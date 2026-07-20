@@ -27,6 +27,10 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - See pricing per session (depends on provider)
   - See token usage per session
   - Global aggregate dashboard with filters per: time (day, week, month, all time, custom), repo, github org, open source vs private, etc.
+- New continous modes
+  - Continous Product manager - implements PostHog in product -> gain insights on usage -> find metrics to improve and lack of features -> market research -> create issues -> create assumptions -> after implementation measures improvements and reports back to user
+  - Continous Maintenance (toggle per repo)
+  - Continous Docs (toggle per repo)
 - New agent modes
   - Deep search - give a goal, run research, use sources and get to the bottom of a question (scientific oriented)
   - SRE - give an error, access to read-only infra MCPs, architecture diagrams and code -> get a resolution
@@ -34,8 +38,6 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Long running Autopilot - like the previous but for giant greenfield projects (e.g. a browser), complete rewrite of codebases (e.g. from C to Rust)
   - Stabilize - takes a repo, checks out the current status, tries to merge all the current pending PRs, fixes security issues, installs dependabot, enhances and hardens Actions, installs agentic workflows to triage issues
   - Swarm - Solves all open issues by creating a roadmap and rationalizing the end to end state of the repo, after planning carefully and reporting back to the user before implementation
-  - Maintenance
-  - Product
   - Team (like squad)
 - Integration with:
   - mbianchidev/sendbox - for sandboxing agents
