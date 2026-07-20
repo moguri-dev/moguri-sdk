@@ -8,8 +8,12 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 ## Extra features on top of OpenCode upstream
 
 - Integration with local AI models ready to install
-- New shortcuts with tags @ or slash commands /
-- Structured and exposed harness plugins/instructions/skills
+- New productivity shortcuts
+  - option/ctrl space for voice dictation with NVidia nemtron new model
+- Metachat
+  - Chat with moguri for changing its own settings and for trouble shooting
+- Granularity of views compact vs detailed for agent tools, steers, etc.
+- Structured and exposed harness plugins/instructions/skills (with slash commands / when feasible - skills always)
   - github plugin for correctly opening/closing/editing PRs, issues - querying CI checks, checking Actions logs, dependabot PRs, code review comment read + write + resolve convo
   - vulnerability resolution methods
   - conflict resolution with rebase vs merge on main/master or other target PRs
@@ -28,7 +32,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - See pricing per session (depends on provider)
   - See token usage per session
   - Global aggregate dashboard with filters per: time (day, week, month, all time, custom), repo, github org, open source vs private, etc.
-- New continous modes
+- New continous modes (taggable @ agents)
   - Continous Product manager - implements PostHog in product -> gain insights on usage -> find metrics to improve and lack of features -> market research -> create issues -> create assumptions -> after implementation measures improvements and reports back to user
   - Continous Maintenance (toggle per repo)
   - Continous Docs (toggle per repo)
@@ -41,7 +45,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Swarm - Solves all open issues by creating a roadmap and rationalizing the end to end state of the repo, after planning carefully and reporting back to the user before implementation
   - Team (like squad)
 - Integration with:
-  - mbianchidev/sendbox - for sandboxing agents
-  - mbianchidev/porto - for handling local dev servers and docker stacks
-  - mbianchidev/sql not-so-lite - for local database management
-  - mbianchidev/stainless - for dev previews
+  - mbianchidev/sendbox - for sandboxing agents (settings profile)
+  - mbianchidev/porto - for handling local dev servers and docker stacks (via CLI pre-installed)
+  - mbianchidev/sql not-so-lite - for local database management (via CLI pre-installed)
+  - mbianchidev/stainless - for dev previews (via MCP and open with)
