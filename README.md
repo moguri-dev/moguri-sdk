@@ -10,9 +10,16 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Integration with local AI models ready to install
 - New shortcuts with tags @ or slash commands /
 - Structured and exposed harness plugins/instructions/skills
-  - github plugin for correctly opening/closing/editing PRs, issues
+  - github plugin for correctly opening/closing/editing PRs, issues - querying CI checks, checking Actions logs, dependabot PRs, code review comment read + write + resolve convo
+  - vulnerability resolution methods
+  - conflict resolution with rebase vs merge on main/master or other target PRs
   - logging / observability
-  - etc.
+  - commit message style, rules (linted) and frequency
+  - token savings `--silent` & co. + caveman
+  - documentation guidelines (in docs/ not in random markdown files)
+  - tech stack preferences
+  - general coding guidelines
+  - etc. see [https://github.com/mbianchidev/.github-private/blob/main/copilot-instructions.md](https://github.com/mbianchidev/.github-private/blob/main/copilot-instructions.md) for full list
 - Better messaging
   - Automatically detects prompts that are repeated e.g. "Fix all review comments and rebase on main" will get a proposed slash command `/fix-rebase`
   - Allow ordering, deleting or modifying messages previously queued (if not picked up already)
