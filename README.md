@@ -28,6 +28,8 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Better messaging
   - Automatically detects prompts that are repeated e.g. "Fix all review comments and rebase on main" will get a proposed slash command `/fix-rebase`
   - Allow ordering, deleting or modifying messages previously queued (if not picked up already)
+- Better chat/sessions
+  - Unarchive sessions (not the deleted ones, of course)
 - Native info dashboard
   - See pricing per session (depends on provider)
   - See token usage per session
