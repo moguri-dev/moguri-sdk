@@ -15,6 +15,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - conflict resolution with rebase vs merge on main/master or other target PRs
   - logging / observability
   - commit message style, rules (linted) and frequency
+  - commit message signing with secure SSH key and strip co-authored with to avoid doing free marketing for agents
   - token savings `--silent` & co. + caveman
   - documentation guidelines (in docs/ not in random markdown files)
   - tech stack preferences
