@@ -13,6 +13,10 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Metachat
   - Chat with moguri for changing its own settings and for trouble shooting
 - Granularity of views compact vs detailed for agent tools, steers, etc.
+  - Expose ALL thinking (collapsible)
+  - Share time elapsed since script started
+  - Share total time elapsed since sub-session/sub-agent started (and token count if possible)
+  - Share total time elapsed since whole session started
 - Structured and exposed harness plugins/instructions/skills (with slash commands / when feasible - skills always)
   - github plugin for correctly opening/closing/editing PRs, issues - querying CI checks, checking Actions logs, dependabot PRs, code review comment read + write + resolve convo
   - vulnerability resolution methods
