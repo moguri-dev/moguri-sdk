@@ -16,7 +16,8 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Projects with worktrees
   - Work-tree aware sessions or from issue, or from PR (requires GitHub MCP, or Linear or Jira installed)
 - Command palette
-- Split pane
+- Split panel
+- Sidebar
 - Metachat
   - Chat with moguri for changing its own settings and for trouble shooting
 - Scheduled actions
