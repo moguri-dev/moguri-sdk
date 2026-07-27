@@ -16,6 +16,10 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Projects with worktrees
 - Metachat
   - Chat with moguri for changing its own settings and for trouble shooting
+- Scheduled actions
+  - Watch
+  - Run prompt
+  - Run agentic workflow (prompt + specific scripts with nice syntax) - optional delegated to server
 - Granularity of views compact vs detailed for agent tools, steers, etc.
   - Expose ALL thinking (collapsible)
   - Share time elapsed since script started
