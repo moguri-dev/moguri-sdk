@@ -10,6 +10,10 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Integration with local AI models ready to install
 - New productivity shortcuts
   - option/ctrl space for voice dictation with NVidia nemtron new model
+- Profiles with (possibly) different API keys and projects binded to them
+  - Work
+  - Open Source
+- Projects with worktrees
 - Metachat
   - Chat with moguri for changing its own settings and for trouble shooting
 - Granularity of views compact vs detailed for agent tools, steers, etc.
