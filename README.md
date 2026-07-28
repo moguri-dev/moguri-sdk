@@ -21,7 +21,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Metachat
   - Chat with moguri for changing its own settings and for trouble shooting
 - Scheduled actions
-  - Watch
+  - Watch CI
   - Run prompt
   - Run agentic workflow (prompt + specific scripts with nice syntax) - optional delegated to server
 - Granularity of views compact vs detailed for agent tools, steers, etc.
@@ -44,6 +44,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Better messaging
   - Automatically detects prompts that are repeated e.g. "Fix all review comments and rebase on main" will get a proposed slash command `/fix-rebase`
   - Allow ordering, deleting or modifying messages previously queued (if not picked up already)
+  - Allow sending immediately a queue message to steer the session
 - Better chat/sessions
   - Unarchive sessions (not the deleted ones, of course)
 - Native info dashboard
