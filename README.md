@@ -7,6 +7,10 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 
 ## Extra features on top of OpenCode upstream
 
+- Dashboard (7,30,60,90,365 days or entire selected year)
+  - Sessions cost
+  - Tokens
+  - Veocity
 - Integration with local AI models ready to install
 - New productivity shortcuts
   - option/ctrl space for voice dictation with NVidia nemtron new model
