@@ -15,6 +15,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Open Source
 - Projects with worktrees
   - Work-tree aware sessions or from issue, or from PR (requires GitHub MCP, or Linear or Jira installed)
+- Folders containing multiple repos/projects
 - Command palette
 - Split panel
 - Sidebar
