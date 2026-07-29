@@ -54,6 +54,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Automatically detects prompts that are repeated e.g. "Fix all review comments and rebase on main" will get a proposed slash command `/fix-rebase`
   - Allow ordering, deleting or modifying messages previously queued (if not picked up already)
   - Allow sending immediately a queue message to steer the session
+  - Allow break-glass message that drops everything the agent is down and send a signal to just look at the new message (emergency lever)
 - Better chat/sessions
   - Unarchive sessions (not the deleted ones, of course)
 - Native info dashboard
