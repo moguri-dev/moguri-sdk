@@ -11,6 +11,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Sessions cost
   - Tokens
   - Veocity
+  - Session metainfo (archived included) and easy delete for them
 - Integration with local AI models ready to install
 - New productivity shortcuts
   - option/ctrl space for voice dictation with NVidia nemtron new model
@@ -20,9 +21,12 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Projects with worktrees
   - Work-tree aware sessions or from issue, or from PR (requires GitHub MCP, or Linear or Jira installed)
 - Folders containing multiple repos/projects
+  - Can work on multiple project as part of a stream, with coordinated PR merge capabilities
 - Command palette
 - Split panel
 - Sidebar
+- Save draft prompts so if app closes nothing happens to that prompt, in the same way save queued ones for when a session resumes
+- Session archive is visible and explorable
 - Metachat
   - Chat with moguri for changing its own settings and for trouble shooting
 - Scheduled actions
@@ -58,7 +62,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Global aggregate dashboard with filters per: time (day, week, month, all time, custom), repo, github org, open source vs private, etc.
 - New continous modes (taggable @ agents)
   - Continous Product manager - implements PostHog in product -> gain insights on usage -> find metrics to improve and lack of features -> market research -> create issues -> create assumptions -> after implementation measures improvements and reports back to user
-  - Continous Maintenance (toggle per repo)
+  - Continous Maintenance (toggle per repo) - keeps all dependabot update/security PRs merged taking care of breaking changes + other custom actions
   - Continous Docs (toggle per repo)
 - New agent modes
   - Deep search - give a goal, run research, use sources and get to the bottom of a question (scientific oriented)
