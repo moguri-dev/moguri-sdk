@@ -23,6 +23,8 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Work-tree aware sessions or from issue, or from PR (requires GitHub MCP, or Linear or Jira installed)
 - Folders containing multiple repos/projects
   - Can work on multiple project as part of a stream, with coordinated PR merge capabilities
+- Group sessions within the same projects with or without an orchestrator session
+  - Allow to attach an orchestrator session later
 - Command palette
 - Split panel
 - Sidebar
