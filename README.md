@@ -18,6 +18,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Profiles with (possibly) different API keys and projects binded to them, and different accents + policies
   - Work
   - Open Source
+- When models ask question save user answers as artifacts tied to the session but not deleted when session is. The artifacts are tied to the project and when deleting a project with at least one artifact the agent asks if the user wants to commit the artifacts in an artifacts/ folder in the project
 - Projects with worktrees
   - Work-tree aware sessions or from issue, or from PR (requires GitHub MCP, or Linear or Jira installed)
 - Folders containing multiple repos/projects
