@@ -41,6 +41,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Share time elapsed since script started
   - Share total time elapsed since sub-session/sub-agent started (and token count if possible)
   - Share total time elapsed since whole session started
+  - Make sure commands run by the agent in the CLI are stoppable at all times manually
 - Structured and exposed harness plugins/instructions/skills (with slash commands / when feasible - skills always)
   - github plugin for correctly opening/closing/editing PRs, issues - querying CI checks, checking Actions logs, dependabot PRs, code review comment read + write + resolve convo
   - vulnerability resolution methods
