@@ -30,6 +30,9 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 - Sidebar
 - Save draft prompts so if app closes nothing happens to that prompt, in the same way save queued ones for when a session resumes
 - Session archive is visible and explorable
+- Agent skills/hooks
+  - Self evolving (optional) powered by actual memory with 3 tiers: glacier, terra, sky
+  - Defined gallery/marketplace
 - Metachat
   - Chat with moguri for changing its own settings and for trouble shooting
 - Scheduled actions
