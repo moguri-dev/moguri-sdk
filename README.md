@@ -79,7 +79,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Long running Autopilot - like the previous but for giant greenfield projects (e.g. a browser), complete rewrite of codebases (e.g. from C to Rust)
   - Stabilize - takes a repo, checks out the current status, tries to merge all the current pending PRs, fixes security issues, installs dependabot, enhances and hardens Actions, installs agentic workflows to triage issues
   - Swarm - Solves all open issues by creating a roadmap and rationalizing the end to end state of the repo, after planning carefully and reporting back to the user before implementation
-  - Team (like squad)
+  - Team (like squad) + [paperclip](https://github.com/paperclipai/paperclip) style, council and other projects that use different personas + agents for better results
 - Integration with:
   - mbianchidev/sendbox - for sandboxing agents (settings profile)
   - mbianchidev/porto - for handling local dev servers and docker stacks (via CLI pre-installed)
