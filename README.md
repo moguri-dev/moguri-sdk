@@ -7,7 +7,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 
 ## Extra features on top of OpenCode upstream
 
-- Dashboard (7,30,60,90,365 days or entire selected year)
+- Dashboard (7,30,60,90,365 days, entire selectable year, custom period, all time)
   - Sessions cost
   - Tokens
   - Veocity
