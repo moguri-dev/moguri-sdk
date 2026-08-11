@@ -57,6 +57,8 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - tech stack preferences
   - general coding guidelines
   - etc. see [https://github.com/mbianchidev/.github-private/blob/main/copilot-instructions.md](https://github.com/mbianchidev/.github-private/blob/main/copilot-instructions.md) for full list
+- Self evolving tools
+  - Python tools for diffing, parsing, splitting, finding are built in so the models do not generate those runtime wasting tokens
 - Better messaging
   - Automatically detects prompts that are repeated e.g. "Fix all review comments and rebase on main" will get a proposed slash command `/fix-rebase`
   - Allow ordering, deleting or modifying messages previously queued (if not picked up already)
