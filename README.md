@@ -9,27 +9,34 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
 
 - Dashboard (7,30,60,90,365 days, entire selectable year, custom period, all time)
   - Sessions cost
-  - Tokens
-  - Veocity
+  - Token usage per session, divided by tool calls, MCP calls, system prompts, messages etc.
+  - Compaction history
+  - Velocity
   - Session metainfo (archived included) and easy delete for them
-- Integration with local AI models ready to install
+  - See pricing per session (depends on provider API)
+  - Global aggregate dashboard with filters per: time (day, week, month, all time, custom), repo, github org, open source vs private, etc.
+- Integration with local AI models ready to install from huggingface - previous system status check
 - New productivity shortcuts
   - option/ctrl space for voice dictation with NVidia nemtron new model
 - Profiles with (possibly) different API keys and projects binded to them, and different accents + policies
   - Work
   - Open Source
-- When models ask question save user answers as artifacts tied to the session but not deleted when session is. The artifacts are tied to the project and when deleting a project with at least one artifact the agent asks if the user wants to commit the artifacts in an artifacts/ folder in the project
+- When models ask question save user answers as artifacts tied to the session but not deleted when session is. The artifacts are tied to the project and when deleting a project with at least one artifact the agent asks if the user wants to commit the artifacts in an artifacts/ folder in the project itself. Examples of artifacts
+  - Decisions (why did I use Golang instead of Rust?)
+  - Plans
+  - Answers to questions on the project
 - Projects with worktrees
   - Work-tree aware sessions or from issue, or from PR (requires GitHub MCP, or Linear or Jira installed)
 - Folders containing multiple repos/projects
-  - Can work on multiple project as part of a stream, with coordinated PR merge capabilities
+  - Can work on multiple project as part of a stream, with coordinated PR merge capabilities - optionally integrated with Stacked PRs from GitHub
 - Group sessions within the same projects with or without an orchestrator session
   - Allow to attach an orchestrator session later
 - Command palette
 - Split panel
 - Sidebar
 - Save draft prompts so if app closes nothing happens to that prompt, in the same way save queued ones for when a session resumes
-- Session archive is visible and explorable
+- Session archive must be visible and explorable
+- Delete session policy, default off, configurable in amount of days or max GB occupied
 - Agent skills/hooks
   - Self evolving (optional) powered by actual memory with 3 tiers: glacier, terra, sky
   - Defined gallery/marketplace
@@ -37,6 +44,8 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Chat with moguri for changing its own settings and for trouble shooting
 - Scheduled actions
   - Watch CI
+  - Dependencies roundup see dependabot, renovate and other bot PRs
+  - "My work", check open PRs
   - Run prompt
   - Run agentic workflow (prompt + specific scripts with nice syntax) - optional delegated to server
 - Granularity of views compact vs detailed for agent tools, steers, etc.
@@ -44,7 +53,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Share time elapsed since script started
   - Share total time elapsed since sub-session/sub-agent started (and token count if possible)
   - Share total time elapsed since whole session started
-  - Make sure commands run by the agent in the CLI are stoppable at all times manually
+  - Make sure commands run by the agent and subagents are stoppable at all times manually from GUI 
 - Structured and exposed harness plugins/instructions/skills (with slash commands / when feasible - skills always)
   - github plugin for correctly opening/closing/editing PRs, issues - querying CI checks, checking Actions logs, dependabot PRs, code review comment read + write + resolve convo
   - vulnerability resolution methods
@@ -66,11 +75,7 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Allow break-glass message that drops everything the agent is down and send a signal to just look at the new message (emergency lever)
 - Better chat/sessions
   - Unarchive sessions (not the deleted ones, of course)
-- Native info dashboard
-  - See pricing per session (depends on provider)
-  - See token usage per session
-  - Global aggregate dashboard with filters per: time (day, week, month, all time, custom), repo, github org, open source vs private, etc.
-- New continous modes (taggable @ agents)
+- New continous modes (with taggable @ agents)
   - Continous Product manager - implements PostHog in product -> gain insights on usage -> find metrics to improve and lack of features -> market research -> create issues -> create assumptions -> after implementation measures improvements and reports back to user
   - Continous Maintenance (toggle per repo) - keeps all dependabot update/security PRs merged taking care of breaking changes + other custom actions
   - Continous Docs (toggle per repo)
@@ -81,9 +86,9 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - Long running Autopilot - like the previous but for giant greenfield projects (e.g. a browser), complete rewrite of codebases (e.g. from C to Rust)
   - Stabilize - takes a repo, checks out the current status, tries to merge all the current pending PRs, fixes security issues, installs dependabot, enhances and hardens Actions, installs agentic workflows to triage issues
   - Swarm - Solves all open issues by creating a roadmap and rationalizing the end to end state of the repo, after planning carefully and reporting back to the user before implementation
-  - Team (like squad) + [paperclip](https://github.com/paperclipai/paperclip) style, council and other projects that use different personas + agents for better results
+  - Team (like [squad](https://bradygaster.github.io/squad)) + [paperclip](https://github.com/paperclipai/paperclip) style, council and other projects that use different personas + agents for better results
 - Integration with:
   - mbianchidev/sendbox - for sandboxing agents (settings profile)
   - mbianchidev/porto - for handling local dev servers and docker stacks (via CLI pre-installed)
   - mbianchidev/sql not-so-lite - for local database management (via CLI pre-installed)
-  - mbianchidev/stainless - for dev previews (via MCP and open with)
+  - mbianchidev/stainless - agentic privacy driven browser, used for dev previews and for launching Playwright (via MCP and open with)
