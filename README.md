@@ -92,3 +92,9 @@ Integrates with @mbianchidev/vslocal IDE with a VSX extension
   - mbianchidev/porto - for handling local dev servers and docker stacks (via CLI pre-installed)
   - mbianchidev/sql not-so-lite - for local database management (via CLI pre-installed)
   - mbianchidev/stainless - agentic privacy driven browser, used for dev previews and for launching Playwright (via MCP and open with)
+
+## To evaluate
+
+- Virtualised Work Trees: Utilizing B-trees and hash array map trees, Delta DB makes spinning up new "agent branches" nearly instantaneous and computationally "free" through copy-on-write persistent data structures.
+- Conflict-Free Replicated Work Trees (CRDTs): Enables multiple humans and agents to manipulate the same codebase concurrently without traditional merge conflicts.
+- Model Blame: Users can identify exactly which AI model or agent wrote a specific line of code, providing a historical record of the "agentic" logic.
