@@ -3,7 +3,8 @@
 A harness for your AI that works on your terms, both in a CLI (TUI) format and a desktop app, inspired by OpenCode
 https://github.com/mbianchidev/open-moguri
 
-Integrates with @mbianchidev/vslocal IDE with a VSX extension
+Optionally integrates with @mbianchidev/vslocal IDE with a VSX extension 
+Optionally integrates with [@simonw/llm](https://github.com/simonw/llm) for getting access to models
 
 ## Extra features on top of OpenCode upstream
 
