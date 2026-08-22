@@ -6,6 +6,8 @@ https://github.com/mbianchidev/open-moguri
 Optionally integrates with @mbianchidev/vslocal IDE with a VSX extension 
 Optionally integrates with [@simonw/llm](https://github.com/simonw/llm) for getting access to models
 
+Also see: https://github.com/deepseek-ai/deepseek-harness
+
 ## Extra features on top of OpenCode upstream
 
 - Dashboard (7,30,60,90,365 days, entire selectable year, custom period, all time)
@@ -71,9 +73,11 @@ Optionally integrates with [@simonw/llm](https://github.com/simonw/llm) for gett
   - Python tools for diffing, parsing, splitting, finding are built in so the models do not generate those runtime wasting tokens
 - Better messaging
   - Automatically detects prompts that are repeated e.g. "Fix all review comments and rebase on main" will get a proposed slash command `/fix-rebase`
-  - Allow ordering, deleting or modifying messages previously queued (if not picked up already)
-  - Allow sending immediately a queue message to steer the session
-  - Allow break-glass message that drops everything the agent is down and send a signal to just look at the new message (emergency lever)
+  - Allow ordering/shuffling, deleting or editing messages previously queued (if not picked up already)
+  - Allow sending a message in different modes:
+    - Stop current turn and send immediately
+    - Queue waiting for current turn to finish
+    - Steer the current turn
 - Better chat/sessions
   - Unarchive sessions (not the deleted ones, of course)
 - New continous modes (with taggable @ agents)
