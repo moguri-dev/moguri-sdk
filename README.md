@@ -36,7 +36,7 @@ Also see: https://github.com/deepseek-ai/deepseek-harness
   - Allow to attach an orchestrator session later
 - Command palette
 - Split panel
-- Sidebar
+- Desktop-only, main-session-aware [sidebar](docs/specs/desktop-sidebar.md) for Changes, Terminal, Files, Stainless Browser, Side chat, Insights, and Extensions
 - Save draft prompts so if app closes nothing happens to that prompt, in the same way save queued ones for when a session resumes
 - Session archive must be visible and explorable
 - Delete session policy, default off, configurable in amount of days or max GB occupied
