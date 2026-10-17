@@ -2,7 +2,7 @@
 
 **Assessment date: 2026-10-17. Status: research and recommendation, not an adopted architecture.**
 
-For a build that forks neither project, see the [from-zero complexity assessment](from-scratch-complexity.md).
+For a build that forks neither project, see the [from-zero complexity assessment](from-scratch-complexity.md). The chosen direction is recorded in the [architecture decisions](decisions.md).
 
 ## Verdict
 

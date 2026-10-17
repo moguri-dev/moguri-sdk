@@ -1,6 +1,6 @@
 # Moguri from zero: complexity assessment
 
-**Assessment date: 2026-10-17. Status: research and recommendation, not an adopted architecture.**
+**Assessment date: 2026-10-17. Status: research. The chosen direction and stack are recorded in the [architecture decisions][D].**
 
 This document estimates what it takes to build Moguri without forking OpenCode or Pi. It complements the [Pi versus OpenCode critique][C], which compared the two fork candidates.
 
@@ -8,10 +8,10 @@ This document estimates what it takes to build Moguri without forking OpenCode o
 
 **A from-zero Moguri is feasible, but only if "from zero" means owning the architecture, the domain model, the local service and all clients while still using proven libraries for commodity parts.** Writing your own model providers, terminal emulator, PTY layer, diff renderer or MCP client would add months and produce no Moguri-specific value.
 
-- **Size:** the first release, meaning the local service, TUI and desktop app passing the brief's acceptance checks, is roughly **74–114 engineer-weeks** of senior work before AI assistance. With heavy coding-agent use, plan for **about 45–85 calendar weeks for one person**. The optional VS Code-compatible extension adds **4–8 weeks**. The full later-work list adds roughly **113–212 more engineer-weeks**.
+- **Size:** the first release, meaning the local service, TUI and desktop app passing the brief's acceptance checks, is roughly **77–119 engineer-weeks** of senior work before AI assistance. With heavy coding-agent use, plan for **about 46–90 calendar weeks for one person**. The optional VS Code-compatible extension adds **4–8 weeks**. The full later-work list adds roughly **113–212 more engineer-weeks**.
 - **The difficulty is not the chat loop.** The difficulty is a crash-safe event model, atomic queue claims across concurrent clients, cancellation that reaches every owned process, and a desktop interface that stays fast and truthful while all of this happens.
 - **Starting from zero is the right choice only if the durable event model is the product.** If it is, retrofitting it into a fast-moving fork may cost more than building it first. If you mainly want OpenCode plus features, fork instead.
-- **Recommended shape:** TypeScript end to end. One local service owns all state. A TUI, an Electron/React desktop app and an optional VS Code extension are thin clients over one typed protocol. Use `pi-ai` (and optionally `pi-agent-core`) for providers, GitHub Copilot login and local OpenAI-compatible servers such as ds4.
+- **Chosen shape ([decisions][D]):** TypeScript on Node.js, with Rust helpers for process control, PTYs, file search and Git reads. One local service owns all state. An OpenTUI + React TUI, an Electron + React desktop app and a later VS Code extension are thin clients over one typed protocol on loopback HTTP and WebSocket. Moguri owns a thin agent loop and uses `pi-ai` for providers, GitHub Copilot login and local OpenAI-compatible servers such as ds4.
 - **The biggest from-zero risk is agent quality, not features.** Mature harnesses have spent years tuning edit tools, compaction and provider quirks. Build an evaluation suite in the first month, or you will not know whether your harness is worse.
 
 These are planning estimates based on judgement, not measurements. Section 7 states the assumptions.
@@ -21,7 +21,7 @@ These are planning estimates based on judgement, not measurements. Section 7 sta
 | Option | You write | You reuse | Use when |
 | --- | --- | --- | --- |
 | **Z0. Pure scratch** | Everything except the language runtime, UI frameworks and basic packages, including provider adapters, Copilot OAuth, the agent loop and tools. | Very little. | Not recommended. Provider churn alone is a full-time job. |
-| **Z1. Own architecture, borrowed engine** (recommended from-zero shape) | Domain model, event store, protocol, service, session control, cancellation, worktrees, artifacts, metrics, profiles, all clients and Moguri UX. | `pi-ai` providers and auth, optionally `pi-agent-core`; MCP SDK; PTY; terminal emulator; diff renderer; SQLite driver; UI toolkits. | The durable domain model must be first-class and you accept building both clients. |
+| **Z1. Own architecture, borrowed engine** (chosen; see [decisions][D]) | Domain model, event store, protocol, service, session control, cancellation, worktrees, artifacts, metrics, profiles, all clients and Moguri UX. | `pi-ai` providers and auth, optionally `pi-agent-core`; MCP SDK; PTY; terminal emulator; diff renderer; SQLite driver; UI toolkits. | The durable domain model must be first-class and you accept building both clients. |
 | **F. Fork OpenCode** | Moguri's domain model, retrofitted into upstream storage and clients, plus upstream merge maintenance. | Most of the runtime, TUI, desktop, terminal, diffs and providers. | You want a usable product soon and accept upstream-shaped internals. See the [critique][C]. |
 
 Z1 overlaps with the critique's "Pi libraries" option: it consumes Pi's packages as libraries, not as a fork of Pi's CLI. The difference is that Z1 also writes the TUI instead of reusing `pi-tui`, so that both clients come from one design.
@@ -44,14 +44,17 @@ flowchart TB
     DESK["Desktop (Electron + React)"]
     VSX["VS Code extension (webview + commands)"]
   end
-  subgraph Service["moguri service (one per user)"]
-    API["Typed API + event stream<br/>versioned, reconnect + replay"]
+  subgraph Service["moguri service (Node.js, one per user)"]
+    API["Typed API + event stream<br/>loopback HTTP + WebSocket, replay"]
     CORE["Domain: profiles, folders, projects,<br/>work items, change sets, sessions, artifacts"]
     CTRL["Session control: drafts, queue,<br/>claims, steer, interrupt"]
-    RUN["Agent runtime: loop, tools, MCP,<br/>permissions, compaction, subagents"]
-    PROC["Process supervisor: PTYs,<br/>process trees, cancellation"]
+    RUN["Agent runtime: own loop, tools, MCP,<br/>permissions, compaction, subagents"]
+    PROC["Cancellation tree<br/>+ process registry"]
+    NATIVE["@moguri/native (Rust addon)<br/>file search, Git reads"]
     STORE["Event store (SQLite WAL, single writer)<br/>+ projections + blob store"]
   end
+  SUP["moguri-supervisor (Rust process)<br/>PTYs, process trees, stop + survivors"]
+  GIT["git CLI<br/>worktrees, commits, push, rebase"]
   PROV["pi-ai providers<br/>Copilot, APIs, ds4-server"]
   TUI --> API
   DESK --> API
@@ -60,7 +63,10 @@ flowchart TB
   API --> CTRL
   CTRL --> RUN
   RUN --> PROC
+  RUN --> NATIVE
+  RUN --> GIT
   RUN --> PROV
+  PROC --> SUP
   CORE --> STORE
   CTRL --> STORE
   RUN --> STORE
@@ -74,24 +80,31 @@ Architecture rules that make the rest tractable:
 3. **The protocol is schema-first.** Define commands, events and errors once, then generate TypeScript clients and JSON Schema. Version the protocol from day one. The VS Code extension updates on a different schedule from the desktop app, so version skew is normal, not exceptional.
 4. **Clients send commands and render projections.** Optimistic UI is allowed. Authoritative state in a client is not.
 5. **Cancellation is a tree.** Each workflow, session, turn, tool call, MCP call, PTY and child process has an owner and a cancellation status of requested, acknowledged, completed, failed or partial.
+6. **Rust helpers execute; the service records.** The supervisor and native addon report facts. Only the Node.js service writes durable events.
 
-## 4. Recommended stack
+## 4. Stack
 
-| Layer | Recommendation | Why | Main alternative |
+Choices marked "decided" are recorded in the [architecture decisions][D].
+
+| Layer | Choice | Why | Main alternative |
 | --- | --- | --- | --- |
-| Language | **TypeScript everywhere** | The VS Code extension must be JavaScript or TypeScript. The desktop renderer is web. Protocol types can be shared across all four codebases. The strongest agent libraries are TypeScript. | Rust or Go service with generated TypeScript types. This gives better process control and footprint, but duplicates types and loses the agent library ecosystem. |
-| Service runtime | **Node.js or Bun**, decided by a spike | Electron and `node-pty` are Node-native. Bun offers single-file builds. | Verify native modules, PTY behavior and SQLite under the chosen runtime before committing. |
-| Providers and auth | **`pi-ai`** (MIT) | Already supports GitHub Copilot through OAuth, many API providers, and any OpenAI-compatible server, including llama.cpp-style endpoints. [P1] | Vercel AI SDK (Apache-2.0) [L5]. Broad providers, but Copilot login would be yours to write and maintain. |
-| Agent loop | **`pi-agent-core`** (MIT) or a thin own loop | `pi-agent-core` depends only on `pi-ai` and TypeBox. [P2] Owning the loop is acceptable because it is small, while the tools and context policy are where quality lives. | Own loop from the start. |
+| Language | **TypeScript, plus Rust helpers** (decided) | The VS Code extension must be JavaScript or TypeScript. The desktop renderer is web. Protocol types can be shared across all four codebases. The strongest agent libraries are TypeScript. Rust covers operating-system and CPU-heavy work. | Rust or Go service with generated TypeScript types. This gives better process control and footprint, but duplicates types and loses the agent library ecosystem. |
+| Service runtime | **Node.js 26** (decided) | Electron embeds Node.js, Node-API addons stay ABI-stable, and OpenTUI needs Node.js 26.4+. Node.js 26 is scheduled to enter LTS on 2026-10-28. [L1], [N1] | Bun. Single-file builds, but native-module compatibility would need proof. |
+| Providers and auth | **`pi-ai`** (MIT, decided) | Already supports GitHub Copilot through OAuth, many API providers, and any OpenAI-compatible server, including llama.cpp-style endpoints. [P1] | Vercel AI SDK (Apache-2.0) [L5]. Broad providers, but Copilot login would be yours to write and maintain. |
+| Agent loop | **Own thin loop** (decided) | Queue, Steer, Interrupt, hard budget stops and cancellation need step boundaries that Moguri controls. The loop is small; tools and context policy are where quality lives. | `pi-agent-core` (MIT), which depends only on `pi-ai` and TypeBox. [P2] |
+| Local API transport | **Loopback HTTP + WebSocket, token-protected** (decided) | Every client speaks it natively. The decisions record the token, `Host` and `Origin` rules. | Unix domain socket or named pipe. |
 | MCP | **Official MCP TypeScript SDK** | Spec-tracking client. The license is in transition from MIT to Apache-2.0. [L3] | None worth considering. |
 | Storage | **SQLite** in WAL mode, single writer, plus a content-addressed blob directory | Matches the brief. Embedded, inspectable and easy to back up. | Postgres is unnecessary for a local-first single-user service. |
-| TUI | **OpenTUI with React** | Same React mental model as the desktop app, so client state hooks can be shared. OpenTUI also offers Solid. It runs on Bun 1.3.14+ or Node.js 26.4+. [L1] | Ink (React, mature, simpler rendering model) [L2]. Bubble Tea or Ratatui only if the service is written in Go or Rust. [L8], [L9] |
-| Desktop | **Electron + React + Vite** | The service is TypeScript anyway. Chromium renders the same on every OS. Webview components can be reused in VS Code. Stay on a supported Electron major. [X1], [X2] | Tauri + React. Smaller binaries, but different system WebView engines per OS and a Node sidecar to package. [X3], [X4] |
-| Terminal | **`node-pty` + xterm.js** | Standard pairing used by VS Code-class tools. [L4], [L6] | Ghostty-web, used by OpenCode, after a rendering spike. |
+| TUI | **OpenTUI with React** (decided) | Same React mental model as the desktop app, so client state hooks can be shared. OpenTUI also offers Solid. It runs on Bun 1.3.14+ or Node.js 26.4+. [L1] | Ink (React, mature, simpler rendering model) [L2]. Bubble Tea or Ratatui only if the service is written in Go or Rust. [L8], [L9] |
+| Desktop | **Electron + React + Vite** (decided) | The service is TypeScript anyway. Chromium renders the same on every OS. Webview components can be reused in VS Code. Stay on a supported Electron major. [X1], [X2] | Tauri + React. Smaller binaries, but different system WebView engines per OS and a Node sidecar to package. [X3], [X4] |
+| Process control | **`process-wrap` in a Rust supervisor process** (decided) | Process groups and sessions on Unix, Job Objects on Windows, so a stop can kill whole trees and report survivors. [R2] | Hand-written Node.js child-process handling. |
+| PTYs and terminal | **`portable-pty` in the Rust supervisor, rendered with xterm.js** (PTYs decided) | PTYs live with process ownership. xterm.js renders in the desktop app and VS Code webviews. [R3], [L6] | `node-pty` in the Node.js service [L4]. Ghostty-web, used by OpenCode, as the renderer after a spike. |
+| File search and Git reads | **Rust addon via napi-rs: ripgrep's `ignore` and `grep` crates, plus `gix`** (decided) | Ignore-aware search and Git status, diffs, history and blame without blocking the Node.js event loop. [R1], [R4], [R5] | Spawning `rg` and `git` for each request. |
+| Git writes | **The user's `git` CLI** (decided) | Hooks, credentials, signing and configuration behave as the user expects. `gix` does not yet support push or checkout orchestration. [R4] | `gix` once its write support matures. |
 | Diffs | **`@pierre/diffs`** (Apache-2.0) or CodeMirror merge view | Purpose-built, Shiki-based diff rendering. [L7] | Monaco diff editor, which is heavier. |
 | IDE extension | **VS Code extension API + webview** | Native commands, diff views and status bar, with React views reused from the desktop app. [V1] | A web-only client, which would lose native editor integration. |
 
-The Electron versus Tauri and React versus Solid choices are yours. The recommendation favors Electron + React because it matches your Vite/React preference, keeps one JavaScript runtime and lets the VS Code webview reuse desktop components.
+Diff rendering, the terminal renderer, the protocol schema tool, the SQLite driver and packaging remain open. Phase 0 spikes validate the decided rows.
 
 ## 5. Where the complexity actually lives
 
@@ -102,6 +115,7 @@ Ranked by risk of delaying or breaking the first release:
    - PTYs, detached grandchildren, MCP servers launched over stdio, and provider streams that ignore aborts all leak.
    - The brief requires reporting exactly what survived, not just trying to stop it.
    - Start with macOS and Linux. Treat Windows as a separate milestone because it uses job objects and ConPTY.
+   - Moguri puts this work in a Rust supervisor process, so a native crash cannot take down the service.
 2. **Durable event model under concurrency.**
    - Atomic queue claims, edits racing claims, idempotent transitions and restart reconciliation are distributed-systems problems inside one machine.
    - Two clients plus the agent loop are already three writers competing for the same session.
@@ -109,7 +123,7 @@ Ranked by risk of delaying or breaking the first release:
 3. **Agent quality.**
    - The edit tool's success rate, context compaction, prompt caching, retries and malformed tool-call repair decide whether people trust the harness.
    - OpenCode and Pi encode years of tuning here. A from-zero harness starts behind.
-   - Mitigation: borrow `pi-agent-core` and Pi's MIT-licensed tool implementations where they fit, and build a golden-task evaluation suite before adding features.
+   - Mitigation: reuse Pi's MIT-licensed tool implementations where they fit, keeping their license notices, and build a golden-task evaluation suite before adding features.
 4. **Desktop UX and performance.**
    - A streaming, virtualized timeline with Markdown, collapsible reasoning, tool cards, diffs and terminals must stay smooth across long sessions.
    - Accessibility, focus handling and keyboard flows must be designed in, not added later.
@@ -122,6 +136,7 @@ Ranked by risk of delaying or breaking the first release:
 6. **Packaging and distribution.**
    - Signed and notarized macOS builds, Linux packages and auto-update.
    - Bundle the service binary inside the desktop app while still letting the TUI use the same service.
+   - Ship prebuilt Rust helpers for each target and sign them with the app.
    - Publish the extension to Open VSX and the Visual Studio Marketplace.
 7. **Three clients multiply surface work.**
    - Every feature needs a TUI design, a desktop design and possibly an extension design.
@@ -136,29 +151,30 @@ Sizes are in engineer-weeks for one senior full-stack engineer working full time
 | --- | --- | --- | --- | --- | --- |
 | 1 | Monorepo, build, CI, packaging, signing, updates | F01, F26 (part) | L | 3–5 | Includes the service binary, desktop bundling, macOS notarization and Linux packages. |
 | 2 | Domain model, event store, projections, migrations, export and backup | F02–F08 | XL | 8–12 | The foundation. Migrations and restart reconciliation are required from the first schema. |
-| 3 | Protocol, client SDK, reconnect and replay, stale-write rejection | F04, S13 | L | 4–6 | Schema-first, versioned, with local-only authentication on loopback or a Unix socket. |
-| 4 | Agent runtime: tools, MCP, permissions, compaction, subagents, questions, providers | F11 (data), F23, P06, P07, U01, U02 | XL | 6–9 | With `pi-ai`. Without it (Z0), expect 14–20. |
+| 3 | Protocol, client SDK, reconnect and replay, stale-write rejection | F04, S13 | L | 4–6 | Schema-first and versioned. Loopback HTTP + WebSocket with a per-start token and `Host` and `Origin` checks. |
+| 4 | Agent runtime: tools, MCP, permissions, compaction, subagents, questions, providers | F11 (data), F23, P06, P07, U01, U02 | XL | 7–10 | Moguri-owned loop on `pi-ai`. Without `pi-ai` (Z0), expect 14–20. |
 | 5 | Session control: lifecycle, drafts, queue, claims, Queue/Steer/Interrupt | F10, F12–F15 | L | 6–8 | Concurrency and property tests included. |
-| 6 | Process supervisor and cancellation tree | F16, F17, S04 (service side), S15 | L | 5–8 | macOS and Linux. Windows adds 3–6 weeks later. |
-| 7 | Projects, worktrees, change sets, Git gates, connector-gated starts | F18–F21 | L | 5–7 | Worktree leases, dirty detection and explicit push, merge and rebase actions. |
+| 6 | Process supervisor and cancellation tree | F16, F17, S04 (service side), S15 | L | 5–8 | Rust supervisor with `process-wrap` and `portable-pty`. macOS and Linux; Windows adds 3–6 weeks later. |
+| 7 | Projects, worktrees, change sets, Git gates, connector-gated starts | F18–F21 | L | 5–7 | Worktree leases, dirty detection and explicit push, merge and rebase actions. `gix` reads; `git` CLI writes. |
 | 8 | Artifacts, questions, archive and retention | F22–F25, F08 (UI) | M | 3–4 | Artifact lifecycle independent of sessions, plus the project-deletion flow. |
 | 9 | Usage events, cost ledger, budgets, dashboard queries | M01–M15, S09, S10 | L | 6–8 | Correct time windows and pricing snapshots are the hard part. |
 | 10 | Profiles, secrets, plugin manifests, local-model health, network disclosure | P01–P05, P08, P09 | L | 6–9 | OS keychains on each platform, hardware detection and profile isolation tests. |
 | 11 | TUI client | F09–F14, F17, M13 (TUI views) | L | 6–10 | Navigation, splits, palette, timeline, queue editing, stop controls and a basic dashboard. |
 | 12 | Desktop client and sidebar | F09–F17, M11–M13, S01–S05, S08, S11, S12, S14 | XL | 12–20 | Timeline, diffs, terminal, files, insights, extensions shell, palette, splits, accessibility and performance work. |
 | 13 | Break-it hardening | F26, Phase 6 | L | 4–8 | Crashes, races, full disks, corrupt state, provider outages and incompatible plugins. |
-| | **Total (Z1)** | | | **74–114** | About 17–26 engineer-months. |
-| | **Total (Z0, own providers and loop)** | | | **82–125** | Row 4 becomes 14–20. |
+| 14 | Rust helpers: Cargo workspace, napi-rs bindings, cross-compilation, signing | F16, F17, S03, S05 | M | 2–4 | Net overhead of a second toolchain for the supervisor and native addon. |
+| | **Total (Z1, as decided)** | | | **77–119** | About 18–27 engineer-months. |
+| | **Total (Z0, own providers too)** | | | **84–129** | Row 4 becomes 14–20. |
 
-With heavy coding-agent assistance, implementation gets faster. Design, cross-platform debugging, UX iteration and hardening speed up much less. A factor of 0.6–0.75 gives **roughly 45–85 calendar weeks for one person** for Z1.
+With heavy coding-agent assistance, implementation gets faster. Design, cross-platform debugging, UX iteration and hardening speed up much less. A factor of 0.6–0.75 gives **roughly 46–90 calendar weeks for one person** for Z1.
 
-For comparison, a first release on an OpenCode fork is roughly **45–75 engineer-weeks**, with low confidence. It saves most of rows 4, 6, 11 and 12, but adds retrofit work to put the event model into upstream storage and clients, plus ongoing upstream merges. Phase 0 of the fork plan would measure this properly. The fork reaches daily use within days. With agent assistance, Z1 needs about 5–9 calendar weeks to reach a TUI you can use daily, and about 8–14 calendar weeks before the desktop app attaches to the same session (phases 1 and 2 in section 10).
+For comparison, a first release on an OpenCode fork is roughly **45–75 engineer-weeks**, with low confidence. It saves most of rows 4, 6, 11 and 12, but adds retrofit work to put the event model into upstream storage and clients, plus ongoing upstream merges. Phase 0 of the fork plan would measure this properly. The fork reaches daily use within days. With agent assistance, Z1 needs about 5–10 calendar weeks to reach a TUI you can use daily, and about 8–15 calendar weeks before the desktop app attaches to the same session (phases 1 and 2 in section 10).
 
 ## 7. Assumptions and critique of the from-zero plan
 
 ### Assumptions behind the numbers
 
-- One experienced engineer who knows TypeScript, React, SQLite and process management.
+- One experienced engineer who knows TypeScript, React, SQLite and process management, plus enough Rust for small helpers.
 - macOS first, Linux second, Windows deferred.
 - First-release scope only, as defined by the newest brief. Later work is estimated separately in section 8.
 - Libraries are adopted, not rewritten (Z1).
@@ -171,7 +187,9 @@ For comparison, a first release on an OpenCode fork is roughly **45–75 enginee
 - **Provider churn never ends.** Delegating providers to `pi-ai` makes Pi's release cadence a dependency. Pin its version, wrap it behind a Moguri provider interface, and keep raw provider data for debugging, as the brief requires.
 - **GitHub Copilot access through a third-party client is a policy question as well as a technical one.** Using a library's OAuth flow does not move responsibility for GitHub's terms to that library. Check the current terms before shipping Copilot login as a headline feature.
 - **Local models change the performance envelope.** ds4 through `ds4-server` is just another OpenAI-compatible endpoint (`U02`), but local generation is slow. Budget and timing UI must handle long turns without looking stuck.
-- **Your repository instructions assume a fork.** `AGENTS.md` and the newest brief say Moguri "began as a fork of OpenCode" and that Phase 0 maps the fork. Adopting Z1 means rewriting Phase 0 as "choose libraries and run spikes", and removing fork language from the brief and README.
+- **Your repository instructions assume a fork.** `AGENTS.md` and the newest brief say Moguri "began as a fork of OpenCode" and that Phase 0 maps the fork. Z1 is now [decided][D], so Phase 0 becomes validation spikes and the fork language must leave the brief, README and `AGENTS.md`. That update has not been made yet.
+- **Two languages cost more than their line count.** Rust adds a second toolchain, cross-compilation, signing and a process boundary to debug. Keep the helpers narrow and move work into Rust only when a measured budget fails.
+- **Node.js 26 is not LTS yet.** OpenTUI needs Node.js 26.4+, and Node.js 26 is scheduled to enter LTS on 2026-10-28. [N1] Ship a pinned runtime with Moguri rather than relying on the user's installation.
 - **The later-work list is larger than the first release.** It is the main source of schedule risk. Section 8 shows why.
 
 ## 8. Later work and the VS Code extension
@@ -194,7 +212,7 @@ For comparison, a first release on an OpenCode fork is roughly **45–75 enginee
 | Desktop sidebar later panels | S06, S07 | 4–8 | Stainless browser and side chat. |
 | **Total** | | **113–212** | About 2.5–4.5 additional engineer-years before AI assistance. |
 
-Counting an engineer-year as about 46 working weeks, the complete vision is roughly **4–7 engineer-years before AI assistance** (187–326 engineer-weeks). That is the strongest argument for keeping later work behind the first-release acceptance checks.
+Counting an engineer-year as about 46 working weeks, the complete vision is roughly **4–7 engineer-years before AI assistance** (190–331 engineer-weeks). That is the strongest argument for keeping later work behind the first-release acceptance checks.
 
 ## 9. Complete feature map
 
@@ -341,18 +359,18 @@ Sizes are marginal costs **after** the subsystems they depend on exist. Do not a
 
 ## 10. From-zero build order
 
-This replaces the fork-mapping Phase 0 only if you adopt Z1. Later phases keep the brief's order.
+Z1 is [decided][D], so this replaces the brief's fork-mapping Phase 0. Later phases keep the brief's order.
 
 | Phase | Goal | Exit check | Cumulative engineer-weeks |
 | --- | --- | --- | --- |
-| 0. Decisions and spikes | Record architecture decisions: runtime, Electron or Tauri, OpenTUI or Ink, protocol schema tool. Spike `pi-ai` with Copilot and ds4, PTY tree killing, the SQLite single-writer store and a desktop shell attaching to the service. | Each spike has a pass or fail result and a written decision under `docs/`. | 2–3 |
-| 1. Walking skeleton | Service, event store, protocol, one session with read, edit, shell and search tools, and a TUI. Start the golden-task evaluation suite. | You use Moguri's TUI for real work. Restart loses nothing. | 8–12 |
-| 2. Second client | Desktop shell attaching to the same session. | A session created in the TUI is controlled from desktop, and the reverse. | 12–18 |
-| 3. Session control | Drafts, queue, claims, Queue/Steer/Interrupt, cancellation tree, stop controls. | Queue, cancellation and concurrent-client acceptance checks pass. | 26–38 |
-| 4. Work items and artifacts | Projects, worktrees, change sets, artifacts, archive. | Artifact and worktree acceptance checks pass. | 36–51 |
-| 5. Analytics and budgets | Usage, cost ledger, budgets, dashboard, insights. | Every dashboard total traces to events. | 44–61 |
-| 6. Profiles and extensions | Profiles, secrets, plugin manifests, local-model health. | Profile isolation checks pass. | 54–76 |
-| 7. Desktop polish and break-it | Sidebar panels, accessibility, performance budgets, fault injection, signed builds. | All first-release acceptance checks pass. | 74–114 |
+| 0. Validation spikes | Validate the [recorded decisions][D]: `pi-ai` with Copilot and ds4, the Rust supervisor stopping PTY process trees, the SQLite single-writer store, OpenTUI on Node.js 26, an Electron shell attaching to the service, the native addon, and signed packaging. Choose the protocol schema tool. | Each spike has a pass or fail result and measurements under `docs/`. | 2–4 |
+| 1. Walking skeleton | Service, event store, protocol, one session with read, edit, shell and search tools, and a TUI. Start the golden-task evaluation suite. | You use Moguri's TUI for real work. Restart loses nothing. | 9–14 |
+| 2. Second client | Desktop shell attaching to the same session. | A session created in the TUI is controlled from desktop, and the reverse. | 13–20 |
+| 3. Session control | Drafts, queue, claims, Queue/Steer/Interrupt, cancellation tree, stop controls. | Queue, cancellation and concurrent-client acceptance checks pass. | 28–42 |
+| 4. Work items and artifacts | Projects, worktrees, change sets, artifacts, archive. | Artifact and worktree acceptance checks pass. | 39–56 |
+| 5. Analytics and budgets | Usage, cost ledger, budgets, dashboard, insights. | Every dashboard total traces to events. | 47–66 |
+| 6. Profiles and extensions | Profiles, secrets, plugin manifests, local-model health. | Profile isolation checks pass. | 57–81 |
+| 7. Desktop polish and break-it | Sidebar panels, accessibility, performance budgets, fault injection, signed builds. | All first-release acceptance checks pass. | 77–119 |
 | 8. VS Code extension | Thin client over the stable protocol. | Same session controllable from TUI, desktop and the editor. | +4–8 |
 
 ## 11. Decision
@@ -360,11 +378,11 @@ This replaces the fork-mapping Phase 0 only if you adopt Z1. Later phases keep t
 | Your priority | Choose |
 | --- | --- |
 | A usable Moguri this quarter | Fork OpenCode, per the [critique][C]. |
-| Durable events, truthful cancellation and one protocol as the core of the product | **Z1: own architecture with borrowed engine libraries.** |
-| Total control, including providers and the agent loop | Z0 is possible, but it costs about 8–11 extra weeks up front and ongoing provider maintenance, with no user-visible benefit. |
+| Durable events, truthful cancellation and one protocol as the core of the product | **Z1: own architecture with borrowed engine libraries.** Chosen; see the [decisions][D]. |
+| Total control, including providers and the agent loop | Z0 is possible, but it costs about 7–10 extra weeks up front and ongoing provider maintenance, with no user-visible benefit. |
 | React desktop and a reusable VS Code webview | Z1 with Electron + React, or a fork that accepts OpenCode's Solid UI. |
 
-**Bottom line:** starting from zero is not reckless if you borrow the engine and own the product. With agent assistance it costs roughly 5–9 weeks before daily TUI use and one to one-and-a-half years of focused solo work before a first release meeting every acceptance check. Choose it only if the event model, cancellation guarantees and multi-client protocol are the reason Moguri exists. Otherwise the fork reaches users sooner.
+**Bottom line:** starting from zero is not reckless if you borrow the engine and own the product. With agent assistance it costs roughly 5–10 weeks before daily TUI use and one to two years of focused solo work before a first release meeting every acceptance check. Choose it only if the event model, cancellation guarantees and multi-client protocol are the reason Moguri exists. Otherwise the fork reaches users sooner.
 
 ## Sources
 
@@ -375,6 +393,7 @@ Repository documents:
 - [I]: README feature inventory.
 - [S]: desktop sidebar specification.
 - [C]: Pi versus OpenCode critique, including OpenCode, Pi and `pi-gui` evidence.
+- [D]: Moguri architecture decisions.
 
 External sources (library facts checked 2026-10-17; pinned where a revision was inspected):
 
@@ -389,6 +408,12 @@ External sources (library facts checked 2026-10-17; pinned where a revision was 
 - [L7]: Pierre `diffs-v1.5.2` release.
 - [L8]: Bubble Tea v2.1.0 release.
 - [L9]: Ratatui v0.30.2 release.
+- [N1]: Node.js release schedule: 26.x scheduled for LTS on 2026-10-28.
+- [R1]: napi-rs.
+- [R2]: `process-wrap` README: process groups, sessions and Job Objects.
+- [R3]: WezTerm `portable-pty` crate.
+- [R4]: gitoxide crate status: status and diffs supported; push and checkout orchestration not yet.
+- [R5]: ripgrep crates, including `ignore` and `grep`.
 - [V1]: VS Code webview API guide.
 - [V2]: Open VSX registry.
 - [X1]–[X4]: Electron support timeline, latest Electron release, Tauri WebView versions and Tauri sidecars, as cited in the critique.
@@ -398,6 +423,7 @@ External sources (library facts checked 2026-10-17; pinned where a revision was 
 [I]: ../../README.md
 [S]: ../specs/desktop-sidebar.md
 [C]: pi-vs-opencode-critique.md
+[D]: decisions.md
 [P1]: https://github.com/earendil-works/pi/blob/c268154ca1171c2f9eefe75d3d7372a68aada2d5/packages/ai/README.md
 [P2]: https://github.com/earendil-works/pi/blob/c268154ca1171c2f9eefe75d3d7372a68aada2d5/packages/agent/package.json
 [L1]: https://github.com/anomalyco/opentui/blob/f8f608e2b9a41685d613a1156708ff06c826c3ce/packages/core/README.md
@@ -409,6 +435,12 @@ External sources (library facts checked 2026-10-17; pinned where a revision was 
 [L7]: https://github.com/pierrecomputer/pierre/releases/tag/diffs-v1.5.2
 [L8]: https://github.com/charmbracelet/bubbletea/releases/tag/v2.1.0
 [L9]: https://github.com/ratatui/ratatui/releases/tag/ratatui-v0.30.2
+[N1]: https://github.com/nodejs/Release/blob/72fdab20216c5f04e0a0fe72a225c2504e9f2b42/README.md
+[R1]: https://github.com/napi-rs/napi-rs/tree/57a539a3d2daff8fcadad20565a5af31db8d949c
+[R2]: https://github.com/watchexec/process-wrap/blob/ca45003a831ac125e6673b8759430e5ef33cc1db/README.md
+[R3]: https://github.com/wezterm/wezterm/tree/e2a98e1b8af156988ad0ac778658ac27b60a55fb/pty
+[R4]: https://github.com/GitoxideLabs/gitoxide/blob/ad0202e3ab396d752a56664001c134f48d834177/crate-status.md
+[R5]: https://github.com/BurntSushi/ripgrep/tree/3fce3b5bb0236da2df6d99672afb8a719642eca7/crates
 [V1]: https://code.visualstudio.com/api/extension-guides/webview
 [V2]: https://open-vsx.org/
 [X1]: https://www.electronjs.org/docs/latest/tutorial/electron-timelines
