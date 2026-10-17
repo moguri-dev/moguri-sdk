@@ -2,6 +2,8 @@
 
 **Assessment date: 2026-10-17. Status: research and recommendation, not an adopted architecture.**
 
+For a build that forks neither project, see the [from-zero complexity assessment](from-scratch-complexity.md).
+
 ## Verdict
 
 **Pi can use GitHub Copilot login, can be forked under MIT, and can use your local DeepSeek model through `antirez/ds4`. None of those three capabilities requires abandoning OpenCode: OpenCode supports them too.**
