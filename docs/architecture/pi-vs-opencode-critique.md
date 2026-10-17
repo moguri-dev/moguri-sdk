@@ -11,6 +11,7 @@ Your suspicion is reasonable, but the distinction is not "good harness versus ba
 - **For Moguri's first release as currently specified, OpenCode is the stronger starting point.** You want a desktop app, TUI, shared service, worktrees, terminals, diffs, permissions, provider integrations, and session management immediately. Discarding working surfaces has a substantial opportunity cost.
 - **For a deliberately new product with its own clients and domain model, Pi is a credible runtime foundation.** Prefer consuming selected Pi packages to forking its entire CLI. Its experimental `pi-durable` package is particularly relevant to your durability and orchestration requirements.
 - **Do not replace OpenCode with "Pi plus extensions" on the assumption that extensions make the remaining work small.** Moguri's hardest requirements are persistence, ownership, concurrent mutations, cancellation, isolation, and recovery. Those are host-application responsibilities, not primarily prompt or tool features.
+- **The sleek desktop requirement strengthens OpenCode for the first release.** Pi core ships no desktop. Its most relevant desktop is the community `pi-gui` app (Electron/React). That app is a good UX reference, but it owns agent execution inside Electron's main process. Moguri needs one local service with both clients attached to it. See [section 6](#6-desktop-uiux-the-requirement-that-changes-the-weighting).
 
 My recommendation is to keep OpenCode as the baseline candidate for the brief as written, while making Phase 0 a comparison against a bounded Pi-library prototype. Switch only if that prototype proves the hard guarantees and you consciously accept building or substantially adapting both clients. This is a recommendation for the next decision, not permission to import code or change the implementation order.
 
@@ -39,12 +40,13 @@ Where the documents differ, this report follows the newest brief: local-runtime 
 | Pi | [`c268154ca1171c2f9eefe75d3d7372a68aada2d5`][P0], `earendil-works/pi`, `main` | Latest release endpoint returned [v1.3.0][PR], commit `71023aec1546d6d677a65669c5665c0927ce0dd0`. Its tree includes MCP, Chord, telemetry, and `pi-durable`; the [release's durable README][P6R] still marks that API experimental. |
 | OpenCode | [`8c173a8f3805d8e749d44311054b07e37a1b2ce1`][O0], `anomalyco/opencode`, `dev` | Latest release endpoint returned [v1.19.3][OR], commit `e3c4eb242585dcd77be1a867391b7c25fd47ce52`. The inspected development desktop package reports `2.0.32`; development APIs must not be presented as v1.19.3 guarantees. |
 | ds4 / DwarfStar | [`fc80bd695da76ee14bcb86820bf900a5cdfda806`][D0], `antirez/ds4`, `main` | Pinned repository documentation, not an assumed installed version. GitHub's latest-release endpoint returned no release. |
+| pi-gui (community Pi desktop) | [`572c0c6de8ffd3a245c224b912bb8752ca200780`][Q0], `minghinmatthewlam/pi-gui`, `main` | Latest release v1.0.1, published 2026-09-26. Third-party, MIT, not part of the Pi project. Inspected because it is the strongest Pi-side desktop evidence. |
 
 Pi's historical `badlogic/pi-mono` repository resolves to `earendil-works/pi`. Current packages use the `@earendil-works` scope. Old articles saying Pi has no MCP, only JSONL persistence, or only a tiny agent loop are incomplete descriptions of this snapshot.
 
 OpenCode has also evolved: current development code separates Core, Schema, Protocol, Server, Client, TUI, desktop, and GUI extensions. Its inspected desktop is **Electron/Solid**, not a presumed Tauri application. The [release desktop manifest][O3R] also uses Electron. [P0], [O1], [O2], [O3]
 
-**Evidence standard:** implementation and primary documentation were inspected; neither upstream was installed or built, no Copilot login was performed, and your machine or running ds4 instance was not accessed. Your statement that the model runs fine is accepted. This report evaluates integration and architecture, not whether your hardware can load the model. Feature availability on your exact installed revisions still needs the compatibility checks in section 8.
+**Evidence standard:** implementation and primary documentation were inspected; neither upstream nor `pi-gui` was installed, built, or run. No Copilot login was performed, and your machine or running ds4 instance was not accessed. Your statement that the model runs fine is accepted. This report evaluates integration and architecture, not whether your hardware can load the model or whether a desktop *looks* sleek to you; that judgement requires the hands-on desktop gate in section 9. Feature availability on your exact installed revisions still needs the compatibility checks in section 9.
 
 `R` below means a reusable upstream implementation, not that Moguri's full requirement passes. `P` means useful primitives with adaptation required. `N` means Moguri must supply the product contract; no complete implementation was established in the inspected evidence. `D` specifically marks OpenCode development-branch evidence, not a release promise. These are qualitative judgments, not measured effort estimates.
 
@@ -203,7 +205,7 @@ Evidence: Pi [SDK][P5], [durable runtime][P6], [Chord][P7], [session format][P11
 | F06. Migrations, restart reconciliation, diagnostic failures; never require deleting state [B], [A] | P JSONL migrations and durable storage/migration facilities. | P SQLite migrations; D execution claims/recovery accounting. | Own Moguri schema evolution and test upgrades at the application boundary. Do not expose experimental storage as a permanent format without a plan. |
 | F07. Content-addressed logs/attachments/snapshots; export, backup and restore [B] | P session export and storage APIs. | P exports and D draft/blob machinery. | Build consistent backup/restore and blob reachability/GC; avoid restoring a database without its attachments. |
 | F08. Trash/tombstones, explicit purge, retention by days and/or GB, default off; pinned artifacts excluded [B] | P session trees/storage; N full retention policy. | P session/archive primitives; N verified full retention policy. | Retention is a domain operation, not `rm` over session files. |
-| F09. TUI and desktop as first-class clients; navigation, split panels, command palette [B] | R terminal UI; N complete desktop and multi-project Moguri shell. | R existing TUI/desktop UI surfaces. | Strong OpenCode advantage. Pi's terminal extension widgets are not desktop components. |
+| F09. TUI and desktop as first-class clients; navigation, split panels, command palette [B] | R terminal UI; N desktop in Pi core; P third-party `pi-gui` desktop with runtime owned by Electron main. | R existing TUI/desktop UI surfaces, both server clients. | Strong OpenCode advantage. Pi's terminal extension widgets are not desktop components. See section 6 for the sleek-desktop analysis. |
 | F10. Active/idle/blocked/failed/completed/archived views, session detail and event log [B] | P runtime lifecycle/tree. | P existing session views and statuses. | Normalize all Moguri states, including stopping/stopped and restored, in one service. |
 | F11. Compact/detailed messages, tools, MCP, steers, subagents; visible prompts and provider-returned reasoning [B] | R/P renderers, prompt entries and events. | R/P existing transcript surfaces. | Show only returned reasoning; retained raw diagnostics need redaction and access policy. |
 | F12. Persistent prompt drafts, attachments and queued messages after app closure [B] | N shared drafts; P durable inbox, not CLI queue. | P desktop drafts; D persisted inbox. | No client-local-only authority. Decide how two composers edit the same draft. |
@@ -266,7 +268,7 @@ The [sidebar specification][S] is substantially more than "add a right panel." C
 
 | ID / Moguri requirement | Pi starting point | OpenCode starting point | Remaining work / critique |
 | --- | --- | --- | --- |
-| S01. Persistent desktop-only sidebar; seven entries; one panel at a time, collapse/resize/badges/splits | N shell; P runtime data. | R/P/D panel/extension shell. | Keep layout local if desired. TUI does not inherit this desktop layout. |
+| S01. Persistent desktop-only sidebar; seven entries; one panel at a time, collapse/resize/badges/splits | N shell in Pi core; P `pi-gui` thread sidebar and per-task workbench as reference; P runtime data. | R/P/D panel/extension shell. | Keep layout local if desired. TUI does not inherit this desktop layout. |
 | S02. Main-session rebinding of every panel; keyboard/focus/labels/status accessibility | N complete implementation. | P/D routed-session contracts. | Test rapid session/profile switches and stale asynchronous responses; no previous-session leakage. |
 | S03. Changes: staged/unstaged/untracked/conflicted/external files; diffs, branch/commit/work-item/PR links; explicit Git actions | P tools; N panel. | R/P diffs/review/Git surfaces. | Service owns status and mutation. Cached diffs are not an authorization or freshness check. |
 | S04. Terminal: owned trees, output/input/open/stop; closing view does not kill process | P tools/tasks; N PTY product. | R/P terminal/PTY surface. | Rebind output safely, preserve ownership and all cancellation outcomes. |
@@ -350,7 +352,57 @@ Evidence: Pi [extensions][P13], [MCP][P14], [packages][P15]; OpenCode [permissio
 | L46. CRDT worktrees for concurrent edits | N research. | N research. | Text convergence does not resolve semantic conflicts, tests, generated files or competing designs. Do not put this on the critical path. |
 | L47. Model blame/provenance: proposed/applied/modified/reviewed/verified patches or lines, without forced Git authorship | P events/tool records. | P events/diffs. | Prefer patch provenance with confidence over exact line ownership; rebases, formatters and human edits erase simple attribution. |
 
-## 6. Criticism of the idea itself
+## 6. Desktop UI/UX: the requirement that changes the weighting
+
+Moguri is not a CLI with an optional GUI. It needs a CLI/TUI **and** a sleek desktop app, and both must be first-class clients. That raises three questions the feature map only partly answers:
+
+- How much proven desktop product already exists?
+- Does that desktop fit Moguri's rule of one local service with every client attached to it?
+- Can it become recognizably Moguri, not a reskinned upstream?
+
+### What desktop exists for each foundation
+
+| Candidate | Desktop stack | Reusable UX assets | Fit with Moguri's one-service model | Main risks |
+| --- | --- | --- | --- | --- |
+| Pi core | None. [Packages][P16] are agent, ai, chord, codemode, coding-agent, durable, env, evals, mcp, telemetry and tui. [`pi-tui`][P17] is a terminal renderer. | TUI components and themes. Desktop integration would go through the SDK, RPC and Chord. | A good engine boundary, but no graphical client. | The entire desktop product is new work. |
+| [`pi-gui`][Q1] (community, [MIT][Q4]) | [Electron 37, React 19, Vite 6, xterm][Q2], built on the Pi coding-agent SDK and Chord. | Thread sidebar, local or worktree threads, Review tab with per-turn checkpoints, terminal and file workbench, ⌘K palette, queue and steer, themes, sandboxed extension views, virtualized streaming timeline and Playwright-driven Electron tests. | Weak as-is. [Electron main owns][Q3] session supervision, drafts, queues, worktrees, terminals and scheduled tasks. Pi's JSONL session files are the shared source of truth with the Pi CLI. | Third-party project (13 contributors at inspection). Electron 37 is outside Electron's [support policy][X1] of the latest three stable majors ([latest is 44.9.0][X2]). Its architecture document says verification covered only the documented macOS scope, and Windows builds are not code-signed. It keeps compatibility seams for private Pi APIs. |
+| OpenCode | Desktop is [Electron 44 (dev)][O3] or [42 (v1.19.3)][O3R]. [App][O16] and [UI][O17] are Solid, Vite 8, Tailwind 4 and Kobalte, with a ghostty-web terminal, `@pierre` diffs and trees, and Shiki highlighting. | Separate `app`, `ui`, `session-ui`, `theme` and [`storybook`][O18] packages; 83 stories with the a11y addon; a [desktop theme schema][O19]; keybinding settings and a command palette; [Playwright regression and performance suites][O20] covering command-palette, timeline-accessibility, side-panel, terminal-input, review and queue regressions, plus startup, palette, terminal and timeline benchmarks; and an [Electron window layer][O21] with recovery, unresponsive-window handling and deep links. | Strong. Desktop and TUI are both clients of the OpenCode server through `@opencode/client`. | The UI is Solid, not React, and imports OpenCode's client and schema packages directly. Changing identity or information architecture means owning a fork of `app`/`ui`. Closed issues show the relevant failure classes: [cross-project data shown or used after a project switch][O22] and [unbounded SQLite WAL growth from multiple long-lived desktop connections][O23]. |
+
+The Pi-side desktop comparison is therefore **`pi-gui` versus OpenCode, not Pi core versus OpenCode**. Pi core alone is the weakest starting point for a sleek desktop.
+
+### Critique
+
+**"Sleek" is mostly invisible engineering.** Colors, spacing and typography are cheap compared with a timeline that never jumps while streaming. The same applies to fast startup, low input latency, long virtualized sessions, large diffs, terminal throughput, reconnect behavior and honest stop states. Both OpenCode and `pi-gui` have invested in this layer, as their benchmark and timeline-viewport work shows. A Pi-core-only desktop starts from zero here.
+
+**The desktop must not own the agent runtime.** `pi-gui` is carefully engineered, but it puts runtime ownership in Electron main and shares session files with the CLI. Moguri requires the TUI and desktop to be clients of one service. Starting from `pi-gui` therefore begins with moving its conversation, workspace, orchestration, scheduled-task and checkpoint owners into the Moguri service. That is a substantial extraction, not a reskin. Without it, Moguri would have two runtimes writing the same JSONL.
+
+**Your stack preference changes the cost.** You prefer Vite with React, and Electron or Tauri. OpenCode matches Electron and Vite but uses Solid. Rewriting OpenCode's `app`, `ui` and `session-ui` in React discards the main reason to pick OpenCode for desktop. If you choose OpenCode, accept Solid for the first release. Its JSX looks familiar, but fine-grained signals are a different mental model from React rendering. If React is non-negotiable, the desktop comparison moves toward `pi-gui` or a new React client, with OpenCode used as a UX reference.
+
+**Electron versus Tauri.** Both serious candidates use Electron. OpenCode itself moved from a [Tauri 2 desktop in v1.2.0][O24] to Electron by v1.19.3. The inspected PRs and issues did not state a rationale, so do not infer one. Tauri uses [system WebViews][X3]: WebView2 (Chromium) on Windows, WKWebView on macOS and WebKitGTK on Linux. Moguri's UI will be dominated by a terminal emulator, diffs and a streaming Markdown/code timeline, so rendering and performance must be verified on each engine. Moguri's service will be TypeScript in either foundation, so Tauri would still ship that runtime as a [sidecar][X4], shrinking its size advantage. Prefer Electron for the first release unless a measured Tauri prototype meets the same UX budgets on all three engines. Keep the service in a separate process so the shell can change later, and stay within Electron's supported majors.
+
+**Information architecture is the hard design problem.** Work items, change sets, artifacts, many agents, Queue/Steer/Interrupt, budgets, profiles, a seven-entry sidebar and a dashboard can easily become a cockpit. Sleekness comes from subtraction:
+
+- Make the work item the primary object.
+- Present sessions and agents as its execution history.
+- Present artifacts as its durable outputs.
+
+The sidebar spec shows Side chat and Browser as unavailable in the first release. That is honest, but two disabled entries out of seven read as unfinished. Consider hiding later-work entries until they exist while keeping the same contract. That is a specification decision for you, not something this report changes.
+
+**Truthful state is part of the visual design.** Stop requested, acknowledged, completed, failed and partial; unknown versus zero cost; provisional versus settled steer metrics; service down; reconnecting; stale data. These need deliberate components and design tokens, not ad hoc toasts. This is where an agent desktop earns trust.
+
+**Accessibility, keyboard flow and theming belong in v1.** The sidebar spec already requires keyboard navigation, focus order and status announcements. Profile accents (P04) and status colors should come from one token set shared by desktop and TUI. OpenCode keeps TUI themes in its `theme` package and desktop tokens in `ui`; `pi-gui` ships desktop theme presets. Whichever path you take, define one Moguri token set before polishing individual screens.
+
+### Shapes worth comparing
+
+| Shape | When it wins | Main cost |
+| --- | --- | --- |
+| A. OpenCode server, desktop and TUI, restyled and extended in Solid | Fastest route to a polished cross-client first release. The one-service architecture already exists. | Accept Solid. Own a fork of the UI packages. Adapt OpenCode's invariants to Moguri's. |
+| B. Pi engine with a Moguri service, a React/Electron desktop derived from `pi-gui`, and a Pi-based TUI as a service client | You want Pi and React, and accept extracting runtime ownership from Electron main. | Refactor `pi-gui` into a pure client; upgrade Electron; validate Windows and Linux; build the TUI as a service client. |
+| C. Pi engine with a new React desktop built from scratch | You want full design control and treat existing apps purely as references. | Largest cost: timeline, diffs, terminal, palette, updater, signing, accessibility and performance harness. |
+
+"OpenCode UI over a Pi engine" is possible only if Moguri's protocol replaces OpenCode's client contract. You would then own a UI fork and a runtime adapter at the same time. Do not pursue it unless Phase 0 shows the UI is far less coupled to `@opencode/client` and `@opencode/schema` than its package dependencies suggest.
+
+## 7. Criticism of the idea itself
 
 ### The strongest idea is durable work, not more agent modes
 
@@ -366,7 +418,7 @@ Pi removes assumptions from your starting point. It also removes completed produ
 
 OpenCode's broader implementation is a liability only where its assumptions conflict with your invariants or slow changes. Existing desktop diff viewers, terminals, file trees, key handling, packaging and accessible interactions are assets until shown otherwise.
 
-Conversely, OpenCode is not a free shell: its Effect/Solid/runtime structure, evolving APIs and release packaging become part of your maintenance surface. A preference for React/Vite or another backend should be costed explicitly rather than used to justify rewriting working clients by habit.
+Conversely, OpenCode is not a free shell: its Effect/Solid/runtime structure, evolving APIs and release packaging become part of your maintenance surface. A preference for React/Vite or another backend should be costed explicitly (section 6) rather than used to justify rewriting working clients by habit.
 
 ### Your first release is still several milestones of product work
 
@@ -422,7 +474,7 @@ Sky/Terra/Glacier are retention categories, not evidence of useful memory. Prove
 
 A Product Manager persona can gather evidence and propose work. It cannot infer business causality or create permission to instrument users merely because its prompt says "improve metrics."
 
-## 7. Foundation decision and ownership boundary
+## 8. Foundation decision and ownership boundary
 
 | Criterion | Better starting point | Why |
 | --- | --- | --- |
@@ -431,6 +483,8 @@ A Product Manager persona can gather evidence and propose work. It cannot infer 
 | Ability to fork commercially | Tie | Both MIT; preserve notices and separate branding. |
 | Embed a replaceable model/agent library | Pi | Explicit library/SDK layering and small application-facing integration surface. |
 | Deliver both polished clients early | OpenCode | Existing desktop/TUI, service, terminals, files, diffs and packaging. |
+| Sleek desktop as a pure client of one service | OpenCode | Desktop and TUI already talk to one server; desktop UX has accessibility, regression and performance suites. |
+| React desktop matching your stack preference | Pi side, via `pi-gui` as a starting point or reference | React/Electron and strong desktop UX work, but runtime ownership must move out of Electron main and Electron must be upgraded. |
 | Durable custom orchestration | Pi-durable is a serious candidate; no automatic winner | Strong primitives but experimental API and semantic mismatches; OpenCode development also has relevant durable machinery. |
 | Existing tool permissions and worktrees | OpenCode | More product-level implementation to adapt. |
 | Complete Moguri profiles, artifacts, budgets, cancellation and analytics | Neither | These must be specified, wired and proven as Moguri contracts. |
@@ -460,7 +514,7 @@ If OpenCode wins, keep the same domain boundary but reuse its actual server, cli
 
 **Fork policy:** begin with reproducibly pinned upstream source/packages and documented patches. Rename/repackage only as required. Preserve license notices, use Moguri-controlled storage/update identities, and do not point a fork's auto-updater at upstream binaries.
 
-## 8. A bounded decision gate, not another roadmap
+## 9. A bounded decision gate, not another roadmap
 
 This is a proposed evaluation, not something executed by this report. It belongs in Phase 0 before importing a baseline or committing to a runtime. Use generated repositories, synthetic messages and no personal/customer data.
 
@@ -475,22 +529,25 @@ This is a proposed evaluation, not something executed by this report. It belongs
 | 7. Artifacts and profile boundary | Delete/archive a source session and retain its answer artifact. Switch profiles and verify no credential, draft, artifact, cache or context leakage. |
 | 8. Accounting | Reconstruct dashboard totals from persisted records, including failed/cancelled attempts and compaction. Assert distinct cost fields, nonoverlapping steer windows and weighted throughput; unknown values remain unknown. |
 | 9. Reuse and maintenance | Inventory what was reused versus replaced, number of required upstream patches, public versus internal APIs, release pinning and migration ownership. Record actual implementation effort rather than invented percentage-complete scores. |
+| 10. Desktop UX baseline | On your target machines, use generated fixtures to measure each candidate desktop. Measure cold start to interactive, send to first visible token, typing latency while streaming, long-timeline scroll stability, large-diff rendering, terminal flood output and palette latency. Complete create work item, run, steer, stop, review and keep the artifact using only the keyboard. Check screen-reader labels, reduced motion, high contrast, and service-down/reconnect states. Set numeric budgets from the best measured baseline rather than inventing them. Then judge sleekness yourself on the same three flows with screenshots. |
 
 A candidate is not preferred merely for passing a basic chat test. For the full brief, it must show that the remaining client/product work is acceptable and the hard guarantees are achievable without two sources of truth.
 
-**Switch to Pi if:** its chosen runtime meets these contracts with a narrow maintained adapter, its experimental API risk is acceptable, and custom client development is an intentional investment.
+**Switch to Pi if:** its chosen runtime meets these contracts with a narrow maintained adapter, its experimental API risk is acceptable, custom client development is an intentional investment, and the chosen desktop path (extracted `pi-gui` or new React client) meets gate 10 as a pure service client.
 
-**Stay with OpenCode if:** its service/UI reuse materially shortens the vertical slice and the necessary invariant changes remain localized.
+**Stay with OpenCode if:** its service/UI reuse materially shortens the vertical slice, the necessary invariant changes remain localized, and you accept Solid for the desktop.
 
-**Reject both prototype shapes if:** they depend on terminal scraping, client-owned queues, session-bound artifacts, blind replay of external effects, ungoverned plugins, or cancellation presented as success before cleanup is known.
+**Reject both prototype shapes if:** they depend on terminal scraping, client-owned queues, a desktop process that owns agent execution, session-bound artifacts, blind replay of external effects, ungoverned plugins, or cancellation presented as success before cleanup is known.
 
 The resulting import/inventory should still produce the required `docs/architecture/upstream-capability-map.md`, naming the selected revision and actual reuse. This assessment is not that completed import map.
 
-## 9. Bottom line
+## 10. Bottom line
 
 **Pi is a good candidate for the engine of Moguri. It is not evidence that OpenCode is the wrong base for the whole product.**
 
 Your Copilot and local-DeepSeek requirements do not decide the choice. The decisive question is whether you want to preserve an existing multi-client product or invest in a new one around a reusable runtime. For the complete current brief, I would not throw away OpenCode's product surfaces before Pi proves the service/durability boundary. I would also not deeply fork either project before measuring the divergence.
+
+The sleek desktop requirement pushes further toward OpenCode for the first release, unless React is non-negotiable. In that case, compare OpenCode against Pi plus a `pi-gui`-derived client only after that client has been reshaped into a pure service client. A beautiful desktop that owns the runtime would break the cross-client promise that makes Moguri distinctive.
 
 The highest-value work is the same either way: durable work items and artifacts, reliable cross-client admission, truthful cancellation, isolated credentials and traceable accounting. Deliver that before the marketplace, swarms, CRDTs or self-evolving organization.
 
@@ -504,6 +561,10 @@ Repository requirements are relative links. Implementation citations are pinned 
 - **P9-P15:** Pi model configuration, queue implementation, session format, RPC, extensions, MCP and package distribution.
 - **O0-O5:** OpenCode project snapshot, server/client architecture, desktop manifest, Copilot implementation and license.
 - **O6-O15:** OpenCode development event bus, inbox, recovery store, GUI extensions, draft storage, accounting, worktrees, permissions, providers and plugins.
+- **O16-O24:** OpenCode desktop UI packages, Storybook, theme schema, end-to-end and performance suites, Electron window layer, relevant desktop issues and the earlier Tauri desktop manifest.
+- **P16-P17:** Pi package inventory and terminal UI library.
+- **Q0-Q4:** Third-party `pi-gui` snapshot, README, desktop manifest, architecture and license.
+- **X1-X4:** Electron support policy and latest release; Tauri WebView engines and sidecar packaging.
 - **PR / OR:** Release metadata and trees used to avoid conflating development branches with shipped packages.
 - **D0-D2:** ds4 README, explicit client configurations and server protocol/runtime guidance.
 - **G1-G2:** GitHub plan/entitlement documentation and official Copilot SDK architecture.
@@ -530,6 +591,8 @@ Repository requirements are relative links. Implementation citations are pinned 
 [P13]: https://github.com/earendil-works/pi/blob/c268154ca1171c2f9eefe75d3d7372a68aada2d5/packages/coding-agent/docs/extensions.md
 [P14]: https://github.com/earendil-works/pi/blob/c268154ca1171c2f9eefe75d3d7372a68aada2d5/packages/coding-agent/docs/mcp.md
 [P15]: https://github.com/earendil-works/pi/blob/c268154ca1171c2f9eefe75d3d7372a68aada2d5/packages/coding-agent/docs/packages.md
+[P16]: https://github.com/earendil-works/pi/tree/c268154ca1171c2f9eefe75d3d7372a68aada2d5/packages
+[P17]: https://github.com/earendil-works/pi/blob/c268154ca1171c2f9eefe75d3d7372a68aada2d5/packages/tui/README.md
 [PR]: https://github.com/earendil-works/pi/releases/tag/v1.3.0
 [O0]: https://github.com/anomalyco/opencode/tree/8c173a8f3805d8e749d44311054b07e37a1b2ce1
 [O1]: https://opencode.ai/docs/server/
@@ -548,7 +611,25 @@ Repository requirements are relative links. Implementation citations are pinned 
 [O13]: https://opencode.ai/docs/permissions/
 [O14]: https://opencode.ai/docs/providers/
 [O15]: https://opencode.ai/docs/plugins/
+[O16]: https://github.com/anomalyco/opencode/blob/8c173a8f3805d8e749d44311054b07e37a1b2ce1/packages/app/package.json
+[O17]: https://github.com/anomalyco/opencode/blob/8c173a8f3805d8e749d44311054b07e37a1b2ce1/packages/ui/package.json
+[O18]: https://github.com/anomalyco/opencode/blob/8c173a8f3805d8e749d44311054b07e37a1b2ce1/packages/storybook/package.json
+[O19]: https://github.com/anomalyco/opencode/blob/8c173a8f3805d8e749d44311054b07e37a1b2ce1/packages/ui/src/theme/desktop-theme.schema.json
+[O20]: https://github.com/anomalyco/opencode/tree/8c173a8f3805d8e749d44311054b07e37a1b2ce1/packages/app/e2e
+[O21]: https://github.com/anomalyco/opencode/tree/8c173a8f3805d8e749d44311054b07e37a1b2ce1/packages/desktop/src/main/windows
+[O22]: https://github.com/anomalyco/opencode/issues/35890
+[O23]: https://github.com/anomalyco/opencode/issues/37495
+[O24]: https://github.com/anomalyco/opencode/blob/ffc000de8e446c63d41a2e352d119d9ff43530d0/packages/desktop/package.json
 [OR]: https://github.com/anomalyco/opencode/releases/tag/v1.19.3
+[Q0]: https://github.com/minghinmatthewlam/pi-gui/tree/572c0c6de8ffd3a245c224b912bb8752ca200780
+[Q1]: https://github.com/minghinmatthewlam/pi-gui/blob/572c0c6de8ffd3a245c224b912bb8752ca200780/README.md
+[Q2]: https://github.com/minghinmatthewlam/pi-gui/blob/572c0c6de8ffd3a245c224b912bb8752ca200780/apps/desktop/package.json
+[Q3]: https://github.com/minghinmatthewlam/pi-gui/blob/572c0c6de8ffd3a245c224b912bb8752ca200780/docs/architecture.md
+[Q4]: https://github.com/minghinmatthewlam/pi-gui/blob/572c0c6de8ffd3a245c224b912bb8752ca200780/LICENSE
+[X1]: https://www.electronjs.org/docs/latest/tutorial/electron-timelines
+[X2]: https://github.com/electron/electron/releases/tag/v44.9.0
+[X3]: https://v2.tauri.app/reference/webview-versions/
+[X4]: https://v2.tauri.app/develop/sidecar/
 [D0]: https://github.com/antirez/ds4/blob/fc80bd695da76ee14bcb86820bf900a5cdfda806/README.md
 [D1]: https://github.com/antirez/ds4/blob/fc80bd695da76ee14bcb86820bf900a5cdfda806/docs/CLIENTS.md
 [D2]: https://github.com/antirez/ds4/blob/fc80bd695da76ee14bcb86820bf900a5cdfda806/docs/SERVER.md
