@@ -2,13 +2,13 @@
 
 **Decided 2026-10-17 by the project owner. Status: accepted, pending the Phase 0 validation spikes below.**
 
-These decisions choose one shape from the [from-zero complexity assessment][Z]. They replace the assumption that Moguri starts as an OpenCode fork. The [newest brief][B], [README][I] and [`AGENTS.md`][A] follow these decisions.
+These decisions define the implementation stack and constraints for the [implementation specification][B]. Moguri is built from zero and does not fork OpenCode or Pi. The [README][I] and [`AGENTS.md`][A] follow these decisions.
 
 ## Summary
 
 | ID | Decision | Revisit if |
 | --- | --- | --- |
-| D01 | Build from zero and borrow libraries for commodity parts. | Phase 0 shows the event model or either client cannot be delivered within the estimate. |
+| D01 | Build from zero and borrow libraries for commodity parts. | Phase 0 shows the event model or either client is not feasible within the project constraints. |
 | D02 | Node.js 26 runs the service and the TUI. | OpenTUI drops Node support, or native modules cannot be packaged reliably. |
 | D03 | The desktop app uses Electron, React and Vite. | Measured memory or startup budgets still fail after optimization. |
 | D04 | The TUI uses OpenTUI with React. | OpenTUI churn or Node incompatibility blocks the TUI. Fall back to Ink. |
@@ -22,13 +22,12 @@ These decisions choose one shape from the [from-zero complexity assessment][Z]. 
 
 **Decision.** Moguri owns its domain model, event store, protocol, local service and clients. It does not fork OpenCode or Pi. Maintained libraries supply providers, MCP, PTYs, terminal rendering, diffs, SQLite and UI toolkits.
 
-**Why.** The durable event model, truthful cancellation and one protocol shared by every client are the reasons Moguri exists. Building them first is cheaper than retrofitting them into a fast-moving fork. [Z], [C]
+**Why.** The durable event model, truthful cancellation and one protocol shared by every client are the reasons Moguri exists. Moguri owns those product-specific foundations and borrows libraries for commodity capabilities.
 
 **Consequences.**
 
-- The first release is estimated at 77–119 engineer-weeks before AI assistance. [Z]
 - A from-zero harness starts behind mature harnesses on agent quality. A golden-task evaluation suite starts in Phase 1.
-- Phase 0 changes from "map the fork" to "validate these decisions".
+- Phase 0 validates the chosen libraries, toolchains, and packaging before feature work.
 
 ## D02. Node.js runtime
 
@@ -82,7 +81,6 @@ These decisions choose one shape from the [from-zero complexity assessment][Z]. 
 - Wrap `pi-ai` behind a Moguri provider interface. Pin its version and keep raw provider data for debugging.
 - Pi's MIT-licensed tool implementations may be reused where they fit, with their license notices kept.
 - Check GitHub's current terms before advertising Copilot sign-in.
-- Owning the loop adds about one engineer-week compared with adopting `pi-agent-core`. [Z]
 
 ## D06. Rust helpers
 
@@ -107,8 +105,6 @@ These decisions choose one shape from the [from-zero complexity assessment][Z]. 
 - Keep a Cargo workspace beside the JavaScript workspace. Ship prebuilt binaries for each target and sign them with the app.
 - Move more work into Rust only when a measured budget fails.
 
-**Cost.** About 2–4 engineer-weeks for the toolchain, bindings, cross-compilation and signing. [Z]
-
 ## D07. Local API transport
 
 **Decision.** The service listens on loopback. Commands use HTTP. Events stream over WebSocket with sequence numbers, so clients can replay missed events after reconnecting.
@@ -127,7 +123,7 @@ These decisions choose one shape from the [from-zero complexity assessment][Z]. 
 
 **Decision.** macOS ships first, signed and notarized. Linux follows. Windows is deferred.
 
-**Consequences.** Avoid Unix-only assumptions where they are cheap to avoid, because the D06 Rust libraries already support Windows. The first release has no Windows acceptance checks. Windows support is estimated at 3–6 additional engineer-weeks. [Z]
+**Consequences.** Avoid Unix-only assumptions where they are cheap to avoid, because the D06 Rust libraries already support Windows. The first release has no Windows acceptance checks.
 
 ## D09. VS Code and `vslocal` extension
 
@@ -163,9 +159,7 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 
 ## Sources
 
-- [Z]: From-zero complexity assessment.
-- [C]: Pi versus OpenCode critique.
-- [B]: Newest build brief.
+- [B]: Moguri implementation specification.
 - [I]: README.
 - [A]: Contributor instructions.
 - [L1]: OpenTUI core README: React and Solid renderers; Bun 1.3.14+ or Node.js 26.4+.
@@ -179,9 +173,7 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 - [R6]: OpenAI Codex repository, primarily Rust.
 - [X1]: Electron release timelines and support policy.
 
-[Z]: from-scratch-complexity.md
-[C]: pi-vs-opencode-critique.md
-[B]: ../../0-implementation-draft-unslopped.md
+[B]: ../implementation.md
 [I]: ../../README.md
 [A]: ../../AGENTS.md
 [L1]: https://github.com/anomalyco/opentui/blob/f8f608e2b9a41685d613a1156708ff06c826c3ce/packages/core/README.md
