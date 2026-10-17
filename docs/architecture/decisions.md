@@ -17,6 +17,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D07 | The local API is HTTP on loopback plus WebSocket events, protected by a token. | Remote execution or a security review requires sockets or TLS. |
 | D08 | macOS ships first, Linux next, Windows later. | Windows users become a priority. |
 | D09 | The VS Code and `vslocal` extension follows a stable TUI and desktop protocol. | The protocol stays unstable after the first release. |
+| D10 | Native SendBox execution is a first-release option. YOLO is the default; a user-only global policy can require SendBox for all new turns. | Phase 0 cannot prove the guest worker, control transport, or required containment on a supported host. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -31,7 +32,7 @@ These decisions define the implementation stack and constraints for the [impleme
 
 ## D02. Node.js runtime
 
-**Decision.** The service and TUI run on Node.js 26, not Bun.
+**Decision.** The service, session worker, and TUI run on Node.js 26, not Bun.
 
 **Why.**
 
@@ -79,6 +80,7 @@ These decisions define the implementation stack and constraints for the [impleme
 **Consequences.**
 
 - Wrap `pi-ai` behind a Moguri provider interface. Pin its version and keep raw provider data for debugging.
+- The loop runs in a session worker on the D10 execution backend. Sandboxed sessions do not run the loop or executable agent tools in the host control-plane process.
 - Pi's MIT-licensed tool implementations may be reused where they fit, with their license notices kept.
 - Check GitHub's current terms before advertising Copilot sign-in.
 
@@ -103,6 +105,7 @@ These decisions define the implementation stack and constraints for the [impleme
 - The supervisor executes and reports. The Node.js service records every durable event and remains the only state owner.
 - A supervisor crash must not crash the service. Phase 0 decides whether supervised processes survive a service restart and how the service reattaches to them. Either way, survivors are reported.
 - Keep a Cargo workspace beside the JavaScript workspace. Ship prebuilt binaries for each target and sign them with the app.
+- SendBox workloads need Linux builds of the worker's native addon and supervisor. Host helpers may supervise SendBox and serve trusted UI queries, but cannot execute sandboxed agents' tool requests on the host.
 - Move more work into Rust only when a measured budget fails.
 
 ## D07. Local API transport
@@ -117,7 +120,7 @@ These decisions define the implementation stack and constraints for the [impleme
 - On start, write a connection file containing the port, protocol version and a random token to the user's Moguri state directory. Only the user can read it.
 - Require the token on every HTTP request and WebSocket connection. Browser WebSocket clients cannot set headers, so send the token in the first message or a subprotocol, never in a URL. Never log it.
 - Reject requests whose `Host` header is not a loopback address, which blocks DNS rebinding. Reject `Origin` values other than Moguri's own clients. Do not enable CORS.
-- Remote access is out of scope until remote execution (`L09`). It will need TLS and real authentication.
+- Remote access is out of scope until remote execution. It will need TLS and real authentication.
 
 ## D08. Platforms
 
@@ -132,8 +135,24 @@ These decisions define the implementation stack and constraints for the [impleme
 **Rules.**
 
 - Negotiate the protocol version on connect. The extension updates on a different schedule from the desktop app.
-- Declare the extension as a UI extension (`extensionKind: ["ui"]`), so it runs on the local machine where the Moguri service runs, even when the editor window is connected to a remote host or container. Remote workspaces stay out of scope until remote execution (`L09`).
+- Declare the extension as a UI extension (`extensionKind: ["ui"]`), so it runs on the local machine where the Moguri service runs, even when the editor window is connected to a remote host or container. Remote workspaces stay out of scope until remote execution.
 - Publish to Open VSX for `vslocal` and to the Visual Studio Marketplace for VS Code.
+
+## D10. Native SendBox execution and global enforcement
+
+**Decision.** Ship a built-in SendBox execution adapter alongside direct host execution. Sessions default to **YOLO (host)**. Users may select **SendBox (local sandbox)** per session or change global and profile defaults. A separate global **Require SendBox** setting rejects new YOLO turns and cannot be overridden by a profile, session, model, plugin, or automation.
+
+**Policy changes.** Only explicit user action may change global enforcement. Enabling it lets already-running YOLO turns finish under the recorded prior execution-mode policy, but blocks new YOLO turn admission immediately, including queued, child-agent, and restarted work. Persist the policy revision and eligible running turns atomically; clients must label the remaining host work accurately. Other permissions, budgets, and manual stop controls remain in force. Defaults never switch a running turn's backend in place.
+
+**Integration boundary.**
+
+- Use SendBox's supported CLI and policy interface behind a typed Moguri backend adapter, not private Rust APIs or a model-generated wrapper. SendBox supports custom guest executables, headless JSON events, and explicit exit status; its `--json` and `--interactive` modes cannot be combined. Phase 0 must prove the worker control and terminal transport rather than assume a ready-made SDK. [S2]
+- The host control plane owns durable state. In SendBox mode, the agent worker, model-facing tool execution, subagents, and executable agent extensions live in the guest or use explicitly scoped SendBox brokers. The guest gets a run-scoped authenticated bridge, not the host control-plane token, home directory, secret store, or unrestricted API.
+- Build a digest-pinned Linux workload image containing the Moguri worker, its pinned Node.js runtime, Linux Rust helpers, and development tools. SendBox agent profiles do not install the agent. Validate runtime, guest artifacts, image, version compatibility, workspace policy, and credentials before launch. [S1], [S2]
+- SendBox currently uses Apple Containerization on macOS 26+ with Apple silicon, or Kata on virtualization-capable Linux. Unsupported hosts or absent prerequisites block sandboxed runs with setup diagnostics; they never cause fallback to YOLO. VM isolation and intentionally writable workspace mounts are shown separately. [S1]
+- Copilot and other remote providers remain external services. A host-side `ds4-server` may remain on the host, but guest access needs an explicitly approved, supported provider connection. Validate scoped authentication and network access; never mount host login state or bypass network policy to make a provider work. The setting governs Moguri session execution, not where an independent inference server runs.
+- Check the latest policy and authenticated backend readiness before each new turn. No model request starts for a new turn until its required sandbox is ready. Guest loss interrupts that work and preserves failure or partial outcomes; no host retry is allowed. Supervision and teardown must account for both the SendBox process and guest workload, rather than treating a CLI exit as proof of complete cleanup.
+- Preserve the same typed commands, events, budgets, Git policies, and cancellation semantics across both backends. In sandboxed sessions, terminals and agent file/tool operations stay within the approved guest workspace and brokers.
 
 ## Phase 0 validation spikes
 
@@ -146,6 +165,7 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 5. **TUI.** OpenTUI with React on Node.js 26 rendering a streaming timeline.
 6. **Native addon.** File search and Git status on a large generated repository, compared with a Node.js baseline.
 7. **Packaging.** A signed and notarized macOS app containing the Node.js runtime, the service, the native addon and the supervisor, and a Linux CLI installation.
+8. **Native SendBox.** Run the Moguri worker as a custom guest executable on supported macOS and Linux hosts; prove bidirectional control, terminal transport, scoped Copilot and host-side ds4 connectivity, MCP containment, cancellation, guest loss, and restart reconciliation. Exercise YOLO defaults, per-session selection, global enforcement, already-running-turn completion, and the absence of host fallback.
 
 ## Still open
 
@@ -172,6 +192,8 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 - [R5]: ripgrep crates, including `ignore` and `grep`.
 - [R6]: OpenAI Codex repository, primarily Rust.
 - [X1]: Electron release timelines and support policy.
+- [S1]: SendBox README: VM runtimes, custom agents, prerequisites, workspace and credential boundaries.
+- [S2]: SendBox integration contract: CLI, YAML policy, custom guest executables, headless JSON events, and MCP brokers.
 
 [B]: ../implementation.md
 [I]: ../../README.md
@@ -186,3 +208,5 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 [R5]: https://github.com/BurntSushi/ripgrep/tree/3fce3b5bb0236da2df6d99672afb8a719642eca7/crates
 [R6]: https://github.com/openai/codex/tree/ce0323f2f2d3b25e82806cd555237da3db4e1897
 [X1]: https://www.electronjs.org/docs/latest/tutorial/electron-timelines
+[S1]: https://github.com/mbianchidev/sendbox/blob/5c6f352b0e3e9bf8568325789d5289ca81d606e0/README.md
+[S2]: https://github.com/mbianchidev/sendbox/blob/5c6f352b0e3e9bf8568325789d5289ca81d606e0/docs/integrations.md
