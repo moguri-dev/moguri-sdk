@@ -18,6 +18,8 @@ These decisions define the implementation stack and constraints for the [impleme
 | D08 | macOS ships first, Linux next, Windows later. | Windows users become a priority. |
 | D09 | The VS Code and `vslocal` extension follows a stable TUI and desktop protocol. | The protocol stays unstable after the first release. |
 | D10 | Native SendBox execution is a first-release option. YOLO is the default; a user-only global policy can require SendBox for all new turns. | Phase 0 cannot prove the guest worker, control transport, or required containment on a supported host. |
+| D11 | Users choose a fixed model or `kupo`, a synthetic router/orchestrator spanning approved local and hosted models with single, cascade, and critique/revision workflows. | Evaluation cannot meet the chosen quality, cost, latency, or isolation budgets. |
+| D12 | Manual approvals are the default. Guided, Autopilot, and System One-backed Autopilot Max are independent of model selection and execution mode; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -83,6 +85,7 @@ These decisions define the implementation stack and constraints for the [impleme
 - The loop runs in a session worker on the D10 execution backend. Sandboxed sessions do not run the loop or executable agent tools in the host control-plane process.
 - Pi's MIT-licensed tool implementations may be reused where they fit, with their license notices kept.
 - Check GitHub's current terms before advertising Copilot sign-in.
+- Reuse this loop for every kupo solver leg. D11 adds orchestration, not a second session runtime; D12 adds a separate decision-provider interface for non-chat APIs.
 
 ## D06. Rust helpers
 
@@ -154,6 +157,40 @@ These decisions define the implementation stack and constraints for the [impleme
 - Check the latest policy and authenticated backend readiness before each new turn. No model request starts for a new turn until its required sandbox is ready. Guest loss interrupts that work and preserves failure or partial outcomes; no host retry is allowed. Supervision and teardown must account for both the SendBox process and guest workload, rather than treating a CLI exit as proof of complete cleanup.
 - Preserve the same typed commands, events, budgets, Git policies, and cancellation semantics across both backends. In sandboxed sessions, terminals and agent file/tool operations stay within the approved guest workspace and brokers.
 
+## D11. kupo synthetic model and routing
+
+**Decision.** Users can select a fixed model or **kupo**. kupo is Moguri's own synthetic auto model: a classifier and versioned orchestration policy that choose among configured local and hosted models. It follows HydraFusion's public single, cascade, and independent critique/revision patterns, without assuming access to GitHub's internal implementation or a standalone HydraFusion API. [H1]
+
+**Rules.**
+
+- Keep fixed-model selection available. kupo selection grants no extra autonomy, permissions, providers, or network access. Approval mode and the D10 execution backend remain separate.
+- Filter the candidate pool by profile policy, data locality, capabilities, context and output limits, health, and budget before sending classifier input. Validate the typed plan and recheck eligibility at each dispatch; remote classifiers are themselves data destinations requiring permission.
+- A configured classifier can be local, hosted, or a D12 System One provider. Its result selects a workflow and concrete model bindings; it cannot create providers or change policy. Leg calls do not invoke kupo recursively. Replanning happens only at recorded safe boundaries, with context rebuilt from canonical events and approved artifacts rather than raw provider session payloads or replayed tools.
+- Single uses the normal loop. Cascade gates an efficient draft with explicit validation before accepting it or escalating. Critique uses an independent, read-only, tool-less model from a different family and a bounded solver revision; two aliases for the same model are not independent critics. If a pattern's prerequisites are absent, choose another eligible pattern or report it unavailable.
+- Reuse owned workspaces and worktree leases to stage compound candidates. Only an accepted, validated patch may be applied against its recorded base; conflict, cancellation, or rejection must not overwrite the user's changes. Solver legs cannot publish an unaccepted candidate; publishing is a separate policy-checked action after validation. Do not replay Git writes, network writes, or other side effects on retry/escalation. Report any effects already performed and partial cleanup honestly.
+- Bound legs, revisions, escalations, retries, spend, and time. Every classifier, draft, critic, revision, and fallback request belongs to the same cancellation tree and cost ledger, with its role, provider, resolved model version, configuration, and outcome recorded.
+- Expose the selected `kupo` label and actual per-leg models in both clients. Failure, unavailable models, invalid plans, or low confidence may use only a visible, preconfigured eligible fallback, or pause for the user. Never silently cross a privacy, budget, or sandbox boundary.
+
+**Schema impact.** Phase 1 defines versioned routing-policy snapshots, plans, leg ownership, candidate bases, acceptance/application outcomes, and complete per-call accounting. Use the existing event/projection model and normal migration and restart-recovery rules; do not build a second hidden workflow store.
+
+## D12. System One decisions and approval modes
+
+**Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. The approval modes are **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or disables sandboxing.
+
+**Provider contract.** Jev is a structured decision model, not a code/chat generator. Its documented hosted API evaluates state against typed Noul (yes/no probability), Choice, and Score questions; some types include a separate confidence value. Use a dedicated adapter to `POST https://api.typesafe.ai/v1/systemone`, not an invented OpenAI-compatible endpoint or assumed `pi-ai` integration. Other local or hosted providers must declare and satisfy equivalent capabilities. [J1], [J2]
+
+**Rules.**
+
+- Represent tool approvals, structured user questions, and steering as bounded typed decisions. Offer explicit alternatives, including escalation to the user. For open-ended questions or missing user-only facts, request clarification rather than invent an answer. The current model may frame alternatives; it cannot set its own permission limits.
+- Autopilot Max can answer instead of prompting the user, approve or deny delegated tool requests, and steer at safe loop boundaries. It needs an explicitly configured compatible decision provider; no silent fallback to generative self-approval. Steering cannot change a pinned model, expand the user's goal or workspace, or grant new permissions.
+- The control plane's deterministic authorizer remains final. User-delegated scope may permit automatic decisions, but a high confidence score cannot override a hard denial, lift a budget, expose a secret, disable Require SendBox, or change another user-only security setting. Git and other consequential writes still need explicit user action or policy.
+- Validate question/answer types, option membership, numeric bounds, and confidence semantics. Treat input content as data, not instructions. Evaluate decision thresholds on generated fixtures; vendor calibration, speed, or cost claims are not permission or a reliability guarantee. Probability and confidence are not interchangeable. [J2]
+- Bind each decision to the exact pending request, arguments/context, delegation, and policy revision. Recheck before tool execution, applying an answer, or admitting a steer. User intervention, revoked delegation, changed input, or cancellation invalidates stale results. Persist the actual model actor, rubric, and available evidence references, never a fake user-authored response or reasoning the provider did not return. Automated answers cannot become user-only Core instructions.
+- Keep model keys in the profile's secret backend. Hosted decision inputs need explicit data/network permission, including SendBox connectivity; local-only sessions cannot send their questions to hosted Jev. Account for every decision call and retry, with independent deadlines and cancellation. A timeout, invalid output, provider outage, or insufficient confidence pauses or escalates; it never means approval.
+- Pin an evaluated Jev version when thresholds depend on it, and record the resolved version returned by the provider even when the user selects an alias. Aliases can move without a client update. [J3]
+
+**Schema impact.** Phase 1 defines approval-mode settings, bounded delegation, decision requests and results, recommendation versus human/automated approval actors, policy revisions, invalidation, and requested/applied steering events. Recovery must preserve pending questions and accounting without re-executing effects; durable changes require migrations.
+
 ## Phase 0 validation spikes
 
 Each spike records a pass or fail result and its measurements under `docs/`.
@@ -166,6 +203,8 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 6. **Native addon.** File search and Git status on a large generated repository, compared with a Node.js baseline.
 7. **Packaging.** A signed and notarized macOS app containing the Node.js runtime, the service, the native addon and the supervisor, and a Linux CLI installation.
 8. **Native SendBox.** Run the Moguri worker as a custom guest executable on supported macOS and Linux hosts; prove bidirectional control, terminal transport, scoped Copilot and host-side ds4 connectivity, MCP containment, cancellation, guest loss, and restart reconciliation. Exercise YOLO defaults, per-session selection, global enforcement, already-running-turn completion, and the absence of host fallback.
+9. **kupo.** Exercise all three patterns with generated local/hosted tasks against a fixed-model baseline. Measure verified quality, complete cost, latency, and cancellation; test ineligible routes, missing critics, unsafe fallbacks, conflicting candidate patches, and restart without duplicate side effects. Do not claim HydraFusion's benchmark results as Moguri's.
+10. **System One and approvals.** Verify Jev's real typed request/response contract and a pluggable alternative using generated fixtures. Cover Manual defaults, Guided confirmation, bounded Autopilot and Autopilot Max with both fixed and kupo models, confidence versus probability, malformed output, missing facts, prompt injection, revoked grants, concurrent human intervention, rate limits, outages, and SendBox/budget enforcement.
 
 ## Still open
 
@@ -176,6 +215,8 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 - Terminal renderer: xterm.js or ghostty-web.
 - How the service and runtime are packaged for the CLI and the desktop app.
 - Linux package formats.
+- Default kupo classifier, evaluated candidate pools, quality gates, and per-pattern limits.
+- Decision-provider thresholds and bounded delegation presets; model selection has no chosen out-of-box concrete provider/model yet.
 
 ## Sources
 
@@ -194,6 +235,10 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 - [X1]: Electron release timelines and support policy.
 - [S1]: SendBox README: VM runtimes, custom agents, prerequisites, workspace and credential boundaries.
 - [S2]: SendBox integration contract: CLI, YAML policy, custom guest executables, headless JSON events, and MCP brokers.
+- [H1]: GitHub's public HydraFusion design: single, cascade, critique/revision, bounded execution, and complete accounting.
+- [J1]: TypeSafe AI's official Jev introduction: System One models produce typed decisions, not chat.
+- [J2]: Official Jev API: endpoint, state/questions/answers, question types, confidence fields, usage, and errors.
+- [J3]: Official Jev model/version documentation: limits, aliases, and resolved versions.
 
 [B]: ../implementation.md
 [I]: ../../README.md
@@ -210,3 +255,7 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 [X1]: https://www.electronjs.org/docs/latest/tutorial/electron-timelines
 [S1]: https://github.com/mbianchidev/sendbox/blob/5c6f352b0e3e9bf8568325789d5289ca81d606e0/README.md
 [S2]: https://github.com/mbianchidev/sendbox/blob/5c6f352b0e3e9bf8568325789d5289ca81d606e0/docs/integrations.md
+[H1]: https://github.blog/ai-and-ml/github-copilot/project-hydrafusion-frontier-quality-via-multi-model-orchestration/
+[J1]: https://docs.typesafe.ai/introduction
+[J2]: https://docs.typesafe.ai/api
+[J3]: https://docs.typesafe.ai/models
