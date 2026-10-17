@@ -2,7 +2,7 @@
 
 **Decided 2026-10-17 by the project owner. Status: accepted, pending the Phase 0 validation spikes below.**
 
-These decisions choose one shape from the [from-zero complexity assessment][Z]. They replace the assumption that Moguri starts as an OpenCode fork. The [newest brief][B], [README][I] and [`AGENTS.md`][A] still describe the fork and must be updated before implementation starts.
+These decisions choose one shape from the [from-zero complexity assessment][Z]. They replace the assumption that Moguri starts as an OpenCode fork. The [newest brief][B], [README][I] and [`AGENTS.md`][A] follow these decisions.
 
 ## Summary
 

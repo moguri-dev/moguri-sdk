@@ -187,7 +187,7 @@ For comparison, a first release on an OpenCode fork is roughly **45–75 enginee
 - **Provider churn never ends.** Delegating providers to `pi-ai` makes Pi's release cadence a dependency. Pin its version, wrap it behind a Moguri provider interface, and keep raw provider data for debugging, as the brief requires.
 - **GitHub Copilot access through a third-party client is a policy question as well as a technical one.** Using a library's OAuth flow does not move responsibility for GitHub's terms to that library. Check the current terms before shipping Copilot login as a headline feature.
 - **Local models change the performance envelope.** ds4 through `ds4-server` is just another OpenAI-compatible endpoint (`U02`), but local generation is slow. Budget and timing UI must handle long turns without looking stuck.
-- **Your repository instructions assume a fork.** `AGENTS.md` and the newest brief say Moguri "began as a fork of OpenCode" and that Phase 0 maps the fork. Z1 is now [decided][D], so Phase 0 becomes validation spikes and the fork language must leave the brief, README and `AGENTS.md`. That update has not been made yet.
+- **Repository instructions assumed a fork.** `AGENTS.md` and the briefs said Moguri "began as a fork of OpenCode" and that Phase 0 maps the fork. With Z1 [decided][D], they now describe a from-zero build whose Phase 0 runs validation spikes.
 - **Two languages cost more than their line count.** Rust adds a second toolchain, cross-compilation, signing and a process boundary to debug. Keep the helpers narrow and move work into Rust only when a measured budget fails.
 - **Node.js 26 is not LTS yet.** OpenTUI needs Node.js 26.4+, and Node.js 26 is scheduled to enter LTS on 2026-10-28. [N1] Ship a pinned runtime with Moguri rather than relying on the user's installation.
 - **The later-work list is larger than the first release.** It is the main source of schedule risk. Section 8 shows why.
@@ -359,7 +359,7 @@ Sizes are marginal costs **after** the subsystems they depend on exist. Do not a
 
 ## 10. From-zero build order
 
-Z1 is [decided][D], so this replaces the brief's fork-mapping Phase 0. Later phases keep the brief's order.
+Z1 is [decided][D], and the brief's Phase 0 now runs these validation spikes. Later phases keep the brief's order.
 
 | Phase | Goal | Exit check | Cumulative engineer-weeks |
 | --- | --- | --- | --- |
