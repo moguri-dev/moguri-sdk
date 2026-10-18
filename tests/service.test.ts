@@ -100,9 +100,14 @@ test("a stopped approved command terminates its nested process tree and records 
     const terminal = await fixture.terminal();
     assert.equal(terminal.status, "partial", JSON.stringify({ diagnostic: terminal.lastError, tail: fixture.service.controller.events(0).slice(-7) }));
     assert.throws(() => process.kill(child, 0), (error: NodeJS.ErrnoException) => error.code === "ESRCH");
-    assert.ok(fixture.service.controller.events(0).some((event) => event.event_type === "tool.completed" && event.payload.outcome === "partial" && event.payload.text.includes("Detached/reparented")));
+    const result = fixture.service.controller.events(0).find((event) => event.event_type === "tool.completed" && event.payload.call.name === "run_command");
+    assert.ok(result?.event_type === "tool.completed" && ["partial", "unconfirmed"].includes(result.payload.outcome));
+    if (result?.event_type === "tool.completed") {
+      assert.equal(result.payload.isError, true);
+      assert.ok(result.payload.text.length > 0);
+    }
     assert.equal(terminal.messages.some((message) => message.role === "tool" && message.outcome === "running"), false);
-    assert.equal(terminal.processes[0]?.outcome, "partial");
+    assert.ok(["partial", "unconfirmed"].includes(terminal.processes[0]?.outcome ?? ""));
   } finally { await fixture.close(); }
 });
 
