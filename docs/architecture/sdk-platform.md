@@ -128,3 +128,11 @@ compact/settings inspection and deterministic design scan found no remaining
 mechanical issues. None of these results claims live Copilot entitlement,
 learned semantic embeddings, real ASR accuracy, microphone capture, qualified
 SendBox or notarized release readiness.
+
+The versioned `0.2.0-alpha.1` macOS arm64 development artifact also passed the
+packaged SDK/service, bundled Node, CLI/TUI, mascot-icon and native speech
+runtime checks. Both hidden Electron workflows passed against that actual app.
+Its DMG is approximately 298 MiB and ZIP 240 MiB; the DMG checksum and ad-hoc
+bundle signature verify. Packager reports the optional `.icon` format absent;
+the generated `.icns` fallback is present and byte-verified against the source
+branding build. No production signing/notarization or model weights are claimed.

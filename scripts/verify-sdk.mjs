@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const temporary = await mkdtemp(join(tmpdir(), "moguri-sdk-consumer-"));
 try {
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", temporary], { encoding: "utf8" }));
   const archive = join(temporary, packed[0].filename);
   const consumer = join(temporary, "consumer");
@@ -12,8 +13,11 @@ try {
   await writeFile(join(consumer, "package.json"), JSON.stringify({
     name: "generated-moguri-sdk-consumer", private: true, type: "module",
     dependencies: { moguri: `file:${archive}` },
+    allowScripts: { ...manifest.allowScripts, [manifest.name]: true },
   }));
-  execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
+  execFileSync("npm", ["install", "--no-audit", "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
+  const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
+  if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
     import {MoguriSdk, type UserSettings} from "moguri";
     import {connectMoguri, createRuntime} from "moguri/node";

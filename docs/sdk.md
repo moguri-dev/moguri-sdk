@@ -24,6 +24,10 @@ compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
 consumer's platform. Use npm's normal dependency installation, not
 `--ignore-scripts`, for an operational CLI.
+With npm's script allowlist enabled, review `npm install-scripts ls` and approve
+this known Moguri package plus its pinned Node/node-pty native installation
+steps. A file-tarball dependency is approved by package name rather than a
+registry-version selector. Do not approve unused provider lifecycle scripts.
 
 | Import | Surface |
 | --- | --- |
