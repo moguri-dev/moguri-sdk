@@ -66,3 +66,36 @@ test("empty or preliminary provider telemetry is not reported as zero complete u
   assert.equal(usagePresent({ type: "message_delta", usage: { output_tokens: 12 } }), true);
   assert.equal(usagePresent({ type: "response.completed", response: { usage: { input_tokens: 30, output_tokens: 12 } } }), true);
 });
+
+test("sign-out invalidates a racing token refresh and cannot be overwritten by stale connected state", async () => {
+  const fetch = globalThis.fetch;
+  const credentials = new InMemoryCredentialStore();
+  const model = githubCopilotProvider().getModels()[0]!;
+  await credentials.modify("github-copilot", async () => ({
+    type: "oauth", refresh: "generated-refresh", access: "generated-expired", expires: 0, availableModelIds: [model.id],
+  }));
+  let entered = false;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  globalThis.fetch = async (input) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.endsWith("/copilot_internal/v2/token")) {
+      entered = true; await gate;
+      return Response.json({ token: "generated-refreshed", expires_at: Date.now() / 1000 + 3600 });
+    }
+    if (url.endsWith("/models")) return Response.json({ data: [{ id: model.id, model_picker_enabled: true, policy: { state: "enabled" } }] });
+    throw new Error("Unexpected fixture request.");
+  };
+  const adapter = new CopilotAdapter(credentials);
+  try {
+    const refreshing = adapter.refresh();
+    await waitFor(() => entered);
+    const logout = adapter.logout();
+    assert.throws(() => adapter.login(), /account change/);
+    release();
+    await Promise.all([refreshing, logout]);
+    assert.equal(adapter.state.status, "disconnected");
+    assert.equal(adapter.state.models.length, 0);
+    assert.equal(await credentials.read("github-copilot"), undefined);
+  } finally { release(); globalThis.fetch = fetch; }
+});

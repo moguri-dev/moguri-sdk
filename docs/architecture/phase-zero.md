@@ -15,13 +15,13 @@ These are development-spike budgets, not product performance claims.
 | Providers | PASS fixtures; FAIL live services | The real maintained pi-ai Copilot OAuth adapter performed device authorization, token exchange, account-filtered discovery, streaming and cancellation against six intercepted HTTP requests. Cancellation: 32.8 ms. No personal credentials, paid inference, live entitlement check or ds4 endpoint was used. |
 | Supervisor | PASS macOS baseline; FAIL Rust/Linux | An actual PTY ran a shell and nested `sleep`; group cancellation took 153.5 ms with zero surviving children. `node-pty` 1.1.0 ships a non-executable macOS helper; the checked-in preparation script restores its executable bits. Rust and Linux were unavailable. |
 | Event store | PASS | 1,000 separately committed SQLite WAL/FULL appends: p95 0.061 ms. Rebuild: 0.489 ms. Killing a writer with an open transaction retained exactly the 1,000 committed events. |
-| Desktop | PASS shell | Electron 44.9.0, hidden isolated window, 10,000 generated timeline rows: ready in 165 ms after process startup, aggregate working set 445.9 MiB, 30 scroll frames averaging 8.22 ms. Full service/client integration is tested after implementation. |
+| Desktop | PASS shell and initial client | Electron 44.9.0, hidden isolated window, 10,000 generated timeline rows: ready in 165 ms after process startup, aggregate working set 445.9 MiB, 30 scroll frames averaging 8.22 ms. Hidden app tests also cover onboarding, shared drafts, tool approvals, cancellation and restart against generated provider responses. |
 | TUI | PASS | OpenTUI/React 0.6.6 on Node 26.12.0 rendered 60 updates, averaging 17.97 ms per update. Test rendering must synchronize React commits before flushing the native scene. Node reports experimental FFI; Bun is not required. |
 | Native addon | FAIL comparison; PASS bounded baseline | No Rust toolchain. Async Node listing: 0.934 ms; system Git status: 5.63 ms for 2,000 generated files. This does not establish performance on a large real repository. |
-| Packaging | FAIL release prerequisites | No signing/notarization identity or Linux execution host. Only unsigned/ad-hoc development macOS packaging is in scope for this checkpoint. |
+| Packaging | PASS development; FAIL release prerequisites | A 269 MiB ad-hoc-signed arm64 DMG and 224 MiB ZIP were built. Verified the bundle signature, DMG checksum, pinned Node, native TUI entrypoint, isolated compiled service and the actual packaged Electron/worker workflow. No signing/notarization identity or Linux execution host was available. |
 | Native SendBox | FAIL unavailable | No installed CLI or digest-pinned guest image. Sandbox admission must be disabled. |
 | kupo | FAIL unavailable | No approved/evaluated multi-model pool or classifier. No routing quality, cost, isolation or wind-down claims. |
-| System One and approvals | FAIL live adapter/delegation | No configured decision provider. Initial human approvals will be tested without claiming evaluated automated decisions. |
+| System One and approvals | PASS human approvals; FAIL live adapter/delegation | Exact-argument human approval, denial races and policy invalidation use the shared service. No decision provider or automated delegation is configured or evaluated. |
 | Remote SSH | FAIL unavailable | No user-configured SSH host; none was scanned or inferred. Remote admission must be disabled. |
 | Composer/defaults/budgets | FAIL complete contract | The checkpoint implements factory defaults and explicit project-text snapshots only. Other attachments, inherited preferences and finite budgets remain unavailable rather than weakening their contracts. |
 
@@ -53,3 +53,23 @@ official support for Moguri. The
 refer users to their applicable consumer, enterprise or Microsoft terms.
 Moguri must not advertise official partner status, guarantee subscription
 compatibility, bypass account policy, or treat catalog estimates as billed usage.
+
+## Packaged checkpoint evidence
+
+The clean-install and final runs passed 23 unit/integration/native-TUI checks, the hidden
+Electron workflow, type checks, builds and dependency audit. The same Electron
+workflow then passed against the ad-hoc app, loading its compiled worker and
+production dependencies. The packaged service check uses an injected generated
+provider with no models, so it never reads a personal keychain entry or makes a
+provider call.
+
+The first packaging attempt revealed that current Packager defaults to ASAR:
+standalone Node cannot execute those virtual paths. The decision was updated
+before proceeding; development packaging now explicitly uses unpacked app
+files. `scripts/verify-package.mjs` guards against recurrence. This establishes
+development artifact functionality, not notarization or complete release scope.
+
+Process-group cancellation is also a limited result: detached/reparented
+descendants are not fully verifiable with the temporary supervisor. Cancelled
+or timed-out shell tools conservatively settle partial and pause further work,
+even when the measured known group has zero survivors.

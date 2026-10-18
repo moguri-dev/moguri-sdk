@@ -64,6 +64,8 @@ export class CopilotAdapter implements ProviderAdapter {
   private readonly models;
   private loginAbort?: AbortController;
   private loginTask?: Promise<void>;
+  private epoch = 0;
+  private signingOut = false;
   constructor(credentials: CredentialStore = new KeyringCredentials()) {
     this.models = createModels({
       credentials,
@@ -73,35 +75,42 @@ export class CopilotAdapter implements ProviderAdapter {
   }
   private update(state: ProviderState): void { this.state = state; this.onChange(); }
   async refresh(): Promise<void> {
-    if (this.loginTask) return;
+    if (this.loginTask || this.signingOut) throw new MoguriError("login_pending", "Finish the active Copilot account change before refreshing.", 409);
+    await this.loadState(this.epoch, AbortSignal.timeout(15_000));
+  }
+  private async loadState(epoch: number, signal: AbortSignal): Promise<void> {
     try {
-      const signal = AbortSignal.timeout(15_000);
       const auth = await this.models.getAuth("github-copilot", { signal });
       const models = auth ? await this.models.getAvailable("github-copilot", { signal }) : [];
+      if (epoch !== this.epoch) return;
+      signal.throwIfAborted();
       this.update({
         status: auth ? "connected" : "disconnected",
         models: models.map((model) => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, imageInput: model.input.includes("image") })),
         login: null, diagnostic: auth && models.length === 0 ? "No enabled, compatible Copilot models. Enable a model in your GitHub Copilot account, then reconnect." : null,
       });
     } catch {
+      if (epoch !== this.epoch) return;
       this.update({ status: "error", models: [], login: null, diagnostic: "Copilot access or OS keychain access failed. Unlock the keychain, check your network/account policy, then reconnect." });
     }
   }
   login(): void {
-    if (this.loginTask) throw new MoguriError("login_pending", "A Copilot login is already in progress.", 409);
+    if (this.loginTask || this.signingOut) throw new MoguriError("login_pending", "A Copilot account change is already in progress.", 409);
     const abort = new AbortController();
+    const epoch = ++this.epoch;
+    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(15 * 60_000)]);
     this.loginAbort = abort;
     this.update({ status: "connecting", models: [], login: null, diagnostic: null });
     this.loginTask = (async () => {
       try {
         await this.models.login("github-copilot", "oauth", {
-          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15 * 60_000)]),
+          signal,
           prompt: async (prompt) => {
             if (prompt.type === "text" && prompt.message.includes("Enterprise")) return "";
             throw new Error("This checkpoint supports github.com device authorization only.");
           },
           notify: (event) => {
-            if (event.type === "device_code") {
+            if (event.type === "device_code" && epoch === this.epoch && !signal.aborted) {
               const url = new URL(event.verificationUri);
               if (url.protocol !== "https:" || url.hostname !== "github.com") throw new Error("Unexpected GitHub authorization destination.");
               this.update({
@@ -111,24 +120,38 @@ export class CopilotAdapter implements ProviderAdapter {
             }
           },
         }, { agentName: "Moguri" });
+        await this.loadState(epoch, signal);
       } catch {
-        this.update({
+        if (epoch === this.epoch) this.update({
           status: abort.signal.aborted ? "disconnected" : "error", models: [], login: null,
           diagnostic: abort.signal.aborted ? "Copilot sign-in cancelled." : "Copilot sign-in failed or expired. Check your subscription, organization policy, network and OS keychain, then try again.",
         });
       } finally {
-        const succeeded = this.state.status === "connecting";
         this.loginTask = undefined;
         this.loginAbort = undefined;
-        if (succeeded) await this.refresh();
       }
     })();
   }
-  async cancel(): Promise<void> { this.loginAbort?.abort(); await this.loginTask; }
+  async cancel(): Promise<void> {
+    if (!this.loginTask) return;
+    this.epoch++;
+    this.loginAbort?.abort();
+    await this.loginTask;
+    this.update({ status: "disconnected", models: [], login: null, diagnostic: "Copilot sign-in cancelled. Sign out to remove any authorization that already completed." });
+  }
   async logout(): Promise<void> {
-    await this.cancel();
-    try { await this.models.logout("github-copilot"); } catch { throw new MoguriError("secret_store", "Could not remove the credential from the OS keychain. Unlock it and try again.", 503); }
-    this.update({ status: "disconnected", models: [], login: null, diagnostic: null });
+    if (this.signingOut) throw new MoguriError("provider_busy", "Copilot sign-out is already in progress.", 409);
+    this.signingOut = true;
+    this.epoch++;
+    this.update({ status: "connecting", models: [], login: null, diagnostic: null });
+    try {
+      await this.cancel();
+      await this.models.logout("github-copilot");
+      this.update({ status: "disconnected", models: [], login: null, diagnostic: null });
+    } catch {
+      this.update({ status: "error", models: [], login: null, diagnostic: "Could not remove the credential from the OS keychain. Unlock it and retry sign-out." });
+      throw new MoguriError("secret_store", this.state.diagnostic!, 503);
+    } finally { this.signingOut = false; }
   }
   async prepare(modelId: string, signal: AbortSignal): Promise<PreparedModel> {
     const auth = await this.models.getAuth("github-copilot", { signal });

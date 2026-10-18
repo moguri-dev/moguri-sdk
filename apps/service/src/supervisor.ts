@@ -50,10 +50,14 @@ export async function runCommand(root: string, command: string, timeoutMs: numbe
     const suffix = `${clipped ? "\n[Output truncated to 128 KiB.]" : ""}${timedOut ? "\n[Command deadline exceeded.]" : ""}`;
     if (!clean) return { text: text + suffix + `\n[Process group ${terminal.pid} cleanup is unconfirmed.]`, isError: true, outcome: "partial" };
     if (hadBackgroundSurvivors) return { text: text + suffix + "\n[Background descendants survived their shell and were stopped. Background execution is unsupported.]", isError: true, outcome: "partial" };
+    if (cancelled) return {
+      text: text + suffix + `\n[Process group ${terminal.pid} stopped. Detached/reparented descendants cannot be fully verified by this checkpoint's supervisor. Inspect processes before resuming.]`,
+      isError: true, outcome: "partial",
+    };
     return {
-      text: text + suffix + `\n[exit=${exit.exitCode}${exit.signal ? ` signal=${exit.signal}` : ""}${cancelled ? " cancelled" : ""}]`,
-      isError: cancelled || exit.exitCode !== 0 || Boolean(exit.signal),
-      outcome: cancelled ? "stopped" : exit.exitCode === 0 && !exit.signal ? "completed" : "failed",
+      text: text + suffix + `\n[exit=${exit.exitCode}${exit.signal ? ` signal=${exit.signal}` : ""}]`,
+      isError: exit.exitCode !== 0 || Boolean(exit.signal),
+      outcome: exit.exitCode === 0 && !exit.signal ? "completed" : "failed",
     };
   } finally { clearTimeout(timer); signal.removeEventListener("abort", stop); }
 }

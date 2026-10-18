@@ -129,6 +129,10 @@ disconnect. A service restart marks interrupted work partial and does not replay
 effects or assume that cleanup succeeded. Interactive terminal reattachment,
 large-repository native search, Linux supervision and the Rust implementation
 remain unvalidated. Revisit this exception before release.
+Because process groups do not contain arbitrarily detached descendants, shell
+cancellation/deadlines remain partial and pause admission even after the known
+group exits. Do not treat the measured nested-process fixture as proof of
+complete containment or enable background execution.
 
 ## D07. Local API transport
 
@@ -267,6 +271,11 @@ credentials via `@napi-rs/keyring`. Packaging uses `@electron/packager`.
 Development macOS artifacts are not notarized releases. Folder attachments,
 images, external references, finite caps and preference inheritance are not
 enabled until their full contracts are implemented.
+
+The development app deliberately uses unpacked application files (`asar: false`):
+the external pinned Node runtime must execute the service/worker and load their
+native dependencies through ordinary filesystem paths. An ASAR containing those
+entrypoints is not executable by a standalone Node process.
 
 ## Sources
 

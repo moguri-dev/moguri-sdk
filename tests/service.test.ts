@@ -98,11 +98,11 @@ test("a stopped approved command terminates its nested process tree and records 
     const child = Number(output.text.match(/GENERATED_CHILD=(\d+)/)![1]);
     await fixture.service.controller.dispatch(envelope({ type: "session.stop", sessionId: fixture.sessionId }));
     const terminal = await fixture.terminal();
-    assert.equal(terminal.status, "stopped", JSON.stringify({ diagnostic: terminal.lastError, tail: fixture.service.controller.events(0).slice(-7) }));
+    assert.equal(terminal.status, "partial", JSON.stringify({ diagnostic: terminal.lastError, tail: fixture.service.controller.events(0).slice(-7) }));
     assert.throws(() => process.kill(child, 0), (error: NodeJS.ErrnoException) => error.code === "ESRCH");
-    assert.ok(fixture.service.controller.events(0).some((event) => event.event_type === "tool.completed" && event.payload.outcome === "stopped"));
+    assert.ok(fixture.service.controller.events(0).some((event) => event.event_type === "tool.completed" && event.payload.outcome === "partial" && event.payload.text.includes("Detached/reparented")));
     assert.equal(terminal.messages.some((message) => message.role === "tool" && message.outcome === "running"), false);
-    assert.equal(terminal.processes[0]?.outcome, "stopped");
+    assert.equal(terminal.processes[0]?.outcome, "partial");
   } finally { await fixture.close(); }
 });
 
