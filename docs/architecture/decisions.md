@@ -2,6 +2,14 @@
 
 **Decided 2026-10-17 by the project owner. Status: accepted, pending the Phase 0 validation spikes below.**
 
+**Initial executable checkpoint, 2026-10-18.** The [Phase 0 results](phase-zero.md)
+authorize a deliberately smaller development checkpoint: macOS Local execution,
+fixed GitHub Copilot models, Manual approvals, and Unlimited budget through both
+clients. This is not completion of the first milestone. Unsupported environments,
+routing, delegation, attachment types and finite budgets must report unavailable,
+never approximate their guarantees or fall back to Local. External-service and
+release-packaging failures remain release blockers.
+
 These decisions define the implementation stack and constraints for the [implementation specification][B]. Moguri is built from zero and does not fork OpenCode or Pi. The [README][I] and [`AGENTS.md`][A] follow these decisions.
 
 ## Summary
@@ -76,7 +84,7 @@ These decisions define the implementation stack and constraints for the [impleme
 
 ## D05. Moguri-owned agent loop, `pi-ai` providers
 
-**Decision.** Moguri writes its own agent loop: step scheduling, tool dispatch, steer points, compaction triggers, budget checks and cancellation. `pi-ai` supplies provider adapters, GitHub Copilot sign-in and OpenAI-compatible endpoints such as `ds4-server`. Moguri does not use `pi-agent-core`. [P1]
+**Decision.** Moguri writes its own agent loop: step scheduling, tool dispatch, steer points, compaction triggers, budget checks and cancellation. `pi-ai` supplies provider adapters, GitHub Copilot sign-in and OpenAI-compatible endpoints such as `ds4-server`. The maintained npm package is now `@earendil-works/pi-ai`; the deprecated `@mariozechner/pi-ai` package is not used. Moguri does not use `pi-agent-core`. [P1]
 
 **Why.** Queue, Steer and Interrupt, hard budget stops before each model request, per-step events and cancellation all depend on step boundaries that Moguri controls.
 
@@ -111,6 +119,16 @@ These decisions define the implementation stack and constraints for the [impleme
 - Keep a Cargo workspace beside the JavaScript workspace. Ship prebuilt binaries for each target and sign them with the app.
 - SendBox workloads need Linux builds of the worker's native addon and supervisor. Local helpers may supervise SendBox/SSH and serve trusted UI queries, but cannot execute Sandbox or Remote agent tool requests locally.
 - Move more work into Rust only when a measured budget fails.
+
+**Initial-checkpoint exception.** Rust could not be validated on the available
+host. The bounded Node filesystem/Git baseline and `node-pty` process-group
+cancellation passed the recorded macOS budgets. The development checkpoint uses
+a separate Node worker, `node-pty`, and explicit process-group escalation instead
+of claiming that unbuilt Rust helpers work. Workers stop owned commands on parent
+disconnect. A service restart marks interrupted work partial and does not replay
+effects or assume that cleanup succeeded. Interactive terminal reattachment,
+large-repository native search, Linux supervision and the Rust implementation
+remain unvalidated. Revisit this exception before release.
 
 ## D07. Local API transport
 
@@ -239,6 +257,16 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 - Decision-provider thresholds and bounded delegation presets; a concrete model is chosen by the user or a valid saved default after discovery, not silently before setup.
 - Remote worker lease, reconnect, and orphan-cleanup behavior under peer loss, to be settled in Phase 0.
 - Attachment size/context limits and telemetry quality thresholds for enforceable token/USD budgets.
+
+**Settled for the initial checkpoint:** npm with an exact-version lockfile;
+TypeBox for command/IPC validation; Node's built-in `node:sqlite` with WAL,
+`synchronous=FULL`, numbered transactional migrations and one service writer;
+OpenTUI 0.6.6 on a bundled Node 26.12 runtime; Electron 44 with a same-origin
+`moguri://app` HTTP proxy and authenticated loopback WebSocket; native OS keyring
+credentials via `@napi-rs/keyring`. Packaging uses `@electron/packager`.
+Development macOS artifacts are not notarized releases. Folder attachments,
+images, external references, finite caps and preference inheritance are not
+enabled until their full contracts are implemented.
 
 ## Sources
 
