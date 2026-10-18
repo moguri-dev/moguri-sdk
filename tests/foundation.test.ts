@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
+import { projectEvents } from "../packages/protocol/src/index.ts";
 
 test("events and command receipts commit together, replay, and cannot be mutated", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-foundation-"));
@@ -22,13 +23,26 @@ test("events and command receipts commit together, replay, and cannot be mutated
     assert.throws(() => store.db.exec("DELETE FROM events"), /append.only/);
     store.close();
     store = new EventStore(path);
-    assert.equal(store.events()[0]?.payload.project.name, project.name);
+    const restored = store.events()[0];
+    assert.equal(restored?.event_type, "project.added");
+    if (restored?.event_type === "project.added") assert.equal(restored.payload.project.name, project.name);
     assert.equal(store.events(1).length, 0);
     assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 1);
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("the default profile never projects another profile's project or session", () => {
+  const store = new EventStore(":memory:");
+  try {
+    store.commit([
+      { event_type: "project.added", profile_id: "generated-other-profile", project_id: "other", payload: { project: { id: "other", name: "generated private project", path: "/generated/private" } } },
+      { event_type: "project.added", profile_id: "default", project_id: "default", payload: { project: { id: "default", name: "generated visible project", path: "/generated/visible" } } },
+    ]);
+    assert.deepEqual(projectEvents(store.events()).projects.map((project) => project.id), ["default"]);
+  } finally { store.close(); }
 });
 
 test("a newer durable schema is refused without resetting user data", async () => {
