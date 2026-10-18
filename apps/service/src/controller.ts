@@ -1,18 +1,21 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { fork, type ChildProcess } from "node:child_process";
-import { basename, isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  CommandSchema, factoryControls, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION,
+  CommandSchema, factoryControls, isPlatformCommand, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore } from "./store.ts";
 import { CopilotAdapter, type ProviderAdapter } from "./provider.ts";
 import { validateTool } from "./tools.ts";
+import { effectiveTools } from "./tools.ts";
+import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
+import { authorizeTool } from "./permissions.ts";
 import { assistantMessage, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest } from "./worker-protocol.ts";
 
 interface Run {
@@ -29,6 +32,12 @@ interface Run {
   stopTimer?: ReturnType<typeof setTimeout>;
   done: boolean;
   stderr: string;
+  declaredTools: Set<string>;
+}
+interface ExternalRun {
+  sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
+  policyRevision: number; permissionRevision: number; abort: AbortController; started: boolean;
+  execute: (signal: AbortSignal) => Promise<unknown>;
 }
 export class ControlPlane extends EventEmitter {
   private history: StoredEvent[];
@@ -38,10 +47,24 @@ export class ControlPlane extends EventEmitter {
   private readonly dispatching = new Map<string, { digest: string; result: Promise<CommandResult> }>();
   private shuttingDown = false;
   private providerMetadata = "";
-  constructor(readonly store: EventStore, readonly provider: ProviderAdapter = new CopilotAdapter(), private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url))) {
+  readonly platform: PlatformRuntime;
+  private externalRuns = new Map<string, ExternalRun>();
+  constructor(readonly store: EventStore, readonly provider: ProviderAdapter = new CopilotAdapter(), private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string } = {}) {
     super();
     this.history = store.events();
     this.projection = projectEvents(this.history);
+    this.platform = new PlatformRuntime(store, platformOptions.stateDir ?? dirname(store.path), {
+      snapshot: () => this.snapshot(), commit: (events) => this.commit(events),
+      invalidateApprovals: () => this.invalidateApprovals(),
+      externalCall: (session, call, execute) => this.externalCall(session, call, execute),
+      subagent: (session, prompt) => this.subagent(session, prompt),
+      stopOwnedSession: (id) => this.stop(id),
+      cancelExternalJob: (id) => {
+        const external = [...this.externalRuns.values()].find((run) => run.jobId === id);
+        if (!external) return false;
+        this.stop(external.sessionId); return true;
+      },
+    }, platformOptions);
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
       const signature = JSON.stringify(metadata);
@@ -52,6 +75,7 @@ export class ControlPlane extends EventEmitter {
     };
   }
   async initialize(): Promise<void> {
+    this.platform.recover();
     for (const session of [...this.projection.sessions]) {
       if (session.turnId) {
         const completed = new Set(this.history.filter((event) => event.turn_id === session.turnId && event.event_type === "tool.completed").map((event) => event.event_type === "tool.completed" ? event.payload.call.id : ""));
@@ -98,6 +122,77 @@ export class ControlPlane extends EventEmitter {
   private event<K extends EventInput["event_type"]>(session: Session, type: K, payload: Extract<EventInput, { event_type: K }>["payload"], stepId?: string): EventInput {
     return { event_type: type, payload, profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, turn_id: session.turnId, step_id: stepId } as EventInput;
   }
+  private invalidateApprovals(): void {
+    for (const run of this.runs.values()) if (run.approval) {
+      const approval = run.approval;
+      run.approval = undefined;
+      this.commit([this.event(this.session(run.sessionId), "tool.decided", { approvalId: approval.id, allow: false, actor: "policy" }, run.stepId)]);
+      this.reply(run, { kind: "reply", requestId: approval.requestId, error: "Policy or permissions changed. Obtain a new exact-argument approval." });
+    }
+    for (const external of [...this.externalRuns.values()]) if (!external.started) this.finishExternal(external, "stopped", "Permissions changed. The external tool was not executed.");
+  }
+  private subagent(parent: Session, prompt: string): string {
+    if (!this.projection.settings.values.subagents.enabled || parent.readOnly || parent.parentSessionId) throw new MoguriError("subagents_disabled", "Only explicitly enabled, depth-one read-only subagents are supported.", 409);
+    if (this.projection.sessions.filter((session) => session.parentSessionId && (session.turnId || session.queue.length)).length >= this.projection.settings.values.subagents.maxParallel) throw new MoguriError("subagent_limit", "The bounded subagent limit is already in use.", 409);
+    this.available(parent.controls);
+    const id = randomUUID();
+    const item = { id: randomUUID(), text: prompt, attachments: [], delivery: "queue" as const };
+    this.commit([
+      { event_type: "session.created", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: { title: `Read-only: ${prompt.slice(0, 60)}`, controls: { ...parent.controls, autonomy: "Manual" }, parentSessionId: parent.id, readOnly: true, contextDigest: this.store.putBlob(JSON.stringify(this.context(parent.id))) } },
+      { event_type: "queue.enqueued", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: { item } },
+    ]);
+    queueMicrotask(() => this.pumpAll());
+    return id;
+  }
+  private externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): string {
+    if (session.readOnly) throw new MoguriError("subagent_readonly", "Read-only subagents cannot own external tool calls.", 403);
+    if (session.turnId || session.queue.length || session.status === "archived") throw new MoguriError("session_busy", "Use an idle, restored session for an external MCP client. The active agent already owns its turn.", 409);
+    if (this.projection.sessions.some((owner) => owner.projectId === session.projectId && owner.turnId && !owner.readOnly)) throw new MoguriError("workspace_busy", "Another session owns this workspace. Wait for it to settle before requesting an external MCP call.", 409);
+    if (this.projection.blockedProjects.includes(session.projectId)) throw new MoguriError("workspace_unconfirmed", "Inspect and explicitly resume this workspace before requesting new external tool work.", 409);
+    if (session.controls.env !== "Local" || !this.projection.policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.find((capability) => capability.env === "Local")?.ready) throw new MoguriError("mcp_env", "A qualified, policy-allowed MCP execution environment is required; no Local fallback.", 403);
+    const project = this.projection.projects.find((project) => project.id === session.projectId)!;
+    const authorization = authorizeTool(this.projection.settings.values, call, project.path);
+    if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
+    const turnId = randomUUID();
+    const stepId = randomUUID();
+    const jobId = randomUUID();
+    const approvalId = randomUUID();
+    const scope = { profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, turn_id: turnId, step_id: stepId };
+    const external: ExternalRun = { sessionId: session.id, turnId, stepId, jobId, call, approvalId, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision, abort: new AbortController(), execute, started: false };
+    this.externalRuns.set(session.id, external);
+    this.commit([
+      { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}`, attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: this.projection.policy.revision } },
+      { ...scope, event_type: "job.started", payload: { job: { id: jobId, kind: "mcp.call", sessionId: session.id, projectId: session.projectId, parentTurnId: turnId, status: "waiting_input", progress: "Exact external-tool approval required", resultDigest: null, error: null } } },
+      { ...scope, event_type: "tool.requested", payload: { approval: { id: approvalId, stepId, call, policyRevision: external.policyRevision, permissionRevision: external.permissionRevision } } },
+    ]);
+    return jobId;
+  }
+  private executeExternal(external: ExternalRun): void {
+    external.started = true;
+    const session = this.session(external.sessionId);
+    this.commit([this.event(session, "tool.started", { call: external.call }, external.stepId), this.event(session, "job.progress", { jobId: external.jobId, progress: "Running approved MCP tool", status: "running" }, external.stepId)]);
+    void external.execute(external.abort.signal).then((result) => {
+      if (external.abort.signal.aborted || !this.externalRuns.has(external.sessionId)) return;
+      const failed = result !== null && typeof result === "object" && "isError" in result && result.isError === true;
+      this.finishExternal(external, failed ? "failed" : "completed", failed ? "The MCP tool returned an error result." : null, result);
+    }).catch((error: unknown) => {
+      if (!this.externalRuns.has(external.sessionId)) return;
+      this.finishExternal(external, "partial", error instanceof MoguriError ? error.message : "External MCP result/effects are unconfirmed; no automatic retry.");
+    });
+  }
+  private finishExternal(external: ExternalRun, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null, result?: unknown): void {
+    if (!this.externalRuns.has(external.sessionId)) return;
+    this.externalRuns.delete(external.sessionId);
+    const session = this.session(external.sessionId);
+    const text = result === undefined ? diagnostic ?? "Tool was not executed." : JSON.stringify(result);
+    this.commit([
+      this.event(session, "tool.completed", { call: external.call, text: text.slice(0, MAX_TEXT), isError: outcome !== "completed", outcome }, external.stepId),
+      this.event(session, "job.finished", { jobId: external.jobId, status: outcome === "stopped" ? "cancelled" : outcome, resultDigest: result === undefined ? null : this.store.putBlob(JSON.stringify(result)), error: diagnostic }, external.stepId),
+      this.event(session, "turn.finished", { outcome, diagnostic }, external.stepId),
+    ]);
+    if (outcome === "partial" || outcome === "failed") this.paused.add(session.id);
+    queueMicrotask(() => this.pumpAll());
+  }
   private revision(actual: number, expected: number): void {
     if (actual !== expected) throw new MoguriError("revision_conflict", "Another client changed this data. Reload the current version before editing.", 409);
   }
@@ -105,7 +200,8 @@ export class ControlPlane extends EventEmitter {
     if (!this.projection.policy.allowedEnvs.includes(controls.env)) throw new MoguriError("env_denied", `${controls.env} is excluded by the user-only allowed-env policy.`, 403);
     const capability = this.snapshot().capabilities.find((capability) => capability.env === controls.env);
     if (!capability?.ready) throw new MoguriError("env_unavailable", capability?.reason ?? "Execution environment unavailable.", 409);
-    if (controls.autonomy !== "Manual") throw new MoguriError("autonomy_unavailable", "Only Manual human approvals are implemented. Other autonomy levels cannot be simulated.", 409);
+    if (controls.autonomy === "Autopilot Max") throw new MoguriError("autonomy_unavailable", "Autopilot Max requires an evaluated decision provider. It cannot silently self-approve.", 409);
+    if (controls.autonomy === "Autopilot" && !this.projection.settings.values.permissions.tools.some((rule) => rule.decision === "allow") && !this.projection.settings.values.permissions.commands.some((rule) => rule.decision === "allow")) throw new MoguriError("delegation_required", "Configure explicit bounded tool or exact-command delegations before selecting Autopilot.", 409);
     if (controls.budget.kind !== "unlimited") throw new MoguriError("budget_unavailable", "Finite budgets are not enforceable in this checkpoint. No cap has been applied.", 409);
     if (!controls.modelId || controls.modelId === "kupo" || !this.provider.state.models.some((model) => model.id === controls.modelId)) {
       throw new MoguriError("model_unavailable", "Sign in to GitHub Copilot and explicitly select an available fixed model.", 409);
@@ -142,6 +238,7 @@ export class ControlPlane extends EventEmitter {
       this.commit(events, { id: envelope.id, digest: commandDigest, result });
       return result;
     };
+    if (isPlatformCommand(command)) return this.platform.execute(command, finish);
     switch (command.type) {
       case "project.add": {
         if (!isAbsolute(command.path)) throw new MoguriError("invalid_project", "Use an absolute project directory. Relative paths depend on the client, not the service.");
@@ -173,12 +270,7 @@ export class ControlPlane extends EventEmitter {
         const policy = { revision: this.projection.policy.revision + 1, allowedEnvs: command.allowedEnvs };
         const finishingTurnIds = command.allowedEnvs.includes("Local") ? [] : this.projection.sessions.filter((session) => session.turnId && session.controls.env === "Local").map((session) => session.turnId!);
         const result = finish([{ event_type: "policy.updated", profile_id: PROFILE_ID, payload: { policy, finishingTurnIds } }]);
-        for (const run of this.runs.values()) if (run.approval) {
-          const approval = run.approval;
-          run.approval = undefined;
-          this.commit([this.event(this.session(run.sessionId), "tool.decided", { approvalId: approval.id, allow: false, actor: "policy" }, run.stepId)]);
-          this.reply(run, { kind: "reply", requestId: approval.requestId, error: "Policy changed. The old approval request is invalid; request a new approval." });
-        }
+        this.invalidateApprovals();
         return result;
       }
       default: break;
@@ -266,15 +358,23 @@ export class ControlPlane extends EventEmitter {
         }
         return finish([this.event(session, "queue.removed", { messageId: command.messageId })]);
       case "session.stop":
-        if (!session.turnId) return finish([]);
         finish([]);
         this.stop(session.id);
         return {};
       case "approval.respond": {
+        const external = this.externalRuns.get(session.id);
+        if (external) {
+          if (external.started || external.approvalId !== command.approvalId || external.policyRevision !== this.projection.policy.revision || external.permissionRevision !== this.projection.settings.permissionRevision) throw new MoguriError("approval_stale", "This external tool approval expired or changed.", 409);
+          finish([this.event(session, "tool.decided", { approvalId: external.approvalId, allow: command.allow, actor: "user" }, external.stepId)]);
+          if (!command.allow) this.finishExternal(external, "stopped", "External MCP request denied by the user.");
+          else this.executeExternal(external);
+          return {};
+        }
         const run = this.runs.get(session.id);
         const approval = run?.approval;
         if (!run || !approval || approval.id !== command.approvalId || run.abort.signal.aborted ||
-          approval.policyRevision !== this.projection.policy.revision) throw new MoguriError("approval_stale", "This approval expired, was cancelled, or was already answered.", 409);
+          approval.policyRevision !== this.projection.policy.revision ||
+          session.pendingApproval?.permissionRevision !== this.projection.settings.permissionRevision) throw new MoguriError("approval_stale", "This approval expired, was cancelled, or was already answered.", 409);
         validateTool(approval.call);
         run.approval = undefined;
         const events: EventInput[] = [this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
@@ -293,7 +393,10 @@ export class ControlPlane extends EventEmitter {
   private context(sessionId: string): Message[] {
     const messages: Message[] = [];
     for (const event of this.history) if (event.profile_id === PROFILE_ID && event.session_id === sessionId) {
-      if (event.event_type === "turn.started" || event.event_type === "steer.applied") messages.push(this.contextItem(event.payload.item));
+      if (event.event_type === "session.created" && event.payload.contextDigest) {
+        const context: unknown = JSON.parse(this.store.blob(event.payload.contextDigest));
+        if (Array.isArray(context)) messages.push(...context as Message[]);
+      } else if (event.event_type === "turn.started" || event.event_type === "steer.applied") messages.push(this.contextItem(event.payload.item));
       else if (event.event_type === "model.completed") messages.push(assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))));
       else if (event.event_type === "tool.completed") messages.push({
         role: "toolResult", toolCallId: event.payload.call.id, toolName: event.payload.call.name,
@@ -306,7 +409,13 @@ export class ControlPlane extends EventEmitter {
     if (this.shuttingDown) return;
     for (const session of this.projection.sessions) {
       if (session.turnId || !session.queue.some((item) => item.delivery !== "steer") || session.status === "archived" || this.paused.has(session.id) || this.projection.blockedProjects.includes(session.projectId)) continue;
-      if ([...this.runs.values()].some((run) => this.session(run.sessionId).projectId === session.projectId)) continue;
+      if (session.readOnly && !this.projection.settings.values.subagents.enabled) {
+        const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
+        if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
+        continue;
+      }
+      if (session.readOnly && [...this.runs.values()].filter((run) => this.session(run.sessionId).readOnly).length >= this.projection.settings.values.subagents.maxParallel) continue;
+      if (!session.readOnly && this.projection.sessions.some((owner) => owner.projectId === session.projectId && owner.turnId && !owner.readOnly)) continue;
       try { this.available(session.controls); } catch (error) {
         const diagnostic = error instanceof Error ? error.message : "Queued turn admission failed.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
@@ -314,7 +423,8 @@ export class ControlPlane extends EventEmitter {
       }
       const item = session.queue.find((item) => item.delivery !== "steer")!;
       const turnId = randomUUID();
-      this.commit([{ ...this.event(session, "turn.started", { item, controls: session.controls, policyRevision: this.projection.policy.revision }), turn_id: turnId }]);
+      const promptDigest = this.store.putBlob(this.platform.prompt(session));
+      this.commit([{ ...this.event(session, "turn.started", { item, controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest }), turn_id: turnId }]);
       const current = this.session(session.id);
       try {
         const project = this.projection.projects.find((project) => project.id === current.projectId)!;
@@ -323,7 +433,7 @@ export class ControlPlane extends EventEmitter {
           stdio: ["ignore", "ignore", "pipe", "ipc"],
           env: { PATH: process.env.PATH, HOME: process.env.HOME, MOGURI_TURN_ID: turnId },
         });
-        const run: Run = { sessionId: current.id, turnId, child, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "" };
+        const run: Run = { sessionId: current.id, turnId, child, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set() };
         this.runs.set(current.id, run);
         child.stderr?.on("data", (data: Buffer) => { run.stderr = (run.stderr + data.toString()).slice(-4096); });
         child.on("message", (message: unknown) => {
@@ -343,7 +453,7 @@ export class ControlPlane extends EventEmitter {
             if (!run.done) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: project.path, context: this.context(current.id) });
+        this.reply(run, { kind: "start", root: project.path, context: this.context(current.id), readOnly: current.readOnly ?? false });
       } catch {
         this.commit([this.event(current, "turn.finished", { outcome: "failed", diagnostic: "Agent worker launch failed. Rebuild Moguri and retry explicitly." })]);
       }
@@ -374,14 +484,22 @@ export class ControlPlane extends EventEmitter {
         const current = this.session(run.sessionId);
         const steers = current.queue.filter((item) => item.delivery === "steer" && item.targetTurnId === run.turnId);
         run.stepId = request.stepId;
-        run.inFlight = true;
+        run.inFlight = false;
         run.calls.clear();
         run.granted.clear();
+        const tools = effectiveTools(this.projection.settings.values, current.readOnly ?? false);
+        run.declaredTools = new Set(tools.map((tool) => tool.name));
+        const started = this.history.find((event) => event.event_type === "turn.started" && event.turn_id === run.turnId);
+        const prompt = started?.event_type === "turn.started" && started.payload.promptDigest ? this.store.blob(started.payload.promptDigest) : this.platform.prompt(current);
+        const memory = this.projection.settings.values.memory.enabled && this.projection.settings.values.memory.useInContext ?
+          await this.platform.memory.search(this.projection.projects.find((project) => project.id === current.projectId)!, current.messages.filter((message) => message.role === "user").at(-1)?.text ?? "project", 4) : [];
+        if (run.done || run.abort.signal.aborted) return;
+        run.inFlight = true;
         this.commit([
           ...steers.map((item) => this.event(current, "steer.applied", { item }, request.stepId)),
           this.event(current, "model.started", { modelId: prepared.model.id }, request.stepId),
         ]);
-        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, steers: steers.map((item) => this.contextItem(item)) } });
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, steers: steers.map((item) => this.contextItem(item)), systemPrompt: prompt + (memory.length ? `\n<untrusted-repository-memory>\n${JSON.stringify(memory).slice(0, 8000)}\n</untrusted-repository-memory>` : ""), tools } });
       } catch {
         this.reply(run, { kind: "reply", requestId: request.requestId, error: "Copilot model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       }
@@ -410,7 +528,7 @@ export class ControlPlane extends EventEmitter {
           toolCalls: calls, timestamp: new Date(message.timestamp).toISOString(), outcome: message.stopReason,
         },
         usage: {
-          stepId: request.stepId, modelId: message.model, role: "solver",
+          stepId: request.stepId, modelId: message.model, role: session.parentSessionId ? "subagent" : "solver",
           inputTokens: request.usageReported ? message.usage.input : null,
           outputTokens: request.usageReported ? message.usage.output : null,
           cacheReadTokens: request.usageReported ? message.usage.cacheRead : null,
@@ -432,6 +550,15 @@ export class ControlPlane extends EventEmitter {
       this.commit([this.event(session, "process.started", { callId: request.callId, pid: request.pid, processGroup: request.pid }, request.stepId)]);
       return;
     }
+    if (request.kind === "delegate") {
+      if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
+      const declared = run.calls.get(request.call.id);
+      if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
+      void this.platform.delegate(session, request.call, run.abort.signal).then((result) => this.reply(run, { kind: "reply", requestId: request.requestId, value: result })).catch((error: unknown) => {
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Capability failed; effects and cleanup may be unconfirmed.", isError: true, outcome: run.abort.signal.aborted || request.call.name === "mcp_gateway" ? "partial" : "failed" } });
+      });
+      return;
+    }
     const declared = run.calls.get(request.call.id);
     if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Tool arguments changed after model completion.");
     if (request.kind === "approval") {
@@ -439,7 +566,18 @@ export class ControlPlane extends EventEmitter {
         if (run.abort.signal.aborted) throw new Error("Turn stopping.");
         if (run.approval) throw new Error("Another tool approval is already pending.");
         validateTool(request.call);
-        const approval = { id: randomUUID(), stepId: request.stepId, call: request.call, policyRevision: this.projection.policy.revision };
+        if (!run.declaredTools.has(request.call.name)) throw new MoguriError("tool_unavailable", "This capability was not enabled or declared for this turn.");
+        const project = this.projection.projects.find((project) => project.id === session.projectId)!;
+        const authorization = authorizeTool(this.projection.settings.values, request.call, project.path);
+        if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
+        const approval = { id: randomUUID(), stepId: request.stepId, call: request.call, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision,
+          recommendation: session.controls.autonomy === "Guided" ? session.messages.filter((message) => message.role === "assistant").at(-1)?.text.slice(0, 1200) || "The model supplied no recommendation. A human must decide." : undefined };
+        if (authorization.decision === "allow") {
+          run.granted.add(request.call.id);
+          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true } });
+          return;
+        }
         run.approval = { ...approval, requestId: request.requestId };
         this.commit([this.event(session, "tool.requested", { approval }, request.stepId)]);
       } catch (error) { this.reply(run, { kind: "reply", requestId: request.requestId, error: error instanceof Error ? error.message : "Tool denied." }); }
@@ -453,6 +591,19 @@ export class ControlPlane extends EventEmitter {
     }
   }
   private stop(sessionId: string): void {
+    for (const session of this.projection.sessions) if (session.parentSessionId === sessionId) this.stop(session.id);
+    this.platform.stopSession(sessionId);
+    const current = this.session(sessionId);
+    if (current.parentSessionId && !current.turnId && current.queue.length) {
+      this.commit([...current.queue.map((item) => this.event(current, "queue.removed", { messageId: item.id })), this.event(current, "turn.finished", { outcome: "stopped", diagnostic: "Owned subagent cancelled before admission. No model request was started." })]);
+    }
+    const external = this.externalRuns.get(sessionId);
+    if (external) {
+      external.abort.abort();
+      this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), this.event(this.session(sessionId), "turn.stop_acknowledged", {})]);
+      this.finishExternal(external, external.started ? "partial" : "stopped", external.started ? "External MCP cancellation requested; remote effects and process cleanup may be unconfirmed." : "Unstarted external MCP request cancelled.");
+      return;
+    }
     const run = this.runs.get(sessionId);
     if (!run || run.abort.signal.aborted) return;
     this.commit([this.event(this.session(sessionId), "turn.stop_requested", {})]);
@@ -492,7 +643,9 @@ export class ControlPlane extends EventEmitter {
   async close(): Promise<void> {
     this.shuttingDown = true;
     await this.provider.cancel();
+    for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
+    await this.platform.close();
     const deadline = Date.now() + 6000;
     while (this.runs.size && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     this.removeAllListeners();

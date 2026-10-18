@@ -4,6 +4,10 @@ Measured 2026-10-18 on macOS 26.6, Apple silicon, Node 26.12.0.
 Reproduce with `npm ci` and `npm run spike`. All fixtures are generated.
 The script fails on a regression in an executable spike; explicitly unavailable
 release prerequisites are reported separately as FAIL and remain blockers.
+These are the initial checkpoint measurements. The later user-requested
+[SDK platform slice](sdk-platform.md) records its separate capability, package
+and recovery evidence; initial unsupported services are not silently promoted
+to release-ready.
 
 Initial budgets were set before the run: SQLite append p95 below 20 ms; bounded
 2,000-file listing below 500 ms and Git status below 1 s; Electron shell ready

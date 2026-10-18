@@ -10,6 +10,11 @@ routing, delegation, attachment types and finite budgets must report unavailable
 never approximate their guarantees or fall back to Local. External-service and
 release-packaging failures remain release blockers.
 
+The [D14 SDK platform slice](#d14-one-importable-sdk-and-user-controlled-capability-platform)
+also supports explicit exact tool/command grants, Guided human confirmation
+and bounded Autopilot, while Manual remains the factory default. It does not
+enable Autopilot Max, qualified SendBox or Remote execution.
+
 These decisions define the implementation stack and constraints for the [implementation specification][B]. Moguri is built from zero and does not fork OpenCode or Pi. The [README][I] and [`AGENTS.md`][A] follow these decisions.
 
 ## Summary
@@ -29,6 +34,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D11 | Users choose a fixed model or `kupo`, a synthetic router/orchestrator spanning approved local and hosted models with single, cascade, and critique/revision workflows. | Evaluation cannot meet the chosen quality, cost, latency, or isolation budgets. |
 | D12 | Autonomy level defaults to Manual. Guided, Autopilot, and System One-backed Autopilot Max are independent of model, Env, and Budget; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
 | D13 | Remote SSH runs the agent task and model calls on a user-configured reachable machine; the local control plane retains durable authority. | Phase 0 cannot prove secure transport, remote model access, cancellation, and reconnect recovery. |
+| D14 | One importable SDK powers both clients, default-dark branding and user-controlled memory, extensions, MCP and local dictation. | SDK packaging, policy, recovery or physical runtime qualification fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -247,6 +253,29 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 10. **System One and approvals.** Verify Jev's real typed request/response contract and a pluggable alternative using generated fixtures. Cover Manual defaults, Guided confirmation, bounded Autopilot and Autopilot Max with both fixed and kupo models, confidence versus probability, malformed output, missing facts, prompt injection, revoked grants, concurrent human intervention, rate limits, outages, and SendBox/budget enforcement.
 11. **Remote SSH.** Prove remote worker and model execution, host verification, scoped credentials/workspaces, attachment transfer, local-model reachability, reconnect/replay, cancellation across a lost connection, and truthful late outcomes without Local fallback or duplicate execution.
 12. **Composer and defaults.** Exercise all attachment triggers and clipboard capability states; provider discovery and the no-model setup state; Local/Manual/Unlimited defaults and repo/project overrides; invalid inherited values; concurrent token/USD reservations, telemetry gaps, and session restart without resetting usage.
+
+## D14. One importable SDK and user-controlled capability platform
+
+**Decision, 2026-10-18.** The `moguri` package exposes browser-safe SDK and React
+entrypoints plus a Node entrypoint for service discovery/embedding and the CLI.
+Both TUI and desktop import that SDK. SDK capabilities own API access and domain
+semantics; Electron adds only native affordances and presentation. Protocol 2
+and transactional database migration 2 extend existing state without reset.
+The [SDK platform contract](sdk-platform.md) records validation and gates.
+
+User-viewable/editable system instructions have shared defaults and reset.
+Deterministic permissions cannot be weakened through prompt text. Repository
+vector/import-symbol graph indexes are local derived data and explicit opt-in.
+Standard skills, approved evolution proposals, scripts, optional read-only
+subagents, plugin manifests and the native MCP gateway extend the same policy,
+ledger and cancellation tree. Later unattended/self-modifying modes are not
+silently enabled.
+
+Dark is the desktop factory theme. Local dictation uses pinned native
+NeMo-Speech.cpp and a user-downloaded Nemotron 3.5 GGUF, with NVIDIA's documented
+locale tiers shown accurately. No cloud ASR fallback or implicit model download
+is allowed. SendBox remains unavailable until its real transport and guest
+prerequisites pass; configuration alone is not proof of containment.
 
 ## Still open
 

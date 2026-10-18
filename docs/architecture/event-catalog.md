@@ -14,19 +14,23 @@ Unused scope fields are null in checkpoint 1.
 | `draft.saved` | Text and authorized snapshots; increments the draft revision. |
 | `queue.enqueued`, `queue.edited`, `queue.removed`, `queue.reordered` | Exact unclaimed message mutation, each with a queue revision. |
 | `queue.delivery_changed` | Explicit conversion of an unclaimed steer into a new queued turn. |
-| `turn.started` | Admitted item, controls and allowed-env policy revision; claims the item once. |
+| `turn.started` | Admitted item, controls, allowed-env revision and optional committed prompt digest; claims the item once. |
 | `steer.applied` | One item enters its owning turn at a safe model-step boundary. |
 | `model.started` | Step and actual fixed model. Creates an unknown, in-progress accounting entry. |
 | `assistant.delta` | Durable streamed text for that step, batched by the worker. |
 | `model.completed` | Public message, normalized-context blob digest and actual/unknown usage. Does not imply overall turn success. |
 | `tool.requested` | Exact declared tool, approval UUID and policy revision. |
-| `tool.decided` | Allow/deny, exact request UUID and real `user`/`policy` actor. No model approval actor exists in this checkpoint. |
+| `tool.decided` | Allow/deny, exact request UUID and real `user`/`policy`/`delegation` actor, with rule ID for explicit grants. Model advice never becomes a human answer. |
 | `tool.started`, `tool.output`, `tool.completed` | Approved execution, bounded output, explicit actual/denied/stopped/failed/partial/unconfirmed result. |
 | `process.started` | Owned tool-call ID, PID and process group. |
 | `turn.stop_requested`, `turn.stop_acknowledged` | Distinct cancellation transitions. Acknowledgement alone is not successful cleanup. |
 | `turn.finished` | Completed/stopped/failed/partial, with actionable diagnostics. Unsettled model usage and process cleanup remain unknown. |
 | `policy.updated` | New user-only allowed-env revision and exact Local turns permitted to finish. |
 | `provider.changed` | Non-secret connection status/diagnostic. Device codes and tokens are not durable events. |
+| `settings.updated` | Shared validated settings, value revision and permission revision. Edits cannot rewrite an admitted prompt snapshot. |
+| `capability.saved` | Project content digest, kind, source, owner and explicit enablement revision. |
+| `capability.proposed`, `proposal.decided` | Reviewed exact proposal/base digest, real model/user origin and actual user decision. No automatic application or enablement. |
+| `job.started`, `job.progress`, `job.finished` | Owned capability work, bounded progress, actual completed/failed/cancelled/partial outcome and retained result reference. |
 
 ## HTTP commands
 
@@ -37,6 +41,8 @@ or absent Origin. There is no CORS allowance.
 - `GET /v1/health`: protocol and service identity.
 - `GET /v1/snapshot`: authoritative current profile projection.
 - `POST /v1/commands`: TypeBox-validated `{ id, profileId, command }`.
+- `POST /v1/query`: TypeBox-validated capability queries, including prompt,
+  memory, MCP metadata/results, voice and Sandbox readiness.
 
 The command union covers project/session creation, configuration,
 archive/restore/resume, draft/snapshot attachment changes, queue admission and
@@ -44,13 +50,17 @@ mutation, explicit steer conversion, exact approval responses, stop, provider
 login/cancel/logout/refresh and allowed-env policy. Invalid data, stale revisions,
 expired approvals, unavailable capabilities and reused command IDs have explicit
 error codes; they are not success-shaped empty responses.
+Platform commands add revision-checked settings/reset, imports and toggles,
+reviewed proposals, explicit style facts/indexing, keychain credential changes,
+approval-bound MCP calls, optional subagents, local speech and job cancellation.
+Credential values are never written into events or command receipts.
 
 ## WebSocket
 
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":1,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":2,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,
@@ -68,6 +78,8 @@ The desktop renderer uses the same protocol through a same-origin
 preload exposes only connection discovery, explicit directory/file pickers and
 explicit HTTPS opening. Node integration is disabled; navigation, new windows,
 iframes and arbitrary permission requests are blocked.
+User-triggered microphone permission is an explicit native bridge operation.
+Neither renderer nor outward MCP may answer a human approval on a model's behalf.
 
 ## Honest accounting
 

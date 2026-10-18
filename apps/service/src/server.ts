@@ -7,10 +7,11 @@ import { Type } from "typebox";
 import { ControlPlane } from "./controller.ts";
 import { EventStore } from "./store.ts";
 import type { ProviderAdapter } from "./provider.ts";
-import { MoguriError, parse, PROTOCOL_VERSION, type Connection, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, parse, PROTOCOL_VERSION, QuerySchema, type Connection, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import type { PlatformOptions } from "./platform.ts";
 
 const authenticateSchema = Type.Object({
-  type: Type.Literal("authenticate"), protocolVersion: Type.Literal(1),
+  type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
   token: Type.String({ minLength: 1, maxLength: 256 }), after: Type.Integer({ minimum: 0 }),
 }, { additionalProperties: false });
 function tokenMatches(value: string | undefined, expected: string): boolean {
@@ -36,7 +37,7 @@ async function claimLock(path: string): Promise<Awaited<ReturnType<typeof open>>
     throw new Error("Another Moguri service owns this state directory. Connect to it instead.");
   }
 }
-export interface ServiceOptions { stateDir: string; provider?: ProviderAdapter; workerPath?: string }
+export interface ServiceOptions { stateDir: string; provider?: ProviderAdapter; workerPath?: string; platform?: PlatformOptions }
 export async function startService(options: ServiceOptions) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const directory = await lstat(options.stateDir);
@@ -55,7 +56,7 @@ export async function startService(options: ServiceOptions) {
     await dbFile.close();
     await chmod(dbPath, 0o600);
     store = new EventStore(dbPath);
-    controller = new ControlPlane(store, options.provider, options.workerPath);
+    controller = new ControlPlane(store, options.provider, options.workerPath, { ...options.platform, stateDir: options.stateDir });
     await controller.initialize();
     const control = controller;
     const token = randomBytes(32).toString("hex");
@@ -71,7 +72,7 @@ export async function startService(options: ServiceOptions) {
         if (!tokenMatches(request.headers.authorization, `Bearer ${token}`)) throw new MoguriError("unauthorized", "A valid local connection token is required.", 401);
         if (request.url === "/v1/health" && request.method === "GET") { response.end(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, pid: process.pid })); return; }
         if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(control.snapshot())); return; }
-        if (request.url !== "/v1/commands" || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
+        if (!["/v1/commands", "/v1/query"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
         let bytes = 0;
@@ -83,7 +84,7 @@ export async function startService(options: ServiceOptions) {
         }
         let body: unknown;
         try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new MoguriError("invalid_json", "Command body is not valid JSON."); }
-        response.end(JSON.stringify(await control.dispatch(body)));
+        response.end(JSON.stringify(request.url === "/v1/query" ? await control.platform.query(parse(QuerySchema, body)) : await control.dispatch(body)));
       };
       void handle().catch((error: unknown) => {
         const known = error instanceof MoguriError;

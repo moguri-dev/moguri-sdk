@@ -12,6 +12,9 @@ Vite (MIT) for desktop, TypeBox (MIT) for validation, `ws` (MIT) for events,
 `node-pty` (MIT) for owned commands, and `@napi-rs/keyring` (MIT) for secrets.
 Node's SQLite driver avoids an additional database addon. Dependency notices
 are retained in installation and packaged dependencies.
+The [SDK platform contract](sdk-platform.md) adds the official MCP SDK,
+sqlite-vec, Ajv, YAML, ignore and Cheerio; the [license inventory](../third-party.md)
+records build-only rasterization and the pinned native speech runtime.
 
 The invariant is one service writer, one append-only event history, and one
 shared typed command protocol. Clients cannot approve on behalf of a model,
@@ -19,20 +22,30 @@ silently substitute a model/backend, reset accounting, or replay a command
 because a connection was lost. Commands carry idempotency IDs; editable data
 carries revision checks.
 
-Schema version 1 introduces events, command receipts and content-addressed
+Database migration 1 introduces events, command receipts and content-addressed
 attachment snapshots in transactional SQLite migrations. Opening newer state
 fails explicitly. Projections rebuild from events. Durable additions require a
 migration and recovery tests, not deletion of user state.
+Migration 2 adds project-scoped derived repository caches and graph tables.
+Event envelopes remain schema version 1; the client protocol is version 2.
 
 Both clients share the SDK and subscribe to the same sequenced stream. The
 service owns projects, sessions, transcripts, drafts, queue, pending approvals,
-policy and accounting. Desktop-only panel selection is presentation state.
-Only Local, fixed Copilot models, Manual approval and Unlimited budget are
-operational in this checkpoint. Other settings explain their missing capability.
+policy, settings, capability registry/proposals/jobs and accounting. Desktop-only
+panel selection is presentation state. `moguri/node` can discover or explicitly
+embed the same runtime without Electron. Public package declarations and
+consumption outside the checkout are executable acceptance checks.
+
+Only Local, fixed Copilot models and Unlimited budget are operational.
+Manual is default; Guided still needs a human and Autopilot uses only explicit
+user grants. Autopilot Max and unqualified environments remain unavailable.
 
 The agent loop runs in a separate Node process. It receives short-lived
 per-request model access through a private IPC channel, never the control-plane
-token or refresh credential. Every tool needs exact-argument human approval.
+token or refresh credential. Every tool needs exact human approval or an
+explicit bounded user delegation. MCP calls always need exact nested-tool
+approval, including a fresh schema/server fingerprint. Connectors run in
+separate bounded processes, not the authoritative service's JS context.
 File tools are project-scoped, reject protected paths and symlink escapes, and
 require a base digest before overwriting. Approved shell commands are explicitly
 unsandboxed Local execution, not filesystem isolation.
@@ -47,3 +60,10 @@ Unit, real-HTTP/WebSocket integration, migration, restart, queue/approval race,
 worker/process-tree cancellation and cross-client tests establish this contract.
 Provider and UI tests use generated fixtures without personal data; live
 Copilot authorization is a separate user action.
+
+Repository memory is opt-in local lexical-vector retrieval plus an import/symbol
+snapshot graph. Style facts and approved skills are independent of session
+retention. Optional tool-less subagents use the same provider and record their
+own usage. Proposals never apply themselves; declarative plugins and scripts
+cannot widen policy. Local speech is native inference using an explicitly
+downloaded, integrity-checked model, with no hosted-ASR path.

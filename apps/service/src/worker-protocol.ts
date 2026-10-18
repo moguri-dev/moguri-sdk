@@ -1,4 +1,4 @@
-import { Type, type Static, type Message, type AssistantMessage } from "@earendil-works/pi-ai";
+import { Type, type Static, type Message, type AssistantMessage, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { isRecord, MAX_TEXT, type ToolCall } from "../../../packages/protocol/src/index.ts";
 import type { PreparedModel } from "./provider.ts";
@@ -8,6 +8,7 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("boundary"), requestId: Type.String(), stepId: Type.String() }),
   Type.Object({ kind: Type.Literal("model.complete"), requestId: Type.String(), stepId: Type.String(), message: Type.Unknown(), usageReported: Type.Boolean(), generationMs: Type.Number() }),
   Type.Object({ kind: Type.Literal("approval"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
+  Type.Object({ kind: Type.Literal("delegate"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: MAX_TEXT + 4096 }), isError: Type.Boolean(), outcome: Type.String() }),
   Type.Object({ kind: Type.Literal("delta"), stepId: Type.String(), text: Type.String({ maxLength: MAX_TEXT }) }),
   Type.Object({ kind: Type.Literal("output"), stepId: Type.String(), callId: Type.String(), text: Type.String({ maxLength: 16_384 }) }),
@@ -16,9 +17,10 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("finished"), requestId: Type.String(), outcome: Type.Union([Type.Literal("completed"), Type.Literal("stopped"), Type.Literal("failed"), Type.Literal("partial")]), diagnostic: Type.Union([Type.String(), Type.Null()]) }),
 ]);
 export type WorkerRequest = Static<typeof WorkerRequestSchema>;
-export interface WorkerStart { kind: "start"; root: string; context: Message[] }
-export interface BoundaryReply extends PreparedModel { steers: Message[] }
-export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean } | { accepted: boolean }; error?: string };
+export interface WorkerStart { kind: "start"; root: string; context: Message[]; readOnly: boolean }
+export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[] }
+export type DelegatedResult = { text: string; isError: boolean; outcome: string };
+export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean } | { accepted: boolean } | DelegatedResult; error?: string };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" };
 export function parentMessage(value: unknown): ParentMessage {
   if (!isRecord(value)) throw new Error("Invalid parent message.");

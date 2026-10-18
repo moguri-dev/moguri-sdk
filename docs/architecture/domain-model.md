@@ -1,7 +1,8 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and durable event schema version are both 1. This is the
+Protocol version and database migration version are 2; immutable event
+envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
 ## Implemented entities
@@ -11,14 +12,19 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Profile | Only `default` is exposed. Every command/event is scoped; other profile rows are excluded from projection, replay and attachment authorization. Profile creation/switching is not implemented. |
 | Project | Stable UUID, canonical local directory and display name. One active-turn lease per project. No managed Git worktree or deletion behavior is implied. |
 | Session | Stable UUID, project, controls, configuration revision, lifecycle, current turn, draft revision, queue revision, messages, usage, owned processes and pending exact-argument approval. |
-| Turn | Admitted queue item, UUID, immutable controls/policy snapshot and worker ownership. Admission removes exactly one unclaimed queue item atomically. |
+| Turn | Admitted queue item, UUID, immutable controls/policy and prompt-digest snapshot, and worker ownership. Admission removes exactly one unclaimed queue item atomically. |
 | Step | One authorized provider request, normalized final context snapshot, usage quality, request wall time and declared tools. Worker completion requires durable acknowledgement before tools or the next step. |
 | Draft | Text, approved attachment snapshots and optimistic revision. Local unacknowledged edits are explicitly not authoritative. |
 | Queue item | UUID, text, snapshots, delivery mode and optional steer target-turn ID. Only unclaimed items are mutable. |
-| Approval | UUID, exact declared tool ID/name/arguments, step and policy revision. Only an actual client answer is attributed to `user`; invalidation is attributed to `policy`. |
+| Approval | UUID, exact tool ID/name/arguments, step, policy and permission revisions. Human answers are `user`, invalidations `policy`, explicit grants `delegation` with rule ID. |
 | Owned process | Tool-call ID, PID, process group, owning turn and actual outcome. Unknown cleanup remains unconfirmed. |
 | Attachment | Session-authorized project-text snapshot, SHA-256, byte count, path and UUID. No arbitrary client-side path grant or silent live-file reread. |
-| Usage | Solver model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
+| Usage | Solver/subagent model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
+| Settings | Revisioned shared values and factory defaults; separate permission revision invalidates stale approvals. Prompt text is not policy. |
+| Capability | Project-scoped skill/script/plugin/style knowledge, immutable content digest, source, enablement revision and optional owning plugin. |
+| Proposal | Exact content/base digests, project, kind, actual user/model actor and pending/approved/rejected decision. Approval installs disabled content. |
+| Capability job | Owned kind/session/turn, progress, terminal status, retained result digest and explicit error. A wait timeout is not cancellation. |
+| Repository index | Derived project-partitioned lexical vectors, source digests/mtime/size, chunks and import/symbol graph. Not a second session store. |
 
 Provider-neutral session state is projected from immutable events. Normalized
 pi-ai model messages live in content-addressed blobs referenced by completion
@@ -57,5 +63,12 @@ Sending a draft, clearing it, enqueuing it and storing the receipt are one commi
 Opening a newer database version or unsupported/corrupt event fails without
 resetting state. Further durable changes require numbered migrations, explicit
 event evolution and restart coverage. Work items, change sets, artifacts,
-routing/decision plans, richer attachments, reservations, profiles and extensions
+routing/decision plans, richer attachments, reservations and profiles
 must extend this authority rather than introduce client-only stores.
+
+Migration 2 adds `memory_files`, `memory_chunks`, `memory_graph_nodes` and
+`memory_graph_edges`. The sqlite-vec virtual table is initialized lazily when
+the opted-in index is used. Re-indexing replaces a project's derived tables
+atomically; cancellation before commit preserves the previous index. Changed,
+missing or newly ignored sources return no stale snippet text. The graph is a
+bounded snapshot from the last successful index, not a live semantic compiler.

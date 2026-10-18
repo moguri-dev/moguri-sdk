@@ -5,11 +5,11 @@ import { eventTypes, isRecord, MoguriError, type CommandResult, type EventInput,
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export class EventStore {
   readonly db: DatabaseSync;
-  constructor(path: string) {
-    this.db = new DatabaseSync(path);
+  constructor(readonly path: string) {
+    this.db = new DatabaseSync(path, { allowExtension: true });
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
-      if (version > 1) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version > 2) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -19,6 +19,16 @@ export class EventStore {
         CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
         CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
         PRAGMA user_version=1;
+        COMMIT;
+      `);
+      if (version < 2) this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE memory_files (project_id TEXT NOT NULL,path TEXT NOT NULL,digest TEXT NOT NULL,mtime REAL NOT NULL,size INTEGER NOT NULL,PRIMARY KEY(project_id,path));
+        CREATE TABLE memory_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT,project_id TEXT NOT NULL,path TEXT NOT NULL,digest TEXT NOT NULL,text TEXT NOT NULL);
+        CREATE INDEX memory_chunks_scope ON memory_chunks(project_id,path);
+        CREATE TABLE memory_graph_nodes (project_id TEXT NOT NULL,id TEXT NOT NULL,path TEXT NOT NULL,label TEXT NOT NULL,kind TEXT NOT NULL,PRIMARY KEY(project_id,id));
+        CREATE TABLE memory_graph_edges (project_id TEXT NOT NULL,source TEXT NOT NULL,target TEXT NOT NULL,kind TEXT NOT NULL,PRIMARY KEY(project_id,source,target,kind));
+        PRAGMA user_version=2;
         COMMIT;
       `);
     } catch (error) { this.db.close(); throw error; }

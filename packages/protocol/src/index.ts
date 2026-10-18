@@ -1,7 +1,9 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot } from "./platform.ts";
+export * from "./platform.ts";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -53,6 +55,7 @@ export const CommandSchema = object({
     object({ type: Type.Literal("provider.logout") }),
     object({ type: Type.Literal("provider.refresh") }),
     object({ type: Type.Literal("policy.set"), allowedEnvs: Type.Array(Type.Union([Type.Literal("Local"), Type.Literal("Sandbox"), Type.Literal("Remote")]), { minItems: 1, uniqueItems: true }) }),
+    PlatformCommandSchema,
   ]),
 });
 export type CommandEnvelope = Static<typeof CommandSchema>;
@@ -83,7 +86,7 @@ export interface PublicMessage {
 export interface Usage {
   stepId: string;
   modelId: string;
-  role: "solver";
+  role: "solver" | "subagent";
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
@@ -102,7 +105,7 @@ export interface QueueItem {
   delivery: "queue" | "steer" | "interrupt";
   targetTurnId?: string;
 }
-export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number }
+export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; outcome: string }
 export type SessionStatus = "idle" | "queued" | "running" | "waiting_input" | "stopping" | "completed" | "stopped" | "failed" | "partial" | "archived";
 export interface Session {
@@ -125,6 +128,8 @@ export interface Session {
   localFinishing: boolean;
   createdAt: string;
   updatedAt: string;
+  parentSessionId?: string;
+  readOnly?: boolean;
 }
 export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean }
 export interface ProviderState {
@@ -134,7 +139,7 @@ export interface ProviderState {
   diagnostic: string | null;
 }
 export interface Policy { revision: number; allowedEnvs: Controls["env"][] }
-export interface Snapshot {
+export interface Snapshot extends PlatformSnapshot {
   protocolVersion: number;
   seq: number;
   profileId: "default";
@@ -155,7 +160,7 @@ export interface Connection {
 
 export interface EventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls };
+  "session.created": { title: string; controls: Controls; parentSessionId?: string; readOnly?: boolean; contextDigest?: string };
   "session.configured": { controls: Controls };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
@@ -167,13 +172,13 @@ export interface EventPayloads {
   "queue.removed": { messageId: string };
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
-  "turn.started": { item: QueueItem; controls: Controls; policyRevision: number };
+  "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string };
   "steer.applied": { item: QueueItem };
   "model.started": { modelId: string };
   "assistant.delta": { text: string };
   "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage };
   "tool.requested": { approval: Approval };
-  "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" };
+  "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" | "delegation"; ruleId?: string };
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number };
@@ -183,6 +188,13 @@ export interface EventPayloads {
   "turn.finished": { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
   "policy.updated": { policy: Policy; finishingTurnIds: string[] };
   "provider.changed": { status: ProviderState["status"]; diagnostic: string | null };
+  "settings.updated": { settings: UserSettings; revision: number; permissionRevision: number };
+  "capability.saved": { entry: CapabilityEntry };
+  "capability.proposed": { proposal: Proposal };
+  "proposal.decided": { proposalId: string; approve: boolean; actor: "user" };
+  "job.started": { job: CapabilityJob };
+  "job.progress": { jobId: string; progress: string; status?: "running" };
+  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null };
 }
 export type EventType = keyof EventPayloads;
 interface EventMetadata {
@@ -208,15 +220,36 @@ export const eventTypes: readonly EventType[] = [
   "steer.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "policy.updated", "provider.changed",
+  "settings.updated", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
 ];
 
-export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[] } {
+export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[] } & PlatformSnapshot {
   const projects = new Map<string, Project>();
   const sessions = new Map<string, Session>();
   let policy: Policy = { revision: 0, allowedEnvs: ["Local", "Sandbox", "Remote"] };
   const blockedProjects = new Set<string>();
+  let settings: PlatformSnapshot["settings"] = { revision: 0, permissionRevision: 0, values: defaultSettings(), defaults: defaultSettings() };
+  const registry = new Map<string, CapabilityEntry>();
+  const proposals = new Map<string, Proposal>();
+  const jobs = new Map<string, CapabilityJob>();
   for (const event of events) {
     if (event.profile_id !== PROFILE_ID) continue;
+    if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: event.payload.settings };
+    if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
+    if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
+    if (event.event_type === "proposal.decided") {
+      const proposal = proposals.get(event.payload.proposalId);
+      if (proposal) proposal.status = event.payload.approve ? "approved" : "rejected";
+    }
+    if (event.event_type === "job.started") jobs.set(event.payload.job.id, { ...event.payload.job });
+    if (event.event_type === "job.progress") {
+      const job = jobs.get(event.payload.jobId);
+      if (job) { job.progress = event.payload.progress; if (event.payload.status) job.status = event.payload.status; }
+    }
+    if (event.event_type === "job.finished") {
+      const job = jobs.get(event.payload.jobId);
+      if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
+    }
     if (event.event_type === "turn.finished" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) blockedProjects.add(event.project_id);
     if (event.event_type === "session.resumed" && event.project_id) blockedProjects.delete(event.project_id);
     if (event.event_type === "project.added") projects.set(event.payload.project.id, event.payload.project);
@@ -231,6 +264,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
         controls: event.payload.controls, revision: 0, status: "idle", draft: { revision: 0, text: "", attachments: [] },
         queue: [], queueRevision: 0, messages: [], usage: [], processes: [], turnId: null, pendingApproval: null,
         lastError: null, localFinishing: false, createdAt: event.timestamp, updatedAt: event.timestamp,
+        parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
       });
     }
     const session = event.session_id ? sessions.get(event.session_id) : undefined;
@@ -283,7 +317,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       case "model.started":
         session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: "assistant", text: "", timestamp: event.timestamp });
         session.usage.push({
-          stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: "solver",
+          stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: session.parentSessionId ? "subagent" : "solver",
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
           estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: 0, quality: "unknown", outcome: "running",
         });
@@ -335,5 +369,6 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
         break;
     }
   }
-  return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects] };
+  return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects],
+    settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()] };
 }

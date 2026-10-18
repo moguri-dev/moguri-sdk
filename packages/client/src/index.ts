@@ -28,7 +28,7 @@ export class MoguriClient {
     await this.refresh();
     this.openSocket();
   }
-  private async http(path: string, body?: CommandEnvelope): Promise<unknown> {
+  protected async request(path: string, body?: unknown): Promise<unknown> {
     const response = await fetch(`${this.connection.baseUrl}${path}`, {
       method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${this.connection.token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20_000),
@@ -40,10 +40,11 @@ export class MoguriClient {
     }
     return result;
   }
-  async command(command: Command, id = crypto.randomUUID()): Promise<CommandResult> {
+  async command(command: Command, id: string = crypto.randomUUID()): Promise<CommandResult> {
     if (this.state.status !== "connected") throw new ClientError("disconnected", "Reconnect to Moguri before changing state. Your local edit has not been sent.");
     try {
-      const result = await this.http("/v1/commands", { id, profileId: PROFILE_ID, command });
+      const envelope: CommandEnvelope = { id, profileId: PROFILE_ID, command };
+      const result = await this.request("/v1/commands", envelope);
       await this.refresh();
       if (!isRecord(result)) throw new Error("Invalid command response.");
       return result as CommandResult;
@@ -61,7 +62,7 @@ export class MoguriClient {
     try {
       do {
         this.refreshAgain = false;
-        const snapshot = await this.http("/v1/snapshot");
+        const snapshot = await this.request("/v1/snapshot");
         if (!isSnapshot(snapshot)) {
           throw new Error("The service protocol is incompatible. Update both clients.");
         }
