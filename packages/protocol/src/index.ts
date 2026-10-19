@@ -7,6 +7,7 @@ import type { ThinkingEffort } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
 import { defaultProjectSettings } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
+import type { RemoteExecution } from "./execution.ts";
 export * from "./controls.ts";
 export * from "./providers.ts";
 import type { McpAuthorization } from "./oauth.ts";
@@ -14,7 +15,7 @@ import type { ConfigurationProposal, Attention, SuggestionSource } from "./engag
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -109,7 +110,7 @@ export interface QueueItem {
   mode?: SessionMode;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string }
-export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; outcome: string }
+export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; outcome: string; env?: Controls["env"] }
 export type SessionStatus = "idle" | "queued" | "running" | "waiting_input" | "stopping" | "completed" | "stopped" | "failed" | "partial" | "archived";
 export interface Session {
   id: string;
@@ -147,7 +148,7 @@ export interface Session {
   suggestionSources?: SuggestionSource[];
   inheritedImages?: boolean;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number }
+export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][] }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];
@@ -195,11 +196,15 @@ export interface EventPayloads {
   "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort };
   "assistant.delta": { text: string };
   "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage };
+  "model.late_usage": { usage: Usage; executionId: string; sequence: number };
+  "execution.started": { execution: RemoteExecution };
+  "execution.changed": { executionId: string; status: RemoteExecution["status"]; cancellation: RemoteExecution["cancellation"]; cleanup: RemoteExecution["cleanup"]; diagnostic: string | null; workerPid?: number };
+  "execution.frame_recorded": { executionId: string; sequence: number; digest: string };
   "tool.requested": { approval: Approval };
   "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" | "delegation"; ruleId?: string };
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
-  "process.started": { callId: string; pid: number; processGroup: number };
+  "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
   "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string };
   "turn.stop_requested": Record<string, never>;
   "turn.stop_acknowledged": Record<string, never>;
@@ -267,6 +272,7 @@ export const eventTypes: readonly EventType[] = [
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
+  "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
 ];
 
 export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[] } & PlatformSnapshot {
@@ -290,6 +296,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
   const sessionGroups = new Map<string, SessionGroup>();
   const artifacts = new Map<string, RetainedArtifact>();
   const terminals = new Map<string, TerminalState>();
+  const executions = new Map<string, RemoteExecution>();
   for (const event of events) {
     if (event.profile_id !== PROFILE_ID) continue;
     if (event.event_type === "session.deleted") {
@@ -297,12 +304,13 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       blockedSessions.delete(event.payload.deletedSessionId);
       for (const [id, terminal] of terminals) if (terminal.sessionId === event.payload.deletedSessionId) terminals.delete(id);
       for (const [id, entry] of attention) if (entry.sessionId === event.payload.deletedSessionId) attention.delete(id);
+      for (const [id, execution] of executions) if (execution.sessionId === event.payload.deletedSessionId) executions.delete(id);
     }
     if (event.event_type === "project.removed") {
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
-      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -317,6 +325,15 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "terminal.changed") {
       terminals.set(event.payload.terminal.id, { ...event.payload.terminal });
       if (event.payload.terminal.status === "unconfirmed") blockedProjects.add(event.payload.terminal.projectId);
+    }
+    if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
+    if (event.event_type === "execution.changed") {
+      const execution = executions.get(event.payload.executionId);
+      if (execution) Object.assign(execution, event.payload);
+    }
+    if (event.event_type === "execution.frame_recorded") {
+      const execution = executions.get(event.payload.executionId);
+      if (execution) execution.lastSequence = Math.max(execution.lastSequence, event.payload.sequence);
     }
     if (event.event_type === "board.saved") boards.set(event.payload.board.projectId, structuredClone(event.payload.board));
     if (event.event_type === "issue.saved") issues.set(event.payload.issue.id, structuredClone(event.payload.issue));
@@ -459,6 +476,11 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
         if (usageIndex >= 0) session.usage[usageIndex] = event.payload.usage; else session.usage.push(event.payload.usage);
         break;
       }
+      case "model.late_usage": {
+        const usageIndex = session.usage.findIndex((usage) => usage.stepId === event.payload.usage.stepId);
+        if (usageIndex >= 0) session.usage[usageIndex] = structuredClone(event.payload.usage);
+        break;
+      }
       case "tool.requested": session.pendingApproval = event.payload.approval; session.status = "waiting_input"; break;
       case "tool.decided": session.pendingApproval = null; if (session.status !== "stopping") session.status = "running"; break;
       case "tool.started":
@@ -498,5 +520,5 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], terminals: [...terminals.values()] };
+    artifacts: [...artifacts.values()], terminals: [...terminals.values()], executions: [...executions.values()] };
 }

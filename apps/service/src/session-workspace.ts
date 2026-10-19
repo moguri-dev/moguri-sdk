@@ -96,6 +96,7 @@ export class SessionWorkspace {
       case "project.porto": return { type: query.type, output: await this.projects.porto(this.project(query.projectId), AbortSignal.timeout(15_000)) };
       case "plan.read": {
         const session = this.session(query.sessionId); const project = this.project(session.projectId);
+        if (session.controls.env !== "Local") throw new MoguriError("plan_env", "Plan workspace transport is not qualified for this environment. No local project was read as a fallback.", 409);
         const settings = this.projects.configuration(project.id).values;
         const text = await this.projects.optional(project.path, settings.planPath, folderPolicy(settings));
         if (text === null) return { type: query.type, path: settings.planPath, text: "", digest: "absent", exists: false };
@@ -232,6 +233,7 @@ export class SessionWorkspace {
       case "plan.save":
       case "artifact.capture": {
         const session = this.session(command.sessionId); const project = this.project(session.projectId);
+        if (session.controls.env !== "Local") throw new MoguriError("plan_env", "Plan/artifact workspace transport is not qualified for this environment. No local project was read or written as a fallback.", 409);
         const settings = this.projects.configuration(project.id).values;
         const path = command.type === "artifact.capture" ? command.path ?? settings.planPath : settings.planPath;
         if (command.type === "plan.save") {

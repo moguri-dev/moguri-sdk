@@ -5,9 +5,9 @@ import {
   defaultProjectConfiguration, defaultProjectSettings, defaultSettings, isRecord, McpServerSchema, MoguriError, parse,
   type Project, type ProjectConfiguration, type ProjectSettings, type SessionWorkspaceResponse, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
-import { isProtectedProjectPath, readProjectFile, scopedPath, writeProjectFile } from "./files.ts";
+import { isProtectedProjectPath, scopedPath, writeProjectFile } from "./files.ts";
 import { validateSettings } from "./permissions.ts";
-import { assertFolderAccess, assertFolderName, folderPolicy, validateProjectPath, type FolderPolicy } from "./project-policy.ts";
+import { assertFolderAccess, assertFolderName, folderPolicy, validateProjectPath, readOptionalProjectFile, repositoryContext, type FolderPolicy } from "./project-policy.ts";
 import { runProgram } from "./program.ts";
 import { digest } from "./store.ts";
 
@@ -19,6 +19,8 @@ export class ProjectService {
     return this.snapshot().projectConfigurations.find((entry) => entry.projectId === id) ?? defaultProjectConfiguration(id);
   }
   validate(values: ProjectSettings, projectId?: string): void {
+    if (values.remotePath !== null && (!values.remotePath.startsWith("/") || /[\0\r\n]/.test(values.remotePath))) throw new MoguriError("remote_workspace", "Use an explicit absolute remote workspace, or null. No local project path is inferred.");
+    if (values.remotePath && this.snapshot().projectConfigurations.some((other) => other.projectId !== projectId && other.values.remotePath === values.remotePath)) throw new MoguriError("remote_workspace_shared", "This remote workspace is already bound to another project. Reuse that project's sessions instead of creating incompatible writers.", 409);
     for (const path of [...values.deniedFolders, ...values.readOnlyFolders, values.instructionsPath, values.mcpPath, values.planPath]) validateProjectPath(path);
     if ([values.instructionsPath, values.mcpPath, values.planPath].some(isProtectedProjectPath)) throw new MoguriError("project_path", "Instruction, MCP and plan paths cannot enter protected directories.");
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(values.repo.upstream) || values.repo.mainBranch.startsWith("-") ||
@@ -29,11 +31,7 @@ export class ProjectService {
     if (/-----BEGIN .*PRIVATE KEY-----|(?:ghp|gho|github_pat)_[A-Za-z0-9_]{20,}/.test(JSON.stringify(values))) throw new MoguriError("project_secret", "Do not put credentials in project settings. Use the secret backend.");
   }
   async optional(root: string, path: string, policy?: FolderPolicy): Promise<string | null> {
-    try {
-      if (policy) { assertFolderName(path, false, policy); await assertFolderAccess(root, path, false, policy); }
-      return (await readProjectFile(root, path)).text;
-    }
-    catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return null; throw error; }
+    return readOptionalProjectFile(root, path, policy);
   }
   async instructionSource(project: Project): Promise<{ instructions: string | null; instructionsPath: string }> {
     const { values } = this.configuration(project.id);
@@ -52,12 +50,7 @@ export class ProjectService {
     return { type: "project.sources", ...source, mcp, mcpPath: values.mcpPath, mcpDigest: mcp === null ? null : digest(mcp) };
   }
   async context(project: Project): Promise<string> {
-    const { values } = this.configuration(project.id);
-    let content = values.instructions;
-    if (!content) {
-      content = await this.optional(project.path, values.instructionsPath, folderPolicy(values)) ?? (values.instructionsPath === "AGENTS.md" ? await this.optional(project.path, "Agents.md", folderPolicy(values)) : null) ?? "";
-    }
-    return content ? `\n<untrusted-repository-instructions>\n${content}\n</untrusted-repository-instructions>` : "";
+    return repositoryContext(project.path, this.configuration(project.id).values);
   }
   private git(project: Project, args: string[], signal: AbortSignal, env?: NodeJS.ProcessEnv) {
     return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", ...args], { cwd: project.path, signal, env, label: "Project Git operation", timeoutMs: 30_000, maxBytes: 512 * 1024 });

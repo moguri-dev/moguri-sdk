@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { isRecord, MoguriError, type LocalEndpoint, type ModelInfo, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, type Controls, type LocalEndpoint, type ModelInfo, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import type { PreparedModel, ProviderAdapter } from "./provider.ts";
 
-export interface ModelRegistryOptions { vault?: SecretVault; fetch?: typeof fetch }
-export const localModelId = (endpointId: string, modelId: string) => `local.${endpointId}.${createHash("sha256").update(modelId).digest("hex").slice(0, 24)}`;
+export interface ModelRegistryOptions {
+  vault?: SecretVault; fetch?: typeof fetch; idPrefix?: () => string; environments?: Controls["env"][];
+  additional?: ModelRegistry; includeCopilot?: boolean; copilotEnvironments?: () => Controls["env"][];
+}
+export const localModelId = (endpointId: string, modelId: string, prefix = "local") => `${prefix}.${endpointId}.${createHash("sha256").update(modelId).digest("hex").slice(0, 24)}`;
 export function localEndpointUrl(value: string): URL {
   let url: URL;
   try { url = new URL(value.endsWith("/") ? value : `${value}/`); }
@@ -32,16 +35,20 @@ export class ModelRegistry implements ProviderAdapter {
   private closed = false;
   constructor(private readonly copilot: ProviderAdapter, private readonly endpoints: () => LocalEndpoint[], private readonly options: ModelRegistryOptions = {}) {
     this.vault = options.vault ?? new McpKeychain("dev.moguri.profile.default.models");
-    this.signature = JSON.stringify(endpoints());
+    this.signature = this.configurationSignature();
     this.state = { ...copilot.state };
     copilot.onChange = () => this.publish();
+    if (options.additional) options.additional.onChange = () => this.publish();
     this.publish(false);
   }
+  private get prefix() { return this.options.idPrefix?.() ?? "local"; }
+  private configurationSignature() { return JSON.stringify({ endpoints: this.endpoints(), prefix: this.prefix }); }
+  private modelId(endpointId: string, modelId: string) { return localModelId(endpointId, modelId, this.prefix); }
   private publish(notify = true) {
     if (this.closed) return;
     const local = [...this.local.values()];
-    const models = [...this.copilot.state.models.map((model) => ({ ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id })), ...local.flatMap((entry) => entry.models)];
-    const connections: ProviderConnection[] = [{ id: "github-copilot", name: "GitHub Copilot", source: "copilot", status: this.copilot.state.status, diagnostic: this.copilot.state.diagnostic }, ...local.map((entry) => entry.connection)];
+    const models = [...this.copilot.state.models.map((model) => ({ ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id, environments: this.options.copilotEnvironments?.() ?? ["Local"] })), ...local.flatMap((entry) => entry.models), ...this.options.additional?.state.models ?? []];
+    const connections: ProviderConnection[] = [...(this.options.includeCopilot === false ? [] : [{ id: "github-copilot", name: "GitHub Copilot", source: "copilot" as const, status: this.copilot.state.status, diagnostic: this.copilot.state.diagnostic }]), ...local.map((entry) => entry.connection), ...this.options.additional?.state.connections ?? []];
     this.state = { ...this.copilot.state, status: models.length ? "connected" : this.copilot.state.status, models, connections };
     if (!models.length && local.some((entry) => entry.connection.status === "error")) this.state = { ...this.state, status: this.copilot.state.status === "connecting" ? "connecting" : "error", diagnostic: "No usable model is available. Inspect the configured endpoint and Copilot connection diagnostics." };
     if (notify) this.onChange();
@@ -51,7 +58,7 @@ export class ModelRegistry implements ProviderAdapter {
     if (!endpoint) throw new MoguriError("local_model_missing", "This local endpoint is no longer enabled. No other provider was selected.", 409);
     return endpoint;
   }
-  private key(endpoint: LocalEndpoint) { return `local-${createHash("sha256").update(`${endpoint.id}\0${localEndpointUrl(endpoint.baseUrl).href}`).digest("hex")}`; }
+  private key(endpoint: LocalEndpoint) { return `local-${createHash("sha256").update(`${this.prefix === "local" ? "" : `${this.prefix}\0`}${endpoint.id}\0${localEndpointUrl(endpoint.baseUrl).href}`).digest("hex")}`; }
   private async credential(endpoint: LocalEndpoint, signal: AbortSignal): Promise<string | null> {
     if (endpoint.auth === "none") return null;
     let key: string | null;
@@ -82,15 +89,16 @@ export class ModelRegistry implements ProviderAdapter {
     if (!isRecord(catalog) || !Array.isArray(catalog.data) || catalog.data.length > 512 || !catalog.data.every((entry) => isRecord(entry) && typeof entry.id === "string")) throw new MoguriError("local_model_catalog", "Expect a bounded OpenAI-compatible data array with model IDs.");
     const ids = new Set(catalog.data.filter(isRecord).map((entry) => entry.id));
     const models = endpoint.models.filter((model) => ids.has(model.id)).map((model) => ({
-      id: localModelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput,
-      providerId: `local.${endpoint.id}`, source: "local" as const, apiModelId: model.id, thinkingLevels: [],
+      id: this.modelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput,
+      providerId: `${this.prefix}.${endpoint.id}`, source: "local" as const, apiModelId: model.id, thinkingLevels: [], environments: this.options.environments ?? ["Local"],
     }));
     if (!models.length) throw new MoguriError("local_model_catalog", "None of this endpoint's explicitly configured models is advertised. Check IDs and limits; no model was guessed.");
     return { models, key };
   }
   synchronize(): void {
-    const signature = JSON.stringify(this.endpoints());
-    if (signature === this.signature || this.closed) return;
+    this.options.additional?.synchronize();
+    const signature = this.configurationSignature();
+    if (signature === this.signature || this.closed) { this.publish(false); return; }
     this.signature = signature;
     void this.refreshLocal();
   }
@@ -99,25 +107,25 @@ export class ModelRegistry implements ProviderAdapter {
     const epoch = ++this.epoch, signal = this.discovery.signal;
     this.local.clear();
     const endpoints = this.endpoints().filter((endpoint) => endpoint.enabled);
-    for (const endpoint of endpoints) this.local.set(endpoint.id, { models: [], connection: { id: `local.${endpoint.id}`, name: endpoint.name, source: "local", status: "connecting", diagnostic: null } });
+    for (const endpoint of endpoints) this.local.set(endpoint.id, { models: [], connection: { id: `${this.prefix}.${endpoint.id}`, name: endpoint.name, source: "local", status: "connecting", diagnostic: null } });
     this.publish();
     const task = Promise.all(endpoints.map(async (endpoint) => {
       try {
         const result = await this.inspect(endpoint, signal);
         if (epoch !== this.epoch || this.closed) return;
         const missing = endpoint.models.length - result.models.length;
-        this.local.set(endpoint.id, { models: result.models, connection: { id: `local.${endpoint.id}`, name: endpoint.name, source: "local", status: "connected", diagnostic: missing ? `${missing} configured models are unavailable. Only advertised models are selectable.` : null } });
+        this.local.set(endpoint.id, { models: result.models, connection: { id: `${this.prefix}.${endpoint.id}`, name: endpoint.name, source: "local", status: "connected", diagnostic: missing ? `${missing} configured models are unavailable. Only advertised models are selectable.` : null } });
       } catch (error) {
         if (epoch !== this.epoch || this.closed) return;
         const diagnostic = error instanceof MoguriError ? error.message : "Local model discovery failed or timed out. Check the configured server; no scan, inference or fallback was attempted.";
         console.error("Local model discovery failed:", endpoint.id, diagnostic);
-        this.local.set(endpoint.id, { models: [], connection: { id: `local.${endpoint.id}`, name: endpoint.name, source: "local", status: "error", diagnostic } });
+        this.local.set(endpoint.id, { models: [], connection: { id: `${this.prefix}.${endpoint.id}`, name: endpoint.name, source: "local", status: "error", diagnostic } });
       }
       this.publish();
     })).then(() => {});
     this.task = task; return task;
   }
-  async refresh(): Promise<void> { await Promise.all([this.copilot.refresh(), this.refreshLocal()]); }
+  async refresh(): Promise<void> { await Promise.all([this.copilot.refresh(), this.refreshLocal(), this.options.additional?.refresh()]); }
   login(): void { this.copilot.login(); }
   async cancel(): Promise<void> { await this.copilot.cancel(); }
   async logout(): Promise<void> { await this.copilot.logout(); }
@@ -129,14 +137,15 @@ export class ModelRegistry implements ProviderAdapter {
     await this.refreshLocal();
   }
   async prepare(id: string, signal: AbortSignal): Promise<PreparedModel> {
-    if (!id.startsWith("local.")) return this.copilot.prepare(id, signal);
+    if (this.options.additional?.state.models.some((model) => model.id === id)) return this.options.additional.prepare(id, signal);
+    if (!id.startsWith(`${this.prefix}.`)) return this.copilot.prepare(id, signal);
     const info = this.state.models.find((model) => model.id === id && model.source === "local");
     if (!info?.providerId) throw new MoguriError("model_unavailable", "The selected local model is unavailable. Recheck its endpoint; no provider was substituted.", 409);
-    const endpoint = this.endpoint(info.providerId.slice(6)), signature = JSON.stringify(endpoint), epoch = this.epoch;
+    const endpoint = this.endpoint(info.providerId.slice(this.prefix.length + 1)), signature = JSON.stringify(endpoint), epoch = this.epoch;
     const inspected = await this.inspect(endpoint, signal);
     signal.throwIfAborted();
     if (epoch !== this.epoch || JSON.stringify(this.endpoint(endpoint.id)) !== signature) throw new MoguriError("model_changed", "Local model configuration changed during admission. No inference was started.", 409);
-    const configuration = endpoint.models.find((model) => localModelId(endpoint.id, model.id) === id);
+    const configuration = endpoint.models.find((model) => this.modelId(endpoint.id, model.id) === id);
     if (!configuration || !inspected.models.some((model) => model.id === id)) throw new MoguriError("model_unavailable", "The selected local model stopped being advertised. No fallback was used.", 409);
     const model: Model<"openai-completions"> = {
       id: configuration.id, name: configuration.name, provider: "moguri-local", api: "openai-completions", baseUrl: localEndpointUrl(endpoint.baseUrl).href,
@@ -146,5 +155,5 @@ export class ModelRegistry implements ProviderAdapter {
     };
     return { model, auth: inspected.key ? { apiKey: inspected.key } : { apiKey: "moguri-keyless", headers: { Authorization: null } } };
   }
-  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.copilot.cancel(); }
+  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.options.additional?.close(); await this.copilot.cancel(); }
 }

@@ -19,6 +19,9 @@ Unused scope fields are null in checkpoint 1.
 | `model.started` | Step, canonical selected model, actual provider/API model, effective context window/effort and estimated context. Creates an unknown, in-progress accounting entry; estimates are not provider token telemetry. |
 | `assistant.delta` | Durable streamed text for that step, batched by the worker. |
 | `model.completed` | Public message, normalized-context blob digest and actual/unknown usage. Does not imply overall turn success. |
+| `model.late_usage` | Exact owned remote step/frame improves unknown accounting after disconnect; no new continuation, tool replay or rewrite of a partial turn. |
+| `execution.started`, `execution.changed` | Pinned target/build/root/run, actual worker and cancellation/cleanup status. SSH exit is not descendant-containment proof. |
+| `execution.frame_recorded` | Run, sequence and digest committed atomically with the primary events; a duplicate cannot authorize another side effect. |
 | `tool.requested` | Exact declared tool, approval UUID and policy revision. |
 | `tool.decided` | Allow/deny, exact request UUID and real `user`/`policy`/`delegation` actor, with rule ID for explicit grants. Model advice never becomes a human answer. |
 | `tool.started`, `tool.output`, `tool.completed` | Approved execution, bounded output, explicit actual/denied/stopped/failed/partial/unconfirmed result. |
@@ -97,7 +100,7 @@ bounded private query/provider paths, never public event frames.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":7,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":8,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 7 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-6 history, sessions, drafts,
+This is an alpha API. Protocol 8 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-7 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -118,6 +118,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
 | `models` | Explicit Copilot/local catalog refresh and user-only resource-bound local endpoint keys. No host scan, weight download or automatic model substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
+| `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
 
 `sessions.create(projectId?, title?, overrides?)` resolves explicit controls
 over `project.values.defaults`, `settings.startup.profile`,
@@ -130,6 +131,23 @@ and declared model limits. Metadata discovery lists only configured advertised
 IDs. Use `models.setToken`/`clearToken` for bearer credentials; no token belongs
 in settings. `provider.connections` keeps Copilot and local status independent;
 each model/call has actual provider/API-model provenance.
+
+`settings.remote` holds a non-secret explicit SSH target, pinned public host key,
+selected local identity path, private remote state directory, installed worker
+argv, scoped-Copilot grant and remote-local endpoints. Projects separately set
+`remotePath`. `remote.probe()` verifies the actual worker digest/runtime;
+`remote.status()` reports current qualification. Model IDs carry their eligible
+environments. `sessions.env()` preserves an eligible selection and clears an
+incompatible model/options, never substitutes another provider.
+
+`snapshot.executions` records owned run/target/root, cancellation, cursor and
+actual/unconfirmed cleanup. `remote.reconcile(id)` reads existing receipts and
+late accounting without replay. `remote.acknowledge(id, true)` records actual
+user inspection, not proof of cleanup. Remote endpoint keys use
+`remote.setToken`/`clearToken`, distinct from host-local keys. The installed
+`moguri worker --stdio` entrypoint exposes the versioned SSH bridge; it never
+starts a second local service. See the [transport contract](architecture/execution-transports.md)
+for still-unqualified side-panel/extension capabilities.
 
 `attachments.file`/`image` capture selected content. `folderPreview`,
 `githubPreview` and `sessionPreview` return exact source/size/exclusion/digest

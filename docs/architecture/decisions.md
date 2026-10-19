@@ -417,6 +417,38 @@ records limits, consent, generated decoder measurements and restart boundaries.
 SendBox remains unavailable until a genuinely qualified worker/model/tool
 transport exists; a test-signed guest is not a production attested release.
 
+## D20. Owned SSH worker bridge and late receipts
+
+**Decision.** Use system OpenSSH (BSD) with one explicit pinned host identity,
+user-selected local private identity, private remote state path and exact
+installed worker build. Never disable host verification, forward an agent,
+infer a workspace from its local name or silently tunnel localhost. Remote
+models and tools run there; the local controller remains authoritative.
+
+An owned Node supervisor forks the existing worker over real IPC and carries
+bounded, versioned control frames over SSH. Transport keys live in the explicit
+local secret backend and remote supervisor memory; private replay frames are
+encrypted and credential-bearing controller replies are never journaled.
+Durable local frame receipts bind sequence/digest to primary events atomically.
+Reconnect/restart inspects an existing run, never creates another or replays a
+side effect. Late usage can improve unknown accounting but cannot turn a
+partial turn into successful work.
+
+Model declarations are env-scoped. Remote-local discovery and inference
+originate on the SSH host; Copilot forwarding is an explicit short-lived grant
+and its model metadata is rechecked remotely. Project-free chats keep null
+roots. Changed host keys, targets, workspaces, permissions and approvals fail
+closed. Remote console/MCP/memory/diff/plan transports remain unavailable until
+qualified, not locally substituted.
+
+Protocol/database migration 8 preserves prior inputs, settings and event/grant
+identities. Actual generated macOS SSH, worker/file/model operations, image
+transfer, lost-completion accounting and SIGKILL recovery qualify the core
+path. This is not Linux release qualification, live Copilot entitlement or
+detached-descendant containment. The [transport contract](execution-transports.md)
+records measurements, ownership and remaining limits. Native SendBox still
+requires the separately rebuilt/qualified guest and genuine worker transport.
+
 ## Still open
 
 - Package manager and monorepo tooling.

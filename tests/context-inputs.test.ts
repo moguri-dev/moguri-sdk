@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdir, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import sharp from "sharp";
 import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
@@ -64,6 +65,18 @@ test("an image-capable worker receives approved image bytes rather than silently
     assert.equal(fixture.session().controls.modelId, controls.modelId);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
+test("generated image data above the text-only 1 MiB limit reaches the image-capable worker intact", mac, async () => {
+  const fixture = await setupFixture({ imageInput: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure();
+    const image = await sharp(randomBytes(768 * 768 * 3), { raw: { width: 768, height: 768, channels: 3 } }).png().toBuffer();
+    await sdk.attachments.image(fixture.sessionId, image.toString("base64"));
+    assert.ok(fixture.session().draft.attachments[0]!.bytes > 1024 * 1024);
+    await fixture.send("Generated image exceeds the separate text-only bound.");
+    assert.equal((await fixture.terminal()).status, "completed");
+    assert.match(JSON.stringify(fixture.requests[0]!.messages), /data:image\/png;base64,/);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
 test("folder preview lists its exact allowed file set and rejects source races, protected files and symlink escapes", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -83,6 +96,20 @@ test("folder preview lists its exact allowed file set and rejects source races, 
     assert.equal(fixture.session().draft.attachments[0]?.kind, "folder");
     const read = await sdk.attachments.read(fixture.sessionId, fixture.session().draft.attachments[0]!.id);
     assert.ok(read.content.kind === "text" && read.content.text.includes("Generated concurrent change."));
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+test("reviewed aggregate context binds the actual session/model destination, not only source bytes", mac, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const preview = (await sdk.attachments.folderPreview(fixture.sessionId, fixture.project)).preview;
+    assert.equal(preview.destination.env, "Local"); assert.equal(preview.destination.modelId, null);
+    await fixture.configure();
+    await assert.rejects(() => sdk.attachments.folder(fixture.sessionId, fixture.project, preview.digest, true), /destination changed after preview/);
+    assert.equal(fixture.session().draft.attachments.length, 0);
+    const current = (await sdk.attachments.folderPreview(fixture.sessionId, fixture.project)).preview;
+    assert.equal(current.destination.modelId, fixture.modelId);
+    await sdk.attachments.folder(fixture.sessionId, fixture.project, current.digest, true);
+    assert.equal(fixture.session().draft.attachments[0]?.kind, "folder"); assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 test("GitHub snapshots keep reference type/revision and retained session context survives source deletion", mac, async () => {

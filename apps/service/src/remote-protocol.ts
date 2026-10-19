@@ -1,0 +1,46 @@
+import { Type, type Static } from "typebox";
+import { PROTOCOL_VERSION, ProjectSettingsSchema } from "../../../packages/protocol/src/index.ts";
+import { WorkerRequestSchema } from "./worker-protocol.ts";
+
+const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
+const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
+const sequence = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+const nullableText = Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]);
+export const BridgeInitSchema = Type.Object({
+  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
+  protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
+  stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
+  runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
+  catalog: Type.Optional(Type.Object({
+    url: Type.String({ maxLength: 4096 }), key: Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]),
+    headers: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]), { maxProperties: 32 })),
+  }, { additionalProperties: false })),
+  context: Type.Optional(ProjectSettingsSchema),
+}, { additionalProperties: false });
+const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText }, { additionalProperties: false });
+const BridgeStatusSchema = Type.Object({
+  runId, workerPid: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+  port: Type.Integer({ minimum: 0, maximum: 65535 }), acknowledged: sequence, sequence,
+  status: Type.Union([Type.Literal("launching"), Type.Literal("running"), Type.Literal("stopping"), Type.Literal("completed"), Type.Literal("stopped"), Type.Literal("failed"), Type.Literal("partial"), Type.Literal("unconfirmed")]),
+  cancellation: Type.Union([Type.Literal("none"), Type.Literal("requested"), Type.Literal("acknowledged"), Type.Literal("unconfirmed")]),
+  cleanup: Type.Union([Type.Literal("pending"), Type.Literal("owned-worker-stopped"), Type.Literal("unconfirmed")]), diagnostic: nullableText,
+}, { additionalProperties: false });
+const BridgeFrameSchema = Type.Object({ kind: Type.Literal("frame"), sequence, digest: hash, request: WorkerRequestSchema }, { additionalProperties: false });
+export const SavedStatusSchema = Type.Object({ status: BridgeStatusSchema, info: BridgeInfoSchema, proof: hash }, { additionalProperties: false });
+export const BridgeEnvelopeSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("probe"), info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("ready"), info: BridgeInfoSchema, status: BridgeStatusSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("status"), status: BridgeStatusSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("catalog"), status: Type.Integer({ minimum: 100, maximum: 599 }), body: Type.String({ maxLength: 512 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("context"), text: Type.String({ maxLength: 256 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("inspection"), ...SavedStatusSchema.properties, frames: Type.Array(BridgeFrameSchema, { maxItems: 128 }), nextSequence: sequence }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("error"), message: Type.String({ maxLength: 4096 }), code: Type.Optional(Type.String({ maxLength: 128 })) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("stderr"), text: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }),
+  BridgeFrameSchema,
+]);
+export type BridgeEnvelope = Static<typeof BridgeEnvelopeSchema>;
+export type BridgeInit = Static<typeof BridgeInitSchema>;
+export type BridgeInfo = Static<typeof BridgeInfoSchema>;
+export type BridgeStatus = Static<typeof BridgeStatusSchema>;
+export type BridgeFrame = Static<typeof BridgeFrameSchema>;
+export type SavedStatus = Static<typeof SavedStatusSchema>;

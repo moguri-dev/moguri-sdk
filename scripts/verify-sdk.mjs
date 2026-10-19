@@ -39,6 +39,8 @@ try {
       await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
       const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
       const general=await sdk.sessions.create(null);
+      await sdk.sessions.env(general.id!,"Local");
+      const remote=await sdk.remote.status();void remote.remote.workerDigest;
       const folder=await sdk.attachments.folderPreview(general.id!,"/generated/source");
       await sdk.attachments.folder(general.id!,"/generated/source",folder.preview.digest,true);
       const sources=await sdk.suggestions.preview(general.id!);
@@ -60,7 +62,10 @@ try {
   ], { cwd: consumer, stdio: "inherit" });
   await writeFile(join(consumer, "smoke.mjs"), `
     import assert from "node:assert/strict";
-    import {mkdir,writeFile} from "node:fs/promises";
+    import {mkdir,writeFile,readFile} from "node:fs/promises";
+    import {spawn} from "node:child_process";
+    import {createHash} from "node:crypto";
+    import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri} from "moguri/node";
     import {DraftEditor} from "moguri";
@@ -74,10 +79,25 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,7);
+      assert.equal(sdk.getState().snapshot.protocolVersion,8);
       const general=await sdk.sessions.create();
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
+      assert.equal((await sdk.remote.status()).remote.ready,false);
+      const workerPath=fileURLToPath(new URL("../worker.mjs",import.meta.resolve("moguri/node")));
+      const workerHash=createHash("sha256").update(await readFile(workerPath)).digest("hex");
+      const role=spawn(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"worker","--stdio"],{stdio:["pipe","pipe","pipe"]});
+      const roleExit=new Promise(resolve=>role.once("exit",resolve));
+      try {
+        const response=await new Promise((resolve,reject)=>{
+          let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
+          role.once("error",reject);
+          role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
+          role.stdin.write(JSON.stringify({action:"probe",protocol:8,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+        });
+        assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
+        role.stdin.end();assert.equal(await roleExit,0);
+      } finally {if(role.exitCode===null&&role.signalCode===null){role.kill("SIGTERM");await roleExit;}}
       const source=join(root,"generated-client.txt");await writeFile(source,"Generated external client context.");
       const captured=await sdk.attachments.file(general.id,source);
       assert.equal((await sdk.attachments.read(general.id,captured.id)).content.text,"Generated external client context.");
@@ -142,7 +162,7 @@ try {
       assert.equal((await sdk.plans.artifact(artifact.id)).text,"Generated external retained plan.");
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===side.id).parentSessionId,undefined);
     } finally {sdk.disconnect();await runtime.close();}
-    console.log("External SDK imports/types, approved/audited install, project-free/metachat/config review, real macOS PTY transport, held prompts/slash/side sessions, retained plans, vectors, native MCP and script-free cache install passed.");
+    console.log("External SDK imports/types, approved/audited install, real installed SSH-worker handshake, typed context, project-free/metachat/config review, real macOS PTY transport, held prompts/slash/side sessions, retained plans, vectors, native MCP and script-free cache install passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }

@@ -27,6 +27,7 @@ export const ProjectSettingsSchema = object({
   instructionsPath: path, instructions: Type.String({ maxLength: 64 * 1024 }), mcpPath: path,
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }), planPath: path,
   defaults: ControlDefaultsSchema,
+  remotePath: Type.Union([path, Type.Null()]),
 });
 export type ProjectSettings = Static<typeof ProjectSettingsSchema>;
 export const defaultProjectSettings = (): ProjectSettings => ({
@@ -34,6 +35,7 @@ export const defaultProjectSettings = (): ProjectSettings => ({
   sandbox: null, scripts: [], port: null, porto: { enabled: false, project: "", executable: "porto" },
   readOnlyFolders: [], deniedFolders: [], instructionsPath: "AGENTS.md", instructions: "", mcpPath: "mcp.json", mcpServers: [], planPath: "docs/plan.md",
   defaults: {},
+  remotePath: null,
 });
 export interface ProjectConfiguration { projectId: string; revision: number; folderId: string | null; color: string; order: number; values: ProjectSettings }
 export const defaultProjectConfiguration = (projectId: string): ProjectConfiguration => ({

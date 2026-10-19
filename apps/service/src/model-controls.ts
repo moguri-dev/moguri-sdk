@@ -18,7 +18,14 @@ export const estimateModelContext = (context: Context): number => estimateContex
 export function contextHasImages(messages: Context["messages"]): boolean {
   return messages.some((message) => typeof message.content !== "string" && message.content.some((block) => block.type === "image"));
 }
+export function validateContextSize(messages: Context["messages"]): void {
+  const text = messages.map((message) => message.role === "assistant" || typeof message.content === "string" ? message :
+    { ...message, content: message.content.map((block) => block.type === "image" ? { ...block, data: "" } : block) });
+  if (Buffer.byteLength(JSON.stringify(text)) > 1024 * 1024) throw new MoguriError("context_limit", "Conversation text exceeds 1 MiB. Existing history is preserved; start a new session before inference.", 409);
+  if (Buffer.byteLength(JSON.stringify(messages)) > 16 * 1024 * 1024) throw new MoguriError("context_limit", "Conversation including approved image data exceeds 16 MiB. Existing history is preserved; no image was dropped or request sent.", 409);
+}
 export function modelRequest(model: Model<Api>, options: ModelOptions | undefined, context: Context) {
+  validateContextSize(context.messages);
   if (!model.input.includes("image") && contextHasImages(context.messages)) throw new MoguriError("model_images", "This model cannot receive the approved images. Select an image-capable model or remove the image context; no content was dropped or sent.", 409);
   validateModelOptions({ contextWindow: model.contextWindow, thinkingLevels: supportedThinking(model) }, options);
   const selected = { ...model, contextWindow: options?.contextWindow ?? model.contextWindow };

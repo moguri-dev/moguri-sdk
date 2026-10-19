@@ -19,7 +19,7 @@ export const isInputCommand = (value: unknown): value is InputCommand => Value.C
 export const isInputQuery = (value: unknown): value is InputQuery => Value.Check(InputQuerySchema, value);
 const MAX_TEXT_BYTES = 2 * 1024 * 1024, MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 interface Host { snapshot(): Snapshot; events(): StoredEvent[] }
-interface Capture { preview: ContextPreview; text: string }
+interface Capture { preview: Omit<ContextPreview, "destination">; text: string }
 export class ContextInputs {
   private stateRoot?: string;
   constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly integrations: ProjectIntegrations, private readonly host: Host, private readonly stateDir: string) {}
@@ -102,11 +102,19 @@ export class ContextInputs {
     if (bytes > MAX_TEXT_BYTES) throw new MoguriError("attachment_reference_limit", "This reference exceeds 2 MiB; no content was silently truncated.");
     return { text, preview: { kind: match[2] === "pull" ? "github_pr" : "github_issue", label: `${match[1]}#${result.number} (${match[2] === "pull" ? "PR" : "issue"})`, bytes, digest: digest(text), files: [], excluded: [], text, source: { kind: access === "gh-cli" ? "github-cli" : "github-public", location: canonical, revision: result.updated_at } } };
   }
+  private reviewed(sessionId: string, captured: Capture): ContextPreview {
+    const session = this.session(sessionId, false), snapshot = this.host.snapshot(), remote = snapshot.settings.values.remote;
+    const destination: ContextPreview["destination"] = {
+      sessionId, env: session.controls.env, modelId: session.controls.modelId,
+      target: session.controls.env === "Remote" ? remote ? `${remote.name} (${remote.host}:${remote.port}), not SendBox-isolated` : "Unconfigured SSH host" : session.controls.env === "Local" ? "Local host and explicitly selected provider" : "Configured SendBox workload",
+    };
+    return { ...captured.preview, destination, digest: digest(JSON.stringify({ source: captured.preview.digest, destination, revision: session.revision, remote: session.controls.env === "Remote" ? remote : null, localModels: snapshot.settings.values.localModels })) };
+  }
   async query(query: InputQuery): Promise<InputResponse> {
     this.session(query.sessionId, false);
-    if (query.type === "attachment.folder.preview") return { type: query.type, preview: (await this.folder(query.path)).preview };
-    if (query.type === "attachment.github.preview") return { type: query.type, preview: (await this.github(this.session(query.sessionId), query.url, query.access)).preview };
-    if (query.type === "attachment.session.preview") return { type: query.type, preview: this.sessionCapture(query.sourceSessionId).preview };
+    if (query.type === "attachment.folder.preview") return { type: query.type, preview: this.reviewed(query.sessionId, await this.folder(query.path)) };
+    if (query.type === "attachment.github.preview") return { type: query.type, preview: this.reviewed(query.sessionId, await this.github(this.session(query.sessionId), query.url, query.access)) };
+    if (query.type === "attachment.session.preview") return { type: query.type, preview: this.reviewed(query.sessionId, this.sessionCapture(query.sourceSessionId)) };
     const attachment = this.host.events().flatMap((event) => event.session_id === query.sessionId && event.event_type === "draft.saved" ? event.payload.attachments : []).find((attachment) => attachment.id === query.attachmentId);
     if (!attachment) throw new MoguriError("attachment_scope", "This attachment has no content grant in the selected session.");
     const content = this.store.blob(attachment.digest);
@@ -143,7 +151,7 @@ export class ContextInputs {
       }
     } else {
       const captured = command.type === "attachment.folder.add" ? await this.folder(command.path) : command.type === "attachment.github.add" ? await this.github(session, command.url, command.access) : this.sessionCapture(command.sourceSessionId);
-      if (captured.preview.digest !== command.expectedDigest) throw new MoguriError("attachment_stale", "The source changed after preview. Review its exact current snapshot before attaching.", 409);
+      if (this.reviewed(session.id, captured).digest !== command.expectedDigest) throw new MoguriError("attachment_stale", "The source or destination changed after preview. Review its exact current snapshot and transfer scope before attaching.", 409);
       attachment = { id: randomUUID(), kind: captured.preview.kind, path: captured.preview.label, digest: this.store.putBlob(captured.text), bytes: captured.preview.bytes, source: captured.preview.source };
     }
     const current = this.session(session.id);

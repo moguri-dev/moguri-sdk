@@ -34,6 +34,14 @@ export class MoguriSdk extends TransportClient {
   readonly sessions = {
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}) }),
     configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.configure", sessionId, controls, expectedRevision }),
+    env: (sessionId: string, env: Controls["env"], expectedRevision = this.sessionRevision(sessionId)) => {
+      const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((value) => value.id === sessionId);
+      if (!snapshot || !session) throw new ClientError("session_missing", "Choose an existing session.");
+      const model = snapshot.provider.models.find((value) => value.id === session.controls.modelId);
+      const keep = session.controls.modelId === null || Boolean(model && (!model.environments || model.environments.includes(env)));
+      const { modelOptions: _, ...controls } = session.controls;
+      return this.command({ type: "session.configure", sessionId, expectedRevision, controls: { ...(keep ? session.controls : controls), env, modelId: keep ? session.controls.modelId : null } });
+    },
     modelOptions: (sessionId: string, modelOptions: ModelOptions, expectedRevision = this.sessionRevision(sessionId)) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
       if (!session) throw new ClientError("session_missing", "Choose an existing session.");
@@ -57,6 +65,14 @@ export class MoguriSdk extends TransportClient {
     refresh: () => this.command({ type: "provider.refresh" }),
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
     clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
+  };
+  readonly remote = {
+    status: () => this.query({ type: "remote.status" }),
+    probe: () => this.command({ type: "remote.probe" }),
+    reconcile: (executionId: string) => this.command({ type: "remote.reconcile", executionId }),
+    acknowledge: (executionId: string, confirmInspection: true) => this.command({ type: "remote.acknowledge", executionId, confirmInspection }),
+    setToken: (endpointId: string, token: string) => this.command({ type: "remote.model-token.set", endpointId, token }),
+    clearToken: (endpointId: string) => this.command({ type: "remote.model-token.clear", endpointId }),
   };
   readonly metachat = {
     create: (projectId: string | null = null, parentSessionId?: string, prompt?: string) => this.command({ type: "metachat.create", projectId, ...(parentSessionId ? { parentSessionId } : {}), ...(prompt ? { prompt } : {}) }),

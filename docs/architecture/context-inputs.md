@@ -23,7 +23,8 @@ personal images or the real clipboard.
   without embedded metadata. A project-free chat may receive an explicitly
   selected image/file, but still cannot infer a workspace root or run file tools.
 - Folder previews expose the exact bounded file set, exclusions, byte count and
-  reviewed digest. Confirmation rechecks current content before attaching.
+  reviewed digest and actual env/model/SSH destination. Confirmation rechecks
+  source and destination; a model/env/target change requires fresh review.
 - GitHub issue/PR snapshots use the user's explicitly chosen public/authorized
   integration, identify repo/number/type and keep a bounded immutable revision.
   Attaching never checks out, resumes, edits, closes or publishes anything.
@@ -44,6 +45,13 @@ Folder/reference preview is not inference. A stale preview, credential failure,
 unsupported file or partial capture has an explicit error and does not overwrite
 the draft. TUI/CLI expose paths and structured previews when clipboard-image
 capture is unavailable.
+
+Conversation text retains its 1 MiB bound separately from approved binary image
+data. Total serialized model context is capped at 16 MiB. Generated noise pixels
+prove a normalized image above 1 MiB reaches an actual image-capable worker;
+binary payloads are not misclassified as text, dropped or remotely captioned.
+Remote receives only captured pixels/content over its authenticated channel,
+not an absolute client-side source path or host folder mount.
 
 Durable schema evolution preserves legacy text attachments and existing
 identities/grants. Tests cover malformed/oversized images, source races,

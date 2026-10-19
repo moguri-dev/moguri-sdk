@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 7; immutable event
+Protocol version and database migration version are 8; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -35,6 +35,7 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | MCP authorization | Non-secret owned OAuth lifecycle, server/scope/expiry and transient-link readiness. State/verifier/authorization URL are ephemeral; issuer/resource-bound clients and grants stay in the secret backend. A durable connected decision gates use. |
 | Configuration proposal | Actual user/model origin, exact target scope, source excerpts, content/base digests and revision, with pending/applied/rejected state. A model cannot decide it. Human approval never enables a skill or publishes instructions. |
 | Attention | Question/bell/done, real-state or heuristic provenance, session, active state and separate read acknowledgement. It never becomes a user answer or approval. |
+| Remote execution | Owned run/target/verified build/root, actual worker PID, cancellation, durable frame cursor and pending/confirmed-worker/unconfirmed cleanup. SSH exit is not proof of descendant containment. |
 
 Provider-neutral session state is projected from immutable events. Normalized
 pi-ai model messages live in content-addressed blobs referenced by completion
@@ -124,3 +125,11 @@ provenance. Local connections use canonical provider identity distinct from the
 upstream API model ID; non-secret connection states do not expose credentials.
 Typed snapshots retain exact destination-session grants. Image pixels remain
 in independently encrypted blobs, not public events or snapshots.
+
+Migration 8 adds explicit SSH target/project-path configuration, independently
+bound remote-local model identity, owned execution/frame events and late usage.
+It preserves schema-7 inputs/defaults and all prior IDs/grants. Frame receipts
+are appended atomically with primary effects; restart never creates another
+worker. Remote replay payloads are private encrypted transport data, not a
+second authority. Late accounting can replace unknown telemetry while a partial
+turn remains partial. Inspection acknowledgement remains distinct from cleanup.

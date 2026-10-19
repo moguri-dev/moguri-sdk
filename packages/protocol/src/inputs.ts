@@ -35,6 +35,7 @@ export interface ContextPreview {
   files: { path: string; bytes: number; digest: string }[];
   excluded: { path: string; reason: string }[];
   text?: string;
+  destination: { sessionId: string; env: "Local" | "Sandbox" | "Remote"; target: string; modelId: string | null };
 }
 export type InputResponse =
   | { type: "attachment.folder.preview"; preview: ContextPreview }

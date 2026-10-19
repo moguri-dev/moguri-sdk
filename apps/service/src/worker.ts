@@ -8,15 +8,19 @@ import { localProvider } from "./local-provider.ts";
 import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 
 const abort = new AbortController();
+let authority = true;
+let terminalRequested = false;
 const pending = new Map<string, { resolve: (message: WorkerReply) => void; reject: (error: Error) => void; interruptible: boolean }>();
 const send = (message: WorkerRequest) => { if (process.connected) process.send?.(message); };
 async function request(message: WorkerRequest & { requestId: string }): Promise<WorkerReply> {
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
+  if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
   const interruptible = message.kind === "boundary" || message.kind === "approval";
   if (interruptible) abort.signal.throwIfAborted();
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible }); send(message); });
 }
 async function finish(outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): Promise<void> {
+  terminalRequested = true;
   await request({ kind: "finished", requestId: randomUUID(), outcome, diagnostic });
 }
 async function run(start: WorkerStart): Promise<void> {
@@ -68,6 +72,7 @@ async function run(start: WorkerStart): Promise<void> {
         });
         if (accepted.error) throw new Error(accepted.error);
         context.push(message);
+        abort.signal.throwIfAborted();
         if (message.stopReason === "aborted") throw new Error("Model request cancelled.");
         if (message.stopReason === "error") throw new Error("The provider request failed. Check the selected provider, model availability and context limits.");
         if (message.stopReason === "pending" || message.stopReason === "deferred") {
@@ -112,11 +117,16 @@ async function run(start: WorkerStart): Promise<void> {
     }
     await finish("partial", "The 32-step safety limit was reached. Review the session before continuing.");
   } catch (error) {
-    if (process.connected) await finish(
-      incompleteCleanup ? "partial" : abort.signal.aborted ? "stopped" : "failed",
-      abort.signal.aborted ? "Turn stopped. No automatic retry will run." : error instanceof Error ? error.message : "Worker failed.",
-    );
-    else console.error("Worker lost the control plane. Final outcome cannot be confirmed durably; no retry will run.");
+    if (process.connected && authority) {
+      try {
+        await finish(incompleteCleanup ? "partial" : abort.signal.aborted ? "stopped" : "failed",
+          abort.signal.aborted ? "Turn stopped. No automatic retry will run." : error instanceof Error ? error.message : "Worker failed.");
+      } catch { console.error("Worker terminal acknowledgement was lost. Its outcome must be reconciled; no retry will run."); }
+    }
+    else {
+      if (process.connected && !terminalRequested) send({ kind: "finished", requestId: randomUUID(), outcome: "partial", diagnostic: "Control disconnected. Owned cancellation settled or remains partial; no further effect was authorized. Reconcile retained remote results without replay." });
+      console.error("Worker lost the control plane. Final outcome cannot be confirmed durably; no retry will run.");
+    }
   } finally {
     for (const waiter of pending.values()) waiter.reject(new Error("Worker finished."));
     pending.clear();
@@ -131,10 +141,11 @@ process.on("message", (raw: unknown) => {
     const waiter = pending.get(message.requestId);
     pending.delete(message.requestId);
     waiter?.resolve(message);
-  } else if (message.kind === "stop") {
+  } else if (message.kind === "stop" || message.kind === "control-lost") {
+    if (message.kind === "control-lost") authority = false;
     send({ kind: "ack" });
     abort.abort();
-    for (const [id, waiter] of pending) if (waiter.interruptible) { waiter.reject(new Error("Turn stopped.")); pending.delete(id); }
+    for (const [id, waiter] of pending) if (waiter.interruptible || !authority) { waiter.reject(new Error("Turn stopped or control authority disconnected.")); pending.delete(id); }
   }
 });
 process.on("disconnect", () => {

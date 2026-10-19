@@ -1,6 +1,6 @@
 import { Type, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { MAX_TEXT, MoguriError, ConfigurationSpecSchema, type ToolCall, type UserSettings, type SessionMode } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, MoguriError, ConfigurationSpecSchema, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
 import { listProjectFiles, readProjectFile, writeProjectFile } from "./files.ts";
 import { runCommand } from "./supervisor.ts";
 import { assertFolderAccess, matchesFolder, readTools, type FolderPolicy } from "./project-policy.ts";
@@ -31,7 +31,7 @@ export const tools: Tool[] = [
     parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }, { additionalProperties: false }),
   })),
 ];
-export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; metachat?: boolean } = { project: true }): Tool[] {
+export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; metachat?: boolean; env?: Controls["env"] } = { project: true }): Tool[] {
   if (readOnly) return [];
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
@@ -40,7 +40,9 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
     .filter((tool) => mode !== "read-only" || readTools.has(tool.name))
     .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)
-    .filter((tool) => !tool.name.startsWith("propose_") || settings.evolution.enabled);
+    .filter((tool) => !tool.name.startsWith("propose_") || settings.evolution.enabled)
+    .filter((tool) => scope.env !== "Remote" || !["mcp_gateway", "memory_search"].includes(tool.name))
+    .map((tool) => tool.name === "run_command" && scope.env === "Remote" ? { ...tool, description: tool.description.replace("on the Local host, without sandbox isolation", "on the approved SSH host, without SendBox isolation") } : tool);
 }
 export function validateTool(call: ToolCall): void {
   const tool = tools.find((tool) => tool.name === call.name);

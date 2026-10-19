@@ -1,14 +1,15 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { fork, type ChildProcess } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  CommandSchema, isPlatformCommand, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls,
+  CommandSchema, isPlatformCommand, isRecord, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
+  type ExecutionCommand, type RemoteExecution, type Usage,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -20,14 +21,20 @@ import { authorizeTool } from "./permissions.ts";
 import { assistantMessage, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest } from "./worker-protocol.ts";
 import { assertSessionTool, folderPolicy } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
-import { contextHasImages, estimateModelContext, modelRequest, validateModelOptions } from "./model-controls.ts";
+import { contextHasImages, estimateModelContext, modelRequest, validateModelOptions, validateContextSize } from "./model-controls.ts";
 import { attentionEvents } from "./attention.ts";
-import { ModelRegistry } from "./model-registry.ts";
+import { ModelRegistry, localEndpointUrl } from "./model-registry.ts";
+import { RemoteRuntime } from "./remote.ts";
+import { McpKeychain } from "./gateway.ts";
+import { localWorker, type WorkerConnection, type WorkerFrame } from "./worker-connection.ts";
+import { frameDigest } from "./worker-wire.ts";
+import type { BridgeStatus } from "./remote-protocol.ts";
 
 interface Run {
   sessionId: string;
   turnId: string;
-  child: ChildProcess;
+  child: WorkerConnection;
+  executionId?: string;
   abort: AbortController;
   stepId?: string;
   inFlight: boolean;
@@ -60,11 +67,39 @@ export class ControlPlane extends EventEmitter {
   private deletingSessions = new Set<string>();
   private deletingProjects = new Set<string>();
   readonly provider: ModelRegistry;
+  readonly remote: RemoteRuntime;
+  private readonly remoteModels: ModelRegistry;
+  private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
   constructor(readonly store: EventStore, provider: ProviderAdapter = new CopilotAdapter(), private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string } = {}) {
     super();
     this.history = store.events();
     this.projection = projectEvents(this.history);
-    this.provider = new ModelRegistry(provider, () => this.projection.settings.values.localModels, platformOptions.models);
+    this.remote = new RemoteRuntime(platformOptions.stateDir ?? dirname(store.path), () => this.projection.settings.values.remote, workerPath, {
+      ...platformOptions.remote, changed: () => { this.provider?.synchronize(); platformOptions.remote?.changed?.(); this.emit("change", []); },
+    });
+    this.remoteModels = new ModelRegistry({
+      state: { status: "disconnected", models: [], login: null, diagnostic: null }, onChange: () => {},
+      refresh: async () => {}, cancel: async () => {}, logout: async () => {},
+      login: () => { throw new MoguriError("remote_account", "Configure the remote endpoint's explicit account, not a second Copilot login."); },
+      prepare: async () => { throw new MoguriError("remote_model", "This remote model is no longer configured. No provider was substituted.", 409); },
+    }, () => this.remote.readiness.ready ? this.projection.settings.values.remote?.models ?? [] : [], {
+      includeCopilot: false, environments: ["Remote"], vault: platformOptions.remote?.modelsVault ?? new McpKeychain("dev.moguri.profile.default.remote-models"),
+      idPrefix: () => {
+        const target = this.projection.settings.values.remote;
+        return `remote.${frameDigest(target ? [target.id, target.host, target.port, target.user, target.hostKey] : null).slice(0, 16)}.local`;
+      },
+      fetch: async (input, init) => {
+        const url = input instanceof Request ? input.url : input.toString(), target = this.remote.assertReady();
+        const endpoint = target.models.find((endpoint) => endpoint.enabled && new URL("models", localEndpointUrl(endpoint.baseUrl)).href === url);
+        if (!endpoint) throw new MoguriError("remote_model_scope", "Remote discovery is limited to the explicitly configured endpoint.", 403);
+        const header = new Headers(init?.headers).get("Authorization");
+        return this.remote.catalog(endpoint.baseUrl, header?.startsWith("Bearer ") ? header.slice(7) : null, init?.signal ?? AbortSignal.timeout(5000));
+      },
+    });
+    this.provider = new ModelRegistry(provider, () => this.projection.settings.values.localModels, {
+      ...platformOptions.models, additional: this.remoteModels,
+      copilotEnvironments: () => this.remote.readiness.ready && this.projection.settings.values.remote?.allowCopilot ? ["Local", "Remote"] : ["Local"],
+    });
     this.platform = new PlatformRuntime(store, platformOptions.stateDir ?? dirname(store.path), {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events, forget) => this.commit(events, undefined, forget),
       invalidateApprovals: (id) => this.invalidateApprovals(id),
@@ -83,7 +118,7 @@ export class ControlPlane extends EventEmitter {
       removeProject: (id, finish) => this.removeProject(id, finish),
       validateAdmission: (session, attachments = []) => {
         if (session.status === "archived") throw new MoguriError("archived", "Restore the session before running queued work.");
-        this.available(session.controls);
+        this.available(session.controls, true, session);
         this.imageModel(session, attachments);
         if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and resume this workspace first.", 409);
         this.paused.delete(session.id);
@@ -99,6 +134,9 @@ export class ControlPlane extends EventEmitter {
         const result = finish([{ event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
         this.invalidateApprovals(); return result;
       },
+      remoteStatus: () => this.remote.readiness,
+      remoteCommand: (command, finish) => this.remoteCommand(command, finish),
+      repositoryContext: (session) => this.repositoryContext(session),
     }, platformOptions);
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
@@ -111,6 +149,11 @@ export class ControlPlane extends EventEmitter {
   }
   async initialize(): Promise<void> {
     this.platform.recover();
+    const interruptedExecutions = this.projection.executions.filter((execution) => ["launching", "running", "stopping"].includes(execution.status));
+    if (interruptedExecutions.length) this.commit(interruptedExecutions.map((execution) => ({
+      event_type: "execution.changed", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
+      payload: { executionId: execution.id, status: "unconfirmed", cancellation: "unconfirmed", cleanup: "unconfirmed", diagnostic: "Control plane restarted. Reconcile the existing remote run; no replacement or effect was replayed." },
+    })));
     for (const session of [...this.projection.sessions]) {
       if (session.turnId) {
         const completed = new Set(this.history.filter((event) => event.turn_id === session.turnId && event.event_type === "tool.completed").map((event) => event.event_type === "tool.completed" ? event.payload.call.id : ""));
@@ -138,17 +181,96 @@ export class ControlPlane extends EventEmitter {
       capabilities: [
         { env: "Local", ready: process.platform === "darwin", reason: process.platform === "darwin" ? "Runs directly on this Mac. Shell commands are not sandboxed." : "Local supervision is validated on macOS only in this checkpoint." },
         { env: "Sandbox", ready: false, reason: "SendBox worker transport and guest artifacts are not validated in this checkpoint. No Local fallback." },
-        { env: "Remote", ready: false, reason: "SSH worker transport is not implemented in this checkpoint. No Local fallback." },
+        { env: "Remote", ready: this.remote.readiness.ready && this.remote.readiness.configDigest === frameDigest(this.projection.settings.values.remote), reason: this.remote.readiness.diagnostic },
       ],
     };
   }
   events(after: number): StoredEvent[] { return this.history.filter((event) => event.seq > after && event.profile_id === PROFILE_ID); }
   private commit(events: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest): void {
+    const context = this.workerFrame.getStore();
+    if (context && !context.recorded) {
+      const execution = this.projection.executions.find((value) => value.id === context.frame.executionId);
+      if (!execution) throw new MoguriError("remote_frame", "The owned remote frame has no execution identity.", 409);
+      events = [...events, { event_type: "execution.frame_recorded", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId, payload: context.frame }];
+    }
     const appended = this.store.commit(events, receipt, forget, (primary) => attentionEvents({ ...this.snapshot(), ...projectEvents([...this.history, ...primary]) }, primary));
+    if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended);
     this.projection = projectEvents(this.history);
     this.emit("change", appended);
+    this.remote.synchronize();
     this.provider.synchronize();
+  }
+  private remoteWorkspace(session: Session): string | null {
+    if (session.projectId === null) return null;
+    const path = this.platform.sessions.projects.configuration(session.projectId).values.remotePath;
+    if (!path || !path.startsWith("/") || /[\0\r\n]/.test(path)) throw new MoguriError("remote_workspace", "Configure this project's explicit absolute remote workspace. Its local folder was not reused.", 409);
+    return path;
+  }
+  private async repositoryContext(session: Session): Promise<string> {
+    if (!session.projectId) return "";
+    const project = this.projectRequired(session.projectId);
+    return session.controls.env === "Remote" ? this.remote.context(this.remoteWorkspace(session)!, this.platform.sessions.projects.configuration(project.id).values) : this.platform.sessions.projects.context(project);
+  }
+  private executionStatus(id: string, status: BridgeStatus): void {
+    const execution = this.projection.executions.find((value) => value.id === id);
+    if (!execution || status.runId !== id) return;
+    this.commit([{ event_type: "execution.changed", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
+      payload: { executionId: id, status: status.status, cancellation: status.cancellation, cleanup: status.cleanup, diagnostic: status.diagnostic, ...(status.workerPid ? { workerPid: status.workerPid } : {}) } }]);
+    queueMicrotask(() => this.pumpAll());
+  }
+  private modelUsage(session: Session, request: Extract<WorkerRequest, { kind: "model.complete" }>): Usage {
+    const message = assistantMessage(request.message), prior = session.usage.find((usage) => usage.stepId === request.stepId);
+    return {
+      stepId: request.stepId, modelId: prior?.modelId ?? message.model, providerId: prior?.providerId, apiModelId: prior?.apiModelId, source: prior?.source,
+      role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
+      inputTokens: request.usageReported ? message.usage.input : null, outputTokens: request.usageReported ? message.usage.output : null,
+      cacheReadTokens: request.usageReported ? message.usage.cacheRead : null, totalTokens: request.usageReported ? message.usage.totalTokens : null,
+      estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: request.generationMs,
+      quality: request.usageReported ? "provider-reported" : "unknown", outcome: message.stopReason,
+      contextWindow: prior?.contextWindow, contextEstimate: prior?.contextEstimate, thinkingEffort: prior?.thinkingEffort,
+    };
+  }
+  private async remoteCommand(command: ExecutionCommand, finish: WorkspaceFinish): Promise<CommandResult> {
+    if (command.type === "remote.probe") { await this.remote.probe(); await this.remoteModels.refresh(); this.emit("change", []); return finish([]); }
+    if (command.type === "remote.model-token.set" || command.type === "remote.model-token.clear") {
+      if ([...this.runs.values()].some((run) => run.executionId)) throw new MoguriError("provider_busy", "Stop owned remote work before changing its endpoint account.", 409);
+      this.remote.assertReady();
+      await this.remoteModels.token(command.endpointId, command.type === "remote.model-token.set" ? command.token : undefined);
+      const settings = this.projection.settings;
+      const result = finish([{ event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
+      this.invalidateApprovals(); return result;
+    }
+    const execution = this.projection.executions.find((value) => value.id === command.executionId);
+    if (!execution) throw new MoguriError("remote_execution", "This remote execution is outside the profile.", 404);
+    if (this.runs.get(execution.sessionId)?.executionId === execution.id) throw new MoguriError("remote_active", "Stop/wait for this live execution before offline reconciliation or inspection acknowledgement.", 409);
+    if (command.type === "remote.acknowledge") return finish([{ event_type: "execution.changed", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
+      payload: { executionId: execution.id, status: execution.status, cancellation: execution.cancellation, cleanup: "acknowledged", diagnostic: "The user acknowledged remote process inspection. This does not retrospectively prove containment or successful cleanup." } }]);
+    const inspection = await this.remote.inspect(execution);
+    if (inspection.status.runId !== execution.id || inspection.info.workerDigest !== execution.workerDigest) throw new MoguriError("remote_identity", "Remote inspection changed its owned run/build identity. No result was applied.", 409);
+    const events: EventInput[] = [];
+    const session = this.session(execution.sessionId);
+    let cursor = execution.lastSequence;
+    for (const frame of inspection.frames) {
+      if (frame.sequence !== cursor + 1 || frameDigest(frame.request) !== frame.digest) throw new MoguriError("remote_frame", "Late remote frame identity/digest/sequence is invalid.", 409);
+      cursor = frame.sequence;
+      const scope = { profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId, ...("stepId" in frame.request ? { step_id: frame.request.stepId } : {}) };
+      if (frame.request.kind === "model.complete") {
+        const stepId = frame.request.stepId;
+        const prior = session.usage.find((usage) => usage.stepId === stepId);
+        if (prior?.quality === "unknown" && frame.request.usageReported && assistantMessage(frame.request.message).model === prior.apiModelId) events.push({ ...scope, event_type: "model.late_usage", payload: { usage: this.modelUsage(session, frame.request), executionId: execution.id, sequence: frame.sequence } });
+      }
+      if (frame.request.kind === "tool.complete") {
+        const call = frame.request.call;
+        const declared = this.history.some((event) => event.event_type === "model.completed" && event.turn_id === execution.turnId && event.payload.message.toolCalls?.some((value) => frameDigest(value) === frameDigest(call)));
+        if (declared) events.push({ ...scope, event_type: "tool.completed", payload: { call, text: frame.request.text, isError: frame.request.isError, outcome: frame.request.outcome } });
+      }
+      events.push({ ...scope, event_type: "execution.frame_recorded", payload: { executionId: execution.id, sequence: frame.sequence, digest: frame.digest } });
+    }
+    events.push({ event_type: "execution.changed", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
+      payload: { executionId: execution.id, status: inspection.status.status, cancellation: inspection.status.cancellation, cleanup: inspection.status.cleanup,
+        diagnostic: `${inspection.status.diagnostic ?? "Owned remote status inspected."} Late receipts do not replay tools or rewrite the original partial turn as successful.`, ...(inspection.status.workerPid ? { workerPid: inspection.status.workerPid } : {}) } });
+    return finish(events);
   }
   private startup(projectId: string | null, overrides: ControlDefaults = {}) {
     const configuration = projectId ? this.platform.sessions.projects.configuration(projectId) : null;
@@ -224,9 +346,12 @@ export class ControlPlane extends EventEmitter {
       await this.platform.sessions.terminals.closeSession(session.id);
     }
     const deadline = Date.now() + 6500;
-    while (sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id)) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    const active = () => sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id)) ||
+      this.projection.executions.some((execution) => sessions.some((session) => session.id === execution.sessionId) && this.remote.owns(execution.id));
+    while (active() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     if (sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id))) throw new MoguriError("cleanup_unconfirmed", "Owned work has not settled. Nothing was deleted; inspect processes first.", 409);
     if (this.projection.terminals.some((terminal) => sessions.some((session) => session.id === terminal.sessionId) && terminal.status === "unconfirmed")) throw new MoguriError("cleanup_unconfirmed", "A previous terminal has unconfirmed cleanup. Inspect and acknowledge it before deletion.", 409);
+    if (this.projection.executions.some((execution) => sessions.some((session) => session.id === execution.sessionId) && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("remote_cleanup", "Reconcile or explicitly acknowledge inspection of owned remote execution before deletion. SSH exit is not cleanup proof.", 409);
     for (const session of sessions) {
       const inspected = this.history.findLast((event) => (session.projectId ? event.project_id === session.projectId : event.session_id === session.id) && event.event_type === "session.resumed")?.seq ?? 0;
       const uncertainTool = this.history.findLast((event) => event.session_id === session.id && event.event_type === "tool.completed" && ["partial", "unconfirmed"].includes(event.payload.outcome))?.seq ?? 0;
@@ -242,6 +367,7 @@ export class ControlPlane extends EventEmitter {
     try {
       await this.settleOwned(session.id);
       const current = this.session(session.id);
+      for (const execution of this.projection.executions.filter((value) => value.sessionId === session.id)) await this.remote.forget(execution);
       const detach = this.projection.sessions.filter((child) => child.parentSessionId === session.id).map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } }));
       const result = finish([...detach, { event_type: "session.deleted", profile_id: PROFILE_ID, project_id: session.projectId, payload: { deletedSessionId: session.id, usage: current.usage } }], { id: session.id }, { sessions: [session.id] });
       this.paused.delete(session.id); return result;
@@ -255,6 +381,7 @@ export class ControlPlane extends EventEmitter {
       const sessions = this.projection.sessions.filter((session) => session.projectId === id);
       await this.platform.cancelProject(id);
       for (const session of sessions) if (this.projection.sessions.some((current) => current.id === session.id)) await this.settleOwned(session.id);
+      for (const execution of this.projection.executions.filter((value) => value.projectId === id)) await this.remote.forget(execution);
       this.revision(this.platform.sessions.projects.configuration(id).revision, revision);
       const usage = [...this.projection.sessions.filter((session) => session.projectId === id).flatMap((session) => session.usage),
         ...this.history.flatMap((event) => event.event_type === "session.deleted" && event.project_id === id ? event.payload.usage : [])];
@@ -281,7 +408,7 @@ export class ControlPlane extends EventEmitter {
   private subagent(parent: Session, prompt: string): string {
     if (!this.projection.settings.values.subagents.enabled || parent.kind !== "agent" || parent.mode !== "agent" || parent.pendingMode === "read-only") throw new MoguriError("subagents_disabled", "Only explicitly enabled, depth-one read-only subagents are supported.", 409);
     if (this.projection.sessions.filter((session) => session.kind === "subagent" && (session.turnId || session.queue.length)).length >= this.projection.settings.values.subagents.maxParallel) throw new MoguriError("subagent_limit", "The bounded subagent limit is already in use.", 409);
-    this.available(parent.controls);
+    this.available(parent.controls, true, parent);
     const id = randomUUID();
     const item = { id: randomUUID(), text: prompt, attachments: [], delivery: "queue" as const };
     this.commit([
@@ -350,21 +477,27 @@ export class ControlPlane extends EventEmitter {
     const messages = this.context(session.id);
     if (session.draft.text || session.draft.attachments.length) messages.push(this.contextItem({ text: session.draft.text, attachments: session.draft.attachments }));
     const settings = this.platform.sessions.projects.values(project?.id);
-    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project), metachat: session.kind === "metachat" });
+    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project), metachat: session.kind === "metachat", env: session.controls.env });
     const systemPrompt = await this.platform.effectivePrompt(session);
     return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools }), contextWindow: model ? session.controls.modelOptions?.contextWindow ?? model.contextWindow : null, modelMaximum: model?.contextWindow ?? null, source: "estimated" as const };
   }
-  private available(controls: Controls, requireModel = true): void {
+  private available(controls: Controls, requireModel = true, session?: Session): void {
     if (!this.projection.policy.allowedEnvs.includes(controls.env)) throw new MoguriError("env_denied", `${controls.env} is excluded by the user-only allowed-env policy.`, 403);
     const capability = this.snapshot().capabilities.find((capability) => capability.env === controls.env);
     if (!capability?.ready) throw new MoguriError("env_unavailable", capability?.reason ?? "Execution environment unavailable.", 409);
     if (controls.autonomy === "Autopilot Max") throw new MoguriError("autonomy_unavailable", "Autopilot Max requires an evaluated decision provider. It cannot silently self-approve.", 409);
     if (controls.autonomy === "Autopilot" && !this.projection.settings.values.permissions.tools.some((rule) => rule.decision === "allow") && !this.projection.settings.values.permissions.commands.some((rule) => rule.decision === "allow")) throw new MoguriError("delegation_required", "Configure explicit bounded tool or exact-command delegations before selecting Autopilot.", 409);
     if (controls.budget.kind !== "unlimited") throw new MoguriError("budget_unavailable", "Finite budgets are not enforceable in this checkpoint. No cap has been applied.", 409);
+    if (requireModel && session && session.kind === "agent" && session.mode === "agent" && this.projection.executions.some((execution) => (session.projectId ? execution.projectId === session.projectId : execution.sessionId === session.id) && this.runs.get(execution.sessionId)?.executionId !== execution.id && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("remote_cleanup", "Owned remote cleanup is still pending/unconfirmed. Wait for its terminal status, reconcile it, or explicitly acknowledge actual process inspection before new work.", 409);
+    if (controls.env === "Remote") {
+      this.remote.assertReady();
+      if (session) this.remoteWorkspace(session);
+    }
     const model = this.provider.state.models.find((model) => model.id === controls.modelId);
     if (requireModel && !model || controls.modelId !== null && !model) {
       throw new MoguriError("model_unavailable", "Connect Copilot or configure a local endpoint, then explicitly select an available model. No provider was substituted.", 409);
     }
+    if (model?.environments && !model.environments.includes(controls.env)) throw new MoguriError("model_env", "This model has not been discovered/approved in the selected environment. No endpoint or execution location was substituted.", 409);
     validateModelOptions(model, controls.modelOptions);
   }
   private attachments(session: Session, attachments: Session["draft"]["attachments"]): void {
@@ -451,7 +584,7 @@ export class ControlPlane extends EventEmitter {
       case "session.configure":
         if (session.turnId) throw new MoguriError("turn_active", "Stop the current turn before changing its controls.", 409);
         this.revision(session.revision, command.expectedRevision);
-        this.available(command.controls, false);
+        this.available(command.controls, false, session);
         return finish([this.event(session, "session.configured", { controls: command.controls })], { revision: session.revision + 1 });
       case "session.archive": {
         await this.settleOwned(session.id);
@@ -466,7 +599,7 @@ export class ControlPlane extends EventEmitter {
         if (session.queue.length && session.queue.every((item) => item.delivery === "steer") && !this.blocked(session)) {
           throw new MoguriError("unapplied_steer", "An unapplied steer belongs to its old turn. Explicitly queue it as a new turn or remove it.", 409);
         }
-        if (session.queue.some((item) => item.delivery !== "steer")) this.available(session.controls);
+        if (session.queue.some((item) => item.delivery !== "steer")) this.available(session.controls, true, session);
         this.paused.delete(session.id);
         finish([...session.queue.filter((item) => item.held && item.delivery !== "steer").map((item) => this.event(session, "queue.released", { messageId: item.id })), this.event(session, "session.resumed", {})]);
         this.pumpAll();
@@ -491,7 +624,7 @@ export class ControlPlane extends EventEmitter {
         this.revision(session.draft.revision, command.expectedRevision);
         if (command.held && command.delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
         if (!command.held) {
-          this.available(session.controls);
+          this.available(session.controls, true, session);
           this.imageModel(session, session.draft.attachments);
           if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "A prior turn failed or has unconfirmed effects. Inspect the workspace, then explicitly Resume after inspection before starting new work.", 409);
         }
@@ -597,7 +730,7 @@ export class ControlPlane extends EventEmitter {
       if (session.kind === "subagent" && [...this.runs.values()].filter((run) => this.session(run.sessionId).kind === "subagent").length >= this.projection.settings.values.subagents.maxParallel) continue;
       if (session.kind === "agent" && (session.pendingMode ?? session.mode) === "agent" && this.otherWriter(session)) continue;
       const item = session.queue.find((item) => item.delivery !== "steer" && !item.held)!;
-      try { this.available(session.controls); this.imageModel(session, item.attachments); } catch (error) {
+      try { this.available(session.controls, true, session); this.imageModel(session, item.attachments); } catch (error) {
         const diagnostic = error instanceof Error ? error.message : "Queued turn admission failed.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
         continue;
@@ -607,33 +740,50 @@ export class ControlPlane extends EventEmitter {
       this.commit([...(session.pendingMode ? [this.event(session, "session.mode_changed", { mode: session.pendingMode })] : []), { ...this.event(session, "turn.started", { item, controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest }), turn_id: turnId }]);
       const current = this.session(session.id);
       try {
+        const context = this.context(current.id); validateContextSize(context);
         const project = this.projection.projects.find((project) => project.id === current.projectId);
-        const child = fork(this.workerPath, [], {
-          execPath: process.execPath, execArgv: this.workerPath.endsWith(".ts") ? ["--import", "tsx"] : [],
-          stdio: ["ignore", "ignore", "pipe", "ipc"],
-          env: { PATH: process.env.PATH, HOME: process.env.HOME, MOGURI_TURN_ID: turnId },
-        });
-        const run: Run = { sessionId: current.id, turnId, child, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set() };
+        let execution: RemoteExecution | undefined;
+        if (current.controls.env === "Remote") {
+          const target = this.remote.assertReady();
+          execution = { id: randomUUID(), sessionId: current.id, projectId: current.projectId, turnId, target, workspace: this.remoteWorkspace(current), workerDigest: this.remote.readiness.workerDigest!,
+            configDigest: frameDigest(target), createdAt: new Date().toISOString(), status: "launching", cancellation: "none", cleanup: "pending", diagnostic: null, lastSequence: 0, workerPid: null };
+          this.commit([{ ...this.event(current, "execution.started", { execution }), turn_id: turnId }]);
+        }
+        const child = execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
+        const run: Run = { sessionId: current.id, turnId, child, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set() };
         this.runs.set(current.id, run);
-        child.stderr?.on("data", (data: Buffer) => { run.stderr = (run.stderr + data.toString()).slice(-4096); });
-        child.on("message", (message: unknown) => {
+        child.events.on("stderr", (data) => { run.stderr = (run.stderr + data).slice(-4096); });
+        child.events.on("message", (message: unknown, frame) => {
           run.chain = run.chain.then(async () => {
             if (run.done) return;
             const request = parse(WorkerRequestSchema, message);
-            await this.workerMessage(run, request);
+            if (frame) {
+              const execution = this.projection.executions.find((value) => value.id === run.executionId);
+              if (!execution || frame.executionId !== execution.id || frameDigest(request) !== frame.digest) throw new MoguriError("remote_frame", "Remote frame does not belong to this exact execution.", 409);
+              if (frame.sequence <= execution.lastSequence) {
+                const known = this.history.find((event) => event.event_type === "execution.frame_recorded" && event.payload.executionId === execution.id && event.payload.sequence === frame.sequence);
+                if (known?.event_type !== "execution.frame_recorded" || known.payload.digest !== frame.digest) throw new MoguriError("remote_frame", "A replay changed an already recorded remote frame.", 409);
+                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
+              } else {
+                if (frame.sequence !== execution.lastSequence + 1) throw new MoguriError("remote_cursor", "Remote frame sequence has a gap. No operation was replayed.", 409);
+                const context = { frame, recorded: false };
+                await this.workerFrame.run(context, async () => { await this.workerMessage(run, request); if (!context.recorded) this.commit([]); });
+              }
+              child.acknowledge?.(frame.sequence);
+            } else await this.workerMessage(run, request);
           }).catch((error: unknown) => {
             console.error("Moguri worker protocol failure:", error instanceof MoguriError ? error.code : "worker_error");
             this.finishRun(run, "partial", "Worker protocol failed. Inspect the workspace; cleanup is unconfirmed.");
             run.child.kill("SIGTERM");
           });
         });
-        child.on("error", () => this.finishRun(run, "failed", "Could not start the agent worker. Rebuild Moguri and check the bundled Node runtime."));
-        child.on("exit", (code, signal) => {
+        child.events.on("error", (error) => { this.finishRun(run, execution ? "partial" : "failed", execution ? error.message : "Could not start the agent worker. Rebuild Moguri and check the bundled Node runtime."); if (execution) child.kill("SIGTERM"); });
+        child.events.on("exit", (code, signal) => {
           void run.chain.then(() => {
             if (!run.done) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: project?.path ?? null, context: this.context(current.id), readOnly: current.kind === "subagent" });
+        this.reply(run, { kind: "start", root: execution ? execution.workspace : project?.path ?? null, context, readOnly: current.kind === "subagent" });
       } catch {
         this.commit([this.event(current, "turn.finished", { outcome: "failed", diagnostic: "Agent worker launch failed. Rebuild Moguri and retry explicitly." })]);
       }
@@ -649,8 +799,10 @@ export class ControlPlane extends EventEmitter {
     const configuration = current.projectId ? this.platform.sessions.projects.configuration(current.projectId) : null;
     const permission = this.projection.settings.permissionRevision;
     const policy = this.projection.policy.revision;
-    const root = this.projection.projects.find((project) => project.id === current.projectId)?.path ?? null;
-    await assertSessionTool(current, root, this.platform.sessions.projects.values(current.projectId), call);
+    const root = current.controls.env === "Remote" ? this.remoteWorkspace(current) : this.projection.projects.find((project) => project.id === current.projectId)?.path ?? null;
+    const execution = this.projection.executions.find((value) => value.id === this.runs.get(current.id)?.executionId);
+    if (execution && (execution.workspace !== root || execution.configDigest !== frameDigest(this.projection.settings.values.remote))) throw new MoguriError("remote_changed", "Remote workspace/target changed after turn admission. No new effect was authorized in the old worker.", 409);
+    await assertSessionTool(current, root, this.platform.sessions.projects.values(current.projectId), call, current.controls.env === "Local");
     if (this.session(current.id).revision !== current.revision || configuration && this.platform.sessions.projects.configuration(configuration.projectId).revision !== configuration.revision ||
       this.projection.settings.permissionRevision !== permission || this.projection.policy.revision !== policy) throw new MoguriError("policy_changed", "Session or project policy changed during authorization. No new effect was admitted.", 409);
   }
@@ -662,7 +814,10 @@ export class ControlPlane extends EventEmitter {
   private async workerMessage(run: Run, request: WorkerRequest): Promise<void> {
     const session = this.session(run.sessionId);
     if (request.kind === "ack") {
-      if (run.abort.signal.aborted) this.commit([this.event(session, "turn.stop_acknowledged", {})]);
+      if (run.abort.signal.aborted) {
+        const execution = this.projection.executions.find((value) => value.id === run.executionId);
+        this.commit([this.event(session, "turn.stop_acknowledged", {}), ...(execution ? [{ ...this.event(session, "execution.changed", { executionId: execution.id, status: "stopping", cancellation: "acknowledged", cleanup: execution.cleanup, diagnostic: "Owned remote worker acknowledged cancellation." }) }] : [])]);
+      }
       return;
     }
     if (request.kind === "finished") {
@@ -673,14 +828,19 @@ export class ControlPlane extends EventEmitter {
     if (request.kind === "boundary") {
       if (run.abort.signal.aborted) { this.reply(run, { kind: "reply", requestId: request.requestId, error: "Turn stopping." }); return; }
       try {
+        if (run.executionId) {
+          const execution = this.projection.executions.find((value) => value.id === run.executionId);
+          if (!execution || execution.workspace !== this.remoteWorkspace(session) || execution.configDigest !== frameDigest(this.projection.settings.values.remote)) throw new MoguriError("remote_changed", "The target/workspace changed during this turn. No new model access was sent to the old worker.", 409);
+          if (session.controls.modelId && !session.controls.modelId.startsWith("remote.") && !this.projection.settings.values.remote?.allowCopilot) throw new MoguriError("remote_credential", "Explicitly allow scoped Copilot access on this verified host before dispatching it.", 403);
+        }
         let before = this.session(run.sessionId);
         if (before.pendingMode === "agent" && before.mode !== "agent") {
           while (this.otherWriter(before)) { run.abort.signal.throwIfAborted(); await new Promise((resolve) => setTimeout(resolve, 30)); before = this.session(run.sessionId); }
           if (before.projectId) this.writerReservations.set(before.projectId, before.id);
         }
         const prepared = await this.provider.prepare(session.controls.modelId!, run.abort.signal);
+        if (run.executionId && !session.controls.modelId!.startsWith("remote.")) await this.remote.verifyCopilot(prepared, run.abort.signal);
         if (run.done || run.abort.signal.aborted) return;
-        if (Buffer.byteLength(JSON.stringify(this.context(session.id))) > 1024 * 1024) throw new MoguriError("context_limit", "The conversation exceeds the checkpoint's 1 MiB context limit. Start a new session; existing history is preserved.");
         let current = this.session(run.sessionId);
         const steers = current.queue.filter((item) => item.delivery === "steer" && item.targetTurnId === run.turnId);
         if (current.pendingMode && steers.some((item) => item.mode)) {
@@ -693,11 +853,11 @@ export class ControlPlane extends EventEmitter {
         run.granted.clear();
         const project = this.projection.projects.find((project) => project.id === current.projectId);
         const projectSettings = this.platform.sessions.projects.values(project?.id);
-        const tools = effectiveTools(this.projection.settings.values, current.kind === "subagent", current.mode, folderPolicy(projectSettings), { project: Boolean(project), metachat: current.kind === "metachat" });
+        const tools = effectiveTools(this.projection.settings.values, current.kind === "subagent", current.mode, folderPolicy(projectSettings), { project: Boolean(project), metachat: current.kind === "metachat", env: current.controls.env });
         run.declaredTools = new Set(tools.map((tool) => tool.name));
         const started = this.history.find((event) => event.event_type === "turn.started" && event.turn_id === run.turnId);
         const prompt = started?.event_type === "turn.started" && started.payload.promptDigest ? this.store.blob(started.payload.promptDigest) : this.platform.prompt(current);
-        run.repositoryContext ??= project ? await this.platform.sessions.projects.context(project) : "";
+        run.repositoryContext ??= await this.repositoryContext(current);
         const effectivePrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext);
         if (run.done || run.abort.signal.aborted) return;
         const configured = modelRequest(prepared.model, current.controls.modelOptions, {
@@ -737,20 +897,7 @@ export class ControlPlane extends EventEmitter {
           reasoning: message.content.filter((block) => block.type === "thinking" && !block.redacted).map((block) => block.type === "thinking" ? block.thinking : "").join(""),
           toolCalls: calls, timestamp: new Date(message.timestamp).toISOString(), outcome: message.stopReason,
         },
-        usage: {
-          stepId: request.stepId, modelId: session.usage.find((usage) => usage.stepId === request.stepId)?.modelId ?? message.model,
-          providerId: session.usage.find((usage) => usage.stepId === request.stepId)?.providerId, apiModelId: session.usage.find((usage) => usage.stepId === request.stepId)?.apiModelId, source: session.usage.find((usage) => usage.stepId === request.stepId)?.source,
-          role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
-          inputTokens: request.usageReported ? message.usage.input : null,
-          outputTokens: request.usageReported ? message.usage.output : null,
-          cacheReadTokens: request.usageReported ? message.usage.cacheRead : null,
-          totalTokens: request.usageReported ? message.usage.totalTokens : null,
-          estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: request.generationMs,
-          quality: request.usageReported ? "provider-reported" : "unknown", outcome: message.stopReason,
-          contextWindow: session.usage.find((usage) => usage.stepId === request.stepId)?.contextWindow,
-          contextEstimate: session.usage.find((usage) => usage.stepId === request.stepId)?.contextEstimate,
-          thinkingEffort: session.usage.find((usage) => usage.stepId === request.stepId)?.thinkingEffort,
-        },
+        usage: this.modelUsage(session, request),
       }, request.stepId)]);
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
       return;
@@ -762,13 +909,16 @@ export class ControlPlane extends EventEmitter {
     }
     if (request.kind === "process") {
       if (!run.granted.has(request.callId)) throw new Error("Process does not belong to an approved tool.");
-      this.commit([this.event(session, "process.started", { callId: request.callId, pid: request.pid, processGroup: request.pid }, request.stepId)]);
+      this.commit([this.event(session, "process.started", { callId: request.callId, pid: request.pid, processGroup: request.pid, env: session.controls.env }, request.stepId)]);
       return;
     }
     if (request.kind === "delegate") {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
+      if (session.controls.env === "Remote" && (request.call.name === "mcp_gateway" || request.call.name === "memory_search" || request.call.name === "moguri_config" && isRecord(request.call.arguments.proposal) && request.call.arguments.proposal.target === "repo-instructions")) {
+        this.reply(run, { kind: "reply", requestId: request.requestId, error: "This capability has no qualified remote workspace transport. No local host operation or repository fallback was used." }); return;
+      }
       void this.platform.delegate(session, request.call, run.abort.signal).then((result) => this.reply(run, { kind: "reply", requestId: request.requestId, value: result })).catch((error: unknown) => {
         this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Capability failed; effects and cleanup may be unconfirmed.", isError: true, outcome: run.abort.signal.aborted || request.call.name === "mcp_gateway" ? "partial" : "failed" } });
       });
@@ -784,7 +934,7 @@ export class ControlPlane extends EventEmitter {
         if (!run.declaredTools.has(request.call.name)) throw new MoguriError("tool_unavailable", "This capability was not enabled or declared for this turn.");
         const project = this.projection.projects.find((project) => project.id === session.projectId);
         await this.assertCurrentTool(session, request.call);
-        const authorization = authorizeTool(this.projection.settings.values, request.call, project?.path ?? null);
+        const authorization = authorizeTool(this.projection.settings.values, request.call, session.controls.env === "Remote" ? this.remoteWorkspace(session) : project?.path ?? null);
         if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
         const approval = { id: randomUUID(), stepId: request.stepId, call: request.call, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision,
           recommendation: session.controls.autonomy === "Guided" ? session.messages.filter((message) => message.role === "assistant").at(-1)?.text.slice(0, 1200) || "The model supplied no recommendation. A human must decide." : undefined };
@@ -843,6 +993,7 @@ export class ControlPlane extends EventEmitter {
       diagnostic = `${diagnostic ?? "Turn interrupted."} The in-flight request's final usage is unavailable.`;
     }
     const session = this.session(run.sessionId);
+    const execution = this.projection.executions.find((value) => value.id === run.executionId);
     if (run.granted.size) { outcome = "partial"; diagnostic = "A tool was approved but its execution result or cleanup was not confirmed. Inspect the workspace before continuing."; }
     this.commit([
       ...(session.pendingMode ? [
@@ -854,6 +1005,7 @@ export class ControlPlane extends EventEmitter {
         isError: true, outcome: run.granted.has(call.id) ? "unconfirmed" : "stopped",
       }, run.stepId)),
       this.event(session, "turn.finished", { outcome, diagnostic }, run.stepId),
+      ...(execution && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) ? [this.event(session, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Turn settled locally; remote worker/descendant cleanup awaits its actual terminal status or explicit reconciliation." })] : []),
     ]);
     this.runs.delete(run.sessionId);
     if (outcome === "partial" || outcome === "failed") for (const current of this.projection.sessions) {
@@ -869,6 +1021,7 @@ export class ControlPlane extends EventEmitter {
     await this.platform.close();
     const deadline = Date.now() + 6000;
     while (this.runs.size && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    await this.remote.close();
     this.removeAllListeners();
   }
 }

@@ -8,6 +8,8 @@ import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse
 import { ControlDefaultsSchema } from "./controls.ts";
 import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
+import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
+export * from "./execution.ts";
 export * from "./workspace.ts";
 export * from "./config.ts";
 export * from "./sessions.ts";
@@ -52,6 +54,7 @@ export const SettingsSchema = object({
   notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
+  remote: Type.Union([RemoteTargetSchema, Type.Null()]),
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
@@ -64,6 +67,7 @@ export const defaultSettings = (): UserSettings => ({
   retention: { deleteArchived: false, afterDays: 30 },
   notifications: { inApp: true, os: false, previewContent: false },
   localModels: [], startup: { global: {}, profile: {} },
+  remote: null,
 });
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
@@ -72,6 +76,7 @@ const section = Type.Union([
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("startup"),
+  Type.Literal("remote"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("settings.update"), expectedRevision: revision, settings: SettingsSchema, acknowledgePromptRisk: Type.Boolean() }),
@@ -100,6 +105,7 @@ export const PlatformCommandSchema = Type.Union([
   OAuthCommandSchema,
   EngagementCommandSchema,
   InputCommandSchema,
+  ExecutionCommandSchema,
 ]);
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
@@ -119,6 +125,7 @@ export const QuerySchema = Type.Union([
   OAuthQuerySchema,
   EngagementQuerySchema,
   InputQuerySchema,
+  ExecutionQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -149,6 +156,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   oauthAuthorizations: McpAuthorization[];
   configurationProposals: ConfigurationProposal[];
   attention: Attention[];
+  executions: RemoteExecution[];
 }
 export interface VoiceStatus {
   runtimeReady: boolean; modelReady: boolean; diagnostic: string | null; modelId: string;
@@ -161,6 +169,7 @@ export type PlatformResponse =
   | OAuthResponse
   | EngagementResponse
   | InputResponse
+  | ExecutionResponse
   | { type: "prompt.preview"; editable: string; effective: string; warning: string }
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }

@@ -34,6 +34,7 @@ export const slashCommands = [
   { name: "run", description: "Release a held prompt", argument: "ID" },
   { name: "settings", description: "Open shared settings" },
   { name: "models", description: "Choose a Copilot model" },
+  { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
   { name: "help", description: "List slash commands" },
 ] as const;
 export const attachmentTriggers = { "^": "Local text file", ":": "Folder", "#": "GitHub issue or PR", "!": "Session", "@": "Project file" } as const;
@@ -56,6 +57,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "remote": {
+      const [action, id, extra] = command.argument.split(/\s+/);
+      if (!action) return { kind: "text", text: JSON.stringify((await sdk.remote.status()).remote, null, 2) };
+      if (action === "probe" && !id) { await sdk.remote.probe(); return { kind: "text", text: JSON.stringify((await sdk.remote.status()).remote, null, 2) }; }
+      if (action === "reconcile" && id && !extra) { await sdk.remote.reconcile(id); return { kind: "ok", message: "Existing remote receipts/status reconciled. No effect was replayed; partial turns were not rewritten as successful." }; }
+      if (action === "acknowledge" && id && !extra) { await sdk.remote.acknowledge(id, true); return { kind: "ok", message: "Your remote process-inspection acknowledgement was recorded. This does not prove containment or cleanup." }; }
+      throw new ClientError("remote_action", "Use /remote, /remote probe, /remote reconcile ID, or only after process inspection /remote acknowledge ID.");
+    }
     case "attach-file":
     case "attach-image": {
       if (!command.argument) throw new ClientError("attachment_path", "Choose an explicit absolute file path.");
@@ -128,15 +137,16 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "panel", panel: "Terminal" };
     case "browser": {
       let url = command.argument || session.browserUrl;
-      if (!url && session.projectId) {
+      if (!url && session.projectId && session.controls.env === "Local") {
         const { configuration } = await sdk.projects.configuration(session.projectId);
         if (configuration.values.port) url = `http://127.0.0.1:${configuration.values.port}/`;
       }
       if (url) await sdk.sessions.browser(sessionId, url);
-      if (!url && client !== "desktop") throw new ClientError("browser_url", "Use /browser URL or configure this project's preview port.");
+      if (!url && client !== "desktop") throw new ClientError("browser_url", "Use /browser URL. A remote localhost port is not mapped to this client without an explicitly approved tunnel.");
       return { kind: "panel", panel: "Browser", ...(url ? { url } : {}) };
     }
     case "diff": {
+      if (session.controls.env !== "Local") throw new ClientError("diff_env", "Diff transport is not qualified for this env yet. No local checkout was read as a fallback.");
       if (!session.projectId) throw new ClientError("project_required", "Select a project to inspect its local changes.");
       if (client === "desktop") return { kind: "panel", panel: "Changes" };
       const result = await sdk.projects.git(session.projectId);
