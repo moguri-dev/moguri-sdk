@@ -5,9 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 2 deliberately rejects incompatible running
-services. Database migration 2 preserves schema-1 history, sessions, drafts,
-receipts and blobs. Restart a previously running alpha service explicitly with
+This is an alpha API. Protocol 3 deliberately rejects incompatible running
+services. Database migration 3 preserves schema-1/2 history, sessions, drafts,
+receipts, blobs and repository indexes. Restart a previously running alpha service explicitly with
 `node bin/moguri.mjs service restart`; do not delete its state.
 
 ## Build and consume
@@ -18,7 +18,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.2.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.3.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -95,6 +95,9 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `voice` | Local status, explicit licensed download, record/transcribe, stop/finalize and revision-safe draft insertion. |
 | `jobs` | Wait or explicitly cancel. A wait timeout/disconnection does not cancel or retry the service's job. |
 | `sandbox` | Truthful readiness/configuration diagnostics. Configuration is not proof of a qualified SendBox transport. |
+| `issues` | Local feature/bug/misc board, create/update/move/archive, revision-checked phases and read-only linked-PR refresh. |
+| `cache` | Local plan inspection, explicit metadata-sharing consent, integrity-verified archive preparation and script-free managed install. |
+| `linear` | Optional team-scoped read-only page import, status and user-only OS-keychain credential setup. |
 
 Use `sdk.command` for project/session creation, draft/queue changes, controls,
 human approvals, archive/resume and allowed-env policy. These are the same
@@ -166,6 +169,66 @@ Tool descriptions, annotations, output and model recommendations remain
 untrusted data, never permission grants.
 
 ## CLI entrypoints
+
+### Dependency cache and project tickets
+
+```ts
+const { plan } = await sdk.cache.inspect(projectId, "npm");
+// Only after the user reviews the plan and accepts OSV metadata disclosure:
+const preparation = await sdk.cache.prepare(projectId, "npm", plan.digest, true);
+const result = await sdk.jobs.wait(preparation.id!);
+if (result.status !== "completed") throw new Error(result.error ?? result.status);
+
+const ticket = await sdk.issues.create(projectId, {
+  title: "Add a generated feature", body: "", kind: "feature",
+  phaseId: "backlog", pullRequestUrl: null,
+});
+await sdk.issues.move(ticket.id!, "in-progress", 0);
+```
+
+`cache.install` is a separate explicit action replacing `node_modules`, never
+an automatic consequence of inspection/preparation. It repeats advisory checks,
+uses private clean staging without project hooks/configuration, and rechecks the
+lock before replacing the tree. npm requires an installed npm CLI; pnpm's native
+launcher is pinned with Moguri. Only single-project npm lockfile 2/3 and pnpm
+lockfile 9/public SHA-512 npm artifacts are qualified. Unsupported managers,
+workspaces, Git/custom/private resolutions and required lifecycle scripts fail
+explicitly. A clean advisory result is not a malware-free guarantee.
+
+Boards are local, project-scoped and have no assignee. `issues.configure`
+accepts `BoardConfig` plus its observed revision; occupied phases cannot be
+removed. Linking a canonical GitHub PR permits bounded read-only observation
+while Moguri runs, unless the board disables it. Choose the public API or an
+explicit signed-in GitHub CLI account. A verified merge advances to
+`mergedColumnId`; closed/unknown/failed checks and stale responses never do.
+
+Linear is off by default. Enable one team in the board, store the user's
+personal API key with `linear.setToken` and explicitly call `linear.import`.
+Each page imports at most 50 tickets, preserves provenance and existing local
+edits, and returns a retained `nextCursor`. No local issue is exported and no
+assignee/person data is requested. OAuth/two-way unattended synchronization is
+not implemented. Credentials are never event payloads, draft text or model input.
+
+CLI examples:
+
+```bash
+moguri issues list PROJECT_ID
+moguri issues create PROJECT_ID issue.json
+moguri issues move ISSUE_ID in-progress --revision 0
+moguri issues configure PROJECT_ID board.json --revision 0
+moguri cache inspect PROJECT_ID npm
+moguri cache prepare PROJECT_ID npm PLAN_SHA256 --accept-dependency-metadata
+moguri cache install PROJECT_ID npm PLAN_SHA256 --accept-dependency-metadata
+moguri linear import PROJECT_ID
+```
+
+`issue.json` has exactly `title`, `body`, `kind`, `phaseId` and nullable
+`pullRequestUrl`. `board.json` has `columns`, `mergedColumnId`, `autoRefreshPrs`,
+`githubAccess` and `linear: { enabled, teamId }`. Update/move/archive/configure
+require the observed `--revision`. `linear token` reads piped stdin instead of
+shell arguments; TUI `/linear token` uses a dedicated masked editor.
+
+### Client lifecycle
 
 `node bin/moguri.mjs --help` lists supported commands. A normally installed
 package also supplies the `moguri` executable. `moguri status` exposes project

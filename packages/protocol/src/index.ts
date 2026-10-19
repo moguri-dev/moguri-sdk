@@ -1,9 +1,9 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot } from "./platform.ts";
+import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt } from "./platform.ts";
 export * from "./platform.ts";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -195,6 +195,9 @@ export interface EventPayloads {
   "job.started": { job: CapabilityJob };
   "job.progress": { jobId: string; progress: string; status?: "running" };
   "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null };
+  "board.saved": { board: IssueBoard };
+  "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
+  "cache.prepared": { receipt: CacheReceipt };
 }
 export type EventType = keyof EventPayloads;
 interface EventMetadata {
@@ -221,6 +224,7 @@ export const eventTypes: readonly EventType[] = [
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "policy.updated", "provider.changed",
   "settings.updated", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
+  "board.saved", "issue.saved", "cache.prepared",
 ];
 
 export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[] } & PlatformSnapshot {
@@ -232,8 +236,14 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
   const registry = new Map<string, CapabilityEntry>();
   const proposals = new Map<string, Proposal>();
   const jobs = new Map<string, CapabilityJob>();
+  const boards = new Map<string, IssueBoard>();
+  const issues = new Map<string, LocalIssue>();
+  const dependencyCaches = new Map<string, CacheReceipt>();
   for (const event of events) {
     if (event.profile_id !== PROFILE_ID) continue;
+    if (event.event_type === "board.saved") boards.set(event.payload.board.projectId, structuredClone(event.payload.board));
+    if (event.event_type === "issue.saved") issues.set(event.payload.issue.id, structuredClone(event.payload.issue));
+    if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
     if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: event.payload.settings };
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
@@ -249,6 +259,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
+      if (job?.kind === "cache.install" && event.payload.status === "partial" && job.projectId) blockedProjects.add(job.projectId);
     }
     if (event.event_type === "turn.finished" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) blockedProjects.add(event.project_id);
     if (event.event_type === "session.resumed" && event.project_id) blockedProjects.delete(event.project_id);
@@ -370,5 +381,6 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     }
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects],
-    settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()] };
+    settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()],
+    boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()] };
 }

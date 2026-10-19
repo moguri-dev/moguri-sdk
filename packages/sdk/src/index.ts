@@ -1,5 +1,5 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { isRecord, QuerySchema, parse, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob } from "../../protocol/src/index.ts";
+import { isRecord, QuerySchema, parse, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager } from "../../protocol/src/index.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
@@ -63,6 +63,27 @@ export class MoguriSdk extends TransportClient {
   };
   readonly subagents = { run: (sessionId: string, prompt: string) => this.command({ type: "subagent.run", sessionId, prompt }) };
   readonly sandbox = { status: () => this.query({ type: "sandbox.status" }) };
+  readonly issues = {
+    board: (projectId: string) => this.query({ type: "board.get", projectId }),
+    configure: (projectId: string, config: BoardConfig, expectedRevision: number) => this.command({ type: "board.save", projectId,
+      config: { columns: config.columns, mergedColumnId: config.mergedColumnId, autoRefreshPrs: config.autoRefreshPrs, githubAccess: config.githubAccess, linear: config.linear }, expectedRevision }),
+    create: (projectId: string, fields: IssueInput) => this.command({ type: "issue.create", projectId, ...fields }),
+    update: (issueId: string, fields: IssueInput, expectedRevision: number) => this.command({ type: "issue.update", issueId, ...fields, expectedRevision }),
+    move: (issueId: string, phaseId: string, expectedRevision: number) => this.command({ type: "issue.move", issueId, phaseId, expectedRevision }),
+    archive: (issueId: string, archived: boolean, expectedRevision: number) => this.command({ type: "issue.archive", issueId, archived, expectedRevision }),
+    refresh: (projectId: string) => this.command({ type: "issues.refresh", projectId }),
+  };
+  readonly cache = {
+    inspect: (projectId: string, manager: PackageManager) => this.query({ type: "cache.inspect", projectId, manager }),
+    prepare: (projectId: string, manager: PackageManager, expectedDigest: string, acceptMetadataSharing: true) => this.command({ type: "cache.prepare", projectId, manager, expectedDigest, acceptMetadataSharing }),
+    install: (projectId: string, manager: PackageManager, expectedDigest: string, acceptMetadataSharing: true, runScripts = false) => this.command({ type: "cache.install", projectId, manager, expectedDigest, acceptMetadataSharing, runScripts }),
+  };
+  readonly linear = {
+    status: (projectId: string) => this.query({ type: "linear.status", projectId }),
+    setToken: (token: string) => this.command({ type: "linear.token.set", token }),
+    clearToken: () => this.command({ type: "linear.token.clear" }),
+    import: (projectId: string, cursor?: string) => this.command({ type: "linear.import", projectId, ...(cursor ? { cursor } : {}) }),
+  };
   readonly jobs = {
     cancel: (jobId: string) => this.command({ type: "job.cancel", jobId }),
     wait: async (jobId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<CapabilityJob> => {

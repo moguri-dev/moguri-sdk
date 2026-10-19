@@ -31,6 +31,9 @@ Unused scope fields are null in checkpoint 1.
 | `capability.saved` | Project content digest, kind, source, owner and explicit enablement revision. |
 | `capability.proposed`, `proposal.decided` | Reviewed exact proposal/base digest, real model/user origin and actual user decision. No automatic application or enablement. |
 | `job.started`, `job.progress`, `job.finished` | Owned capability work, bounded progress, actual completed/failed/cancelled/partial outcome and retained result reference. |
+| `board.saved` | Project configuration/revision, ordered phases, merged destination and explicit read-only integration policy. |
+| `issue.saved` | Complete revisioned local ticket and real `user`, `github` or `linear` actor. Only a verified merge can drive an automated phase transition. |
+| `cache.prepared` | Exact plan digest, advisory check time, package/reuse/download counts and `scripts: blocked`, never a permanent safety grant. |
 
 ## HTTP commands
 
@@ -53,6 +56,10 @@ error codes; they are not success-shaped empty responses.
 Platform commands add revision-checked settings/reset, imports and toggles,
 reviewed proposals, explicit style facts/indexing, keychain credential changes,
 approval-bound MCP calls, optional subagents, local speech and job cancellation.
+Workspace commands add revisioned board/ticket changes, exact-plan cache
+preparation/install with explicit metadata-sharing consent, and user-only Linear
+credential changes/imports. Workspace queries inspect boards/plans or non-secret
+integration readiness. No PR mutation or CI dispatch is exposed.
 Credential values are never written into events or command receipts.
 
 ## WebSocket
@@ -60,7 +67,7 @@ Credential values are never written into events or command receipts.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":2,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":3,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

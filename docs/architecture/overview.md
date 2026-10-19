@@ -27,7 +27,10 @@ attachment snapshots in transactional SQLite migrations. Opening newer state
 fails explicitly. Projections rebuild from events. Durable additions require a
 migration and recovery tests, not deletion of user state.
 Migration 2 adds project-scoped derived repository caches and graph tables.
-Event envelopes remain schema version 1; the client protocol is version 2.
+Migration 3 adds derived dependency-cache object metadata, local board/ticket
+and cache-receipt events. Event envelopes remain schema version 1; the client
+protocol is version 3. The [workspace contract](workspace-platform.md) records
+cache/advisory, read-only integration and recovery boundaries.
 
 Both clients share the SDK and subscribe to the same sequenced stream. The
 service owns projects, sessions, transcripts, drafts, queue, pending approvals,

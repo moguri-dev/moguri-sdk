@@ -64,6 +64,7 @@ export class ControlPlane extends EventEmitter {
         if (!external) return false;
         this.stop(external.sessionId); return true;
       },
+      wake: () => queueMicrotask(() => this.pumpAll()),
     }, platformOptions);
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
@@ -145,6 +146,7 @@ export class ControlPlane extends EventEmitter {
     return id;
   }
   private externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): string {
+    if (this.platform.workspace.busyProjects.has(session.projectId)) throw new MoguriError("workspace_busy", "A managed dependency install owns this workspace. Wait for it to settle.", 409);
     if (session.readOnly) throw new MoguriError("subagent_readonly", "Read-only subagents cannot own external tool calls.", 403);
     if (session.turnId || session.queue.length || session.status === "archived") throw new MoguriError("session_busy", "Use an idle, restored session for an external MCP client. The active agent already owns its turn.", 409);
     if (this.projection.sessions.some((owner) => owner.projectId === session.projectId && owner.turnId && !owner.readOnly)) throw new MoguriError("workspace_busy", "Another session owns this workspace. Wait for it to settle before requesting an external MCP call.", 409);
@@ -408,7 +410,7 @@ export class ControlPlane extends EventEmitter {
   private pumpAll(): void {
     if (this.shuttingDown) return;
     for (const session of this.projection.sessions) {
-      if (session.turnId || !session.queue.some((item) => item.delivery !== "steer") || session.status === "archived" || this.paused.has(session.id) || this.projection.blockedProjects.includes(session.projectId)) continue;
+      if (session.turnId || !session.queue.some((item) => item.delivery !== "steer") || session.status === "archived" || this.paused.has(session.id) || this.projection.blockedProjects.includes(session.projectId) || this.platform.workspace.busyProjects.has(session.projectId)) continue;
       if (session.readOnly && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);

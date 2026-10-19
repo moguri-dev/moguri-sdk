@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/index.ts";
 import { digest } from "./store.ts";
 
-const protectedPart = (part: string) => part === ".git" || part === ".moguri" || part === "node_modules" ||
+const protectedPart = (part: string) => part === ".git" || part === ".moguri" || part.startsWith(".moguri-dependencies-") || part === "node_modules" ||
   [".ssh", ".aws", ".azure", ".kube", ".docker", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "Moguri"].includes(part) ||
   /^\.env(?:\.|$)/i.test(part) || /\.(?:pem|key|p12|pfx)$/i.test(part) ||
   /^(?:credentials|id_rsa|id_ed25519)(?:\.|$)/i.test(part);
@@ -31,16 +31,16 @@ export async function scopedPath(root: string, input: string, allowMissing = fal
   }
   return path;
 }
-export async function readProjectFile(root: string, input: string): Promise<{ text: string; digest: string; bytes: number; path: string }> {
+export async function readProjectFile(root: string, input: string, maxBytes = MAX_TEXT): Promise<{ text: string; digest: string; bytes: number; path: string }> {
   const path = await scopedPath(root, input);
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = await file.stat();
-    if (!metadata.isFile() || metadata.size > MAX_TEXT) throw new MoguriError("file_limit", "Only regular UTF-8 text files up to 128 KiB are supported.");
-    const buffer = Buffer.alloc(MAX_TEXT + 1);
+    if (!metadata.isFile() || metadata.size > maxBytes) throw new MoguriError("file_limit", `Only regular UTF-8 text files up to ${Math.ceil(maxBytes / 1024)} KiB are supported.`);
+    const buffer = Buffer.alloc(maxBytes + 1);
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     const content = buffer.subarray(0, bytesRead);
-    if (bytesRead > MAX_TEXT || content.includes(0) || !isUtf8(content)) throw new MoguriError("file_limit", "The file is too large, binary, or not valid UTF-8.");
+    if (bytesRead > maxBytes || content.includes(0) || !isUtf8(content)) throw new MoguriError("file_limit", "The file is too large, binary, or not valid UTF-8.");
     const text = content.toString("utf8");
     return { text, digest: digest(text), bytes: bytesRead, path: relative(await realpath(root), path) };
   } finally { await file.close(); }

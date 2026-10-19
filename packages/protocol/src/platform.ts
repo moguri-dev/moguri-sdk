@@ -1,5 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
+export * from "./workspace.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -82,6 +84,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("voice.stop"), jobId: id }),
   object({ type: Type.Literal("voice.insert"), sessionId: id, jobId: id, expectedRevision: revision }),
   object({ type: Type.Literal("job.cancel"), jobId: id }),
+  WorkspaceCommandSchema,
 ]);
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
@@ -96,6 +99,7 @@ export const QuerySchema = Type.Union([
   object({ type: Type.Literal("sandbox.status") }),
   object({ type: Type.Literal("capability.content"), capabilityId: id }),
   object({ type: Type.Literal("proposal.content"), proposalId: id }),
+  WorkspaceQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -118,7 +122,7 @@ export interface CapabilityJob {
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
-export interface PlatformSnapshot {
+export interface PlatformSnapshot extends WorkspaceSnapshot {
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
   proposals: Proposal[];
@@ -130,6 +134,7 @@ export interface VoiceStatus {
 }
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
+  | WorkspaceResponse
   | { type: "prompt.preview"; editable: string; effective: string; warning: string }
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }

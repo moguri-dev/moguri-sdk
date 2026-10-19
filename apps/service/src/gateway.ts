@@ -6,9 +6,10 @@ import type { McpOperation } from "./mcp-worker.ts";
 
 export interface SecretVault { read(id: string, signal?: AbortSignal): Promise<string | null>; write(id: string, value: string, signal?: AbortSignal): Promise<void>; remove(id: string, signal?: AbortSignal): Promise<void> }
 export class McpKeychain implements SecretVault {
+  constructor(private readonly namespace = "dev.moguri.profile.default.mcp") {}
   private entry(id: string) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,100}$/.test(id)) throw new MoguriError("secret_scope", "Invalid MCP credential namespace.");
-    return new AsyncEntry("dev.moguri.profile.default.mcp", id, { linux: { store: "secret-service" } });
+    return new AsyncEntry(this.namespace, id, { linux: { store: "secret-service" } });
   }
   read(id: string, signal?: AbortSignal) { return this.entry(id).getPassword(signal); }
   write(id: string, value: string, signal?: AbortSignal) { return this.entry(id).setPassword(value, signal); }

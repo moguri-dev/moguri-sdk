@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import {
   defaultSettings, isRecord, MoguriError, PROFILE_ID, SYSTEM_PROMPT_WARNING,
+  isWorkspaceCommand, isWorkspaceQuery,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall,
 } from "../../../packages/protocol/src/index.ts";
@@ -12,6 +13,7 @@ import { McpGateway, type SecretVault } from "./gateway.ts";
 import { LocalDictation, type SpeechOptions } from "./voice.ts";
 import { EventStore } from "./store.ts";
 import { validateSettings } from "./permissions.ts";
+import { WorkspaceRuntime, type WorkspaceOptions } from "./workspace.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
@@ -22,17 +24,23 @@ export interface PlatformHost {
   subagent(session: Session, prompt: string): string;
   stopOwnedSession(id: string): void;
   cancelExternalJob(id: string): boolean;
+  wake(): void;
 }
-export interface PlatformOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions }
+export interface PlatformOptions extends WorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions }
 export class PlatformRuntime {
   readonly memory: RepositoryMemory;
   readonly gateway: McpGateway;
   readonly voice: LocalDictation;
+  readonly workspace: WorkspaceRuntime;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; kind: string }>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
     this.memory = new RepositoryMemory(store);
     this.gateway = new McpGateway(options.vault, options.mcpWorkerPath);
     this.voice = new LocalDictation(stateDir, options.speech);
+    this.workspace = new WorkspaceRuntime({
+      snapshot: () => this.snapshot(), project: (id) => this.project(id), commit: (events) => this.host.commit(events),
+      job: (kind, projectId, execute, settled) => this.job(kind, projectId, null, execute, settled), wake: () => this.host.wake(),
+    }, store, stateDir, options);
   }
   private snapshot() { return this.host.snapshot(); }
   private project(id: string): Project {
@@ -51,6 +59,7 @@ export class PlatformRuntime {
       event_type: "job.finished", profile_id: PROFILE_ID, project_id: job.projectId, session_id: job.sessionId,
       payload: { jobId: job.id, status: "partial", resultDigest: null, error: "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed." },
     })));
+    this.workspace.start();
   }
   prompt(session?: Session): string {
     const snapshot = this.snapshot();
@@ -91,6 +100,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isWorkspaceQuery(query)) return this.workspace.query(query);
     switch (query.type) {
       case "prompt.preview": return { type: query.type, editable: this.snapshot().settings.values.systemPrompt, effective: this.prompt(query.sessionId ? this.session(query.sessionId) : undefined), warning: SYSTEM_PROMPT_WARNING };
       case "memory.search": this.memoryEnabled(); return { type: query.type, items: await this.memory.search(this.project(query.projectId), query.text, query.limit) };
@@ -158,7 +168,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
   private entry(projectId: string, kind: CapabilityEntry["kind"], name: string, description: string, content: string, source: CapabilityEntry["source"], enabled = false): CapabilityEntry {
     return { id: randomUUID(), projectId, kind, name, description, contentDigest: this.store.putBlob(content), source, enabled, revision: 0, createdAt: new Date().toISOString() };
   }
-  private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>): string {
+  private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void): string {
     const id = randomUUID();
     const job: CapabilityJob = { id, kind, projectId, sessionId, parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
     this.host.commit([{ event_type: "job.started", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: { job } }]);
@@ -168,17 +178,19 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       abort.signal.throwIfAborted();
       this.host.commit([{ event_type: "job.finished", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null } }]);
     }).catch((error: unknown) => {
-      const cancelled = abort.signal.aborted || error instanceof MoguriError && error.code === "speech_stopped";
-      console.error(`Moguri capability ${kind} (${id}) ${cancelled ? "cancelled" : "failed"}:`, error instanceof Error ? error.message : "Unknown capability error");
+      const partial = error instanceof MoguriError && (error.code === "install_partial" || error.code === "program_partial");
+      const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
+      console.error(`Moguri capability ${kind} (${id}) ${partial ? "partial" : cancelled ? "cancelled" : "failed"}:`, error instanceof Error ? error.message : "Unknown capability error");
       this.host.commit([{ event_type: "job.finished", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: {
-        jobId: id, status: cancelled ? "cancelled" : "failed", resultDigest: null,
+        jobId: id, status: partial ? "partial" : cancelled ? "cancelled" : "failed", resultDigest: null,
         error: error instanceof MoguriError ? error.message : error instanceof Error && error.name === "AbortError" ? "Capability cancelled; no automatic retry." : "Capability failed. Check the configured runtime, file permissions and connection; no success was recorded.",
       } }]);
-    }).finally(() => this.active.delete(id));
+    }).finally(() => { this.active.delete(id); settled?.(); });
     this.active.set(id, { abort, done, sessionId: sessionId ?? undefined, kind });
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isWorkspaceCommand(command)) return this.workspace.execute(command, finish);
     const snapshot = this.snapshot();
     switch (command.type) {
       case "settings.update":
@@ -374,5 +386,5 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     throw new MoguriError("capability_unavailable", "This delegated capability is not available.");
   }
   stopSession(id: string): void { for (const job of this.active.values()) if (job.sessionId === id) job.abort.abort(); }
-  async close(): Promise<void> { for (const job of this.active.values()) job.abort.abort(); await this.gateway.close(); await Promise.all([...this.active.values()].map((job) => job.done)); }
+  async close(): Promise<void> { this.workspace.close(); for (const job of this.active.values()) job.abort.abort(); await this.gateway.close(); await Promise.all([...this.active.values()].map((job) => job.done)); }
 }

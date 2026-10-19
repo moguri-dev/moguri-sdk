@@ -9,7 +9,7 @@ export class EventStore {
     this.db = new DatabaseSync(path, { allowExtension: true });
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
-      if (version > 2) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version > 3) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -29,6 +29,12 @@ export class EventStore {
         CREATE TABLE memory_graph_nodes (project_id TEXT NOT NULL,id TEXT NOT NULL,path TEXT NOT NULL,label TEXT NOT NULL,kind TEXT NOT NULL,PRIMARY KEY(project_id,id));
         CREATE TABLE memory_graph_edges (project_id TEXT NOT NULL,source TEXT NOT NULL,target TEXT NOT NULL,kind TEXT NOT NULL,PRIMARY KEY(project_id,source,target,kind));
         PRAGMA user_version=2;
+        COMMIT;
+      `);
+      if (version < 3) this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE dependency_cache_objects (cache_key TEXT PRIMARY KEY,integrity TEXT NOT NULL,bytes INTEGER NOT NULL,verified_at TEXT NOT NULL);
+        PRAGMA user_version=3;
         COMMIT;
       `);
     } catch (error) { this.db.close(); throw error; }

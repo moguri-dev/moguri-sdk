@@ -8,7 +8,7 @@ import { EventStore } from "./store.ts";
 
 const dimensions = 384;
 type IgnoreScope = { base: string; rules: ReturnType<typeof ignore> };
-const protectedPaths = ignore().add([".git/", "node_modules/", ".moguri/", ".native/", "dist/", "release/", ".ssh/", ".aws/", ".env", ".env.*"]);
+const protectedPaths = ignore().add([".git/", "node_modules/", ".moguri/", ".moguri-dependencies-*/", ".native/", "dist/", "release/", ".ssh/", ".aws/", ".env", ".env.*"]);
 export function lexicalVector(text: string): Buffer {
   const values = new Float32Array(dimensions);
   const words = text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];

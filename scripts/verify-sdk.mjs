@@ -56,10 +56,20 @@ try {
       const job=await sdk.memory.index(p.id); assert.equal((await sdk.jobs.wait(job.id)).status,"completed");
       assert.ok((await sdk.memory.search(p.id,"portable sdk memory")).items.length>0);
       assert.ok((await sdk.mcp.tools("builtin","grep",0,s.id)).tools.some(t=>t.name==="grep_logs"));
+      const ticket=await sdk.issues.create(p.id,{title:"Generated external SDK ticket",body:"Generated",kind:"feature",phaseId:"backlog",pullRequestUrl:null});
+      await sdk.issues.move(ticket.id,"in-progress",0);
+      assert.equal((await sdk.issues.board(p.id)).issues[0].phaseId,"in-progress");
+      await writeFile(join(project,"package.json"),JSON.stringify({name:"generated-sdk-cache",version:"1.0.0"}));
+      await writeFile(join(project,"package-lock.json"),JSON.stringify({name:"generated-sdk-cache",version:"1.0.0",lockfileVersion:3,packages:{"":{name:"generated-sdk-cache",version:"1.0.0"}}}));
+      const plan=(await sdk.cache.inspect(p.id,"npm")).plan;
+      const prepared=await sdk.cache.prepare(p.id,"npm",plan.digest,true);
+      assert.equal((await sdk.jobs.wait(prepared.id)).status,"completed");
+      const installed=await sdk.cache.install(p.id,"npm",plan.digest,true);
+      assert.equal((await sdk.jobs.wait(installed.id)).status,"completed");
       assert.equal((await sdk.voice.status()).voice.runtimeReady,true);
       assert.equal((await sdk.voice.status()).voice.modelReady,false);
     } finally {sdk.disconnect();await runtime.close();}
-    console.log("External SDK import, strict consumer types, embedded runtime, vector retrieval and native MCP passed.");
+    console.log("External SDK imports/types, embedded runtime, vectors, native MCP, local tickets and script-free cache install passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }

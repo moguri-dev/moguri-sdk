@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 2; immutable event
+Protocol version and database migration version are 3; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -25,6 +25,10 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Proposal | Exact content/base digests, project, kind, actual user/model actor and pending/approved/rejected decision. Approval installs disabled content. |
 | Capability job | Owned kind/session/turn, progress, terminal status, retained result digest and explicit error. A wait timeout is not cancellation. |
 | Repository index | Derived project-partitioned lexical vectors, source digests/mtime/size, chunks and import/symbol graph. Not a second session store. |
+| Issue board | Project, configuration revision, ordered phase IDs/names, merged destination, explicit PR-observation access and optional Linear team. |
+| Local issue | Stable UUID/project-local number, feature/bug/misc, title/body/phase, optimistic revision, archive state and verified remote-link provenance. No assignee. |
+| Dependency plan | Exact project/manager/manifest/lock digest, unique public package versions and SHA-512 artifacts. Branch names are not mutable cache identities. |
+| Cache receipt | Project/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
 
 Provider-neutral session state is projected from immutable events. Normalized
 pi-ai model messages live in content-addressed blobs referenced by completion
@@ -72,3 +76,10 @@ the opted-in index is used. Re-indexing replaces a project's derived tables
 atomically; cancellation before commit preserves the previous index. Changed,
 missing or newly ignored sources return no stale snippet text. The graph is a
 bounded snapshot from the last successful index, not a live semantic compiler.
+
+Migration 3 adds derived `dependency_cache_objects` metadata while preserving
+schema-1/2 state. Boards, tickets and cache receipts are projected from immutable
+events, not stored in client databases. Archive does not delete tickets.
+Interrupted installs become partial on restart and quarantine project admission;
+verified cache objects remain reusable only after current checks. Credentials
+stay in the explicit keychain and are never copied to this projection.

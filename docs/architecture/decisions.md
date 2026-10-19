@@ -35,6 +35,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D12 | Autonomy level defaults to Manual. Guided, Autopilot, and System One-backed Autopilot Max are independent of model, Env, and Budget; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
 | D13 | Remote SSH runs the agent task and model calls on a user-configured reachable machine; the local control plane retains durable authority. | Phase 0 cannot prove secure transport, remote model access, cancellation, and reconnect recovery. |
 | D14 | One importable SDK powers both clients, default-dark branding and user-controlled memory, extensions, MCP and local dictation. | SDK packaging, policy, recovery or physical runtime qualification fails. |
+| D15 | Profile-owned verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -276,6 +277,31 @@ NeMo-Speech.cpp and a user-downloaded Nemotron 3.5 GGUF, with NVIDIA's documente
 locale tiers shown accurately. No cloud ASR fallback or implicit model download
 is allowed. SendBox remains unavailable until its real transport and guest
 prerequisites pass; configuration alone is not proof of containment.
+
+## D15. Shared cache and local project workflow
+
+**Decision, 2026-10-19.** The user-requested
+[workspace slice](workspace-platform.md) adds shared content-addressed npm/pnpm
+archives, script-free managed installs, local feature/bug/misc boards and
+read-only PR/optional Linear integrations through the same SDK.
+Protocol/database migration 3 preserves previous state and rejects incompatible
+clients. These are explicit bounded additions, not permission to activate
+unattended self-modification or the remaining deferred roadmap.
+
+Package/version identity includes SHA-512 and the exact manifest/lock plan.
+Advisory checks happen before artifact download/reuse; unknown is not clean.
+Project scripts/hooks/configuration are not evaluated during managed installs.
+No package gets a malware-free guarantee and no lifecycle code runs on the host
+as a fake SendBox substitute. Only qualified adapters are offered; workspace,
+private-registry and further ecosystem support remain explicit limitations.
+
+Tickets are local and independent of sessions, with revisioned configurable
+phases and no assignee. A verified merged PR can advance phase under the
+board's read-only observation policy. Linear starts off and imports only
+explicit pages using a scoped user key; local issues are never auto-exported.
+Neither integration starts CI, merges, pushes or grants permissions.
+
+CI is restricted to pushes to `main`. Feature/PR checks are performed locally.
 
 ## Still open
 
