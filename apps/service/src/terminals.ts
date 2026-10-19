@@ -60,7 +60,7 @@ export class TerminalManager {
     const start = Math.max(0, offset - terminal.baseOffset);
     let end = Math.min(terminal.output.length, start + limit);
     const code = terminal.output.charCodeAt(end - 1);
-    if (end < terminal.output.length && code >= 0xd800 && code <= 0xdbff) end--;
+    if (end < terminal.output.length && code >= 0xd800 && code <= 0xdbff) end += end - start === 1 ? 1 : -1;
     return { terminal: { ...terminal.state }, data: terminal.output.slice(start, end), baseOffset: terminal.baseOffset, nextOffset: terminal.baseOffset + end };
   }
   close(id: string): Promise<TerminalState> {

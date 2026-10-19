@@ -166,7 +166,7 @@ test("subagents are opt-in, depth-one, tool-less and separately accounted", mac,
     assert.equal(session.usage[0]?.role, "subagent");
     assert.equal(fixture.requests[0]?.tools, undefined);
     await assert.rejects(() => sdk.subagents.run(session.id, "generated nested child"), /depth-one/);
-    await assert.rejects(() => sdk.mcp.call(session.id, "builtin", "grep_logs", { path: "fixture.txt", query: "original" }, "0".repeat(64)), /Read-only subagents/);
+    await assert.rejects(() => sdk.mcp.call(session.id, "builtin", "grep_logs", { path: "fixture.txt", query: "original" }, "0".repeat(64)), { code: "subagent_readonly" });
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

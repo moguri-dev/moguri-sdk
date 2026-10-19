@@ -29,6 +29,11 @@ this known Moguri package plus its pinned Node/node-pty native installation
 steps. A file-tarball dependency is approved by package name rather than a
 registry-version selector. Do not approve unused provider lifecycle scripts.
 
+For an installed file tarball, complete its reviewed native-helper setup with
+`npm install-scripts approve moguri` then `npm rebuild moguri`.
+The approval command resolves the package name to that exact file dependency;
+an unapproved install notice is not proof that its postinstall ran.
+
 | Import | Surface |
 | --- | --- |
 | `moguri` | Browser-safe `MoguriSdk`, typed protocol, defaults, `DraftEditor`, ASCII identity |
@@ -38,7 +43,9 @@ registry-version selector. Do not approve unused provider lifecycle scripts.
 
 `npm run verify:sdk` packs and installs into a separate temporary consumer,
 type-checks all four entrypoints without the repository's tsconfig, and runs an
-embedded service with real vector retrieval and native MCP discovery. It does
+embedded service with real vector retrieval and native MCP discovery. It also
+exercises the packed package's actual PTY transport on macOS after explicit
+script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 ## Connect to the shared service

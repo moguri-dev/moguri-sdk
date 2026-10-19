@@ -100,3 +100,35 @@ input/resize/stop/restart and shared slash commands. Hidden Electron tests load
 the actual Ghostty WASM, exercise compact/long-content layouts and native action
 fixtures without opening a personal browser, publishing a real branch, running
 CI or using a microphone.
+
+## Alpha delivery evidence
+
+The macOS arm64 `0.4.0-alpha.1` checkpoint passes clean locked installation,
+type/declaration checks, production build and **83** generated unit/integration/
+native-TUI checks. All **five** hidden Electron workflows pass for source and
+the actual packaged app, including real Ghostty keyboard input, isolated browser
+boundaries, held prompts, side read approvals and project/session deletion.
+One batched visual inspection covered desktop, compact, long-title and settings
+states; the bounded static desktop scan returned no findings.
+
+The packed external consumer imports all four SDK entrypoints, explicitly
+approves/rebuilds that exact file dependency, audits with no reported
+vulnerabilities and drives its own real PTY I/O on macOS. The separately bundled
+Node/service/SDK/native dependencies also pass PTY readiness/input/close checks,
+not just renderer or source-runtime proxies. Unicode paging advances even with
+a one-unit requested page, and generated high-volume output verifies the actual
+128 KiB UTF-8 retention bound.
+
+Delivery includes the ad-hoc-signed app, approximately 326.5 MiB DMG, 257.5 MiB
+ZIP and 5.8 MiB SDK tarball. Signature/icon, self-hosted Ghostty assets, pinned
+Node/speech runtime and DMG checksum are verified. No model weights, personal
+keychain, microphone, real authorization or private Porto process was used.
+Live Copilot entitlement, ASR accuracy and real SendBox/Remote containment are
+not inferred from these generated checks.
+
+Known nonfatal warnings remain visible: experimental OpenTUI FFI, upstream
+dependency deprecations, the initial file-package script approval notice,
+Packager's optional `.icon` absence with verified `.icns` fallback, and the
+lazy Ghostty JavaScript chunk exceeding Vite's generic 500 kB threshold. The
+source and external consumer audits report no vulnerabilities. CI is still
+main-push-only; this evidence was produced locally, not by dispatching CI.

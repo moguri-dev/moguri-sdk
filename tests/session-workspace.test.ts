@@ -131,3 +131,29 @@ test("Ghostty transport owns PTYs and never persists terminal input/output or it
     await assert.rejects(() => sdk.terminal.input(terminal.id!, "not replayed"), /not running/);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
+
+test("terminal paging makes Unicode progress and retains at most 128 KiB of actual UTF-8 output", mac, async () => {
+  const fixture = await setupFixture({ platform: { terminal: { executable: process.execPath, args: ["-e", "process.stdout.write('\\u{1f600}'.repeat(40000)+'GENERATED_UTF8_READY\\n');process.stdin.resume();"] } } });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const terminal = await sdk.terminal.open(fixture.sessionId);
+    let result = await sdk.terminal.read(terminal.id!);
+    let text = "";
+    for (let index = 0; index < 100; index++) {
+      result = await sdk.terminal.read(terminal.id!);
+      text = result.data + (await sdk.terminal.read(terminal.id!, result.nextOffset)).data;
+      if (text.includes("GENERATED_UTF8_READY")) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.match(text, /GENERATED_UTF8_READY/);
+    result = await sdk.terminal.read(terminal.id!);
+    text = result.data + (await sdk.terminal.read(terminal.id!, result.nextOffset)).data;
+    assert.ok(result.baseOffset > 0);
+    assert.ok(Buffer.byteLength(text) <= 128 * 1024);
+    const page = await sdk.terminal.read(terminal.id!, result.baseOffset, 1);
+    assert.equal(page.data, "\u{1f600}");
+    assert.equal(page.nextOffset, result.baseOffset + 2);
+    await assert.rejects(() => sdk.terminal.input(terminal.id!, ""), /at least one/);
+    await sdk.terminal.close(terminal.id!);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
