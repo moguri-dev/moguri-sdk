@@ -8,7 +8,7 @@ import {
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
-  type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings,
+  type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
 import { RepositoryMemory } from "./memory.ts";
 import { McpGateway, type SecretVault } from "./gateway.ts";
@@ -21,9 +21,12 @@ import { assertSessionTool, matchesFolder } from "./project-policy.ts";
 import { pullRequestLink } from "./project-integrations.ts";
 import type { OAuthOptions } from "./mcp-oauth.ts";
 import { Engagement, isEngagementCommand, isEngagementQuery } from "./engagement.ts";
+import type { ModelRegistryOptions } from "./model-registry.ts";
+import { ContextInputs, isInputCommand, isInputQuery } from "./context-inputs.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
+  events(): StoredEvent[];
   commit(events: EventInput[], forget?: ForgetRequest): void;
   finish: WorkspaceFinish;
   invalidateApprovals(sessionId?: string): void;
@@ -40,10 +43,13 @@ export interface PlatformHost {
   closingProject(id: string): boolean;
   contextPreview: SessionWorkspaceHost["contextPreview"];
   validateControls(controls: Controls): void;
+  startup(projectId: string | null): ResolvedControls;
+  modelCredential(endpointId: string, token: string | undefined, finish: WorkspaceFinish): Promise<CommandResult>;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions }
 export class PlatformRuntime {
   readonly engagement: Engagement;
+  readonly inputs: ContextInputs;
   readonly memory: RepositoryMemory;
   readonly gateway: McpGateway;
   readonly voice: LocalDictation;
@@ -67,14 +73,17 @@ export class PlatformRuntime {
       invalidate: (id) => this.host.invalidateApprovals(id),
       mode: host.mode, spawn: host.spawnUser, deleteSession: host.deleteSession, removeProject: host.removeProject, validateAdmission: host.validateAdmission,
       contextPreview: host.contextPreview,
+      startup: host.startup,
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
     }, stateDir, options);
+    this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events }, stateDir);
     this.engagement = new Engagement(store, this.sessions.projects, {
       snapshot: () => this.snapshot(), commit: (events) => this.host.commit(events),
       invalidate: () => this.host.invalidateApprovals(), wake: () => this.host.wake(),
       admit: (controls) => this.host.validateControls(controls),
+      startup: host.startup,
       settingsEvent: (settings, revision, acknowledge) => this.settingsEvent(settings, revision, acknowledge),
       skill: (content) => this.skill(content),
     });
@@ -144,6 +153,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isInputQuery(query)) return this.inputs.query(query);
     if (isEngagementQuery(query)) return this.engagement.query(query);
     if (isSessionWorkspaceQuery(query)) return this.sessions.query(query);
     if (isWorkspaceQuery(query)) return this.workspace.query(query);
@@ -237,7 +247,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (settings.systemPrompt !== snapshot.settings.values.systemPrompt && !acknowledge) throw new MoguriError("prompt_warning", SYSTEM_PROMPT_WARNING, 409);
     validateSettings(settings);
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
-    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution]);
+    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels]);
     return { event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
   }
   private skill(content: string) {
@@ -275,11 +285,14 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isInputCommand(command)) return this.inputs.execute(command, finish);
     if (isEngagementCommand(command)) return this.engagement.execute(command, finish);
     if (isSessionWorkspaceCommand(command)) return this.sessions.execute(command, finish);
     if (isWorkspaceCommand(command)) return this.workspace.execute(command, finish);
     const snapshot = this.snapshot();
     switch (command.type) {
+      case "models.token.set":
+      case "models.token.clear": return this.host.modelCredential(command.endpointId, command.type === "models.token.set" ? command.token : undefined, finish);
       case "settings.update":
       case "settings.reset": {
         const settings = command.type === "settings.update" ? command.settings : structuredClone(snapshot.settings.values);

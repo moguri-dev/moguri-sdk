@@ -5,6 +5,9 @@ import { McpServerSchema, SandboxSchema } from "./config.ts";
 import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot } from "./sessions.ts";
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
+import { ControlDefaultsSchema } from "./controls.ts";
+import { LocalEndpointSchema } from "./providers.ts";
+import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 export * from "./workspace.ts";
 export * from "./config.ts";
 export * from "./sessions.ts";
@@ -47,6 +50,8 @@ export const SettingsSchema = object({
   sandbox: SandboxSchema,
   retention: object({ deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }) }),
   notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
+  localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
+  startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
@@ -58,6 +63,7 @@ export const defaultSettings = (): UserSettings => ({
   sandbox: { executable: "sendbox", configPath: null, image: null, bundlePath: null, trustRootPath: null },
   retention: { deleteArchived: false, afterDays: 30 },
   notifications: { inApp: true, os: false, previewContent: false },
+  localModels: [], startup: { global: {}, profile: {} },
 });
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
@@ -65,10 +71,13 @@ const section = Type.Union([
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
+  Type.Literal("localModels"), Type.Literal("startup"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("settings.update"), expectedRevision: revision, settings: SettingsSchema, acknowledgePromptRisk: Type.Boolean() }),
   object({ type: Type.Literal("settings.reset"), expectedRevision: revision, section }),
+  object({ type: Type.Literal("models.token.set"), endpointId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
+  object({ type: Type.Literal("models.token.clear"), endpointId: id }),
   object({ type: Type.Literal("memory.index"), projectId: id }),
   object({ type: Type.Literal("memory.remember"), projectId: id, text: Type.String({ minLength: 1, maxLength: 8000 }) }),
   object({ type: Type.Literal("skill.import"), projectId: id, path }),
@@ -90,6 +99,7 @@ export const PlatformCommandSchema = Type.Union([
   SessionWorkspaceCommandSchema,
   OAuthCommandSchema,
   EngagementCommandSchema,
+  InputCommandSchema,
 ]);
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
@@ -108,6 +118,7 @@ export const QuerySchema = Type.Union([
   SessionWorkspaceQuerySchema,
   OAuthQuerySchema,
   EngagementQuerySchema,
+  InputQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -149,6 +160,7 @@ export type PlatformResponse =
   | SessionWorkspaceResponse
   | OAuthResponse
   | EngagementResponse
+  | InputResponse
   | { type: "prompt.preview"; editable: string; effective: string; warning: string }
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }

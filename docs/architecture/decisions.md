@@ -388,6 +388,35 @@ answer. Desktop banners are opt-in, generic by default and not replayed on
 startup; TUI and GUI share read acknowledgements without resolving work.
 Protocol/database migration 6 preserves earlier encrypted history and grants.
 
+## D19. Local model registry, resolved controls and typed context
+
+**Decision.** Reuse maintained pi-ai's OpenAI-compatible adapter for explicitly
+configured local endpoints. Never scan hosts, download weights or silently
+replace a failed selection. Canonical model/provider identity and actual API
+model ID are distinct, and Copilot account readiness remains independent.
+Resource-bound keys use the explicit secret backend; untrusted provider echo is
+redacted before public persistence, including split stream chunks.
+
+Resolve complete new-session controls once from factory, global,
+Default-profile, project and explicit session layers, retaining source/revision
+provenance. This is not yet multiple isolated profiles, and preferences never
+widen hard policy or rewrite active sessions.
+
+Reuse Sharp (Apache-2.0; bundled libvips LGPL-2.1-or-later) for local bounded,
+metadata-stripped image normalization. Reuse existing nested-ignore and exact
+GitHub read helpers for reviewed folder/reference snapshots. Images and
+snapshots use the existing encrypted destination-session grants; unsupported
+image models preserve the full draft/queue instead of dropping or captioning
+content. Shared SDK inputs power CLI, TUI and desktop, with no fake terminal
+clipboard support.
+
+Protocol/database migration 7 preserves old event identities, defaults,
+ciphertext grants and recovery behavior. The [runtime contract](runtime-foundation.md)
+records actual provider and failing native qualification; the [input contract](context-inputs.md)
+records limits, consent, generated decoder measurements and restart boundaries.
+SendBox remains unavailable until a genuinely qualified worker/model/tool
+transport exists; a test-signed guest is not a production attested release.
+
 ## Still open
 
 - Package manager and monorepo tooling.
@@ -408,8 +437,8 @@ OpenTUI 0.6.6 on a bundled Node 26.12 runtime; Electron 44 with a same-origin
 `moguri://app` HTTP proxy and authenticated loopback WebSocket; native OS keyring
 credentials via `@napi-rs/keyring`. Packaging uses `@electron/packager`.
 Development macOS artifacts are not notarized releases. Folder attachments,
-images, external references, finite caps and preference inheritance are not
-enabled until their full contracts are implemented.
+images, external references and snapshotted default inheritance follow D19.
+Finite caps, managed worktrees, real isolated profiles and routing remain open.
 
 The development app deliberately uses unpacked application files (`asar: false`):
 the external pinned Node runtime must execute the service/worker and load their

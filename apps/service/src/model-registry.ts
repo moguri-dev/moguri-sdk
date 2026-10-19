@@ -1,0 +1,150 @@
+import { createHash } from "node:crypto";
+import type { Model } from "@earendil-works/pi-ai";
+import { isRecord, MoguriError, type LocalEndpoint, type ModelInfo, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { McpKeychain, type SecretVault } from "./gateway.ts";
+import type { PreparedModel, ProviderAdapter } from "./provider.ts";
+
+export interface ModelRegistryOptions { vault?: SecretVault; fetch?: typeof fetch }
+export const localModelId = (endpointId: string, modelId: string) => `local.${endpointId}.${createHash("sha256").update(modelId).digest("hex").slice(0, 24)}`;
+export function localEndpointUrl(value: string): URL {
+  let url: URL;
+  try { url = new URL(value.endsWith("/") ? value : `${value}/`); }
+  catch { throw new MoguriError("local_model_url", "Use a valid local-model API base URL."); }
+  if (url.username || url.password || url.search || url.hash || url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) throw new MoguriError("local_model_url", "Local model endpoints require HTTPS or explicit loopback HTTP, without credentials, query or fragment.");
+  return url;
+}
+export function validateLocalEndpoints(endpoints: LocalEndpoint[]): void {
+  if (new Set(endpoints.map((endpoint) => endpoint.id)).size !== endpoints.length) throw new MoguriError("local_model_id", "Local endpoint IDs must be unique.");
+  for (const endpoint of endpoints) {
+    localEndpointUrl(endpoint.baseUrl);
+    if (new Set(endpoint.models.map((model) => model.id)).size !== endpoint.models.length || endpoint.models.some((model) => model.maxTokens >= model.contextWindow)) throw new MoguriError("local_model_limits", "Use unique model IDs and an output limit strictly smaller than each declared context window.");
+  }
+}
+export class ModelRegistry implements ProviderAdapter {
+  state: ProviderState;
+  onChange = () => {};
+  private readonly vault: SecretVault;
+  private local = new Map<string, { connection: ProviderConnection; models: ModelInfo[] }>();
+  private discovery = new AbortController();
+  private task?: Promise<void>;
+  private epoch = 0;
+  private signature: string;
+  private closed = false;
+  constructor(private readonly copilot: ProviderAdapter, private readonly endpoints: () => LocalEndpoint[], private readonly options: ModelRegistryOptions = {}) {
+    this.vault = options.vault ?? new McpKeychain("dev.moguri.profile.default.models");
+    this.signature = JSON.stringify(endpoints());
+    this.state = { ...copilot.state };
+    copilot.onChange = () => this.publish();
+    this.publish(false);
+  }
+  private publish(notify = true) {
+    if (this.closed) return;
+    const local = [...this.local.values()];
+    const models = [...this.copilot.state.models.map((model) => ({ ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id })), ...local.flatMap((entry) => entry.models)];
+    const connections: ProviderConnection[] = [{ id: "github-copilot", name: "GitHub Copilot", source: "copilot", status: this.copilot.state.status, diagnostic: this.copilot.state.diagnostic }, ...local.map((entry) => entry.connection)];
+    this.state = { ...this.copilot.state, status: models.length ? "connected" : this.copilot.state.status, models, connections };
+    if (!models.length && local.some((entry) => entry.connection.status === "error")) this.state = { ...this.state, status: this.copilot.state.status === "connecting" ? "connecting" : "error", diagnostic: "No usable model is available. Inspect the configured endpoint and Copilot connection diagnostics." };
+    if (notify) this.onChange();
+  }
+  private endpoint(id: string): LocalEndpoint {
+    const endpoint = this.endpoints().find((endpoint) => endpoint.id === id && endpoint.enabled);
+    if (!endpoint) throw new MoguriError("local_model_missing", "This local endpoint is no longer enabled. No other provider was selected.", 409);
+    return endpoint;
+  }
+  private key(endpoint: LocalEndpoint) { return `local-${createHash("sha256").update(`${endpoint.id}\0${localEndpointUrl(endpoint.baseUrl).href}`).digest("hex")}`; }
+  private async credential(endpoint: LocalEndpoint, signal: AbortSignal): Promise<string | null> {
+    if (endpoint.auth === "none") return null;
+    let key: string | null;
+    try { key = await this.vault.read(this.key(endpoint), signal); }
+    catch { throw new MoguriError("local_model_secret", "The local-model secret backend is unavailable. Unlock it; no plaintext or ambient fallback exists.", 503); }
+    signal.throwIfAborted();
+    if (!key) throw new MoguriError("local_model_auth", "Store this endpoint's credential explicitly in its profile secret backend.", 401);
+    return key;
+  }
+  private async inspect(endpoint: LocalEndpoint, signal: AbortSignal): Promise<{ models: ModelInfo[]; key: string | null }> {
+    const key = await this.credential(endpoint, signal);
+    const response = await (this.options.fetch ?? fetch)(new URL("models", localEndpointUrl(endpoint.baseUrl)), { headers: key ? { Authorization: `Bearer ${key}` } : {}, redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) });
+    if (!response.ok) throw new MoguriError("local_model_http", `Local model discovery returned HTTP ${response.status}. Check the exact endpoint and credential; no inference or fallback occurred.`, 409);
+    if (!response.body) throw new MoguriError("local_model_catalog", "The configured endpoint returned no model catalog.");
+    const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+    let bytes = 0;
+    try {
+      while (true) {
+        const part = await reader.read(); if (part.done) break;
+        bytes += part.value.byteLength;
+        if (bytes > 256 * 1024) { await reader.cancel(); throw new MoguriError("local_model_catalog", "The configured model catalog exceeded 256 KiB."); }
+        chunks.push(part.value);
+      }
+    } finally { reader.releaseLock(); }
+    let catalog: unknown;
+    try { catalog = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+    catch { throw new MoguriError("local_model_catalog", "The configured endpoint returned an invalid JSON catalog."); }
+    if (!isRecord(catalog) || !Array.isArray(catalog.data) || catalog.data.length > 512 || !catalog.data.every((entry) => isRecord(entry) && typeof entry.id === "string")) throw new MoguriError("local_model_catalog", "Expect a bounded OpenAI-compatible data array with model IDs.");
+    const ids = new Set(catalog.data.filter(isRecord).map((entry) => entry.id));
+    const models = endpoint.models.filter((model) => ids.has(model.id)).map((model) => ({
+      id: localModelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput,
+      providerId: `local.${endpoint.id}`, source: "local" as const, apiModelId: model.id, thinkingLevels: [],
+    }));
+    if (!models.length) throw new MoguriError("local_model_catalog", "None of this endpoint's explicitly configured models is advertised. Check IDs and limits; no model was guessed.");
+    return { models, key };
+  }
+  synchronize(): void {
+    const signature = JSON.stringify(this.endpoints());
+    if (signature === this.signature || this.closed) return;
+    this.signature = signature;
+    void this.refreshLocal();
+  }
+  private refreshLocal(): Promise<void> {
+    this.discovery.abort(); this.discovery = new AbortController();
+    const epoch = ++this.epoch, signal = this.discovery.signal;
+    this.local.clear();
+    const endpoints = this.endpoints().filter((endpoint) => endpoint.enabled);
+    for (const endpoint of endpoints) this.local.set(endpoint.id, { models: [], connection: { id: `local.${endpoint.id}`, name: endpoint.name, source: "local", status: "connecting", diagnostic: null } });
+    this.publish();
+    const task = Promise.all(endpoints.map(async (endpoint) => {
+      try {
+        const result = await this.inspect(endpoint, signal);
+        if (epoch !== this.epoch || this.closed) return;
+        const missing = endpoint.models.length - result.models.length;
+        this.local.set(endpoint.id, { models: result.models, connection: { id: `local.${endpoint.id}`, name: endpoint.name, source: "local", status: "connected", diagnostic: missing ? `${missing} configured models are unavailable. Only advertised models are selectable.` : null } });
+      } catch (error) {
+        if (epoch !== this.epoch || this.closed) return;
+        const diagnostic = error instanceof MoguriError ? error.message : "Local model discovery failed or timed out. Check the configured server; no scan, inference or fallback was attempted.";
+        console.error("Local model discovery failed:", endpoint.id, diagnostic);
+        this.local.set(endpoint.id, { models: [], connection: { id: `local.${endpoint.id}`, name: endpoint.name, source: "local", status: "error", diagnostic } });
+      }
+      this.publish();
+    })).then(() => {});
+    this.task = task; return task;
+  }
+  async refresh(): Promise<void> { await Promise.all([this.copilot.refresh(), this.refreshLocal()]); }
+  login(): void { this.copilot.login(); }
+  async cancel(): Promise<void> { await this.copilot.cancel(); }
+  async logout(): Promise<void> { await this.copilot.logout(); }
+  async token(id: string, token?: string): Promise<void> {
+    const endpoint = this.endpoint(id);
+    if (endpoint.auth !== "bearer") throw new MoguriError("local_model_auth", "Set this endpoint's explicit authentication method before storing a credential.");
+    try { if (token) await this.vault.write(this.key(endpoint), token, AbortSignal.timeout(15_000)); else await this.vault.remove(this.key(endpoint), AbortSignal.timeout(15_000)); }
+    catch { throw new MoguriError("local_model_secret", "The local-model credential could not be changed. Check the secret backend; no plaintext fallback was used.", 503); }
+    await this.refreshLocal();
+  }
+  async prepare(id: string, signal: AbortSignal): Promise<PreparedModel> {
+    if (!id.startsWith("local.")) return this.copilot.prepare(id, signal);
+    const info = this.state.models.find((model) => model.id === id && model.source === "local");
+    if (!info?.providerId) throw new MoguriError("model_unavailable", "The selected local model is unavailable. Recheck its endpoint; no provider was substituted.", 409);
+    const endpoint = this.endpoint(info.providerId.slice(6)), signature = JSON.stringify(endpoint), epoch = this.epoch;
+    const inspected = await this.inspect(endpoint, signal);
+    signal.throwIfAborted();
+    if (epoch !== this.epoch || JSON.stringify(this.endpoint(endpoint.id)) !== signature) throw new MoguriError("model_changed", "Local model configuration changed during admission. No inference was started.", 409);
+    const configuration = endpoint.models.find((model) => localModelId(endpoint.id, model.id) === id);
+    if (!configuration || !inspected.models.some((model) => model.id === id)) throw new MoguriError("model_unavailable", "The selected local model stopped being advertised. No fallback was used.", 409);
+    const model: Model<"openai-completions"> = {
+      id: configuration.id, name: configuration.name, provider: "moguri-local", api: "openai-completions", baseUrl: localEndpointUrl(endpoint.baseUrl).href,
+      reasoning: false, input: configuration.imageInput ? ["text", "image"] : ["text"], contextWindow: configuration.contextWindow, maxTokens: configuration.maxTokens,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" },
+    };
+    return { model, auth: inspected.key ? { apiKey: inspected.key } : { apiKey: "moguri-keyless", headers: { Authorization: null } } };
+  }
+  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.copilot.cancel(); }
+}

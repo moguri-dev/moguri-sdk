@@ -1,15 +1,13 @@
 import { readdir, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import ignore from "ignore";
 import * as vec from "sqlite-vec";
 import { MoguriError, type GraphNode, type GraphEdge, type MemoryHit, type Project } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, scopedPath } from "./files.ts";
 import { EventStore } from "./store.ts";
 import { matchesFolder } from "./project-policy.ts";
+import { ignoredPath, readIgnoreScope, type IgnoreScope } from "./ignore-rules.ts";
 
 const dimensions = 384;
-type IgnoreScope = { base: string; rules: ReturnType<typeof ignore> };
-const protectedPaths = ignore().add([".git/", "node_modules/", ".moguri/", ".moguri-dependencies-*/", ".native/", "dist/", "release/", ".ssh/", ".aws/", ".env", ".env.*"]);
 export function lexicalVector(text: string): Buffer {
   const values = new Float32Array(dimensions);
   const words = text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
@@ -32,23 +30,8 @@ export class RepositoryMemory {
     this.store.db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(project_id TEXT PARTITION KEY, embedding FLOAT[384] DISTANCE_METRIC=cosine)");
     this.loaded = true;
   }
-  private async localRules(root: string, directory: string): Promise<IgnoreScope> {
-    const rules = ignore();
-    try { rules.add((await readProjectFile(root, relative(root, join(directory, ".gitignore")))).text); }
-    catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
-    return { base: directory, rules };
-  }
-  private excluded(root: string, absolute: string, directory: boolean, chain: IgnoreScope[]): boolean {
-    const suffix = directory ? "/" : "";
-    if (protectedPaths.ignores(relative(root, absolute) + suffix)) return true;
-    let excluded = false;
-    for (const rule of chain) {
-      const match = rule.rules.test(relative(rule.base, absolute) + suffix);
-      if (match.ignored) excluded = true;
-      if (match.unignored) excluded = false;
-    }
-    return excluded;
-  }
+  private localRules = readIgnoreScope;
+  private excluded = ignoredPath;
   private async currentlyIgnored(root: string, path: string, cache: Map<string, IgnoreScope>): Promise<boolean> {
     const chain: IgnoreScope[] = [];
     const parts = path.split(/[\\/]/);

@@ -35,16 +35,21 @@ export async function scopedPath(root: string, input: string, allowMissing = fal
 }
 export async function readProjectFile(root: string, input: string, maxBytes = MAX_TEXT): Promise<{ text: string; digest: string; bytes: number; path: string }> {
   const path = await scopedPath(root, input);
+  const content = await readRegularFile(path, maxBytes);
+  if (content.includes(0) || !isUtf8(content)) throw new MoguriError("file_limit", "The file is binary or not valid UTF-8.");
+  const text = content.toString("utf8");
+  return { text, digest: digest(text), bytes: content.length, path: relative(await realpath(root), path) };
+}
+export async function readRegularFile(path: string, maxBytes: number): Promise<Buffer> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = await file.stat();
-    if (!metadata.isFile() || metadata.size > maxBytes) throw new MoguriError("file_limit", `Only regular UTF-8 text files up to ${Math.ceil(maxBytes / 1024)} KiB are supported.`);
+    if (!metadata.isFile() || metadata.size > maxBytes) throw new MoguriError("file_limit", `Only regular files up to ${Math.ceil(maxBytes / 1024)} KiB are supported.`);
     const buffer = Buffer.alloc(maxBytes + 1);
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     const content = buffer.subarray(0, bytesRead);
-    if (bytesRead > maxBytes || content.includes(0) || !isUtf8(content)) throw new MoguriError("file_limit", "The file is too large, binary, or not valid UTF-8.");
-    const text = content.toString("utf8");
-    return { text, digest: digest(text), bytes: bytesRead, path: relative(await realpath(root), path) };
+    if (bytesRead > maxBytes) throw new MoguriError("file_limit", "The file grew beyond its approved byte limit.");
+    return content;
   } finally { await file.close(); }
 }
 export async function writeProjectFile(root: string, input: string, text: string, expectedDigest: string): Promise<string> {

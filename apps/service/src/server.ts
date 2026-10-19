@@ -81,7 +81,7 @@ export async function startService(options: ServiceOptions) {
         for await (const chunk of request) {
           const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           bytes += data.length;
-          if (bytes > 2 * 1024 * 1024) throw new MoguriError("body_limit", "Command body exceeds 2 MiB.", 413);
+          if (bytes > 16 * 1024 * 1024) throw new MoguriError("body_limit", "Command body exceeds 16 MiB.", 413);
           chunks.push(data);
         }
         let body: unknown;

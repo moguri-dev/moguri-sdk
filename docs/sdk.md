@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 6 deliberately rejects incompatible running
-services. State migrations preserve schema-1/2/3/4/5 history, sessions, drafts,
+This is an alpha API. Protocol 7 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-6 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -20,7 +20,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.6.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.7.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -116,6 +116,28 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
+| `models` | Explicit Copilot/local catalog refresh and user-only resource-bound local endpoint keys. No host scan, weight download or automatic model substitution. |
+| `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
+
+`sessions.create(projectId?, title?, overrides?)` resolves explicit controls
+over `project.values.defaults`, `settings.startup.profile`,
+`settings.startup.global` and factory values. `session.defaults` records sources
+and observed revisions. Existing sessions do not inherit later changes. These
+preferences do not weaken policy and do not imply multi-profile isolation.
+
+`settings.localModels` contains explicit endpoint IDs/names/URLs/auth methods
+and declared model limits. Metadata discovery lists only configured advertised
+IDs. Use `models.setToken`/`clearToken` for bearer credentials; no token belongs
+in settings. `provider.connections` keeps Copilot and local status independent;
+each model/call has actual provider/API-model provenance.
+
+`attachments.file`/`image` capture selected content. `folderPreview`,
+`githubPreview` and `sessionPreview` return exact source/size/exclusion/digest
+data; the matching `folder`/`github`/`session` method needs the reviewed digest
+and literal user confirmation. `attachments.read` checks the destination
+session's grant before returning text or private image bytes. Source changes
+require new preview; source-session deletion does not erase an independently
+approved destination snapshot.
 
 Use `sdk.command` for project/session creation, draft/queue changes, controls,
 human approvals, archive/resume and allowed-env policy. These are the same

@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
   ConfigurationSpecSchema, EngagementCommandSchema, EngagementQuerySchema, SettingsSchema, ProjectSettingsSchema,
-  factoryControls, isRecord, MoguriError, parse, PROFILE_ID, SYSTEM_PROMPT_WARNING,
+  isRecord, MoguriError, parse, PROFILE_ID, SYSTEM_PROMPT_WARNING,
   type CapabilityEntry, type CommandResult, type ConfigurationProposal, type ConfigurationSpec, type Controls,
-  type EngagementCommand, type EngagementQuery, type EngagementResponse, type EventInput, type Session, type Snapshot, type SuggestionPreview, type SuggestionSource, type UserSettings,
+  type EngagementCommand, type EngagementQuery, type EngagementResponse, type EventInput, type Session, type Snapshot, type SuggestionPreview, type SuggestionSource, type UserSettings, type ResolvedControls,
 } from "../../../packages/protocol/src/index.ts";
 import { Value } from "typebox/value";
 import { digest, EventStore } from "./store.ts";
@@ -22,6 +22,7 @@ interface Host {
   admit(controls: Controls): void;
   settingsEvent(settings: UserSettings, revision: number, acknowledge: boolean): EventInput;
   skill(content: string): { name: string; description: string };
+  startup(projectId: string | null): ResolvedControls;
 }
 interface Target { before: unknown; revision: number | null }
 type ScopeSession = Pick<Session, "id" | "projectId">;
@@ -133,11 +134,12 @@ export class Engagement {
     if (parent && parent.projectId !== scope) throw new MoguriError("metachat_scope", "A linked settings chat must use the parent's scope.");
     let ancestor = parent; let depth = 0;
     while (ancestor) { if (++depth >= 8) throw new MoguriError("session_depth", "Settings chats keep the eight-level attachment limit."); const parentId = ancestor.parentSessionId; ancestor = this.snapshot().sessions.find((session) => session.id === parentId); }
-    const controls = { ...(parent?.controls ?? factoryControls()), autonomy: "Manual" as const };
+    const startup = parent ? undefined : this.host.startup(scope);
+    const controls = { ...(parent?.controls ?? startup!.controls), autonomy: "Manual" as const };
     if (run) this.host.admit(controls);
     const id = randomUUID();
     const events: EventInput[] = [{ event_type: "session.created", profile_id: PROFILE_ID, project_id: scope, session_id: id, payload: {
-      title: context ? "Moguri suggestions" : "Moguri settings", kind: "metachat", controls, ...(parent ? { parentSessionId: parent.id } : {}),
+      title: context ? "Moguri suggestions" : "Moguri settings", kind: "metachat", controls, ...(startup ? { defaults: startup.defaults } : {}), ...(parent ? { parentSessionId: parent.id } : {}),
       ...(sources ? { suggestionSources: sources } : {}),
       ...(context ? { contextDigest: this.store.putBlob(JSON.stringify([{ role: "user", content: context, timestamp: Date.now() }])) } : {}),
     } }];

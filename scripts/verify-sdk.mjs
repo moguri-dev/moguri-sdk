@@ -39,6 +39,8 @@ try {
       await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
       const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
       const general=await sdk.sessions.create(null);
+      const folder=await sdk.attachments.folderPreview(general.id!,"/generated/source");
+      await sdk.attachments.folder(general.id!,"/generated/source",folder.preview.digest,true);
       const sources=await sdk.suggestions.preview(general.id!);
       const meta=await sdk.metachat.create(null,general.id);
       const proposal=await sdk.configuration.propose(meta.id!,{target:"global",section:"instructions",value:"Generated guidance",reason:"Generated review"});
@@ -72,10 +74,15 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,6);
+      assert.equal(sdk.getState().snapshot.protocolVersion,7);
       const general=await sdk.sessions.create();
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
+      const source=join(root,"generated-client.txt");await writeFile(source,"Generated external client context.");
+      const captured=await sdk.attachments.file(general.id,source);
+      assert.equal((await sdk.attachments.read(general.id,captured.id)).content.text,"Generated external client context.");
+      const folder=(await sdk.attachments.folderPreview(general.id,project)).preview;
+      await sdk.attachments.folder(general.id,project,folder.digest,true);
       assert.deepEqual((await sdk.mcp.tools("builtin","",0,general.id)).tools.map(t=>t.name),["fetch_page"]);
       await assert.rejects(()=>sdk.plans.read(general.id),/Select a project/);
       const meta=await sdk.metachat.create(null,general.id,"Generated external settings request.");

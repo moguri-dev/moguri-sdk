@@ -4,7 +4,7 @@ import { basename, isAbsolute } from "node:path";
 import {
   MoguriError, PROFILE_ID, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
-  type ModelContextPreview,
+  type ModelContextPreview, type ResolvedControls,
 } from "../../../packages/protocol/src/index.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
 import { readProjectFile, writeProjectFile } from "./files.ts";
@@ -23,10 +23,11 @@ export interface SessionWorkspaceHost {
   deleteSession(session: Session, finish: WorkspaceFinish): Promise<CommandResult>;
   removeProject(id: string, finish: WorkspaceFinish): Promise<CommandResult>;
   job(kind: string, projectId: string, execute: (signal: AbortSignal) => Promise<unknown>): string;
-  validateAdmission(session: Session): void;
+  validateAdmission(session: Session, attachments?: Session["draft"]["attachments"]): void;
   wake(): void;
   verifyPr(projectId: string, url: string): Promise<void>;
   contextPreview(session: Session): Promise<ModelContextPreview>;
+  startup(projectId: string | null): ResolvedControls;
 }
 export class SessionWorkspace {
   readonly projects: ProjectService;
@@ -152,19 +153,18 @@ export class SessionWorkspace {
         const issue = command.issueId ? this.snapshot().issues.find((issue) => issue.id === command.issueId && issue.projectId === project.id) : undefined;
         if (command.issueId && !issue) throw new MoguriError("work_item", "This work item does not belong to this project.");
         if (!issue && !command.prUrl) throw new MoguriError("work_item", "Choose an existing work item or explicit PR URL.");
-        const { factoryControls } = await import("../../../packages/protocol/src/index.ts");
         const { pullRequestLink } = await import("./project-integrations.ts");
         const prUrl = command.prUrl ? pullRequestLink(command.prUrl).url : issue?.pullRequest?.url ?? null;
         if (command.prUrl) await this.host.verifyPr(project.id, prUrl!);
         const id = randomUUID();
         return finish([{ event_type: "session.created", profile_id: PROFILE_ID, project_id: project.id, session_id: id,
-          payload: { title: issue?.title ?? `PR ${prUrl}`, controls: factoryControls(), prUrl, workItemId: issue?.id ?? null } },
+          payload: { title: issue?.title ?? `PR ${prUrl}`, ...this.host.startup(project.id), prUrl, workItemId: issue?.id ?? null } },
           { event_type: "draft.saved", profile_id: PROFILE_ID, project_id: project.id, session_id: id, payload: { text: issue ? `${issue.title}\n\n${issue.body}` : `Work on ${prUrl}. The folder checkout has not been changed.`, attachments: [] } }], { id });
       }
       case "queue.release": {
         const session = this.session(command.sessionId); this.revision(session.queueRevision, command.expectedRevision);
         if (!session.queue.some((item) => item.id === command.messageId && item.held)) throw new MoguriError("queue_claimed", "This held message was removed, released or already claimed.", 409);
-        this.host.validateAdmission(session);
+        this.host.validateAdmission(session, session.queue.find((item) => item.id === command.messageId)!.attachments);
         const result = finish([this.event(session, { event_type: "queue.released", profile_id: PROFILE_ID, payload: { messageId: command.messageId } })]);
         this.host.wake(); return result;
       }

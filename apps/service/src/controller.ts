@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  CommandSchema, factoryControls, isPlatformCommand, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION,
+  CommandSchema, isPlatformCommand, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
-  type SessionMode,
+  type SessionMode, type ControlDefaults,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -20,8 +20,9 @@ import { authorizeTool } from "./permissions.ts";
 import { assistantMessage, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest } from "./worker-protocol.ts";
 import { assertSessionTool, folderPolicy } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
-import { estimateModelContext, modelRequest, validateModelOptions } from "./model-controls.ts";
+import { contextHasImages, estimateModelContext, modelRequest, validateModelOptions } from "./model-controls.ts";
 import { attentionEvents } from "./attention.ts";
+import { ModelRegistry } from "./model-registry.ts";
 
 interface Run {
   sessionId: string;
@@ -58,12 +59,14 @@ export class ControlPlane extends EventEmitter {
   private writerReservations = new Map<string, string>();
   private deletingSessions = new Set<string>();
   private deletingProjects = new Set<string>();
-  constructor(readonly store: EventStore, readonly provider: ProviderAdapter = new CopilotAdapter(), private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string } = {}) {
+  readonly provider: ModelRegistry;
+  constructor(readonly store: EventStore, provider: ProviderAdapter = new CopilotAdapter(), private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string } = {}) {
     super();
     this.history = store.events();
     this.projection = projectEvents(this.history);
+    this.provider = new ModelRegistry(provider, () => this.projection.settings.values.localModels, platformOptions.models);
     this.platform = new PlatformRuntime(store, platformOptions.stateDir ?? dirname(store.path), {
-      snapshot: () => this.snapshot(), commit: (events, forget) => this.commit(events, undefined, forget),
+      snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events, forget) => this.commit(events, undefined, forget),
       invalidateApprovals: (id) => this.invalidateApprovals(id),
       externalCall: (session, call, execute) => this.externalCall(session, call, execute),
       subagent: (session, prompt) => this.subagent(session, prompt),
@@ -78,15 +81,24 @@ export class ControlPlane extends EventEmitter {
       spawnUser: (session, kind, title, finish) => this.spawnUser(session, kind, title, finish),
       deleteSession: (session, finish) => this.deleteSession(session, finish),
       removeProject: (id, finish) => this.removeProject(id, finish),
-      validateAdmission: (session) => {
+      validateAdmission: (session, attachments = []) => {
         if (session.status === "archived") throw new MoguriError("archived", "Restore the session before running queued work.");
         this.available(session.controls);
+        this.imageModel(session, attachments);
         if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and resume this workspace first.", 409);
         this.paused.delete(session.id);
       },
       closingProject: (id) => this.deletingProjects.has(id),
       contextPreview: (session) => this.previewContext(session),
       validateControls: (controls) => this.available(controls),
+      startup: (projectId) => this.startup(projectId),
+      modelCredential: async (id, token, finish) => {
+        if (this.runs.size) throw new MoguriError("provider_busy", "Stop active model work before changing a local endpoint account.", 409);
+        await this.provider.token(id, token);
+        const settings = this.projection.settings;
+        const result = finish([{ event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
+        this.invalidateApprovals(); return result;
+      },
     }, platformOptions);
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
@@ -136,6 +148,17 @@ export class ControlPlane extends EventEmitter {
     if (forget) this.history = this.store.events(); else this.history.push(...appended);
     this.projection = projectEvents(this.history);
     this.emit("change", appended);
+    this.provider.synchronize();
+  }
+  private startup(projectId: string | null, overrides: ControlDefaults = {}) {
+    const configuration = projectId ? this.platform.sessions.projects.configuration(projectId) : null;
+    const settings = this.projection.settings;
+    return resolveControls([
+      { source: "global", values: settings.values.startup.global },
+      { source: "profile", values: settings.values.startup.profile },
+      { source: "project", values: configuration?.values.defaults ?? {} },
+      { source: "session", values: overrides },
+    ], { settingsRevision: settings.revision, projectRevision: configuration?.revision ?? null });
   }
   private session(id: string): Session {
     const session = this.projection.sessions.find((session) => session.id === id);
@@ -182,6 +205,7 @@ export class ControlPlane extends EventEmitter {
     return finish([{ event_type: "session.created", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: {
       title: title?.trim() || (kind === "side" ? "Side chat" : "Subsession"), controls: { ...parent.controls, autonomy: "Manual" },
       parentSessionId: parent.id, kind, mode: kind === "side" ? "read-only" : "agent", contextDigest: this.store.putBlob(JSON.stringify(this.context(parent.id))),
+      inheritedImages: contextHasImages(this.context(parent.id)),
       prUrl: parent.prUrl, workItemId: parent.workItemId,
     } }], { id });
   }
@@ -261,7 +285,7 @@ export class ControlPlane extends EventEmitter {
     const id = randomUUID();
     const item = { id: randomUUID(), text: prompt, attachments: [], delivery: "queue" as const };
     this.commit([
-      { event_type: "session.created", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: { title: `Read-only: ${prompt.slice(0, 60)}`, controls: { ...parent.controls, autonomy: "Manual" }, parentSessionId: parent.id, readOnly: true, contextDigest: this.store.putBlob(JSON.stringify(this.context(parent.id))) } },
+      { event_type: "session.created", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: { title: `Read-only: ${prompt.slice(0, 60)}`, controls: { ...parent.controls, autonomy: "Manual" }, parentSessionId: parent.id, readOnly: true, inheritedImages: contextHasImages(this.context(parent.id)), contextDigest: this.store.putBlob(JSON.stringify(this.context(parent.id))) } },
       { event_type: "queue.enqueued", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: { item } },
     ]);
     queueMicrotask(() => this.pumpAll());
@@ -339,18 +363,23 @@ export class ControlPlane extends EventEmitter {
     if (controls.budget.kind !== "unlimited") throw new MoguriError("budget_unavailable", "Finite budgets are not enforceable in this checkpoint. No cap has been applied.", 409);
     const model = this.provider.state.models.find((model) => model.id === controls.modelId);
     if (requireModel && !model || controls.modelId !== null && !model) {
-      throw new MoguriError("model_unavailable", "Sign in to GitHub Copilot and explicitly select an available fixed model.", 409);
+      throw new MoguriError("model_unavailable", "Connect Copilot or configure a local endpoint, then explicitly select an available model. No provider was substituted.", 409);
     }
     validateModelOptions(model, controls.modelOptions);
   }
   private attachments(session: Session, attachments: Session["draft"]["attachments"]): void {
-    if (!session.projectId && attachments.length) throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
+    if (!session.projectId && attachments.some((attachment) => attachment.kind === "project_file")) throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
     for (const attachment of attachments) {
       const known = this.history.some((event) => event.profile_id === PROFILE_ID && event.session_id === session.id && event.event_type === "draft.saved" &&
         event.payload.attachments.some((item) => JSON.stringify(item) === JSON.stringify(attachment)));
       if (!known || digest(this.store.blob(attachment.digest)) !== attachment.digest) throw new MoguriError("attachment_denied", "Attachment snapshot is not authorized for this session.", 403);
     }
-    if (attachments.reduce((bytes, attachment) => bytes + attachment.bytes, 0) > 512 * 1024) throw new MoguriError("attachment_limit", "Attached text must fit within 512 KiB.");
+    const maximum = attachments.every((attachment) => attachment.kind === "project_file") ? 512 * 1024 : 12 * 1024 * 1024;
+    if (attachments.reduce((bytes, attachment) => bytes + attachment.bytes, 0) > maximum) throw new MoguriError("attachment_limit", `Captured context exceeds its ${maximum / 1024} KiB limit.`);
+  }
+  private imageModel(session: Session, attachments: Session["draft"]["attachments"]): void {
+    const model = this.provider.state.models.find((model) => model.id === session.controls.modelId);
+    if (!model?.imageInput && (attachments.some((attachment) => attachment.kind === "image") || contextHasImages(this.context(session.id)))) throw new MoguriError("model_images", "Select an image-capable model before admitting this complete context. The draft/queue was preserved; no image was dropped.", 409);
   }
   dispatch(raw: unknown): Promise<CommandResult> {
     const envelope = parse(CommandSchema, raw);
@@ -394,7 +423,7 @@ export class ControlPlane extends EventEmitter {
         const projectId = command.projectId ?? null;
         if (projectId !== null) this.projectRequired(projectId);
         const id = randomUUID();
-        return finish([{ event_type: "session.created", profile_id: PROFILE_ID, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", controls: factoryControls() } }], { id });
+        return finish([{ event_type: "session.created", profile_id: PROFILE_ID, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...this.startup(projectId, command.overrides) } }], { id });
       }
       case "provider.login": {
         if (this.runs.size) throw new MoguriError("provider_busy", "Stop active turns before changing the provider account.", 409);
@@ -463,6 +492,7 @@ export class ControlPlane extends EventEmitter {
         if (command.held && command.delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
         if (!command.held) {
           this.available(session.controls);
+          this.imageModel(session, session.draft.attachments);
           if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "A prior turn failed or has unconfirmed effects. Inspect the workspace, then explicitly Resume after inspection before starting new work.", 409);
         }
         if (!session.draft.text.trim() && !session.draft.attachments.length) throw new MoguriError("empty_message", "Write a prompt or attach a project file first.");
@@ -536,8 +566,9 @@ export class ControlPlane extends EventEmitter {
     }
   }
   private contextItem(item: { text: string; attachments: Session["draft"]["attachments"] }): Message {
-    const attached = item.attachments.map((attachment) => `\n\n<attached_project_file path=${JSON.stringify(attachment.path)} sha256="${attachment.digest}">\n${this.store.blob(attachment.digest)}\n</attached_project_file>`).join("");
-    return { role: "user", content: item.text + attached, timestamp: Date.now() };
+    const text = item.text + item.attachments.filter((attachment) => attachment.kind !== "image").map((attachment) => `\n\n<untrusted-attachment kind="${attachment.kind}" name=${JSON.stringify(attachment.path)} sha256="${attachment.digest}">\n${this.store.blob(attachment.digest)}\n</untrusted-attachment>`).join("");
+    const images = item.attachments.filter((attachment) => attachment.kind === "image");
+    return { role: "user", content: images.length ? [{ type: "text", text }, ...images.map((attachment) => ({ type: "image" as const, data: this.store.blob(attachment.digest), mimeType: attachment.mimeType }))] : text, timestamp: Date.now() };
   }
   private context(sessionId: string): Message[] {
     const messages: Message[] = [];
@@ -565,12 +596,12 @@ export class ControlPlane extends EventEmitter {
       }
       if (session.kind === "subagent" && [...this.runs.values()].filter((run) => this.session(run.sessionId).kind === "subagent").length >= this.projection.settings.values.subagents.maxParallel) continue;
       if (session.kind === "agent" && (session.pendingMode ?? session.mode) === "agent" && this.otherWriter(session)) continue;
-      try { this.available(session.controls); } catch (error) {
+      const item = session.queue.find((item) => item.delivery !== "steer" && !item.held)!;
+      try { this.available(session.controls); this.imageModel(session, item.attachments); } catch (error) {
         const diagnostic = error instanceof Error ? error.message : "Queued turn admission failed.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
         continue;
       }
-      const item = session.queue.find((item) => item.delivery !== "steer" && !item.held)!;
       const turnId = randomUUID();
       const promptDigest = this.store.putBlob(this.platform.prompt(session));
       this.commit([...(session.pendingMode ? [this.event(session, "session.mode_changed", { mode: session.pendingMode })] : []), { ...this.event(session, "turn.started", { item, controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest }), turn_id: turnId }]);
@@ -676,7 +707,7 @@ export class ControlPlane extends EventEmitter {
         this.commit([
           ...steers.map((item) => this.event(current, "steer.applied", { item }, request.stepId)),
           this.event(current, "turn.prompt_bound", { promptDigest: this.store.putBlob(effectivePrompt) }, request.stepId),
-          this.event(current, "model.started", { modelId: prepared.model.id, contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens, ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId),
+          this.event(current, "model.started", { modelId: current.controls.modelId!, providerId: this.provider.state.models.find((model) => model.id === current.controls.modelId)?.providerId ?? prepared.model.provider, apiModelId: prepared.model.id, source: this.provider.state.models.find((model) => model.id === current.controls.modelId)?.source ?? "copilot", contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens, ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId),
         ]);
         this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: configured.model, maxTokens: configured.maxTokens, thinkingEffort: configured.thinkingEffort, steers: steers.map((item) => this.contextItem(item)), systemPrompt: effectivePrompt, tools, mode: current.mode, folders: folderPolicy(projectSettings) } });
       } catch (error) {
@@ -707,7 +738,9 @@ export class ControlPlane extends EventEmitter {
           toolCalls: calls, timestamp: new Date(message.timestamp).toISOString(), outcome: message.stopReason,
         },
         usage: {
-          stepId: request.stepId, modelId: message.model, role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
+          stepId: request.stepId, modelId: session.usage.find((usage) => usage.stepId === request.stepId)?.modelId ?? message.model,
+          providerId: session.usage.find((usage) => usage.stepId === request.stepId)?.providerId, apiModelId: session.usage.find((usage) => usage.stepId === request.stepId)?.apiModelId, source: session.usage.find((usage) => usage.stepId === request.stepId)?.source,
+          role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
           inputTokens: request.usageReported ? message.usage.input : null,
           outputTokens: request.usageReported ? message.usage.output : null,
           cacheReadTokens: request.usageReported ? message.usage.cacheRead : null,
@@ -830,7 +863,7 @@ export class ControlPlane extends EventEmitter {
   }
   async close(): Promise<void> {
     this.shuttingDown = true;
-    await this.provider.cancel();
+    await this.provider.close();
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
     await this.platform.close();

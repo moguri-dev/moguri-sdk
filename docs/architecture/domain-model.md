@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 6; immutable event
+Protocol version and database migration version are 7; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -18,7 +18,7 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Queue item | UUID, text, snapshots, delivery mode, held state, optional steer target and mode-control intent. Held prompts never auto-admit. Only unclaimed items are mutable. |
 | Approval | UUID, exact tool ID/name/arguments, step, policy and permission revisions. Human answers are `user`, invalidations `policy`, explicit grants `delegation` with rule ID. |
 | Owned process | Tool-call ID, PID, process group, owning turn and actual outcome. Unknown cleanup remains unconfirmed. |
-| Attachment | Session-authorized project-text snapshot, SHA-256, byte count, path and UUID. No arbitrary client-side path grant or silent live-file reread. |
+| Attachment | Session-authorized project/client text, normalized image, exact folder/GitHub/session snapshot, SHA-256, bytes and source revision. Explicit selection grants captured content only, never arbitrary filesystem access. |
 | Usage | Solver/side/subagent model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
 | Settings | Revisioned shared values and factory defaults; separate permission revision invalidates stale approvals. Prompt text is not policy. |
 | Capability | Project-scoped skill/script/plugin/style knowledge, immutable content digest, source, enablement revision and optional owning plugin. |
@@ -115,3 +115,12 @@ Global guidance, skills and OAuth accounts are profile-owned; historical project
 OAuth resources are removed with project data. Startup fails incomplete OAuth
 flows, never replays callbacks, and preserves attention/read state without
 inventing new questions.
+
+Migration 7 records the local-model/startup-control/typed-input schema without
+rewriting historical event identities, scope keys, snapshots or receipts.
+Existing project/settings values merge new defaults; legacy sessions keep their
+saved controls. New sessions retain complete resolved values and source/revision
+provenance. Local connections use canonical provider identity distinct from the
+upstream API model ID; non-secret connection states do not expose credentials.
+Typed snapshots retain exact destination-session grants. Image pixels remain
+in independently encrypted blobs, not public events or snapshots.

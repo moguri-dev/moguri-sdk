@@ -14,19 +14,20 @@ export function pullRequestLink(input: string): PullRequestLink {
 }
 export class ProjectIntegrations {
   constructor(readonly vault: SecretVault, private readonly options: IntegrationOptions = {}) {}
-  async pullRequest(link: PullRequestLink, board: IssueBoard, root: string, signal: AbortSignal): Promise<PullRequestLink> {
-    const current = pullRequestLink(link.url);
-    const endpoint = `repos/${current.repo}/pulls/${current.number}`;
-    let result: unknown;
-    if (board.githubAccess === "gh-cli") {
+  async githubRead(endpoint: string, access: "public" | "gh-cli", root: string, signal: AbortSignal): Promise<unknown> {
+    if (!/^repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:pulls|issues)\/[1-9]\d*$/.test(endpoint)) throw new MoguriError("github_endpoint", "Choose an exact repository issue or PR read endpoint.");
+    if (access === "gh-cli") {
       const text = await runProgram("gh", ["api", "--hostname", "github.com", "--method", "GET", endpoint], {
-        cwd: root, signal, timeoutMs: 15_000, maxBytes: 2 * 1024 * 1024, label: "Read linked GitHub pull request",
+        cwd: root, signal, timeoutMs: 15_000, maxBytes: 2 * 1024 * 1024, label: "Read selected GitHub issue or PR",
         env: { GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" },
       });
-      try { result = JSON.parse(text); } catch { throw new MoguriError("issue_pr_response", "GitHub CLI returned invalid PR JSON. No phase was changed."); }
-    } else {
-      result = await fetchJson(this.options.fetch ?? fetch, `https://api.github.com/${endpoint}`, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }, AbortSignal.any([signal, AbortSignal.timeout(15_000)]));
+      try { return JSON.parse(text); } catch { throw new MoguriError("issue_pr_response", "GitHub CLI returned invalid reference JSON. Nothing was applied."); }
     }
+    return fetchJson(this.options.fetch ?? fetch, `https://api.github.com/${endpoint}`, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }, AbortSignal.any([signal, AbortSignal.timeout(15_000)]));
+  }
+  async pullRequest(link: PullRequestLink, board: IssueBoard, root: string, signal: AbortSignal): Promise<PullRequestLink> {
+    const current = pullRequestLink(link.url);
+    const result = await this.githubRead(`repos/${current.repo}/pulls/${current.number}`, board.githubAccess, root, signal);
     if (!isRecord(result) || result.number !== current.number || result.html_url !== current.url || !["open", "closed"].includes(String(result.state)) ||
       typeof result.merged !== "boolean" || result.merged && (result.state !== "closed" || typeof result.merged_at !== "string" || !Number.isFinite(Date.parse(result.merged_at)))) {
       throw new MoguriError("issue_pr_response", "The response did not verify this exact PR's state. No phase was changed.");

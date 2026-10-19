@@ -1,5 +1,5 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec } from "../../protocol/src/index.ts";
+import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -15,8 +15,24 @@ export class MoguriSdk extends TransportClient {
     if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");
     return session.revision;
   }
+  private draftRevision(id: string): number {
+    const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
+    if (!session) throw new ClientError("session_missing", "Choose an existing destination session.");
+    return session.draft.revision;
+  }
+  readonly attachments = {
+    file: (sessionId: string, path: string, mode: "text" | "image" = "text", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.file.add", sessionId, path, mode, expectedRevision }),
+    image: (sessionId: string, data: string, name = "Clipboard image", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.image.add", sessionId, data, name, expectedRevision }),
+    folderPreview: (sessionId: string, path: string) => this.query({ type: "attachment.folder.preview", sessionId, path }),
+    folder: (sessionId: string, path: string, expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.folder.add", sessionId, path, expectedDigest, confirm, expectedRevision }),
+    githubPreview: (sessionId: string, url: string, access: "public" | "gh-cli" = "public") => this.query({ type: "attachment.github.preview", sessionId, url, access }),
+    github: (sessionId: string, url: string, access: "public" | "gh-cli", expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.github.add", sessionId, url, access, expectedDigest, confirm, expectedRevision }),
+    sessionPreview: (sessionId: string, sourceSessionId: string) => this.query({ type: "attachment.session.preview", sessionId, sourceSessionId }),
+    session: (sessionId: string, sourceSessionId: string, expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.session.add", sessionId, sourceSessionId, expectedDigest, confirm, expectedRevision }),
+    read: (sessionId: string, attachmentId: string) => this.query({ type: "attachment.read", sessionId, attachmentId }),
+  };
   readonly sessions = {
-    create: (projectId: string | null = null, title?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}) }),
+    create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}) }),
     configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.configure", sessionId, controls, expectedRevision }),
     modelOptions: (sessionId: string, modelOptions: ModelOptions, expectedRevision = this.sessionRevision(sessionId)) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
@@ -36,6 +52,11 @@ export class MoguriSdk extends TransportClient {
   readonly suggestions = {
     preview: (sessionId: string, allProjects = false) => this.query({ type: "suggestions.preview", sessionId, allProjects }),
     generate: (sessionId: string, expectedDigest: string, allProjects: boolean, confirmScope: true) => this.command({ type: "suggestions.generate", sessionId, expectedDigest, allProjects, confirmScope }),
+  };
+  readonly models = {
+    refresh: () => this.command({ type: "provider.refresh" }),
+    setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
+    clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
   };
   readonly metachat = {
     create: (projectId: string | null = null, parentSessionId?: string, prompt?: string) => this.command({ type: "metachat.create", projectId, ...(parentSessionId ? { parentSessionId } : {}), ...(prompt ? { prompt } : {}) }),

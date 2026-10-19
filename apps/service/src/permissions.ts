@@ -1,9 +1,11 @@
 import { relative, isAbsolute, normalize } from "node:path";
 import type { ToolCall, UserSettings } from "../../../packages/protocol/src/index.ts";
 import { MoguriError } from "../../../packages/protocol/src/index.ts";
+import { validateLocalEndpoints } from "./model-registry.ts";
 
 export interface Authorization { decision: "ask" | "allow" | "deny"; ruleId?: string; reason: string }
 export function validateSettings(settings: UserSettings): void {
+  validateLocalEndpoints(settings.localModels);
   const ids = new Set<string>();
   for (const server of settings.mcpServers) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,100}$/.test(server.id) || server.id === "builtin" || ids.has(server.id)) throw new MoguriError("invalid_server", "MCP server IDs must be unique safe names; builtin is reserved.");

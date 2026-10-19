@@ -3,11 +3,18 @@ import { Value } from "typebox/value";
 import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
 export * from "./platform.ts";
 export * from "./model.ts";
-import { ModelOptionsSchema, type ThinkingEffort } from "./model.ts";
+import type { ThinkingEffort } from "./model.ts";
+import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
+import { defaultProjectSettings } from "./sessions.ts";
+import type { ProviderConnection } from "./providers.ts";
+export * from "./controls.ts";
+export * from "./providers.ts";
 import type { McpAuthorization } from "./oauth.ts";
 import type { ConfigurationProposal, Attention, SuggestionSource } from "./engagement.ts";
+import { AttachmentSchema, type Attachment } from "./inputs.ts";
+export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -15,24 +22,6 @@ const text = Type.String({ maxLength: MAX_TEXT });
 const revision = Type.Integer({ minimum: 0 });
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 
-export const ControlsSchema = object({
-  env: Type.Union([Type.Literal("Local"), Type.Literal("Sandbox"), Type.Literal("Remote")]),
-  modelId: Type.Union([id, Type.Null()]),
-  autonomy: Type.Union([Type.Literal("Manual"), Type.Literal("Guided"), Type.Literal("Autopilot"), Type.Literal("Autopilot Max")]),
-  budget: Type.Union([
-    object({ kind: Type.Literal("unlimited") }),
-    object({ kind: Type.Literal("limited"), tokens: Type.Optional(Type.Integer({ minimum: 1 })), usd: Type.Optional(Type.Number({ exclusiveMinimum: 0 })) }),
-  ]),
-  modelOptions: Type.Optional(ModelOptionsSchema),
-});
-export type Controls = Static<typeof ControlsSchema>;
-export const factoryControls = (): Controls => ({ env: "Local", modelId: null, autonomy: "Manual", budget: { kind: "unlimited" } });
-
-export const AttachmentSchema = object({
-  id, kind: Type.Literal("project_file"), path: Type.String({ minLength: 1, maxLength: 4096 }),
-  digest: Type.String({ pattern: "^[a-f0-9]{64}$" }), bytes: Type.Integer({ minimum: 0, maximum: MAX_TEXT }),
-});
-export type Attachment = Static<typeof AttachmentSchema>;
 const attachments = Type.Array(AttachmentSchema, { maxItems: 16 });
 const sessionId = { sessionId: id };
 
@@ -41,7 +30,7 @@ export const CommandSchema = object({
   profileId: Type.Literal("default"),
   command: Type.Union([
     object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }) }),
-    object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })) }),
+    object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema) }),
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema }),
     object({ type: Type.Literal("session.archive"), ...sessionId }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
@@ -87,10 +76,14 @@ export interface PublicMessage {
   reasoning?: string;
   toolCalls?: ToolCall[];
   outcome?: string;
+  attachments?: Attachment[];
 }
 export interface Usage {
   stepId: string;
   modelId: string;
+  providerId?: string;
+  apiModelId?: string;
+  source?: "copilot" | "local";
   role: "solver" | "subagent" | "side";
   inputTokens: number | null;
   outputTokens: number | null;
@@ -123,6 +116,7 @@ export interface Session {
   projectId: string | null;
   title: string;
   controls: Controls;
+  defaults?: DefaultsSnapshot;
   revision: number;
   status: SessionStatus;
   beforeArchive?: SessionStatus;
@@ -151,13 +145,15 @@ export interface Session {
   workItemId: string | null;
   browserUrl: string | null;
   suggestionSources?: SuggestionSource[];
+  inheritedImages?: boolean;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[] }
+export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];
   login: { code: string; url: string; expiresAt: number } | null;
   diagnostic: string | null;
+  connections?: ProviderConnection[];
 }
 export interface Policy { revision: number; allowedEnvs: Controls["env"][] }
 export interface Snapshot extends PlatformSnapshot {
@@ -182,7 +178,7 @@ export interface Connection {
 
 export interface EventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[] };
+  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[] };
   "session.configured": { controls: Controls };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
@@ -196,7 +192,7 @@ export interface EventPayloads {
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
   "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string };
   "steer.applied": { item: QueueItem };
-  "model.started": { modelId: string; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort };
+  "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort };
   "assistant.delta": { text: string };
   "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage };
   "tool.requested": { approval: Approval };
@@ -308,7 +304,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
       for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
     }
-    if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, structuredClone(event.payload.configuration));
+    if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
     if (event.event_type === "configuration.proposed") configurationProposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "configuration.decided") { const proposal = configurationProposals.get(event.payload.proposalId); if (proposal) proposal.status = event.payload.approve ? "applied" : "rejected"; }
@@ -359,7 +355,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       if (!event.session_id) throw new Error("Invalid session.created event scope.");
       sessions.set(event.session_id, {
         id: event.session_id, projectId: event.project_id ?? null, title: event.payload.title,
-        controls: event.payload.controls, revision: 0, status: "idle", draft: { revision: 0, text: "", attachments: [] },
+        controls: structuredClone(event.payload.controls), defaults: event.payload.defaults ? structuredClone(event.payload.defaults) : undefined, revision: 0, status: "idle", draft: { revision: 0, text: "", attachments: [] },
         queue: [], queueRevision: 0, messages: [], usage: [], processes: [], turnId: null, pendingApproval: null,
         lastError: null, localFinishing: false, createdAt: event.timestamp, updatedAt: event.timestamp,
         parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
@@ -367,6 +363,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
         kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, unread: false, groupId: null, archivedAt: null,
         prUrl: event.payload.prUrl ?? null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
         suggestionSources: event.payload.suggestionSources,
+        inheritedImages: event.payload.inheritedImages,
       });
     }
     const session = event.session_id ? sessions.get(event.session_id) : undefined;
@@ -375,10 +372,12 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     const addUser = (item: QueueItem) => session.messages.push({
       id: item.id, turnId: event.turn_id ?? "", role: "user", text: item.text +
         (item.attachments.length ? `\n\nAttached: ${item.attachments.map((attachment) => attachment.path).join(", ")}` : ""),
-      timestamp: event.timestamp,
+      timestamp: event.timestamp, attachments: item.attachments.length ? structuredClone(item.attachments) : undefined,
     });
     switch (event.event_type) {
-      case "session.configured": session.controls = event.payload.controls; session.revision++; break;
+      case "session.configured":
+        if (session.defaults) for (const key of controlKeys) if (JSON.stringify(session.controls[key]) !== JSON.stringify(event.payload.controls[key])) session.defaults.sources[key] = "session";
+        session.controls = structuredClone(event.payload.controls); session.revision++; break;
       case "session.organized": {
         const changes = event.payload.changes;
         if (changes.title !== undefined) session.title = changes.title;
@@ -444,6 +443,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
           estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: 0, quality: "unknown", outcome: "running",
           contextWindow: event.payload.contextWindow, contextEstimate: event.payload.contextEstimate, thinkingEffort: event.payload.thinkingEffort,
+          providerId: event.payload.providerId, apiModelId: event.payload.apiModelId, source: event.payload.source,
         });
         break;
       case "assistant.delta": {

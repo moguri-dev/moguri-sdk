@@ -8,7 +8,7 @@ Unused scope fields are null in checkpoint 1.
 | Event family | Payload and invariant |
 | --- | --- |
 | `project.added` | Canonical project identity/path. No filesystem access is implied for an agent. |
-| `session.created`, `session.configured` | Title/controls and explicit configuration changes. Running turns cannot be rewritten. |
+| `session.created`, `session.configured` | Title/controls, optional resolved startup values/source revisions and explicit configuration changes. Running turns cannot be rewritten. |
 | `session.archived`, `session.restored` | Non-destructive lifecycle changes after settling owned work and holding prompts. PR merge does not prevent restoration. |
 | `session.blocked`, `session.resumed` | Admission diagnostic or explicit user resumption. Resumption does not prove prior cleanup. |
 | `draft.saved` | Text and authorized snapshots; increments the draft revision. |
@@ -16,7 +16,7 @@ Unused scope fields are null in checkpoint 1.
 | `queue.delivery_changed` | Explicit conversion of an unclaimed steer into a new queued turn. |
 | `turn.started` | Admitted item, controls, allowed-env revision and optional committed prompt digest; claims the item once. |
 | `steer.applied` | One item enters its owning turn at a safe model-step boundary. |
-| `model.started` | Step, actual fixed model, effective context window/effort and estimated context. Creates an unknown, in-progress accounting entry; estimates are not provider token telemetry. |
+| `model.started` | Step, canonical selected model, actual provider/API model, effective context window/effort and estimated context. Creates an unknown, in-progress accounting entry; estimates are not provider token telemetry. |
 | `assistant.delta` | Durable streamed text for that step, batched by the worker. |
 | `model.completed` | Public message, normalized-context blob digest and actual/unknown usage. Does not imply overall turn success. |
 | `tool.requested` | Exact declared tool, approval UUID and policy revision. |
@@ -86,13 +86,18 @@ reviewed configuration decisions and attention acknowledgements. Queries expose
 only transient authorization links, scoped source previews and exact proposal
 reviews. Source preview makes no model call; generated analysis uses an ordinary
 owned model turn. Null project scope supplies no filesystem or shell root.
+Runtime/input commands add explicit model refresh/resource-bound keys and
+selected client text/images or exact reviewed folder/GitHub/session snapshots.
+Preview performs no inference. Source revisions and destination-session grants
+are checked again at capture/admission. Image bytes travel only through the
+bounded private query/provider paths, never public event frames.
 
 ## WebSocket
 
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":6,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":7,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

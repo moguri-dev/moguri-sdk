@@ -15,7 +15,11 @@ export function validateModelOptions(model: Pick<ModelInfo, "contextWindow" | "t
   if (options.thinkingEffort !== undefined && !model.thinkingLevels?.includes(options.thinkingEffort)) throw new MoguriError("model_thinking", "This thinking effort is not supported by the selected model's actual transport. No fallback was applied.");
 }
 export const estimateModelContext = (context: Context): number => estimateContextTokens(normalizeContext(context)).tokens;
+export function contextHasImages(messages: Context["messages"]): boolean {
+  return messages.some((message) => typeof message.content !== "string" && message.content.some((block) => block.type === "image"));
+}
 export function modelRequest(model: Model<Api>, options: ModelOptions | undefined, context: Context) {
+  if (!model.input.includes("image") && contextHasImages(context.messages)) throw new MoguriError("model_images", "This model cannot receive the approved images. Select an image-capable model or remove the image context; no content was dropped or sent.", 409);
   validateModelOptions({ contextWindow: model.contextWindow, thinkingLevels: supportedThinking(model) }, options);
   const selected = { ...model, contextWindow: options?.contextWindow ?? model.contextWindow };
   const normalized = normalizeContext(context);

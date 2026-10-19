@@ -9,6 +9,12 @@ export type SlashResult =
   | { kind: "text"; text: string }
   | { kind: "copy"; text: string };
 export const slashCommands = [
+  { name: "attach-file", description: "Capture an explicitly selected local UTF-8 file", argument: "ABSOLUTE_PATH" },
+  { name: "attach-image", description: "Capture a local PNG/JPEG/WebP; terminal clipboard images need this fallback", argument: "ABSOLUTE_PATH" },
+  { name: "attach-folder", description: "Preview an exact folder snapshot, then confirm its digest", argument: "[SHA256] ABSOLUTE_PATH" },
+  { name: "attach-github", description: "Preview a typed GitHub issue/PR reference", argument: "[gh-cli] [SHA256] URL" },
+  { name: "attach-session", description: "Preview authorized session text without controlling the source", argument: "[SHA256] SESSION_ID" },
+  { name: "attached", description: "Inspect an attachment snapshot", argument: "ATTACHMENT_ID" },
   { name: "suggestions", description: "Preview scoped previous prompts and generate reviewed usage improvements", argument: "[all|run DIGEST|run-all DIGEST]" },
   { name: "meta", aliases: ["metachat"], description: "Open a settings-focused chat with reviewed proposals", argument: "[REQUEST]" },
   { name: "attention", description: "Show questions, approvals and finished work; mark read without answering", argument: "[read ID]" },
@@ -30,6 +36,13 @@ export const slashCommands = [
   { name: "models", description: "Choose a Copilot model" },
   { name: "help", description: "List slash commands" },
 ] as const;
+export const attachmentTriggers = { "^": "Local text file", ":": "Folder", "#": "GitHub issue or PR", "!": "Session", "@": "Project file" } as const;
+export function parseAttachmentTrigger(text: string): { prefix: keyof typeof attachmentTriggers; query: string; start: number } | null {
+  const match = text.match(/(?:^|\s)([@^:#!])([^\s]*)$/);
+  if (!match || !(match[1]! in attachmentTriggers)) return null;
+  const prefix = match[1] as keyof typeof attachmentTriggers;
+  return { prefix, query: match[2]!, start: text.length - match[2]!.length - 1 };
+}
 export function parseSlash(text: string): { name: string; argument: string } | null {
   if (!text.startsWith("/")) return null;
   const [first, ...rest] = text.trim().split(/\s+/);
@@ -43,6 +56,33 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "attach-file":
+    case "attach-image": {
+      if (!command.argument) throw new ClientError("attachment_path", "Choose an explicit absolute file path.");
+      const result = await sdk.attachments.file(session.id, command.argument, command.name === "attach-image" ? "image" : "text");
+      return { kind: "ok", message: `Captured attachment ${result.id}. No prompt was sent.` };
+    }
+    case "attach-folder":
+    case "attach-github":
+    case "attach-session": {
+      const useCli = command.name === "attach-github" && command.argument.startsWith("gh-cli ");
+      const argument = useCli ? command.argument.slice(7) : command.argument;
+      const match = argument.match(/^([a-f0-9]{64})\s+([\s\S]+)$/);
+      const target = match?.[2] ?? argument;
+      if (!target) throw new ClientError("attachment_source", "Select a folder, canonical reference URL or source session ID.");
+      const access = useCli ? "gh-cli" : "public";
+      if (match) {
+        const result = command.name === "attach-folder" ? await sdk.attachments.folder(session.id, target, match[1]!, true) : command.name === "attach-github" ? await sdk.attachments.github(session.id, target, access, match[1]!, true) : await sdk.attachments.session(session.id, target, match[1]!, true);
+        return { kind: "ok", message: `Attached exact reviewed snapshot ${result.id}. No prompt was sent.` };
+      }
+      const { preview } = command.name === "attach-folder" ? await sdk.attachments.folderPreview(session.id, target) : command.name === "attach-github" ? await sdk.attachments.githubPreview(session.id, target, access) : await sdk.attachments.sessionPreview(session.id, target);
+      return { kind: "text", text: JSON.stringify(preview, null, 2) + `\n\nOnly after source/destination review: /${command.name} ${useCli ? "gh-cli " : ""}${preview.digest} ${target}` };
+    }
+    case "attached": {
+      if (!command.argument) throw new ClientError("attachment_source", "Use /attached ATTACHMENT_ID.");
+      const result = await sdk.attachments.read(session.id, command.argument);
+      return { kind: "text", text: result.content.kind === "text" ? result.content.text : JSON.stringify({ attachment: result.attachment, diagnostic: "Image retained privately. Desktop previews pixels; terminal/CLI may inspect its typed metadata without pretending clipboard support." }, null, 2) };
+    }
     case "meta": {
       const created = await sdk.metachat.create(session.projectId, session.id, command.argument || undefined);
       return { kind: "session", sessionId: created.id!, side: false };

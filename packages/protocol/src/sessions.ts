@@ -2,6 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { McpServerSchema, SandboxSchema } from "./config.ts";
 import type { ModelContextPreview } from "./model.ts";
+import { ControlDefaultsSchema } from "./controls.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -25,12 +26,14 @@ export const ProjectSettingsSchema = object({
   deniedFolders: Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { maxItems: 100 }),
   instructionsPath: path, instructions: Type.String({ maxLength: 64 * 1024 }), mcpPath: path,
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }), planPath: path,
+  defaults: ControlDefaultsSchema,
 });
 export type ProjectSettings = Static<typeof ProjectSettingsSchema>;
 export const defaultProjectSettings = (): ProjectSettings => ({
   repo: { upstream: "origin", mainBranch: "main", branchPattern: "moguri/{slug}-{id}", githubAccess: "public" },
   sandbox: null, scripts: [], port: null, porto: { enabled: false, project: "", executable: "porto" },
   readOnlyFolders: [], deniedFolders: [], instructionsPath: "AGENTS.md", instructions: "", mcpPath: "mcp.json", mcpServers: [], planPath: "docs/plan.md",
+  defaults: {},
 });
 export interface ProjectConfiguration { projectId: string; revision: number; folderId: string | null; color: string; order: number; values: ProjectSettings }
 export const defaultProjectConfiguration = (projectId: string): ProjectConfiguration => ({

@@ -3,7 +3,9 @@ import { performance } from "node:perf_hooks";
 import { createModels, type Message } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { executeTool } from "./tools.ts";
-import { parentMessage, toolCalls, usagePresent, type BoundaryReply, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
+import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
+import { localProvider } from "./local-provider.ts";
+import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 
 const abort = new AbortController();
 const pending = new Map<string, { resolve: (message: WorkerReply) => void; reject: (error: Error) => void; interruptible: boolean }>();
@@ -20,6 +22,7 @@ async function finish(outcome: "completed" | "stopped" | "failed" | "partial", d
 async function run(start: WorkerStart): Promise<void> {
   const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
   models.setProvider(githubCopilotProvider());
+  models.setProvider(localProvider());
   const context: Message[] = start.context;
   let incompleteCleanup = false;
   try {
@@ -29,11 +32,16 @@ async function run(start: WorkerStart): Promise<void> {
       const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId });
       if (reply.error || !reply.value || !("model" in reply.value)) throw new Error(reply.error ?? "Missing model authorization.");
       const boundary: BoundaryReply = reply.value;
+      const secrets = [...new Set([
+        ...(boundary.auth.apiKey && boundary.auth.headers?.Authorization !== null ? [boundary.auth.apiKey] : []),
+        ...Object.entries(boundary.auth.headers ?? {}).filter(([name, value]) => value && /authorization|api[-_]?key|auth[-_]?token/i.test(name)).flatMap(([, value]) => value ? [value, value.replace(/^Bearer\s+/i, "")] : []),
+      ])];
+      const redactor = new SecretStreamRedactor(secrets);
       context.push(...boundary.steers);
       const model = { ...boundary.model, baseUrl: boundary.auth.baseUrl ?? boundary.model.baseUrl };
       let usageReported = false;
       let buffered = "";
-      const flush = () => { if (buffered) { send({ kind: "delta", stepId, text: buffered }); buffered = ""; } };
+      const flush = () => { if (buffered) { const text = redactor.push(buffered); if (text) send({ kind: "delta", stepId, text }); buffered = ""; } };
       const timer = setInterval(flush, 50);
       const started = performance.now();
       try {
@@ -52,7 +60,8 @@ async function run(start: WorkerStart): Promise<void> {
           if (buffered.length > 16_384) flush();
         }
         flush();
-        const message = await stream.result();
+        const tail = redactor.finish(); if (tail) send({ kind: "delta", stepId, text: tail });
+        const message = assistantMessage(redactSecrets(await stream.result(), secrets));
         const accepted = await request({
           kind: "model.complete", requestId: randomUUID(), stepId, message,
           usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started,
@@ -60,7 +69,7 @@ async function run(start: WorkerStart): Promise<void> {
         if (accepted.error) throw new Error(accepted.error);
         context.push(message);
         if (message.stopReason === "aborted") throw new Error("Model request cancelled.");
-        if (message.stopReason === "error") throw new Error("The provider request failed. Check Copilot access, model availability and context limits.");
+        if (message.stopReason === "error") throw new Error("The provider request failed. Check the selected provider, model availability and context limits.");
         if (message.stopReason === "pending" || message.stopReason === "deferred") {
           await finish("partial", "The provider deferred completion. Deferred continuation is not supported; no result or retry is assumed.");
           return;
