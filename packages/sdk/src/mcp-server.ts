@@ -24,7 +24,8 @@ export function createGatewayMcpServer(sdk: MoguriSdk, sessionId: string): Serve
     try {
       const { snapshot, session } = bound();
       const args = request.params.arguments ?? {};
-      const enabled = snapshot.settings.values.mcpServers.filter((server) => server.enabled && (!server.projectIds || server.projectIds.includes(session.projectId)));
+      const scoped = snapshot.projectConfigurations.find((configuration) => configuration.projectId === session.projectId)?.values.mcpServers ?? [];
+      const enabled = [...snapshot.settings.values.mcpServers, ...scoped].filter((server) => server.enabled && (!server.projectIds || session.projectId !== null && server.projectIds.includes(session.projectId)));
       const allowed = (id: string) => { if (id !== "builtin" && !enabled.some((server) => server.id === id)) throw new Error("MCP server is outside this session's approved scope."); };
       let result: unknown;
       switch (request.params.name) {
@@ -35,7 +36,7 @@ export function createGatewayMcpServer(sdk: MoguriSdk, sessionId: string): Serve
           result = await sdk.mcp.tools(String(args.serverId), String(args.query ?? ""), Number(args.offset ?? 0), sessionId); break;
         case "moguri_auth_status":
           allowed(String(args.serverId));
-          result = await sdk.mcp.auth(String(args.serverId)); break;
+          result = await sdk.mcp.auth(String(args.serverId), sessionId); break;
         case "moguri_call_tool": {
           allowed(String(args.serverId));
           if (!isRecord(args.arguments)) throw new Error("Tool arguments must be an object.");

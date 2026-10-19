@@ -43,6 +43,9 @@ Unused scope fields are null in checkpoint 1.
 | `terminal.changed` | Owned user-console lifecycle only, never input/output or keystroke hashes. Acknowledged inspection is distinct from proven closure. |
 | `turn.prompt_bound` | Exact effective step prompt digest, including mode, repository instructions and any opted-in retrieved memory. |
 | `session.deleted`, `project.removed` | Transactional tombstone/key erasure with retained sanitized usage; independent artifacts survive session deletion. |
+| `mcp.oauth_changed` | Non-secret explicit OAuth lifecycle and transient-link readiness. Tokens, authorization URLs, state, PKCE verifiers and client secrets are not event payloads. |
+| `configuration.proposed`, `configuration.decided` | Exact scoped content/base digests and revision, verified source excerpts, actual user/model origin and a real user decision. No self-approval, authentication, automatic enablement or publication. |
+| `attention.raised`, `attention.cleared`, `attention.acknowledged` | Atomically derived question/approval/failure/done state; heuristic provenance is explicit and read acknowledgement never resolves or approves. |
 
 ## HTTP commands
 
@@ -77,13 +80,19 @@ Session-workspace commands cover organization, modes, explicit user children,
 reviewed project settings, retained plans, deletion/retention and terminals.
 Missing repo defaults require explicit publication approval. MCP imports bind
 the exact reviewed file digest. No opening/reading action silently pushes.
+Engagement commands add explicit OAuth begin/cancel/clear/client setup, nullable
+session creation, metachat creation, exact-source-consented suggestions,
+reviewed configuration decisions and attention acknowledgements. Queries expose
+only transient authorization links, scoped source previews and exact proposal
+reviews. Source preview makes no model call; generated analysis uses an ordinary
+owned model turn. Null project scope supplies no filesystem or shell root.
 
 ## WebSocket
 
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":5,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":6,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,
@@ -104,6 +113,8 @@ The preview has its own ephemeral partition, no Node/preload bridge, denied
 permissions/downloads/popups and no automatic model context. Node integration
 is disabled; arbitrary native navigation and permission requests are blocked.
 User-triggered microphone permission is an explicit native bridge operation.
+Notification navigation is a narrow session-ID event, not arbitrary native
+execution. OS banners use generic content unless the user opts into previews.
 Neither renderer nor outward MCP may answer a human approval on a model's behalf.
 
 ## Honest accounting

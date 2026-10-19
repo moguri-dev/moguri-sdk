@@ -5,10 +5,11 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 5 deliberately rejects incompatible running
-services. State migrations preserve schema-1/2/3/4 history, sessions, drafts,
+This is an alpha API. Protocol 6 deliberately rejects incompatible running
+services. State migrations preserve schema-1/2/3/4/5 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
-model controls without resetting prior defaults. Restart a previously running alpha service explicitly with
+model controls without resetting prior defaults. Migration 6 adds nullable project
+scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
 `node bin/moguri.mjs service restart`; do not delete its state.
 
 ## Build and consume
@@ -19,7 +20,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.5.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.6.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -98,7 +99,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `settings` / `prompt` | Get, revision-checked update/reset, effective prompt preview. Prompt edits require explicit risk acknowledgement; running turns retain their prompt digest. |
 | `memory` | Opt-in index, lexical-vector search, import/symbol graph, explicit project-style facts. Context injection has a separate opt-in. |
 | `capabilities` | Import disabled standard skills/plugins, inspect source, toggle with revision, propose, review and decide against an exact SHA-256. |
-| `mcp` | Paged tool discovery, non-secret auth status, user-only keychain credential changes, exact approval-bound call, retained result pages. |
+| `mcp` | Paged tool discovery, non-secret auth status, explicit OAuth begin/status/cancel/clear/registered-client setup, user-only keychain credentials, exact approval-bound call and retained result pages. |
 | `subagents` | Explicit opt-in, depth-one tool-less child using the same fixed model and approved parent context. |
 | `voice` | Local status, explicit licensed download, record/transcribe, stop/finalize and revision-safe draft insertion. |
 | `jobs` | Wait or explicitly cancel. A wait timeout/disconnection does not cancel or retry the service's job. |
@@ -112,10 +113,52 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
 | `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
+| `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
+| `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
+| `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
 
 Use `sdk.command` for project/session creation, draft/queue changes, controls,
 human approvals, archive/resume and allowed-env policy. These are the same
 validated commands used by both clients.
+
+### Project-free chats and reviewed configuration
+
+`sessions.create()` or `sessions.create(null)` creates a real project-free chat.
+Raw `session.create` also permits an omitted/null `projectId`. No workspace root,
+attachments, commands, terminal or repository memory is available, and failure
+quarantines only the affected general chat. Scope cannot be reassigned by a
+navigation selection. Explicit global MCPs remain subject to normal approvals.
+
+```ts
+const general = await sdk.sessions.create(null);
+const { preview } = await sdk.suggestions.preview(general.id!);
+// Present preview.scope, sources and digest. No inference has occurred.
+// After explicit source consent and selection of a model:
+const analysis = await sdk.suggestions.generate(general.id!, preview.digest, false, true);
+const settingsChat = await sdk.metachat.create(null, general.id, "Discuss Moguri settings.");
+```
+
+Project-free previews exclude project chats by default. Passing `allProjects:
+true` requires an explicitly project-free source and matching reviewed digest;
+generation does not silently widen scope. Metachat can read non-secret config
+or create proposals through `moguri_config`, never apply, authenticate or grant
+permissions. Optional ordinary evolution still starts off.
+
+`configuration.propose(sessionId, spec)` creates a user-authored proposal;
+model-created ones retain `actor: model`. Specs identify `global`, `project`,
+`policy`, `repo-instructions` or `skill`, section/value/reason and optional
+verified evidence IDs. `configuration.review(id)` returns the exact before/
+after value and warning. Only after actual human review/risk acknowledgement,
+call `configuration.decide(id, true, reviewed.proposal.contentDigest, true)`.
+Reject with `false`. Status, base revision/digest and target validity are
+rechecked at apply. Skills install disabled; repo writes are local and report
+partial effects if their durable decision fails. Proposals survive origin-session
+deletion in their independent target compartment.
+
+`attention.acknowledge(ids)` marks shared items read; it never answers/approves.
+Preferences are `settings.values.notifications`: `inApp: true`, `os: false`,
+`previewContent: false` by default. Native OS delivery/navigation is an Electron
+binding of service events, not a second notification state store.
 
 ### Held prompts, modes and retained plans
 
@@ -241,17 +284,34 @@ credentials, permissions or answer its own approval. Calls wait for the human
 in the bound idle session, then retain a paged result.
 
 Backend MCP transports are stdio and Streamable HTTP, using no auth or a scoped
-OS-keychain bearer credential. HTTPS is required except explicitly configured
-loopback HTTP. Interactive OAuth-only servers are not yet supported. Discovery
+OS-keychain bearer credential or explicit OAuth. HTTPS is required except explicitly configured
+loopback HTTP. Discovery
 is bounded to 512 tools/64 pages, with 20 tools per SDK response. Tool schemas
 and server versions are fingerprinted and rechecked at invocation. Credentials
 are not forwarded through environment variables to stdio children.
+
+Set HTTP `transport.auth` to `"oauth"`. `mcp.oauthBegin(serverId, sessionId?)`
+returns the authorization ID; `mcp.oauthStatus(id)` exposes its ephemeral URL
+and lifecycle. Open that URL only on explicit user action. `oauthCancel(id)`
+settles a flow; `oauthClear(serverId, sessionId?)` removes its credential bundle.
+`oauthClient(serverId, clientId, issuer, clientSecret?, sessionId?, redirectUri?)`
+stores a registered client in the secret backend. Optional `redirectUri` must be
+an exact fixed loopback callback registered with the issuer; no silent port
+fallback. Do not put client secrets in settings or command-line arguments.
+
+The official SDK performs S256 PKCE, issuer/resource discovery, registration,
+exchange and refresh. Resource changes do not reuse another resource's key.
+New grants require a durable connected decision before use. Cancel/expiry/
+restart never replays a callback; revoked/failed refresh never retries a tool
+or changes to anonymous/bearer auth. Project operations must include the bound
+session ID, including outward auth-status queries.
 
 The curated internal MCP exposes `grep_logs`, `fetch_page`, `search_memory` and
 `memory_graph`. Page fetching requires approved HTTPS, pins the resolved public
 destination, rejects private networks/unsafe redirects and bounds extraction.
 Tool descriptions, annotations, output and model recommendations remain
 untrusted data, never permission grants.
+Project-free discovery/calls exclude workspace tools and approved project scripts.
 
 ## CLI entrypoints
 
@@ -261,6 +321,14 @@ Examples: `moguri slash "/read-only" --session ID`,
 `moguri queue hold prompt.txt --session ID`,
 `moguri project get ID`, and
 `moguri project set ID settings.json --revision N`.
+Project-free/engagement commands include `moguri session create`,
+`moguri metachat [REQUEST] --session ID`,
+`moguri suggestions preview --session ID`,
+`moguri suggestions generate --session ID --digest SHA256`,
+`moguri configuration review ID`,
+`moguri configuration apply ID --digest SHA256 --acknowledge-config-risk`,
+`moguri attention list` and `moguri attention read ID`.
+Use `--all-projects` only after explicitly reviewing that wider source scope.
 Destructive removal requires `--confirm-remove`; default publication requires
 `--confirm-push`; repo MCP import requires `--confirm-review --digest SHA256`.
 Queue mutations use their observed queue revision, not the session revision.

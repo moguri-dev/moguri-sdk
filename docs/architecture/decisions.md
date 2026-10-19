@@ -38,6 +38,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D15 | Profile-owned verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
 | D16 | Ghostty embeds the desktop terminal; shared held queues, read-only/side sessions and retained project artifacts extend the same SDK/event authority. | Native input/resize/cancellation, retention-key migration, multi-client policy or packaged-client acceptance fails. |
 | D17 | Compact icon controls expose shared working-context/thinking settings, estimated context preview and provenance-safe usage, with the original red-pom-pom mascot. | Supported transport options, bounded request sizing, migration/restart or compact native-popover behavior fails. |
+| D18 | Project-free chats, explicit MCP OAuth, scoped suggestions/reviewed metachat and shared attention extend the same SDK authority. | Scope isolation, issuer/resource binding, exact configuration review, cancellation, migration or private notification delivery fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -358,6 +359,34 @@ identity, while permitting optional typed model settings and per-step sizing/
 effort provenance. The original mascot gains a small red pom-pom using online
 trait references, not embedded/copied artwork. Existing protection, budget
 qualification and model-provider boundaries are unchanged.
+
+## D18. OAuth and reviewed metachat
+
+**Decision.** The [engagement contract](engagement.md) adds true nullable project
+scope, not a hidden shared workspace. No-project chats have no workspace file,
+command, terminal or repository-memory authority and no fake project writer
+lease. Both clients consume the same typed SDK.
+
+Reuse the official MIT-licensed MCP SDK for OAuth discovery, registration,
+S256 PKCE and resource-bound exchange/refresh. Owned loopback callbacks require
+exact state and one exchange. Secrets stay in the explicit keychain backend;
+new grants are unusable until a durable connected event confirms them.
+Cancellation settles or explicitly reports uncertain credential cleanup.
+No model starts login and no authorization opens without a user action.
+
+Suggestions preview bounded prior user prompts locally. Project-free scope
+excludes project chats unless the user explicitly reviews an all-project
+preview. Analysis is an ordinary accounted/cancellable model turn in a settings
+chat. The model may read non-secret settings or propose an exact change, never
+apply, authenticate or grant permissions. Human decisions bind content/base
+digests, revisions, evidence and risk; skills install disabled and instruction
+writes remain local.
+
+Question/bell/done attention is derived in the same SQLite transaction as the
+underlying state. Question detection is a nonblocking heuristic, not a human
+answer. Desktop banners are opt-in, generic by default and not replayed on
+startup; TUI and GUI share read acknowledgements without resolving work.
+Protocol/database migration 6 preserves earlier encrypted history and grants.
 
 ## Still open
 

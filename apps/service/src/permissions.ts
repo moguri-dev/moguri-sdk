@@ -25,9 +25,10 @@ export function validateSettings(settings: UserSettings): void {
   }
   if (settings.sandbox.image && !/@sha256:[a-f0-9]{64}$/.test(settings.sandbox.image)) throw new MoguriError("sandbox_image", "SendBox requires a digest-pinned workload image.");
 }
-export function authorizeTool(settings: UserSettings, call: ToolCall, root: string): Authorization {
+export function authorizeTool(settings: UserSettings, call: ToolCall, root: string | null): Authorization {
   const value = typeof call.arguments.path === "string" ? call.arguments.path : "";
-  const scoped = value && isAbsolute(value) ? relative(root, value) : value;
+  if (!root && ["list_files", "read_file", "write_file", "run_command"].includes(call.name)) return { decision: "deny", reason: "A selected project is required for workspace access." };
+  const scoped = value && root && isAbsolute(value) ? relative(root, value) : value;
   const matched = settings.permissions.tools.filter((rule) => {
     if (rule.tool !== "*" && rule.tool !== call.name) return false;
     const prefix = rule.pathPrefix.replace(/\/$/, "");

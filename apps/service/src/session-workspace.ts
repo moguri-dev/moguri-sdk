@@ -41,7 +41,8 @@ export class SessionWorkspace {
     }, options.terminal);
   }
   private snapshot() { return this.host.snapshot(); }
-  private project(id: string) {
+  private project(id: string | null) {
+    if (id === null) throw new MoguriError("project_required", "Select a project for this workspace capability. No previous root was reused.", 409);
     const project = this.snapshot().projects.find((project) => project.id === id);
     if (!project) throw new MoguriError("project_missing", "Project is outside this profile.", 404);
     return project;

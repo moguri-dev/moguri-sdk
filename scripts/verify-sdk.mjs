@@ -38,6 +38,15 @@ try {
       await sdk.sessions.mode("generated-id","read-only");
       await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
       const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
+      const general=await sdk.sessions.create(null);
+      const sources=await sdk.suggestions.preview(general.id!);
+      const meta=await sdk.metachat.create(null,general.id);
+      const proposal=await sdk.configuration.propose(meta.id!,{target:"global",section:"instructions",value:"Generated guidance",reason:"Generated review"});
+      const review=await sdk.configuration.review(proposal.id!); void review.before;
+      await sdk.configuration.decide(proposal.id!,false,review.proposal.contentDigest,false);
+      const oauth=await sdk.mcp.oauthBegin("generated-server",general.id);
+      await sdk.mcp.oauthStatus(oauth.id!);
+      await sdk.mcp.oauthCancel(oauth.id!); void sources.preview.digest;
       await sdk.slash("generated-id","/rename Generated","cli");
       void slashCommands;
       return settings;
@@ -63,7 +72,20 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,5);
+      assert.equal(sdk.getState().snapshot.protocolVersion,6);
+      const general=await sdk.sessions.create();
+      assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
+      assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
+      assert.deepEqual((await sdk.mcp.tools("builtin","",0,general.id)).tools.map(t=>t.name),["fetch_page"]);
+      await assert.rejects(()=>sdk.plans.read(general.id),/Select a project/);
+      const meta=await sdk.metachat.create(null,general.id,"Generated external settings request.");
+      assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===meta.id).kind,"metachat");
+      const proposal=await sdk.configuration.propose(meta.id,{target:"global",section:"instructions",value:"Generated external guidance.",reason:"Generated external exact review."});
+      const reviewed=await sdk.configuration.review(proposal.id);
+      await assert.rejects(()=>sdk.configuration.decide(proposal.id,true,reviewed.proposal.contentDigest,false),/Acknowledge/);
+      await sdk.configuration.decide(proposal.id,true,reviewed.proposal.contentDigest,true);
+      assert.equal(sdk.settings.get().values.instructions,"Generated external guidance.");
+      assert.equal(sdk.settings.get().values.notifications.os,false);
       const context=(await sdk.sessions.context(s.id)).context;
       assert.ok(context.estimatedTokens>0);assert.equal(context.source,"estimated");
       if(process.platform==="darwin") {
@@ -113,7 +135,7 @@ try {
       assert.equal((await sdk.plans.artifact(artifact.id)).text,"Generated external retained plan.");
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===side.id).parentSessionId,undefined);
     } finally {sdk.disconnect();await runtime.close();}
-    console.log("External SDK imports/types, approved/audited install, real macOS PTY transport, held prompts/slash/side sessions, retained plans, vectors, native MCP and script-free cache install passed.");
+    console.log("External SDK imports/types, approved/audited install, project-free/metachat/config review, real macOS PTY transport, held prompts/slash/side sessions, retained plans, vectors, native MCP and script-free cache install passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }

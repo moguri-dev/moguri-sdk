@@ -3,9 +3,13 @@ import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
 import { McpServerSchema, SandboxSchema } from "./config.ts";
 import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot } from "./sessions.ts";
+import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
+import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 export * from "./workspace.ts";
 export * from "./config.ts";
 export * from "./sessions.ts";
+export * from "./oauth.ts";
+export * from "./engagement.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -27,6 +31,7 @@ Finish with the outcome and any real blocker. Do not claim access to hidden reas
 export const SettingsSchema = object({
   appearance: object({ theme: Type.Union([Type.Literal("dark"), Type.Literal("light"), Type.Literal("system")]) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
+  instructions: Type.String({ maxLength: 64 * 1024 }),
   permissions: object({
     tools: Type.Array(object({ id, tool: Type.String({ minLength: 1, maxLength: 80 }), decision, pathPrefix: Type.String({ maxLength: 4096 }) }), { maxItems: 100 }),
     commands: Type.Array(object({ id, command: Type.String({ minLength: 1, maxLength: 16384 }), decision }), { maxItems: 100 }),
@@ -41,22 +46,25 @@ export const SettingsSchema = object({
   }),
   sandbox: SandboxSchema,
   retention: object({ deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }) }),
+  notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
-  appearance: { theme: "dark" }, systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  appearance: { theme: "dark" }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "",
   permissions: { tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [],
   voice: { language: "auto", backend: "auto" },
   sandbox: { executable: "sendbox", configPath: null, image: null, bundlePath: null, trustRootPath: null },
   retention: { deleteArchived: false, afterDays: 30 },
+  notifications: { inApp: true, os: false, previewContent: false },
 });
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("retention"),
+  Type.Literal("instructions"), Type.Literal("notifications"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("settings.update"), expectedRevision: revision, settings: SettingsSchema, acknowledgePromptRisk: Type.Boolean() }),
@@ -80,6 +88,8 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("job.cancel"), jobId: id }),
   WorkspaceCommandSchema,
   SessionWorkspaceCommandSchema,
+  OAuthCommandSchema,
+  EngagementCommandSchema,
 ]);
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
@@ -96,6 +106,8 @@ export const QuerySchema = Type.Union([
   object({ type: Type.Literal("proposal.content"), proposalId: id }),
   WorkspaceQuerySchema,
   SessionWorkspaceQuerySchema,
+  OAuthQuerySchema,
+  EngagementQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -103,7 +115,7 @@ export interface GraphNode { id: string; path: string; label: string; kind: "fil
 export interface GraphEdge { source: string; target: string; kind: "imports" | "declares" }
 export interface McpToolInfo { serverId: string; name: string; description: string; inputSchema: Record<string, unknown>; digest: string }
 export interface CapabilityEntry {
-  id: string; projectId: string; kind: "skill" | "script" | "plugin" | "memory";
+  id: string; projectId: string | null; kind: "skill" | "script" | "plugin" | "memory";
   name: string; description: string; contentDigest: string; enabled: boolean; revision: number;
   source: "user" | "approved-proposal"; createdAt: string;
   ownerPluginId?: string;
@@ -123,6 +135,9 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   registry: CapabilityEntry[];
   proposals: Proposal[];
   jobs: CapabilityJob[];
+  oauthAuthorizations: McpAuthorization[];
+  configurationProposals: ConfigurationProposal[];
+  attention: Attention[];
 }
 export interface VoiceStatus {
   runtimeReady: boolean; modelReady: boolean; diagnostic: string | null; modelId: string;
@@ -132,11 +147,13 @@ export interface SandboxStatus { ready: boolean; diagnostic: string; configured:
 export type PlatformResponse =
   | WorkspaceResponse
   | SessionWorkspaceResponse
+  | OAuthResponse
+  | EngagementResponse
   | { type: "prompt.preview"; editable: string; effective: string; warning: string }
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }
   | { type: "mcp.tools"; tools: McpToolInfo[]; nextOffset: number | null }
-  | { type: "mcp.auth"; state: "not-required" | "configured" | "required"; method: "none" | "bearer"; diagnostic: string }
+  | { type: "mcp.auth"; state: "not-required" | "configured" | "required"; method: "none" | "bearer" | "oauth"; diagnostic: string; expiresAt?: number | null }
   | { type: "result.read"; text: string; nextOffset: number | null }
   | { type: "voice.status"; voice: VoiceStatus }
   | { type: "sandbox.status"; sandbox: SandboxStatus }

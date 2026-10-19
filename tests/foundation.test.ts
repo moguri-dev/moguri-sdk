@@ -28,7 +28,7 @@ test("events and command receipts commit together, replay, and cannot be mutated
     assert.equal(restored?.event_type, "project.added");
     if (restored?.event_type === "project.added") assert.equal(restored.payload.project.name, project.name);
     assert.equal(store.events(1).length, 0);
-    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 5);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 6);
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });
@@ -43,6 +43,16 @@ test("the default profile never projects another profile's project or session", 
       { event_type: "project.added", profile_id: "default", project_id: "default", payload: { project: { id: "default", name: "generated visible project", path: "/generated/visible" } } },
     ]);
     assert.deepEqual(projectEvents(store.events()).projects.map((project) => project.id), ["default"]);
+  } finally { store.close(); }
+});
+
+test("derived events and primary command receipts roll back atomically on derivation failure", () => {
+  const store = new EventStore(":memory:");
+  try {
+    assert.throws(() => store.commit([{ event_type: "project.added", profile_id: "default", project_id: "generated-atomic", payload: { project: { id: "generated-atomic", name: "Generated atomic", path: "/generated" } } }],
+      { id: "generated-atomic-command", digest: "generated", result: {} }, undefined, () => { throw new Error("Generated derivation failure"); }), /derivation failure/);
+    assert.equal(store.events().length, 0);
+    assert.equal(store.receipt("generated-atomic-command", "generated"), undefined);
   } finally { store.close(); }
 });
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import {
-  defaultProjectConfiguration, defaultSettings, isRecord, McpServerSchema, MoguriError, parse,
+  defaultProjectConfiguration, defaultProjectSettings, defaultSettings, isRecord, McpServerSchema, MoguriError, parse,
   type Project, type ProjectConfiguration, type ProjectSettings, type SessionWorkspaceResponse, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 import { isProtectedProjectPath, readProjectFile, scopedPath, writeProjectFile } from "./files.ts";
@@ -13,6 +13,7 @@ import { digest } from "./store.ts";
 
 export class ProjectService {
   constructor(private readonly snapshot: () => Snapshot, private readonly stateDir: string) {}
+  values(id: string | null | undefined): ProjectSettings { return id ? this.configuration(id).values : defaultProjectSettings(); }
   configuration(id: string): ProjectConfiguration {
     if (!this.snapshot().projects.some((project) => project.id === id)) throw new MoguriError("project_missing", "Project is outside this profile.", 404);
     return this.snapshot().projectConfigurations.find((entry) => entry.projectId === id) ?? defaultProjectConfiguration(id);
@@ -34,7 +35,7 @@ export class ProjectService {
     }
     catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return null; throw error; }
   }
-  async sources(project: Project): Promise<Extract<SessionWorkspaceResponse, { type: "project.sources" }>> {
+  async instructionSource(project: Project): Promise<{ instructions: string | null; instructionsPath: string }> {
     const { values } = this.configuration(project.id);
     let instructionsPath = values.instructionsPath;
     let instructions = await this.optional(project.path, instructionsPath, folderPolicy(values));
@@ -42,8 +43,13 @@ export class ProjectService {
       const alternate = await this.optional(project.path, "Agents.md", folderPolicy(values));
       if (alternate !== null) { instructions = alternate; instructionsPath = "Agents.md"; }
     }
+    return { instructions, instructionsPath };
+  }
+  async sources(project: Project): Promise<Extract<SessionWorkspaceResponse, { type: "project.sources" }>> {
+    const { values } = this.configuration(project.id);
+    const source = await this.instructionSource(project);
     const mcp = await this.optional(project.path, values.mcpPath, folderPolicy(values));
-    return { type: "project.sources", instructions, mcp, instructionsPath, mcpPath: values.mcpPath, mcpDigest: mcp === null ? null : digest(mcp) };
+    return { type: "project.sources", ...source, mcp, mcpPath: values.mcpPath, mcpDigest: mcp === null ? null : digest(mcp) };
   }
   async context(project: Project): Promise<string> {
     const { values } = this.configuration(project.id);

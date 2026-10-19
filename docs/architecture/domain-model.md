@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 5; immutable event
+Protocol version and database migration version are 6; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -11,7 +11,7 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | --- | --- |
 | Profile | Only `default` is exposed. Every command/event is scoped; other profile rows are excluded from projection, replay and attachment authorization. Profile creation/switching is not implemented. |
 | Project | Stable UUID/canonical folder, ordered navigation folder/color and revisioned repository/policy/script/MCP bindings. One active agent writer; no implicit managed Git worktree. |
-| Session | UUID/project, controls/revisions/lifecycle, agent/read-only mode, pending safe-boundary mode, explicit agent/side/model-subagent kind, pin/unread/group/parent metadata, PR/work-item binding, drafts/queue/messages/usage and exact approval. |
+| Session | UUID/nullable project, controls/revisions/lifecycle, agent/read-only mode, pending safe-boundary mode, explicit agent/side/model-subagent/metachat kind, pin/unread/group/parent metadata, PR/work-item binding, drafts/queue/messages/usage and exact approval. A null project never resolves to another root. |
 | Turn | Admitted queue item, UUID, immutable controls/policy and prompt-digest snapshot, and worker ownership. Admission removes exactly one unclaimed queue item atomically. |
 | Step | One authorized provider request, normalized final context snapshot, usage quality, request wall time and declared tools. Worker completion requires durable acknowledgement before tools or the next step. |
 | Draft | Text, approved attachment snapshots and optimistic revision. Local unacknowledged edits are explicitly not authoritative. |
@@ -32,6 +32,9 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Retained artifact | Project-owned immutable content snapshot, origin-session reference and optional source path. Session deletion cannot remove its independent grant. |
 | User terminal | Session/project ownership, PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Ghostty owns VT rendering; output and input are bounded ephemeral data. |
 | Model options | Optional working window and supported thinking effort in revisioned session controls; the provider maximum is not changed. Step usage records effective window/effort and labeled estimated context separately from actual token telemetry. |
+| MCP authorization | Non-secret owned OAuth lifecycle, server/scope/expiry and transient-link readiness. State/verifier/authorization URL are ephemeral; issuer/resource-bound clients and grants stay in the secret backend. A durable connected decision gates use. |
+| Configuration proposal | Actual user/model origin, exact target scope, source excerpts, content/base digests and revision, with pending/applied/rejected state. A model cannot decide it. Human approval never enables a skill or publishes instructions. |
+| Attention | Question/bell/done, real-state or heuristic provenance, session, active state and separate read acknowledgement. It never becomes a user answer or approval. |
 
 Provider-neutral session state is projected from immutable events. Normalized
 pi-ai model messages live in content-addressed blobs referenced by completion
@@ -50,7 +53,7 @@ surviving children and forgets only the requested retention compartment.
 
 Steers bind to one turn and never migrate implicitly. Interrupt priorities are
 recorded through queue ordering. Failed or partial work quarantines automatic
-admission for the project until explicit user inspection/resumption. Queues
+admission for the project, or only the affected project-free session, until explicit user inspection/resumption. Queues
 recovered after restart require explicit resumption even if they were unclaimed.
 
 Allowed-env revisions record the active Local turn IDs permitted to finish.
@@ -104,3 +107,11 @@ Migration 5 records the optional model-control schema without rewriting event
 identities, ciphertext grants or legacy defaults. Schema-4 state upgrades in
 place. Context preview is a read-only local estimate of the saved draft,
 instructions, declared tools and conversation; it never calls a model.
+
+Migration 6 records nullable scope, OAuth/engagement events, user guidance and
+notification preferences without rewriting older identities or encrypted grants.
+Configuration content/evidence remains independent of origin-session retention.
+Global guidance, skills and OAuth accounts are profile-owned; historical project
+OAuth resources are removed with project data. Startup fails incomplete OAuth
+flows, never replays callbacks, and preserves attention/read state without
+inventing new questions.

@@ -7,7 +7,7 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { writeLegacyState } from "./fixtures/legacy-state.ts";
 
-test("schema-1 state migrates to schema 5 with the same sessions, drafts, receipts and immutable history", async () => {
+test("schema-1 state migrates to schema 6 with the same sessions, drafts, receipts and immutable history", async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
@@ -17,7 +17,7 @@ test("schema-1 state migrates to schema 5 with the same sessions, drafts, receip
     sdk.disconnect();
     await writeLegacyState(fixture.service, 1);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 5);
+    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 6);
     const session = restarted.controller.snapshot().sessions.find((session) => session.id === fixture.sessionId)!;
     assert.equal(session.draft.text, "generated schema-one surviving draft");
     assert.equal(restarted.controller.snapshot().settings.values.appearance.theme, "dark");
@@ -36,7 +36,7 @@ test("schema-2 upgrades preserve prior state and new boards survive restart whil
     await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "Generated schema-two draft", attachments: [] });
     sdk.disconnect(); await writeLegacyState(fixture.service, 2);
     runtime = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(runtime.store.db.prepare("PRAGMA user_version").get()?.user_version, 5);
+    assert.equal(runtime.store.db.prepare("PRAGMA user_version").get()?.user_version, 6);
     assert.equal(runtime.controller.snapshot().sessions[0]?.draft.text, "Generated schema-two draft");
     sdk = await new MoguriSdk(runtime.connection).ready();
     const created = await sdk.issues.create(projectId, { title: "Generated retained issue", body: "Generated", kind: "misc", phaseId: "backlog", pullRequestUrl: null });

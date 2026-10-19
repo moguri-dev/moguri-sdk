@@ -18,7 +18,7 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("finished"), requestId: Type.String(), outcome: Type.Union([Type.Literal("completed"), Type.Literal("stopped"), Type.Literal("failed"), Type.Literal("partial")]), diagnostic: Type.Union([Type.String(), Type.Null()]) }),
 ]);
 export type WorkerRequest = Static<typeof WorkerRequestSchema>;
-export interface WorkerStart { kind: "start"; root: string; context: Message[]; readOnly: boolean }
+export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
 export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean } | DelegatedResult; error?: string };
@@ -29,7 +29,7 @@ export function parentMessage(value: unknown): ParentMessage {
   if (value.kind === "reply" && typeof value.requestId === "string" &&
     (value.error === undefined || typeof value.error === "string") &&
     (value.value === undefined || isRecord(value.value))) return value as ParentMessage;
-  if (value.kind === "start" && typeof value.root === "string" && Array.isArray(value.context)) return value as ParentMessage;
+  if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) return value as ParentMessage;
   throw new Error("Invalid parent message.");
 }
 const assistantSchema = Type.Object({

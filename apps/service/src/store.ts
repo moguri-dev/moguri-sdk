@@ -42,6 +42,7 @@ function references(input: EventInput): string[] {
     case "capability.saved": return [input.payload.entry.contentDigest];
     case "capability.proposed": return [input.payload.proposal.contentDigest];
     case "artifact.saved": return [input.payload.artifact.contentDigest];
+    case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
     case "job.finished": return input.payload.resultDigest ? [input.payload.resultDigest] : [];
     default: return [];
@@ -56,7 +57,7 @@ export class EventStore {
     this.db = new DatabaseSync(path, { allowExtension: true });
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
-      if (version > 5) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version > 6) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -88,6 +89,9 @@ export class EventStore {
       if (version < 5) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('model_controls_schema','1');
         PRAGMA user_version=5; COMMIT;`);
+      if (version < 6) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('engagement_schema','1');
+        PRAGMA user_version=6; COMMIT;`);
       const existing = this.db.prepare("SELECT scope,payload FROM retention_keys LIMIT 1").get();
       if (existing) this.key({ scope: String(existing.scope), projectId: null, sessionId: null }, false);
     } catch (error) { this.db.close(); throw error; }
@@ -148,11 +152,11 @@ export class EventStore {
     if (row.digest !== expectedDigest) throw new MoguriError("idempotency_conflict", "A command ID was reused with different arguments.", 409);
     return JSON.parse(String(row.result)) as CommandResult;
   }
-  commit(inputs: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest): StoredEvent[] {
+  commit(inputs: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest, derive?: (events: StoredEvent[]) => EventInput[]): StoredEvent[] {
     const events: StoredEvent[] = [];
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      for (const input of inputs) {
+      const append = (input: EventInput) => {
         const data = {
           project_id: null, session_id: null, turn_id: null, step_id: null, correlation_id: null,
           ...input, id: randomUUID(), schema_version: 1, timestamp: new Date().toISOString(), work_item_id: null, parent_event_id: null,
@@ -162,12 +166,15 @@ export class EventStore {
         const payload = seal(JSON.stringify(input.payload), this.key(scope, true)!, scope.scope, `event:${data.id}`);
         const row = this.db.prepare("INSERT INTO events (id,data,payload) VALUES (?,?,?)").run(data.id, JSON.stringify({ ...data, payload }), JSON.stringify(payload));
         events.push({ ...data, seq: Number(row.lastInsertRowid) } as StoredEvent);
-      }
+      };
+      for (const input of inputs) append(input);
+      const derived = derive?.(events) ?? [];
+      for (const input of derived) append(input);
       if (receipt) this.db.prepare("INSERT INTO receipts VALUES (?,?,?)").run(receipt.id, receipt.digest, JSON.stringify(receipt.result));
       for (const input of inputs) if (input.event_type === "project.relocated" && input.project_id) this.clearProjectIndex(input.project_id);
       if (forget) this.forget(forget);
       this.db.exec("COMMIT");
-      for (const input of inputs) for (const hash of references(input)) this.pending.delete(hash);
+      for (const input of [...inputs, ...derived]) for (const hash of references(input)) this.pending.delete(hash);
       if (forget) { this.keys.clear(); this.pending.clear(); this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); }
       return events;
     } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); this.keys.clear(); throw error; }

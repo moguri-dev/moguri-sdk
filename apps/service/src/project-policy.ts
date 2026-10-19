@@ -26,10 +26,11 @@ export async function assertFolderAccess(root: string, input: string, write: boo
   assertFolderName(name, write, policy);
 }
 export const readTools = new Set(["list_files", "read_file", "memory_search"]);
-export async function assertSessionTool(session: Session, root: string, settings: ProjectSettings, call: ToolCall): Promise<void> {
+export async function assertSessionTool(session: Session, root: string | null, settings: ProjectSettings, call: ToolCall): Promise<void> {
   if ((session.mode === "read-only" || session.pendingMode === "read-only" || session.kind === "side") && !readTools.has(call.name)) throw new MoguriError("read_only", "This session is question/read-only. Edit, shell, MCP execution, Git and evolution tools are disabled.", 403);
   const policy = folderPolicy(settings);
-  if (["list_files", "read_file", "write_file"].includes(call.name)) await assertFolderAccess(root, String(call.arguments.path), call.name === "write_file", policy);
+  if (!root && ["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(call.name)) throw new MoguriError("project_required", "Select a project for workspace files, commands or repository knowledge. No previous root was reused.", 403);
+  if (root && ["list_files", "read_file", "write_file"].includes(call.name)) await assertFolderAccess(root, String(call.arguments.path), call.name === "write_file", policy);
   if ((call.name === "run_command" || call.name === "mcp_gateway") && (policy.denied.length || policy.readOnly.length)) throw new MoguriError("folder_containment", "Host shell/MCP execution cannot enforce these folder restrictions. A qualified containment broker is required; no Local bypass.", 403);
 }
 export function relativeProjectPath(root: string, input: string): string {

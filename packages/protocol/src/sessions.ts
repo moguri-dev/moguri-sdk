@@ -10,7 +10,7 @@ const path = Type.String({ minLength: 1, maxLength: 4096 });
 const nullableId = Type.Union([id, Type.Null()]);
 export const SessionModeSchema = Type.Union([Type.Literal("agent"), Type.Literal("read-only")]);
 export type SessionMode = Static<typeof SessionModeSchema>;
-export type SessionKind = "agent" | "side" | "subagent";
+export type SessionKind = "agent" | "side" | "subagent" | "metachat";
 export const ProjectSettingsSchema = object({
   repo: object({
     upstream: Type.String({ minLength: 1, maxLength: 100 }), mainBranch: Type.String({ minLength: 1, maxLength: 200 }),
