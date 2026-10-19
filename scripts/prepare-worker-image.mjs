@@ -4,13 +4,20 @@ import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { spawn, execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
 
 const { values } = parseArgs({ options: { build: { type: "boolean" }, tag: { type: "string" } } });
 const files = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs"];
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+const containerfile = await readFile("scripts/worker-image/Containerfile", "utf8");
+const base = containerfile.match(/^FROM (docker\.io\/library\/node@sha256:[a-f0-9]{64})$/m)?.[1];
+if (!base) throw new Error("The workload needs one explicit digest-pinned Node base; no mutable tag was accepted.");
 const payload = {
+  schemaVersion: 1,
   version: JSON.parse(await readFile("package.json", "utf8")).version,
-  base: "docker.io/library/node@sha256:2928a235e5af9997b97f8fbe5718cfd40676fc9190b619effc0c0249c41bb4e4",
+  protocol: PROTOCOL_VERSION,
+  base,
+  recipeDigest: hash(containerfile),
   files: {},
 };
 for (const file of files) payload.files[file] = hash(await readFile(file));
@@ -20,7 +27,7 @@ await mkdir(join(context, "dist"));
 for (const file of files) await cp(file, join(context, file));
 await cp("scripts/worker-image/Containerfile", join(context, "Containerfile"));
 await writeFile(join(context, "payload.json"), JSON.stringify(payload, null, 2), { mode: 0o600 });
-const tag = values.tag ?? `docker.io/library/moguri-worker:${payload.version}-${payload.files["dist/worker.mjs"].slice(0, 12)}`;
+const tag = values.tag ?? `docker.io/library/moguri-worker:${payload.version}-${hash(JSON.stringify(payload)).slice(0, 12)}`;
 if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:-]{0,200}$/.test(tag)) throw new Error("Use a safe local workload image tag. This script never publishes it.");
 if (!values.build) {
   console.log(JSON.stringify({ status: "PREPARED", context, tag, payload, qualification: "No build/VM/native SendBox qualification has run." }, null, 2));

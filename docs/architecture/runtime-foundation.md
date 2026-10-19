@@ -74,6 +74,51 @@ These identities are developer qualification inputs, not a factory trust-root
 change. Native Moguri probes must verify the installed bytes and boundary
 independently before advertising Sandbox readiness.
 
+### Moguri Node workload qualification
+
+The updated no-cache Linux arm64 image verifies exact protocol-9 worker/bridge
+payloads, Node 26.12.0, a regular canonical Node ELF, native node-pty and nftables.
+The first Bookworm image (nftables 1.0.6) still timed out in guest readiness.
+A pinned Node/Trixie image with the separately qualified nftables generation
+1.1.3 advances through authenticated R3 readiness into real workload execution.
+This narrows compatibility; it does not prove nft alone caused the earlier
+failure.
+
+The Trixie build passed in **32,874.13 ms** with zero npm audit findings.
+Its local-only immutable reference is
+`docker.io/library/moguri-worker@sha256:4591ec01ac6955440c2c54eaa40427fb64d3884f5f695f8c30e364ce2eff06d1`,
+based on verified arm64 Node 26.12.0/Trixie manifest
+`sha256:f6e55fb0e92f7f115549278ab36f68f0659790f5d4fd7cb4446486d8ed70d842`.
+Worker digest is
+`b3ad90fefe5e488ea8521553b63ed0ac9a623cf1043ad79c81847f5515155f63`.
+Build tags bind payload/recipe identity; immutable aliases are verified locally
+without publishing the image.
+
+**The actual Node workload is still blocked.** It aborts with exit 134 at
+`node_platform.cc:109`, `uv_thread_create`. A real non-root ctypes/pthread probe
+inside the same signed guest reports `pthread_create=EPERM`,
+`clone3(NULL,0)=EPERM`, process limit 256, NNP=1, seccomp=2 and no effective
+capabilities. Thread compatibility, not image presence or a shell-only pass,
+must be qualified before enabling Moguri Sandbox. Do not disable hardening,
+allow uninspectable clone3, or call single-threaded Node an equivalent runtime.
+The coordinated SendBox repair is investigating the compatible denied-syscall
+behavior; a changed guest needs a separately signed/authenticated candidate.
+
+`node --import tsx scripts/sendbox-worker-spike.mjs --candidate INSTALLATION.json
+--workload IMAGE_QUALIFICATION.json` verifies root-owned candidate hashes and
+uses generated private configuration. It requires exact persistent-guest
+terminal success and decoded output, then the actual Moguri foreground-PTY
+bootstrap. Current execution fails before that PTY stage. A long generated VM
+name also produced Apple `startProcess` EINVAL; bounded names avoided that
+failure without changing protections.
+
+Abrupt SIGTERM of a diagnostic host CLI left its owned VM alive. It was stopped
+and deleted by exact identity, with empty owned inventory confirmed. The spike
+now matches its unique run prefix, trusted bootstrap executable and generated
+workspace mount before targeted cleanup. This is not a qualified production
+cancellation/restart adapter. No foreign VM, service registration, Porto process
+or production trust path was changed.
+
 SendBox entry allow rules match argv token counts, not shell-style tail globs:
 `/bin/sh -c *` matches the three-token generated probe, while `/bin/sh *` does
 not. `scripts/sendbox-spike.mjs` preserves failed configuration and reports the
