@@ -64,3 +64,25 @@ third-party artwork or branding are embedded.
 Generated tests cover supported/unsupported effort, context admission, migration/
 restart, actual adapter options, Cmd keydown/keyup/blur, popover navigation,
 usage provenance and compact layout. CI remains main-push-only.
+
+## Alpha qualification
+
+The `0.5.0-alpha.1` macOS arm64 checkpoint passes **88** generated unit/
+integration/native-TUI checks and **six** hidden Electron workflows against
+source and the packaged app. The composer workflow checks exact icon roles,
+queue-only modifier behavior before model selection, context/effort persistence,
+actual generated request parameters, safe Enter handling inside popovers,
+unknown monetary telemetry and non-overlapping compact/long-model layouts.
+Bounded visual inspection and confirmation, plus a static UI scan, are complete.
+
+Clean locked installation, type/declaration checks, production builds and both
+source/external-consumer audits pass without reported vulnerabilities. The
+independently packed SDK exposes model options and local context preview without
+Electron. The versioned app, DMG, ZIP and SDK tarball retain the original runtime
+boundaries; ad-hoc signature, regenerated mascot icon, native PTY transport and
+DMG checksum are verified. Development artifacts are not notarized.
+
+No live inference, personal login/keychain/microphone or real model weights were
+used. Nonfatal upstream dependency/FFI, initial file-package approval, optional
+`.icon` fallback and lazy Ghostty chunk-size notices remain visible. No feature
+CI is dispatched; the workflow still triggers only on pushes to `main`.
