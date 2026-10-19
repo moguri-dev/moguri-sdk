@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import * as cacache from "cacache";
 import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
@@ -107,17 +107,40 @@ test("failed managed installs preserve the old dependency tree and quarantine au
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     artifact = await dependencyArchive(fixture.directory); await dependencyProject(fixture.project, artifact);
-    await mkdir(join(fixture.project, "node_modules"), { recursive: true });
-    await writeFile(join(fixture.project, "node_modules", "generated-old-tree"), "generated original dependencies");
-    const manifestPath = join(fixture.project, "package.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.dependencies[artifact.name] = "2.0.0"; await writeFile(manifestPath, JSON.stringify(manifest));
+    const previousTree = join(fixture.directory, "generated-existing-dependencies");
+    await mkdir(previousTree, { recursive: true });
+    await writeFile(join(previousTree, "generated-old-tree"), "generated original dependencies");
+    await symlink(previousTree, join(fixture.project, "node_modules"), "dir");
     const { plan } = await sdk.cache.inspect(fixture.session().projectId, "npm");
     const job = await sdk.cache.install(plan.projectId, "npm", plan.digest, true);
     assert.equal((await sdk.jobs.wait(job.id!)).status, "partial");
     assert.equal(await readFile(join(fixture.project, "node_modules", "generated-old-tree"), "utf8"), "generated original dependencies");
     assert.ok(sdk.getState().snapshot?.blockedProjects.includes(plan.projectId));
     assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("cache admission rejects local manifest references and hidden pnpm directory/patch resolutions before networking", async () => {
+  let requests = 0;
+  const fixture = await setupFixture({ platform: { cache: { fetch: async () => { requests++; throw new Error("No network should be reached."); } } } });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const artifact = await dependencyArchive(fixture.directory);
+    await dependencyProject(fixture.project, artifact);
+    const manifest = JSON.parse(await readFile(join(fixture.project, "package.json"), "utf8"));
+    manifest.dependencies[artifact.name] = "file:/generated/private";
+    await writeFile(join(fixture.project, "package.json"), JSON.stringify(manifest));
+    await assert.rejects(() => sdk.cache.inspect(fixture.session().projectId, "npm"), /Local|local|registry names/);
+    await dependencyProject(fixture.project, artifact, "pnpm");
+    const lock = join(fixture.project, "pnpm-lock.yaml");
+    const original = await readFile(lock, "utf8");
+    await writeFile(lock, original.replace(`resolution: {integrity: ${artifact.integrity}}`, `resolution: {integrity: ${artifact.integrity}, directory: /generated/private, type: directory}`));
+    await assert.rejects(() => sdk.cache.inspect(fixture.session().projectId, "pnpm"), /directory|resolution/);
+    await writeFile(lock, original + "\npatchedDependencies:\n  generated-shared-package: /generated/private.patch\n");
+    await assert.rejects(() => sdk.cache.inspect(fixture.session().projectId, "pnpm"), /patch/);
+    await writeFile(lock, original.replace(`version: ${artifact.version}`, "version: file:/generated/private"));
+    await assert.rejects(() => sdk.cache.inspect(fixture.session().projectId, "pnpm"), /reference|resolution/);
+    assert.equal(requests, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

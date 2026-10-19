@@ -8,7 +8,7 @@ this slice is local.
 ## Phase 0 and sources
 
 Reuse Node crypto/SQLite/HTTP, TypeBox, YAML and the existing OS keychain. Add
-`cacache` 21.0.1 (ISC) and its development declarations, and pinned pnpm 12.14.0
+`cacache` 21.0.1 (ISC), semver 7.8.5 (ISC), their development declarations and pinned pnpm 12.14.0
 (MIT). pnpm's optional native binary is used through its maintained launcher;
 its installer scripts are denied. No project lifecycle code is evaluated by
 the cache.
@@ -40,6 +40,10 @@ Initial adapters are npm lockfile 2/3 and pnpm lockfile 9, public npm-registry
 packages with SHA-512 integrity. Unknown formats, private/custom registries,
 Git/URL/executable resolutions and missing integrity fail explicitly.
 No user registry credentials are inferred or copied.
+Declared specifiers must be semver registry ranges. npm package locations and
+pnpm importer/snapshot references are validated, not just artifact hashes;
+hidden directory/patch resolutions, tags and aliases are rejected before
+networking rather than trusted because another lock entry has integrity.
 
 Explicit preparation/installation authorizes sending public dependency
 name/version metadata to OSV. Check every exact version before downloading
@@ -103,7 +107,7 @@ secret redaction. CLI/TUI, desktop and external packed SDK expose the same APIs.
 ## Local acceptance, 2026-10-19
 
 A clean locked installation, production build and type checks pass. The full
-generated suite passes 59 checks, including real CLI/TUI interaction, native
+generated suite passes 60 checks, including real CLI/TUI interaction, native
 npm/pnpm installs (including a scoped package), two Git worktree branches,
 concurrent cache reuse, changed-plan rejection, new-advisory revocation,
 corruption, cancellation/TERM escalation and old-tree preservation. It also

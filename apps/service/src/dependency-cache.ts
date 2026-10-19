@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, delimiter, join } from "node:path";
 import { parseDocument } from "yaml";
 import * as cacache from "cacache";
+import { valid, validRange, satisfies } from "semver";
 import { isRecord, MoguriError, type CacheReceipt, type DependencyPackage, type DependencyPlan, type PackageManager, type Project } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { boundedBody, fetchJson } from "./network.ts";
@@ -16,6 +17,28 @@ const require = createRequire(import.meta.url);
 const packageName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const versionPattern = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$/;
 const integrityPattern = /^sha512-[A-Za-z0-9+/]{86}==$/;
+const packageLocation = /^(?:node_modules\/(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*)(?:\/node_modules\/(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*)*$/;
+function registryRange(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 300 && validRange(value) !== null;
+}
+function lockedVersion(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 2000 || !versionPattern.test(value.split("(")[0]!)) return false;
+  const suffix = value.slice(value.split("(")[0]!.length);
+  if (/[^A-Za-z0-9@._+()/-]/.test(suffix) || suffix.includes("..")) return false;
+  let depth = 0;
+  for (const character of suffix) {
+    if (character === "(") depth++;
+    else if (character === ")") { if (--depth < 0) return false; }
+    else if (!depth) return false;
+  }
+  return depth === 0;
+}
+function validateOverrides(value: unknown): void {
+  if (value === undefined) return;
+  if (typeof value === "string" && (registryRange(value) || /^\$[A-Za-z0-9@/._-]+$/.test(value))) return;
+  if (isRecord(value)) { for (const entry of Object.values(value)) validateOverrides(entry); return; }
+  throw new MoguriError("cache_resolution", "Overrides must remain registry version ranges. Local, Git, URL and executable resolutions are not admitted.");
+}
 export class DependencyCache {
   readonly npmCache: string;
   readonly pnpmStore: string;
@@ -27,7 +50,7 @@ export class DependencyCache {
     this.content = join(this.npmCache, "_cacache");
   }
   private entry(name: unknown, version: unknown, integrity: unknown, resolved?: unknown, hasInstallScript = false): DependencyPackage {
-    if (typeof name !== "string" || !packageName.test(name) || typeof version !== "string" || !versionPattern.test(version) || typeof integrity !== "string" || !integrityPattern.test(integrity)) {
+    if (typeof name !== "string" || !packageName.test(name) || typeof version !== "string" || !versionPattern.test(version) || !valid(version) || typeof integrity !== "string" || !integrityPattern.test(integrity)) {
       throw new MoguriError("cache_lock", "Every cached package needs a registry name, exact version and SHA-512 integrity. Git, local, exotic and unpinned dependencies are not supported.");
     }
     const canonical = `https://registry.npmjs.org/${name}/-/${name.split("/").at(-1)}-${version}.tgz`;
@@ -37,6 +60,17 @@ export class DependencyCache {
   async inspect(project: Project, manager: PackageManager): Promise<DependencyPlan> {
     const manifest = await readProjectFile(project.path, "package.json", 2 * 1024 * 1024);
     const lock = await readProjectFile(project.path, manager === "npm" ? "package-lock.json" : "pnpm-lock.yaml", 2 * 1024 * 1024);
+    let declared: unknown;
+    try { declared = JSON.parse(manifest.text); } catch { throw new MoguriError("cache_manifest", "package.json is not valid JSON."); }
+    if (!isRecord(declared) || declared.workspaces !== undefined) throw new MoguriError("cache_manifest", "This adapter requires a single-project manifest without workspaces.");
+    for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+      const dependencies = declared[section];
+      if (dependencies === undefined) continue;
+      if (!isRecord(dependencies) || Object.entries(dependencies).some(([name, range]) => !packageName.test(name) || !registryRange(range))) {
+        throw new MoguriError("cache_resolution", "Declared dependencies must be registry names with semver ranges. Tags, aliases, local, Git and executable resolutions require a separately qualified adapter.");
+      }
+    }
+    validateOverrides(declared.overrides);
     const packages: DependencyPackage[] = [];
     if (manager === "npm") {
       let data: unknown;
@@ -44,20 +78,49 @@ export class DependencyCache {
       if (!isRecord(data) || ![2, 3].includes(Number(data.lockfileVersion)) || !isRecord(data.packages)) throw new MoguriError("cache_lock", "Use an npm version-2 or version-3 lockfile.");
       for (const [path, item] of Object.entries(data.packages)) {
         if (!path) continue;
-        if (!isRecord(item) || !path.includes("node_modules/") || item.link) throw new MoguriError("cache_lock", "Linked/workspace dependencies need a separately qualified cache adapter; they were not skipped.");
+        if (!isRecord(item) || !packageLocation.test(path) || item.link) throw new MoguriError("cache_lock", "Linked/workspace or escaping package locations are not supported; they were not skipped.");
         packages.push(this.entry(item.name ?? path.slice(path.lastIndexOf("node_modules/") + 13), item.version, item.integrity, item.resolved, item.hasInstallScript === true));
+      }
+      for (const section of ["dependencies", "devDependencies", "optionalDependencies"]) {
+        for (const [name, range] of Object.entries(isRecord(declared[section]) ? declared[section] : {})) {
+          const item = data.packages[`node_modules/${name}`];
+          if (!isRecord(item) || typeof item.version !== "string" || !satisfies(item.version, String(range))) throw new MoguriError("cache_lock", "The declared dependency ranges do not match this lock. Generate and review a consistent lock before cache admission.");
+        }
       }
     } else {
       const yaml = parseDocument(lock.text, { uniqueKeys: true, schema: "core" });
       if (yaml.errors.length) throw new MoguriError("cache_lock", "pnpm-lock.yaml contains invalid or duplicate fields.");
       const data: unknown = yaml.toJS({ maxAliasCount: 10 });
       if (!isRecord(data) || Number(data.lockfileVersion) !== 9 || !isRecord(data.packages) || !isRecord(data.importers) || Object.keys(data.importers).some((key) => key !== ".")) throw new MoguriError("cache_lock", "This adapter supports single-project pnpm lockfile 9. Workspace/importer formats require qualification.");
+      if (data.patchedDependencies !== undefined) throw new MoguriError("cache_resolution", "Patched dependencies require a separately reviewed adapter; external patch paths are not read.");
+      validateOverrides(data.overrides);
       for (const [key, value] of Object.entries(data.packages)) {
         const plain = key.split("(")[0]!;
         const at = plain.lastIndexOf("@");
-        if (!isRecord(value) || !isRecord(value.resolution) || value.resolution.tarball !== undefined) throw new MoguriError("cache_lock", "pnpm packages must use registry names and SHA-512 integrity, not custom tarballs.");
+        if (!isRecord(value) || !isRecord(value.resolution) || Object.keys(value.resolution).some((key) => key !== "integrity")) throw new MoguriError("cache_lock", "pnpm resolution must contain only SHA-512 integrity, never directory, Git or custom-tarball fields.");
         packages.push(this.entry(plain.slice(0, at), plain.slice(at + 1), value.resolution.integrity));
       }
+      if (!isRecord(data.snapshots) || !isRecord(data.importers["."])) throw new MoguriError("cache_lock", "The pnpm lock needs complete importer and snapshot data.");
+      const snapshots = data.snapshots;
+      const validateReferences = (entry: unknown, importer: boolean) => {
+        if (!isRecord(entry)) throw new MoguriError("cache_lock", "Invalid pnpm dependency snapshot.");
+        for (const section of ["dependencies", "devDependencies", "optionalDependencies"]) {
+          const references = entry[section];
+          if (references === undefined) continue;
+          if (!isRecord(references)) throw new MoguriError("cache_resolution", "Invalid pnpm dependency references.");
+          for (const [name, raw] of Object.entries(references)) {
+            const version = importer && isRecord(raw) ? raw.version : raw;
+            if (!packageName.test(name) || !lockedVersion(version) || !(`${name}@${version}` in snapshots) ||
+              importer && (!isRecord(raw) || !registryRange(raw.specifier))) throw new MoguriError("cache_resolution", "Every pnpm reference must resolve to an integrity-checked registry snapshot. Local, URL, Git and missing references are blocked.");
+          }
+        }
+      };
+      for (const [key, value] of Object.entries(snapshots)) {
+        const base = key.split("(")[0]!;
+        if (!(base in data.packages) || !lockedVersion(key.slice(key.lastIndexOf("@", base.length - 1) + 1))) throw new MoguriError("cache_resolution", "The pnpm snapshot has an unqualified package or peer resolution.");
+        validateReferences(value, false);
+      }
+      validateReferences(data.importers["."], true);
     }
     const unique = new Map<string, DependencyPackage>();
     for (const entry of packages) {
