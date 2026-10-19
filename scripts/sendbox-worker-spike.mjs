@@ -48,7 +48,7 @@ const cleanup = () => {
   assert.deepEqual(ownedVms(), [], "Owned native guest remains. Inspect before claiming cleanup.");
 };
 const args = ["--runtime", "apple", "--config", config, "--image", workload.image, "--bundle", candidate.bundle, "--trust-root", candidate.key, "--trust-root-id", candidate.trustRootId, "--minimum-release-sequence", String(candidate.minimumReleaseSequence)];
-const nativeCode = `const fs=require("node:fs");const status=fs.readFileSync("/proc/self/status","utf8");const p=require("/opt/moguri/payload.json");const field=name=>status.match(new RegExp("^"+name+":\\\\s*(.+)$","m"))?.[1];if(process.getuid()===0||field("NoNewPrivs")!=="1"||field("Seccomp")!=="2"||!/^0+$/.test(field("CapEff")??"x"))throw Error("Native Node boundary controls failed");fs.writeFileSync("/workspace/generated-node.txt","GENERATED_NODE_WORKSPACE_READY");if(fs.readFileSync("/workspace/generated-node.txt","utf8")!=="GENERATED_NODE_WORKSPACE_READY")throw Error("Wrong workspace");fs.unlinkSync("/workspace/generated-node.txt");console.log("GENERATED_MOGURI_NODE_BOUNDARY_READY");console.log(JSON.stringify({uid:process.getuid(),node:process.versions.node,protocol:p.protocol,nnp:field("NoNewPrivs"),seccomp:field("Seccomp"),capabilities:field("CapEff")}));`;
+const nativeCode = `const fs=require("node:fs");const status=fs.readFileSync("/proc/self/status","utf8");const p=require("/opt/moguri/payload.json");const field=name=>status.match(new RegExp("^"+name+":\\\\s*(.+)$","m"))?.[1];if(process.getuid()===0||field("NoNewPrivs")!=="1"||field("Seccomp")!=="2"||!/^0+$/.test(field("CapEff")??"x"))throw Error("Native Node boundary controls failed");const thread=new(require("node:worker_threads").Worker)('require("node:worker_threads").parentPort.postMessage("GENERATED_WORKER_THREAD_READY")',{eval:true});let message;thread.on("message",value=>message=value);thread.on("error",error=>{throw error;});thread.on("exit",code=>{if(code!==0||message!=="GENERATED_WORKER_THREAD_READY")throw Error("Normal Node worker thread did not complete");fs.writeFileSync("/workspace/generated-node.txt","GENERATED_NODE_WORKSPACE_READY");if(fs.readFileSync("/workspace/generated-node.txt","utf8")!=="GENERATED_NODE_WORKSPACE_READY")throw Error("Wrong workspace");fs.unlinkSync("/workspace/generated-node.txt");console.log("GENERATED_MOGURI_NODE_BOUNDARY_READY");console.log(JSON.stringify({uid:process.getuid(),node:process.versions.node,protocol:p.protocol,nnp:field("NoNewPrivs"),seccomp:field("Seccomp"),capabilities:field("CapEff")}));});`;
 const threadCode = `import ctypes,json,os,resource
 libc=ctypes.CDLL(None,use_errno=True)
 thread=ctypes.c_ulong()
@@ -96,7 +96,9 @@ try {
     }
   };
   const threading = await run("/usr/bin/python3.13", ["-c", threadCode], "thread-result.jsonl");
-  assert.equal(JSON.parse(threading.stdout).pthreadCode, 0);
+  const threadInfo = JSON.parse(threading.stdout);
+  assert.equal(threadInfo.pthreadCode, 0); assert.equal(threadInfo.clone3Errno, 38); assert.ok(threadInfo.uid > 0);
+  for (const expected of [/^NoNewPrivs:\s*1$/, /^Seccomp:\s*2$/, /^CapEff:\s*0+$/]) assert.ok(threadInfo.status.some((line) => expected.test(line)));
   const plain = await run("/usr/local/bin/node", ["-e", nativeCode], "node-result.jsonl"), lines = plain.stdout.trimEnd().split("\n");
   assert.equal(lines[0], "GENERATED_MOGURI_NODE_BOUNDARY_READY");
   const controls = JSON.parse(lines[1]); assert.ok(controls.uid > 0); assert.equal(controls.nnp, "1"); assert.equal(controls.seccomp, "2"); assert.match(controls.capabilities, /^0+$/);

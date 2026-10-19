@@ -94,21 +94,23 @@ Worker digest is
 Build tags bind payload/recipe identity; immutable aliases are verified locally
 without publishing the image.
 
-**The actual Node workload is still blocked.** It aborts with exit 134 at
+**R3 cannot run the normal Node workload.** It aborts with exit 134 at
 `node_platform.cc:109`, `uv_thread_create`. A real non-root ctypes/pthread probe
 inside the same signed guest reports `pthread_create=EPERM`,
 `clone3(NULL,0)=EPERM`, process limit 256, NNP=1, seccomp=2 and no effective
 capabilities. Thread compatibility, not image presence or a shell-only pass,
 must be qualified before enabling Moguri Sandbox. Do not disable hardening,
 allow uninspectable clone3, or call single-threaded Node an equivalent runtime.
-The coordinated SendBox repair is investigating the compatible denied-syscall
-behavior; a changed guest needs a separately signed/authenticated candidate.
+The coordinated SendBox repair changed only the two uninspectable clone3-denial
+surfaces to ENOSYS so glibc can fall back to the existing flag-filtered clone.
+Clone3 remains denied; architecture guards, namespace masks and all other
+mandatory controls stay enforced.
 
 `node --import tsx scripts/sendbox-worker-spike.mjs --candidate INSTALLATION.json
 --workload IMAGE_QUALIFICATION.json` verifies root-owned candidate hashes and
 uses generated private configuration. It requires exact persistent-guest
 terminal success and decoded output, then the actual Moguri foreground-PTY
-bootstrap. Current execution fails before that PTY stage. A long generated VM
+bootstrap. R3 execution failed before that PTY stage. A long generated VM
 name also produced Apple `startProcess` EINVAL; bounded names avoided that
 failure without changing protections.
 
@@ -118,6 +120,42 @@ now matches its unique run prefix, trusted bootstrap executable and generated
 workspace mount before targeted cleanup. This is not a qualified production
 cancellation/restart adapter. No foreign VM, service registration, Porto process
 or production trust path was changed.
+
+### R4 normal threading and Moguri bootstrap
+
+The user separately authenticated R4 under
+`/opt/sendbox-readiness-adc32f48-r4`. Its native quality gate and genuine Node
+26.12.0 worker-thread/create/join tests pass with retained clone3/namespace/
+process-control denials. Expected host/guest remain 0.2.0/aarch64, trust root
+`readiness-qualification-adc32f48-r4`, release sequence 8/minimum accepted 7;
+Moguri qualification pins minimum release sequence 8.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Host | `b1cecdc3b9ae472adcf3027c3b23078f3106760729db8de9527b4848fa67663d` |
+| Guest tar | `1464bb448205e9a0fd135461324515117cbc284953b2686228f7b9f5995ebab1` |
+| Public key | `abf436a098b5c21e4a8d6a16107ce516bd7aa32c370156cb5ff6702991d8579d` |
+| Manifest | `3936c30ab7c9d67ebef53eb339704a1e7b555260f635e98fe2156207f9c8592d` |
+
+Moguri independently verified root ownership and exact installed hashes, then
+passed actual signed-guest ctypes thread/retained-denial checks, normal Node
+worker-thread IPC, non-root/NNP=1/seccomp=2/no-capabilities, generated workspace
+write/read/delete and the **real protocol-10 Moguri foreground-PTY bootstrap**
+in **3,816.87 ms**. Owned inventory is empty afterward.
+
+The current local-only image is
+`docker.io/library/moguri-worker@sha256:759564d72938010e79109a223362f6a3f90077ea8226be85502ff1389bc95fdf`;
+worker SHA-256 is
+`d3755c349096417a4d09cc252f06ab800b3ee1e2487491e6dc514ea55cfe277b`.
+Its no-cache build passed in **30,484.22 ms**, including a non-root read check
+for its public read-only payload manifest. An earlier 0600 manifest correctly
+failed EACCES; only that non-secret image metadata is now 0444, not credentials
+or host state.
+
+This remains development-candidate/primitive evidence. Provider turns, scoped
+credential forwarding, large input-credit behavior, SDK transport integration
+and cancellation/restart still require genuine qualification. No production
+trust change, attested release or ready Sandbox capability is claimed.
 
 SendBox entry allow rules match argv token counts, not shell-style tail globs:
 `/bin/sh -c *` matches the three-token generated probe, while `/bin/sh *` does
