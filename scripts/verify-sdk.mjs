@@ -19,7 +19,7 @@ try {
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
-    import {MoguriSdk, type UserSettings} from "moguri";
+    import {MoguriSdk, DraftEditor, slashCommands, type UserSettings} from "moguri";
     import {connectMoguri, createRuntime} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
@@ -28,6 +28,13 @@ try {
       const snapshot = sdk.settings.get();
       if (!snapshot) throw new Error("Not connected");
       const settings: UserSettings = snapshot.values;
+      const project = await sdk.projects.configuration("generated-id");
+      await sdk.projects.configure("generated-id",project.configuration.values,project.configuration.revision);
+      const editor = new DraftEditor(sdk,"generated-id",{revision:0,text:"",attachments:[]});
+      const held = await editor.send("queue",true); void held.id;
+      await sdk.sessions.mode("generated-id","read-only");
+      await sdk.slash("generated-id","/rename Generated","cli");
+      void slashCommands;
       return settings;
     }
     void MoguriSdk; void createRuntime; void useMoguri; void createGatewayMcpServer; void typedConsumer;
@@ -40,16 +47,32 @@ try {
     import {mkdir,writeFile} from "node:fs/promises";
     import {join} from "node:path";
     import {createRuntime,connectMoguri} from "moguri/node";
+    import {DraftEditor} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
     const provider={state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>provider.onChange(),login:()=>{throw Error("No real authorization in SDK verification")},cancel:async()=>{},logout:async()=>{},prepare:async()=>{throw Error("No paid calls in SDK verification")}};
-    const runtime=await createRuntime({stateDir:join(root,"state"),provider});
+    const runtime=await createRuntime({stateDir:join(root,"state"),provider,retentionKey:Buffer.alloc(32,0x67)});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
     try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
+      assert.equal(sdk.getState().snapshot.protocolVersion,4);
+      const editor=new DraftEditor(sdk,s.id,sdk.getState().snapshot.sessions.find(v=>v.id===s.id).draft);
+      editor.edit("Generated external held prompt");
+      const held=await editor.send("queue",true); editor.dispose();
+      assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===s.id).queue[0].held,true);
+      assert.equal(sdk.prompts.text(s.id,held.id),"Generated external held prompt");
+      await sdk.slash(s.id,"/rename Generated external session","cli");
+      await sdk.slash(s.id,"/read-only","cli");
+      const side=await sdk.sessions.spawn(s.id,"side");
+      assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===side.id).kind,"side");
+      await assert.rejects(()=>sdk.sessions.mode(side.id,"agent"),/Question-only/);
+      await sdk.slash(s.id,"/agent","cli");
+      const projectSettings=(await sdk.projects.configuration(p.id)).configuration;
+      await sdk.projects.configure(p.id,{...projectSettings.values,port:4321},projectSettings.revision);
+      const artifact=await sdk.plans.save(s.id,"Generated external retained plan.","absent");
       const preview=await sdk.prompt.preview(s.id); assert.match(preview.effective,/moguri-execution-contract/);
       const settings=structuredClone(sdk.settings.get().values); settings.memory.enabled=true;
       await sdk.settings.update(settings,sdk.settings.get().revision);
@@ -68,8 +91,11 @@ try {
       assert.equal((await sdk.jobs.wait(installed.id)).status,"completed");
       assert.equal((await sdk.voice.status()).voice.runtimeReady,true);
       assert.equal((await sdk.voice.status()).voice.modelReady,false);
+      await sdk.sessions.delete(s.id,true);
+      assert.equal((await sdk.plans.artifact(artifact.id)).text,"Generated external retained plan.");
+      assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===side.id).parentSessionId,undefined);
     } finally {sdk.disconnect();await runtime.close();}
-    console.log("External SDK imports/types, embedded runtime, vectors, native MCP, local tickets and script-free cache install passed.");
+    console.log("External SDK imports/types, held prompts/slash/side sessions, retained plans, embedded runtime, vectors, native MCP, local tickets and script-free cache install passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }

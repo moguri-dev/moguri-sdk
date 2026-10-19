@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 3; immutable event
+Protocol version and database migration version are 4; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -10,16 +10,16 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Entity | Identity and authority |
 | --- | --- |
 | Profile | Only `default` is exposed. Every command/event is scoped; other profile rows are excluded from projection, replay and attachment authorization. Profile creation/switching is not implemented. |
-| Project | Stable UUID, canonical local directory and display name. One active-turn lease per project. No managed Git worktree or deletion behavior is implied. |
-| Session | Stable UUID, project, controls, configuration revision, lifecycle, current turn, draft revision, queue revision, messages, usage, owned processes and pending exact-argument approval. |
+| Project | Stable UUID/canonical folder, ordered navigation folder/color and revisioned repository/policy/script/MCP bindings. One active agent writer; no implicit managed Git worktree. |
+| Session | UUID/project, controls/revisions/lifecycle, agent/read-only mode, pending safe-boundary mode, explicit agent/side/model-subagent kind, pin/unread/group/parent metadata, PR/work-item binding, drafts/queue/messages/usage and exact approval. |
 | Turn | Admitted queue item, UUID, immutable controls/policy and prompt-digest snapshot, and worker ownership. Admission removes exactly one unclaimed queue item atomically. |
 | Step | One authorized provider request, normalized final context snapshot, usage quality, request wall time and declared tools. Worker completion requires durable acknowledgement before tools or the next step. |
 | Draft | Text, approved attachment snapshots and optimistic revision. Local unacknowledged edits are explicitly not authoritative. |
-| Queue item | UUID, text, snapshots, delivery mode and optional steer target-turn ID. Only unclaimed items are mutable. |
+| Queue item | UUID, text, snapshots, delivery mode, held state, optional steer target and mode-control intent. Held prompts never auto-admit. Only unclaimed items are mutable. |
 | Approval | UUID, exact tool ID/name/arguments, step, policy and permission revisions. Human answers are `user`, invalidations `policy`, explicit grants `delegation` with rule ID. |
 | Owned process | Tool-call ID, PID, process group, owning turn and actual outcome. Unknown cleanup remains unconfirmed. |
 | Attachment | Session-authorized project-text snapshot, SHA-256, byte count, path and UUID. No arbitrary client-side path grant or silent live-file reread. |
-| Usage | Solver/subagent model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
+| Usage | Solver/side/subagent model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
 | Settings | Revisioned shared values and factory defaults; separate permission revision invalidates stale approvals. Prompt text is not policy. |
 | Capability | Project-scoped skill/script/plugin/style knowledge, immutable content digest, source, enablement revision and optional owning plugin. |
 | Proposal | Exact content/base digests, project, kind, actual user/model actor and pending/approved/rejected decision. Approval installs disabled content. |
@@ -29,6 +29,8 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Local issue | Stable UUID/project-local number, feature/bug/misc, title/body/phase, optimistic revision, archive state and verified remote-link provenance. No assignee. |
 | Dependency plan | Exact project/manager/manifest/lock digest, unique public package versions and SHA-512 artifacts. Branch names are not mutable cache identities. |
 | Cache receipt | Project/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
+| Retained artifact | Project-owned immutable content snapshot, origin-session reference and optional source path. Session deletion cannot remove its independent grant. |
+| User terminal | Session/project ownership, PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Ghostty owns VT rendering; output and input are bounded ephemeral data. |
 
 Provider-neutral session state is projected from immutable events. Normalized
 pi-ai model messages live in content-addressed blobs referenced by completion
@@ -41,6 +43,9 @@ stored tools. Attachments also use digest-verified blobs.
 Sessions begin idle and may be queued, running, waiting for human input,
 stopping, completed, stopped, failed, partial or archived. Archive/restore is
 non-destructive. An ended turn cannot retain a live approval.
+Archival settles owned work and holds queued user prompts. Restoration does not
+depend on an attached PR remaining open. Deletion settles ownership, detaches
+surviving children and forgets only the requested retention compartment.
 
 Steers bind to one turn and never migrate implicitly. Interrupt priorities are
 recorded through queue ordering. Failed or partial work quarantines automatic
@@ -83,3 +88,13 @@ events, not stored in client databases. Archive does not delete tickets.
 Interrupted installs become partial on restart and quarantine project admission;
 verified cache objects remain reusable only after current checks. Credentials
 stay in the explicit keychain and are never copied to this projection.
+
+Migration 4 transactionally encrypts payload/blob storage in independent
+profile/project/session compartments without changing prior event IDs,
+sequences or receipts. Scope keys are wrapped by an OS-keychain master; its
+stable identifier is retained with state. Deletion destroys the selected keys
+and blob grants while preserving immutable ciphertext audit rows and sanitized
+usage. Project removal also removes derived indexes and historical project MCP
+credentials, not repository files, external PRs, shared caches or service logs.
+Relocating an attached folder invalidates its derived index. This is not
+forensic secure erasure or removal of external backups.

@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { isUtf8 } from "node:buffer";
-import { open, realpath, stat, readdir, rename, unlink } from "node:fs/promises";
+import { open, realpath, lstat, stat, readdir, rename, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/index.ts";
@@ -10,6 +10,7 @@ const protectedPart = (part: string) => part === ".git" || part === ".moguri" ||
   [".ssh", ".aws", ".azure", ".kube", ".docker", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "Moguri"].includes(part) ||
   /^\.env(?:\.|$)/i.test(part) || /\.(?:pem|key|p12|pfx)$/i.test(part) ||
   /^(?:credentials|id_rsa|id_ed25519)(?:\.|$)/i.test(part);
+export const isProtectedProjectPath = (input: string): boolean => input.split(/[\\/]/).some(protectedPart);
 export async function scopedPath(root: string, input: string, allowMissing = false): Promise<string> {
   root = await realpath(root);
   const requested = resolve(root, input);
@@ -24,8 +25,9 @@ export async function scopedPath(root: string, input: string, allowMissing = fal
     throw new MoguriError("path_denied", "Symlinks cannot escape the approved project or enter protected paths.");
   }
   try {
+    if ((await lstat(path)).isSymbolicLink()) throw new MoguriError("path_denied", "Symlink file access is not supported. Select the real project file.");
     const canonical = await realpath(path);
-    if (canonical !== path) throw new MoguriError("path_denied", "Symlink file access is not supported. Select the real project file.");
+    if (canonical !== path && (process.platform !== "darwin" || canonical.toLowerCase() !== path.toLowerCase())) throw new MoguriError("path_denied", "Symlink file access is not supported. Select the real project file.");
   } catch (error) {
     if (!(allowMissing && error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
   }

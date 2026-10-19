@@ -1,4 +1,4 @@
-import type { Attachment, Session } from "../../protocol/src/index.ts";
+import type { Attachment, CommandResult, Session } from "../../protocol/src/index.ts";
 import { ClientError, type MoguriClient } from "./index.ts";
 
 export interface DraftState {
@@ -83,12 +83,13 @@ export class DraftEditor {
     const saved = this.client.getState().snapshot?.sessions.find((session) => session.id === this.sessionId)?.draft;
     if (saved) this.receive(saved);
   }
-  async send(delivery: "queue" | "steer" | "interrupt"): Promise<void> {
+  async send(delivery: "queue" | "steer" | "interrupt", held = false): Promise<CommandResult> {
     await this.flush();
     if (this.state.dirty || this.state.conflict) throw new Error("Save or resolve the draft before sending.");
-    await this.client.command({ type: "message.send", sessionId: this.sessionId, expectedRevision: this.revision, delivery });
+    const result = await this.client.command({ type: "message.send", sessionId: this.sessionId, expectedRevision: this.revision, delivery, ...(held ? { held: true } : {}) });
     const saved = this.client.getState().snapshot?.sessions.find((session) => session.id === this.sessionId)?.draft;
     if (saved) this.receive(saved);
+    return result;
   }
   dispose(): void { clearTimeout(this.timer); this.listeners.clear(); }
 }

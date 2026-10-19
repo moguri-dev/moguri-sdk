@@ -5,9 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 3 deliberately rejects incompatible running
-services. Database migration 3 preserves schema-1/2 history, sessions, drafts,
-receipts, blobs and repository indexes. Restart a previously running alpha service explicitly with
+This is an alpha API. Protocol 4 deliberately rejects incompatible running
+services. Database migration 4 preserves schema-1/2/3 history, sessions, drafts,
+receipts, blobs and indexes while adding retention compartments. Restart a previously running alpha service explicitly with
 `node bin/moguri.mjs service restart`; do not delete its state.
 
 ## Build and consume
@@ -18,7 +18,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.3.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.4.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -98,10 +98,64 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `issues` | Local feature/bug/misc board, create/update/move/archive, revision-checked phases and read-only linked-PR refresh. |
 | `cache` | Local plan inspection, explicit metadata-sharing consent, integrity-verified archive preparation and script-free managed install. |
 | `linear` | Optional team-scoped read-only page import, status and user-only OS-keychain credential setup. |
+| `sessions` | Revisioned rename/mode/pin/unread/group/attach/delete, explicit side/agent children and work-item/verified-PR context. Side sessions cannot acquire write authority. |
+| `projects` | Configuration, ordered folders/color, atomic reorder, relocation/removal, scoped Git/source reads, reviewed MCP imports and explicit default-file publication. |
+| `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
+| `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
+| `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
+| `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 
 Use `sdk.command` for project/session creation, draft/queue changes, controls,
 human approvals, archive/resume and allowed-env policy. These are the same
 validated commands used by both clients.
+
+### Held prompts, modes and retained plans
+
+```ts
+import { DraftEditor } from "moguri";
+
+const session = sdk.getState().snapshot?.sessions.find((item) => item.id === sessionId);
+if (!session) throw new Error("Choose a session.");
+const editor = new DraftEditor(sdk, session.id, session.draft);
+try {
+  editor.edit("Review the generated change.");
+  const held = await editor.send("queue", true); // No model call, even when idle.
+  console.log(held.id);
+} finally {
+  editor.dispose();
+}
+await sdk.slash(sessionId, "/read-only", "cli");
+const side = await sdk.sessions.spawn(sessionId, "side");
+const plan = await sdk.plans.read(sessionId);
+// A read-only session cannot save a plan or promote a question-only child.
+// Native panel/copy results from slash() must be handled by the client binding.
+```
+
+Release a held prompt with `prompts.release(sessionId, messageId,
+observedQueueRevision)` only after explicit user admission. A selected available
+model, ready environment and policy are required then, not when holding text.
+`/run ID` uses this same operation. Returning to agent mode is a safe-boundary
+request; immediate restriction and model-declared tools are service-enforced.
+
+Project settings use `projects.configuration` and
+`projects.configure(projectId, settings, observedRevision)`.
+`projects.sources` returns the actual instruction/MCP source and `mcpDigest`;
+`projects.importMcp(projectId, observedRevision, true, reviewedDigest)` rejects
+file changes after review and installs supported entries disabled.
+Project MCP auth/token operations must include their bound session ID.
+`projects.initialize` is an explicitly confirmed non-protected-branch push job,
+not an implicit effect of reading settings. Inspect its terminal result:
+partial or cancelled publication is not success.
+
+Artifacts are project-owned: `plans.save`/`capture` retain a content snapshot
+independent of a session; `plans.artifact` remains readable after session
+deletion. Deletion requires confirmation and an observed session revision.
+Project removal separately forgets project content/derived indexes and project
+MCP credentials, never source files, external PRs or shared caches/models.
+Archived retention is opt-in `settings.values.retention`; `retention.run`
+honors that policy. Production retention uses the explicit OS-keychain backend;
+generated embedders/tests may inject a 32-byte `retentionKey`, never hardcode a
+real key or silently derive one from a path.
 
 To enable memory, clone `sdk.settings.get().values`, set `memory.enabled`, then
 call `settings.update` with the observed revision. `memory.index(projectId)`
@@ -169,6 +223,16 @@ Tool descriptions, annotations, output and model recommendations remain
 untrusted data, never permission grants.
 
 ## CLI entrypoints
+
+`moguri --help` lists the session/project/queue/plan commands.
+Examples: `moguri slash "/read-only" --session ID`,
+`moguri session rename NAME --session ID`,
+`moguri queue hold prompt.txt --session ID`,
+`moguri project get ID`, and
+`moguri project set ID settings.json --revision N`.
+Destructive removal requires `--confirm-remove`; default publication requires
+`--confirm-push`; repo MCP import requires `--confirm-review --digest SHA256`.
+Queue mutations use their observed queue revision, not the session revision.
 
 ### Dependency cache and project tickets
 

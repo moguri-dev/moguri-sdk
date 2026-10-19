@@ -1,7 +1,11 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
+import { McpServerSchema, SandboxSchema } from "./config.ts";
+import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot } from "./sessions.ts";
 export * from "./workspace.ts";
+export * from "./config.ts";
+export * from "./sessions.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -20,15 +24,6 @@ Respect the effective execution environment, human approvals, explicit delegatio
 Push, merge, rebase, branch deletion, scheduled actions, and changes to Moguri's own behavior need explicit user action or policy. A model recommendation is not user consent.
 Finish with the outcome and any real blocker. Do not claim access to hidden reasoning or billable-usage information the provider did not supply.`;
 
-export const McpServerSchema = object({
-  id, name: Type.String({ minLength: 1, maxLength: 120 }), enabled: Type.Boolean(),
-  projectIds: Type.Optional(Type.Array(id, { maxItems: 100 })),
-  transport: Type.Union([
-    object({ type: Type.Literal("stdio"), command: path, args: Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 64 }) }),
-    object({ type: Type.Literal("http"), url: Type.String({ minLength: 1, maxLength: 2048 }), auth: Type.Union([Type.Literal("none"), Type.Literal("bearer")]) }),
-  ]),
-});
-export type McpServerConfig = Static<typeof McpServerSchema>;
 export const SettingsSchema = object({
   appearance: object({ theme: Type.Union([Type.Literal("dark"), Type.Literal("light"), Type.Literal("system")]) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
@@ -44,10 +39,8 @@ export const SettingsSchema = object({
     language: Type.String({ minLength: 1, maxLength: 16 }),
     backend: Type.Union([Type.Literal("auto"), Type.Literal("cpu"), Type.Literal("metal")]),
   }),
-  sandbox: object({
-    executable: path, configPath: Type.Union([path, Type.Null()]), image: Type.Union([path, Type.Null()]),
-    bundlePath: Type.Union([path, Type.Null()]), trustRootPath: Type.Union([path, Type.Null()]),
-  }),
+  sandbox: SandboxSchema,
+  retention: object({ deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }) }),
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
@@ -57,12 +50,13 @@ export const defaultSettings = (): UserSettings => ({
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [],
   voice: { language: "auto", backend: "auto" },
   sandbox: { executable: "sendbox", configPath: null, image: null, bundlePath: null, trustRootPath: null },
+  retention: { deleteArchived: false, afterDays: 30 },
 });
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
-  Type.Literal("voice"), Type.Literal("sandbox"),
+  Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("retention"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("settings.update"), expectedRevision: revision, settings: SettingsSchema, acknowledgePromptRisk: Type.Boolean() }),
@@ -74,8 +68,8 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("capability.toggle"), capabilityId: id, enabled: Type.Boolean(), expectedRevision: revision }),
   object({ type: Type.Literal("proposal.create"), projectId: id, kind: Type.Union([Type.Literal("skill"), Type.Literal("script"), Type.Literal("memory")]), name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
   object({ type: Type.Literal("proposal.decide"), proposalId: id, approve: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
-  object({ type: Type.Literal("mcp.token.set"), serverId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
-  object({ type: Type.Literal("mcp.token.clear"), serverId: id }),
+  object({ type: Type.Literal("mcp.token.set"), serverId: id, token: Type.String({ minLength: 1, maxLength: 32768 }), sessionId: Type.Optional(id) }),
+  object({ type: Type.Literal("mcp.token.clear"), serverId: id, sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("mcp.call"), sessionId: id, serverId: id, tool: Type.String({ minLength: 1, maxLength: 160 }), arguments: Type.Record(Type.String(), Type.Unknown()), schemaDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("subagent.run"), sessionId: id, prompt: Type.String({ minLength: 1, maxLength: 32768 }) }),
   object({ type: Type.Literal("voice.download"), acceptLicense: Type.Literal(true) }),
@@ -85,6 +79,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("voice.insert"), sessionId: id, jobId: id, expectedRevision: revision }),
   object({ type: Type.Literal("job.cancel"), jobId: id }),
   WorkspaceCommandSchema,
+  SessionWorkspaceCommandSchema,
 ]);
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
@@ -93,13 +88,14 @@ export const QuerySchema = Type.Union([
   object({ type: Type.Literal("memory.search"), projectId: id, text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
   object({ type: Type.Literal("memory.graph"), projectId: id, path: Type.String({ maxLength: 4096 }) }),
   object({ type: Type.Literal("mcp.tools"), serverId: id, sessionId: Type.Optional(id), query: Type.String({ maxLength: 200 }), offset: Type.Integer({ minimum: 0, maximum: 10000 }) }),
-  object({ type: Type.Literal("mcp.auth"), serverId: id }),
+  object({ type: Type.Literal("mcp.auth"), serverId: id, sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("result.read"), resultId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 32768 }) }),
   object({ type: Type.Literal("voice.status") }),
   object({ type: Type.Literal("sandbox.status") }),
   object({ type: Type.Literal("capability.content"), capabilityId: id }),
   object({ type: Type.Literal("proposal.content"), proposalId: id }),
   WorkspaceQuerySchema,
+  SessionWorkspaceQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -122,7 +118,7 @@ export interface CapabilityJob {
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
-export interface PlatformSnapshot extends WorkspaceSnapshot {
+export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
   proposals: Proposal[];
@@ -135,6 +131,7 @@ export interface VoiceStatus {
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
   | WorkspaceResponse
+  | SessionWorkspaceResponse
   | { type: "prompt.preview"; editable: string; effective: string; warning: string }
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }

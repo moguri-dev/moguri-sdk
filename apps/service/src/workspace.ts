@@ -15,6 +15,7 @@ interface WorkspaceHost {
   commit(events: EventInput[]): void;
   job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (message: string) => void) => Promise<unknown>, settled?: () => void): string;
   wake(): void;
+  closing(id: string): boolean;
 }
 export class WorkspaceRuntime {
   readonly cache: DependencyCache;
@@ -32,6 +33,7 @@ export class WorkspaceRuntime {
     if (this.timer) return;
     this.timer = setInterval(() => {
       for (const board of this.host.snapshot().boards) {
+        if (this.host.closing(board.projectId)) continue;
         if (board.autoRefreshPrs && this.host.snapshot().issues.some((issue) => issue.projectId === board.projectId && this.due(issue))) this.refresh(board.projectId, false);
       }
     }, this.options.integrations?.prRefreshMs ?? 60_000);

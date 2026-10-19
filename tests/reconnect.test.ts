@@ -17,7 +17,7 @@ test("a client reconnects through a rotated private connection file without rese
     await client.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "generated reconnect draft", attachments: [] });
     const oldToken = client.connection.token;
     await fixture.service.close();
-    restarted = await startService({ stateDir, provider: fixture.provider });
+    restarted = await startService({ stateDir, provider: fixture.provider, retentionKey: fixture.retentionKey });
     await waitFor(() => client.getState().status === "connected" && client.connection.token !== oldToken);
     assert.equal(client.getState().snapshot?.sessions.find((session) => session.id === fixture.sessionId)?.draft.text, "generated reconnect draft");
     assert.equal(restarted.controller.events(0).filter((event) => event.event_type === "draft.saved").length, 1);

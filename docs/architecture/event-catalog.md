@@ -9,7 +9,7 @@ Unused scope fields are null in checkpoint 1.
 | --- | --- |
 | `project.added` | Canonical project identity/path. No filesystem access is implied for an agent. |
 | `session.created`, `session.configured` | Title/controls and explicit configuration changes. Running turns cannot be rewritten. |
-| `session.archived`, `session.restored` | Non-destructive lifecycle changes. Active/queued sessions cannot be archived. |
+| `session.archived`, `session.restored` | Non-destructive lifecycle changes after settling owned work and holding prompts. PR merge does not prevent restoration. |
 | `session.blocked`, `session.resumed` | Admission diagnostic or explicit user resumption. Resumption does not prove prior cleanup. |
 | `draft.saved` | Text and authorized snapshots; increments the draft revision. |
 | `queue.enqueued`, `queue.edited`, `queue.removed`, `queue.reordered` | Exact unclaimed message mutation, each with a queue revision. |
@@ -34,6 +34,15 @@ Unused scope fields are null in checkpoint 1.
 | `board.saved` | Project configuration/revision, ordered phases, merged destination and explicit read-only integration policy. |
 | `issue.saved` | Complete revisioned local ticket and real `user`, `github` or `linear` actor. Only a verified merge can drive an automated phase transition. |
 | `cache.prepared` | Exact plan digest, advisory check time, package/reuse/download counts and `scripts: blocked`, never a permanent safety grant. |
+| `queue.held`, `queue.released` | Explicit prompt admission state; holding does not require a provider or start a model request. |
+| `session.organized`, `session.group_saved` | Revisioned title/pin/unread/group/acyclic same-project attachment and group metadata. |
+| `session.mode_requested`, `session.mode_changed` | Immediate restriction of new approvals and safe-boundary mode acknowledgement. Side/model-subagent sessions cannot gain edit authority. |
+| `session.browser_changed` | Explicit validated HTTPS/loopback preview association, not model context. |
+| `project.configured`, `project.folder_saved`, `project.relocated` | Typed policy/configuration/navigation and attached-folder changes; atomic exact-membership reorder and index invalidation. |
+| `artifact.saved` | Independently project-owned content grant and origin reference. |
+| `terminal.changed` | Owned user-console lifecycle only, never input/output or keystroke hashes. Acknowledged inspection is distinct from proven closure. |
+| `turn.prompt_bound` | Exact effective step prompt digest, including mode, repository instructions and any opted-in retrieved memory. |
+| `session.deleted`, `project.removed` | Transactional tombstone/key erasure with retained sanitized usage; independent artifacts survive session deletion. |
 
 ## HTTP commands
 
@@ -46,6 +55,9 @@ or absent Origin. There is no CORS allowance.
 - `POST /v1/commands`: TypeBox-validated `{ id, profileId, command }`.
 - `POST /v1/query`: TypeBox-validated capability queries, including prompt,
   memory, MCP metadata/results, voice and Sandbox readiness.
+- `POST /v1/terminal`: authenticated ephemeral input/resize, deliberately outside
+  durable command receipts. Query output uses bounded replay offsets and is not
+  an event stream or model context.
 
 The command union covers project/session creation, configuration,
 archive/restore/resume, draft/snapshot attachment changes, queue admission and
@@ -61,13 +73,17 @@ preparation/install with explicit metadata-sharing consent, and user-only Linear
 credential changes/imports. Workspace queries inspect boards/plans or non-secret
 integration readiness. No PR mutation or CI dispatch is exposed.
 Credential values are never written into events or command receipts.
+Session-workspace commands cover organization, modes, explicit user children,
+reviewed project settings, retained plans, deletion/retention and terminals.
+Missing repo defaults require explicit publication approval. MCP imports bind
+the exact reviewed file digest. No opening/reading action silently pushes.
 
 ## WebSocket
 
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":3,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":4,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,
@@ -83,8 +99,10 @@ connection metadata and resynchronizes without resending mutations.
 The desktop renderer uses the same protocol through a same-origin
 `moguri://app` HTTP proxy and an authenticated loopback WebSocket. Its sandboxed
 preload exposes only connection discovery, explicit directory/file pickers and
-explicit HTTPS opening. Node integration is disabled; navigation, new windows,
-iframes and arbitrary permission requests are blocked.
+explicit HTTP(S) opening, bounded clipboard writes and an isolated preview.
+The preview has its own ephemeral partition, no Node/preload bridge, denied
+permissions/downloads/popups and no automatic model context. Node integration
+is disabled; arbitrary native navigation and permission requests are blocked.
 User-triggered microphone permission is an explicit native bridge operation.
 Neither renderer nor outward MCP may answer a human approval on a model's behalf.
 

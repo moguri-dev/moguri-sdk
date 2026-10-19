@@ -4,35 +4,47 @@ import { join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import {
   defaultSettings, isRecord, MoguriError, PROFILE_ID, SYSTEM_PROMPT_WARNING,
+  defaultBoard,
   isWorkspaceCommand, isWorkspaceQuery,
+  isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall,
 } from "../../../packages/protocol/src/index.ts";
 import { RepositoryMemory } from "./memory.ts";
 import { McpGateway, type SecretVault } from "./gateway.ts";
 import { LocalDictation, type SpeechOptions } from "./voice.ts";
-import { EventStore } from "./store.ts";
+import { EventStore, type ForgetRequest } from "./store.ts";
 import { validateSettings } from "./permissions.ts";
 import { WorkspaceRuntime, type WorkspaceOptions } from "./workspace.ts";
+import { SessionWorkspace, type SessionWorkspaceHost, type SessionWorkspaceOptions, type WorkspaceFinish } from "./session-workspace.ts";
+import { assertSessionTool, matchesFolder } from "./project-policy.ts";
+import { pullRequestLink } from "./project-integrations.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
-  commit(events: EventInput[]): void;
-  finish(events: EventInput[], result?: CommandResult): CommandResult;
-  invalidateApprovals(): void;
+  commit(events: EventInput[], forget?: ForgetRequest): void;
+  finish: WorkspaceFinish;
+  invalidateApprovals(sessionId?: string): void;
   externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): string;
   subagent(session: Session, prompt: string): string;
   stopOwnedSession(id: string): void;
   cancelExternalJob(id: string): boolean;
   wake(): void;
+  mode: SessionWorkspaceHost["mode"];
+  spawnUser: SessionWorkspaceHost["spawn"];
+  deleteSession: SessionWorkspaceHost["deleteSession"];
+  removeProject: SessionWorkspaceHost["removeProject"];
+  validateAdmission: SessionWorkspaceHost["validateAdmission"];
+  closingProject(id: string): boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions }
 export class PlatformRuntime {
   readonly memory: RepositoryMemory;
   readonly gateway: McpGateway;
   readonly voice: LocalDictation;
   readonly workspace: WorkspaceRuntime;
-  private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; kind: string }>();
+  readonly sessions: SessionWorkspace;
+  private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
     this.memory = new RepositoryMemory(store);
     this.gateway = new McpGateway(options.vault, options.mcpWorkerPath);
@@ -40,7 +52,16 @@ export class PlatformRuntime {
     this.workspace = new WorkspaceRuntime({
       snapshot: () => this.snapshot(), project: (id) => this.project(id), commit: (events) => this.host.commit(events),
       job: (kind, projectId, execute, settled) => this.job(kind, projectId, null, execute, settled), wake: () => this.host.wake(),
+      closing: host.closingProject,
     }, store, stateDir, options);
+    this.sessions = new SessionWorkspace(store, {
+      snapshot: () => this.snapshot(), commit: (events, forget) => this.host.commit(events, forget),
+      invalidate: (id) => this.host.invalidateApprovals(id),
+      mode: host.mode, spawn: host.spawnUser, deleteSession: host.deleteSession, removeProject: host.removeProject, validateAdmission: host.validateAdmission,
+      wake: host.wake,
+      verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
+      job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
+    }, stateDir, options);
   }
   private snapshot() { return this.host.snapshot(); }
   private project(id: string): Project {
@@ -60,6 +81,7 @@ export class PlatformRuntime {
       payload: { jobId: job.id, status: "partial", resultDigest: null, error: "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed." },
     })));
     this.workspace.start();
+    this.sessions.recover();
   }
   prompt(session?: Session): string {
     const snapshot = this.snapshot();
@@ -83,7 +105,8 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
   }
   private server(id: string, projectId?: string): McpServerConfig | null {
     if (id === "builtin") return null;
-    const server = this.snapshot().settings.values.mcpServers.find((server) => server.id === id && server.enabled);
+    const servers = [...this.snapshot().settings.values.mcpServers, ...(projectId ? this.sessions.projects.configuration(projectId).values.mcpServers : [])];
+    const server = servers.find((server) => server.id === id && server.enabled);
     if (!server || projectId && server.projectIds && !server.projectIds.includes(projectId)) throw new MoguriError("mcp_denied", "This MCP is not enabled for the current profile/project.", 403);
     return server;
   }
@@ -100,23 +123,34 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isSessionWorkspaceQuery(query)) return this.sessions.query(query);
     if (isWorkspaceQuery(query)) return this.workspace.query(query);
     switch (query.type) {
-      case "prompt.preview": return { type: query.type, editable: this.snapshot().settings.values.systemPrompt, effective: this.prompt(query.sessionId ? this.session(query.sessionId) : undefined), warning: SYSTEM_PROMPT_WARNING };
-      case "memory.search": this.memoryEnabled(); return { type: query.type, items: await this.memory.search(this.project(query.projectId), query.text, query.limit) };
-      case "memory.graph": this.memoryEnabled(); return { type: query.type, ...this.memory.graph(this.project(query.projectId), query.path) };
+      case "prompt.preview": {
+        const session = query.sessionId ? this.session(query.sessionId) : undefined;
+        return { type: query.type, editable: this.snapshot().settings.values.systemPrompt, effective: session ? await this.effectivePrompt(session) : this.prompt(), warning: SYSTEM_PROMPT_WARNING };
+      }
+      case "memory.search": this.memoryEnabled(); return { type: query.type, items: await this.memory.search(this.project(query.projectId), query.text, query.limit, this.sessions.projects.configuration(query.projectId).values.deniedFolders) };
+      case "memory.graph": {
+        this.memoryEnabled();
+        const graph = this.memory.graph(this.project(query.projectId), query.path);
+        const denied = this.sessions.projects.configuration(query.projectId).values.deniedFolders;
+        const nodes = graph.nodes.filter((node) => !matchesFolder(node.path, denied));
+        const ids = new Set(nodes.map((node) => node.id));
+        return { type: query.type, nodes, edges: graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)) };
+      }
       case "mcp.tools": {
         const session = query.sessionId ? this.session(query.sessionId) : undefined;
         const server = this.server(query.serverId, session?.projectId);
-        if (server && (!this.snapshot().policy.allowedEnvs.includes("Local") || session && (session.controls.env !== "Local" || session.readOnly))) throw new MoguriError("mcp_env", "Configured MCP discovery cannot run on the Local host under this environment or read-only policy. No Local fallback.", 403);
+        if (server && (!this.snapshot().policy.allowedEnvs.includes("Local") || session && (session.controls.env !== "Local" || session.mode !== "agent" || session.kind !== "agent"))) throw new MoguriError("mcp_env", "Configured MCP discovery cannot run on the Local host under this environment or read-only policy. No Local fallback.", 403);
         const root = session ? this.project(session.projectId).path : join(this.stateDir, "gateway-workspace");
         await mkdir(root, { recursive: true, mode: 0o700 });
-        const tools = (await this.gateway.tools(server, root, AbortSignal.timeout(20_000), await this.scripts(session?.projectId)))
+        const tools = (await this.gateway.tools(server, root, AbortSignal.timeout(20_000), await this.scripts(session?.projectId), session?.id))
           .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
         return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
       }
       case "mcp.auth": {
-        const server = this.server(query.serverId);
+        const server = this.server(query.serverId, query.sessionId ? this.session(query.sessionId).projectId : undefined);
         const bearer = server?.transport.type === "http" && server.transport.auth === "bearer";
         let exists = false;
         try { exists = bearer && Boolean(await this.gateway.vault.read(query.serverId, AbortSignal.timeout(15_000))); }
@@ -151,6 +185,15 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     const text = this.store.blob(job.resultDigest);
     return { text: text.slice(offset, offset + limit), nextOffset: offset + limit < text.length ? offset + limit : null };
   }
+  async effectivePrompt(session: Session, base = this.prompt(session), repositoryContext?: string): Promise<string> {
+    const project = this.project(session.projectId);
+    const settings = this.snapshot().settings.values;
+    const instructions = repositoryContext ?? await this.sessions.projects.context(project);
+    const memory = settings.memory.enabled && settings.memory.useInContext ?
+      await this.memory.search(project, session.messages.findLast((message) => message.role === "user")?.text ?? "project", 4, this.sessions.projects.configuration(project.id).values.deniedFolders) : [];
+    return `${base}\n<session-mode>${session.mode}. ${session.mode === "read-only" ? "Answer questions using only permitted read operations. Never edit files, execute commands, publish, commit, push or create a PR." : "Use only the currently declared and authorized tools."}</session-mode>${instructions}` +
+      (memory.length ? `\n<untrusted-repository-memory>\n${JSON.stringify(memory).slice(0, 8000)}\n</untrusted-repository-memory>` : "");
+  }
   private async content(path: string, limit = 64 * 1024): Promise<string> {
     const file = await stat(path);
     if (!file.isFile() || file.size > limit) throw new MoguriError("import_limit", "Choose a regular capability file up to 64 KiB.");
@@ -169,6 +212,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return { id: randomUUID(), projectId, kind, name, description, contentDigest: this.store.putBlob(content), source, enabled, revision: 0, createdAt: new Date().toISOString() };
   }
   private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void): string {
+    if (projectId && this.host.closingProject(projectId)) throw new MoguriError("project_removing", "No new job can start while this project is being removed.", 409);
     const id = randomUUID();
     const job: CapabilityJob = { id, kind, projectId, sessionId, parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
     this.host.commit([{ event_type: "job.started", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: { job } }]);
@@ -178,7 +222,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       abort.signal.throwIfAborted();
       this.host.commit([{ event_type: "job.finished", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null } }]);
     }).catch((error: unknown) => {
-      const partial = error instanceof MoguriError && (error.code === "install_partial" || error.code === "program_partial");
+      const partial = error instanceof MoguriError && ["install_partial", "program_partial", "repo_defaults_partial"].includes(error.code) || kind === "project.defaults" && abort.signal.aborted;
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
       console.error(`Moguri capability ${kind} (${id}) ${partial ? "partial" : cancelled ? "cancelled" : "failed"}:`, error instanceof Error ? error.message : "Unknown capability error");
       this.host.commit([{ event_type: "job.finished", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: {
@@ -186,10 +230,11 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         error: error instanceof MoguriError ? error.message : error instanceof Error && error.name === "AbortError" ? "Capability cancelled; no automatic retry." : "Capability failed. Check the configured runtime, file permissions and connection; no success was recorded.",
       } }]);
     }).finally(() => { this.active.delete(id); settled?.(); });
-    this.active.set(id, { abort, done, sessionId: sessionId ?? undefined, kind });
+    this.active.set(id, { abort, done, sessionId: sessionId ?? undefined, projectId: projectId ?? undefined, kind });
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isSessionWorkspaceCommand(command)) return this.sessions.execute(command, finish);
     if (isWorkspaceCommand(command)) return this.workspace.execute(command, finish);
     const snapshot = this.snapshot();
     switch (command.type) {
@@ -205,6 +250,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
           throw new MoguriError("prompt_warning", SYSTEM_PROMPT_WARNING, 409);
         }
         validateSettings(settings);
+        if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
         const permissionsChanged = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution]);
         const result = finish([{ event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (permissionsChanged ? 1 : 0) } }], { revision: snapshot.settings.revision + 1 });
         if (permissionsChanged) this.host.invalidateApprovals();
@@ -213,7 +259,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "memory.index": {
         this.memoryEnabled();
         const project = this.project(command.projectId);
-        const id = this.job("memory.index", project.id, null, (signal, progress) => this.memory.index(project, snapshot.settings.values.memory.maxFiles, signal, progress));
+        const id = this.job("memory.index", project.id, null, (signal, progress) => this.memory.index(project, snapshot.settings.values.memory.maxFiles, signal, progress, this.sessions.projects.configuration(project.id).values.deniedFolders));
         return finish([], { id });
       }
       case "memory.remember": {
@@ -273,7 +319,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       }
       case "mcp.token.set":
       case "mcp.token.clear":
-        this.server(command.serverId);
+        this.server(command.serverId, command.sessionId ? this.session(command.sessionId).projectId : undefined);
         if (this.gateway.busy) throw new MoguriError("mcp_busy", "Finish or stop active MCP connections before changing their account.", 409);
         try { if (command.type === "mcp.token.set") await this.gateway.vault.write(command.serverId, command.token, AbortSignal.timeout(15_000)); else await this.gateway.vault.remove(command.serverId, AbortSignal.timeout(15_000)); }
         catch { throw new MoguriError("secret_store", "MCP credential storage failed. Unlock the OS keychain; no plaintext credential was saved.", 503); }
@@ -330,11 +376,12 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     const serverId = String(args.serverId);
     const server = this.server(serverId, session.projectId);
     const project = this.project(session.projectId);
+    await assertSessionTool(this.session(session.id), project.path, this.sessions.projects.configuration(project.id).values, { id: "gateway-policy", name: "mcp_gateway", arguments: args });
     let prepared: unknown;
     const input = isRecord(args.arguments) ? args.arguments : {};
     if (serverId === "builtin" && args.tool === "search_memory") { this.memoryEnabled(); prepared = await this.memory.search(project, String(input.query), 6); }
     if (serverId === "builtin" && args.tool === "memory_graph") { this.memoryEnabled(); prepared = this.memory.graph(project, String(input.path)); }
-    return this.gateway.operate({ action: "call", server, root: project.path, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared, scripts: await this.scripts(project.id) }, signal);
+    return this.gateway.operate({ action: "call", server, root: project.path, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared, scripts: await this.scripts(project.id) }, signal, session.id);
   }
   async delegate(session: Session, call: ToolCall, signal: AbortSignal): Promise<{ text: string; isError: boolean; outcome: string }> {
     if (call.name === "run_subagent") {
@@ -352,7 +399,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }
     if (call.name === "memory_search") {
       this.memoryEnabled();
-      return { text: JSON.stringify(await this.memory.search(this.project(session.projectId), String(call.arguments.query), 6)), isError: false, outcome: "completed" };
+      return { text: JSON.stringify(await this.memory.search(this.project(session.projectId), String(call.arguments.query), 6, this.sessions.projects.configuration(session.projectId).values.deniedFolders)), isError: false, outcome: "completed" };
     }
     if (call.name === "propose_skill" || call.name === "propose_script" || call.name === "propose_memory") {
       if (!this.snapshot().settings.values.evolution.enabled) throw new MoguriError("evolution_disabled", "Model proposals require explicit opt-in. They never apply themselves.");
@@ -366,11 +413,11 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }
     if (call.name === "mcp_gateway") {
       const action = call.arguments.action;
-      if (action === "discover") return { text: JSON.stringify([{ id: "builtin", name: "Moguri foundational scripts" }, ...this.snapshot().settings.values.mcpServers.filter((server) => server.enabled && (!server.projectIds || server.projectIds.includes(session.projectId))).map((server) => ({ id: server.id, name: server.name, transport: server.transport.type }))]), isError: false, outcome: "completed" };
+      if (action === "discover") return { text: JSON.stringify([{ id: "builtin", name: "Moguri foundational scripts" }, ...[...this.snapshot().settings.values.mcpServers, ...this.sessions.projects.configuration(session.projectId).values.mcpServers].filter((server) => server.enabled && (!server.projectIds || server.projectIds.includes(session.projectId))).map((server) => ({ id: server.id, name: server.name, transport: server.transport.type }))]), isError: false, outcome: "completed" };
       if (action === "tools") return { text: JSON.stringify(await this.query({ type: "mcp.tools", sessionId: session.id, serverId: String(call.arguments.serverId), query: String(call.arguments.query ?? ""), offset: Number(call.arguments.offset ?? 0) })), isError: false, outcome: "completed" };
       if (action === "auth") {
         this.server(String(call.arguments.serverId), session.projectId);
-        return { text: JSON.stringify(await this.query({ type: "mcp.auth", serverId: String(call.arguments.serverId) })), isError: false, outcome: "completed" };
+        return { text: JSON.stringify(await this.query({ type: "mcp.auth", serverId: String(call.arguments.serverId), sessionId: session.id })), isError: false, outcome: "completed" };
       }
       if (action === "read_result") return { text: JSON.stringify(this.readResult(String(call.arguments.resultId), Number(call.arguments.offset ?? 0), 12000, session.id)), isError: false, outcome: "completed" };
       if (action === "call") {
@@ -386,5 +433,12 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     throw new MoguriError("capability_unavailable", "This delegated capability is not available.");
   }
   stopSession(id: string): void { for (const job of this.active.values()) if (job.sessionId === id) job.abort.abort(); }
-  async close(): Promise<void> { this.workspace.close(); for (const job of this.active.values()) job.abort.abort(); await this.gateway.close(); await Promise.all([...this.active.values()].map((job) => job.done)); }
+  async settleSession(id: string): Promise<void> { this.stopSession(id); await Promise.all([...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)); await this.gateway.cancelOwner(id); }
+  async cancelProject(id: string): Promise<void> {
+    const jobs = [...this.active.values()].filter((job) => job.projectId === id);
+    for (const job of jobs) job.abort.abort();
+    await Promise.all(jobs.map((job) => job.done));
+    await this.gateway.cancelRoot(this.project(id).path);
+  }
+  async close(): Promise<void> { this.workspace.close(); await this.sessions.close(); for (const job of this.active.values()) job.abort.abort(); await this.gateway.close(); await Promise.all([...this.active.values()].map((job) => job.done)); }
 }

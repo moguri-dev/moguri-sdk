@@ -88,7 +88,7 @@ async function run(start: WorkerStart): Promise<void> {
                   const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call });
                   if (reply.error || !reply.value || !("text" in reply.value)) throw new Error(reply.error ?? "Missing delegated result.");
                   return reply.value;
-                });
+                }, { mode: approval.value.mode, folders: approval.value.folders });
             } catch (error) {
               result = { text: error instanceof Error ? error.message : "Tool execution failed.", isError: true, outcome: abort.signal.aborted ? "stopped" : "failed" };
             }

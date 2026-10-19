@@ -1,6 +1,7 @@
 import { Type, type Static, type Message, type AssistantMessage, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { isRecord, MAX_TEXT, type ToolCall } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MAX_TEXT, type ToolCall, type SessionMode } from "../../../packages/protocol/src/index.ts";
+import type { FolderPolicy } from "./project-policy.ts";
 import type { PreparedModel } from "./provider.ts";
 
 const toolCall = Type.Object({ id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()) });
@@ -18,9 +19,9 @@ export const WorkerRequestSchema = Type.Union([
 ]);
 export type WorkerRequest = Static<typeof WorkerRequestSchema>;
 export interface WorkerStart { kind: "start"; root: string; context: Message[]; readOnly: boolean }
-export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[] }
+export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
-export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean } | { accepted: boolean } | DelegatedResult; error?: string };
+export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean } | DelegatedResult; error?: string };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" };
 export function parentMessage(value: unknown): ParentMessage {
   if (!isRecord(value)) throw new Error("Invalid parent message.");

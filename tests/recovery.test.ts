@@ -13,7 +13,7 @@ test("restart preserves drafts and queued messages, marks interrupted work parti
     await fixture.service.controller.dispatch(envelope({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "generated surviving draft", attachments: [] }));
     const stateDir = join(fixture.directory, "state");
     await fixture.service.close();
-    const store = new EventStore(join(stateDir, "state.sqlite"));
+    const store = new EventStore(join(stateDir, "state.sqlite"), fixture.retentionKey);
     const scope = { profile_id: "default", project_id: fixture.session().projectId, session_id: fixture.sessionId };
     store.commit([
       { ...scope, event_type: "queue.enqueued", payload: { item: { id: "generated-claimed", text: "generated interrupted operation", attachments: [], delivery: "queue" } } },
@@ -22,7 +22,7 @@ test("restart preserves drafts and queued messages, marks interrupted work parti
       { ...scope, event_type: "queue.enqueued", payload: { item: { id: "generated-queued", text: "generated preserved queue", attachments: [], delivery: "queue" } } },
     ]);
     store.close();
-    restarted = await startService({ stateDir, provider: fixture.provider });
+    restarted = await startService({ stateDir, provider: fixture.provider, retentionKey: fixture.retentionKey });
     const session = restarted.controller.snapshot().sessions.find((session) => session.id === fixture.sessionId)!;
     assert.equal(session.turnId, null);
     assert.equal(session.draft.text, "generated surviving draft");

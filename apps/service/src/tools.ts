@@ -1,8 +1,9 @@
 import { Type, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { MAX_TEXT, MoguriError, type ToolCall, type UserSettings } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, MoguriError, type ToolCall, type UserSettings, type SessionMode } from "../../../packages/protocol/src/index.ts";
 import { listProjectFiles, readProjectFile, writeProjectFile } from "./files.ts";
 import { runCommand } from "./supervisor.ts";
+import { assertFolderAccess, matchesFolder, readTools, type FolderPolicy } from "./project-policy.ts";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 export const tools: Tool[] = [
@@ -24,9 +25,11 @@ export const tools: Tool[] = [
     parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }, { additionalProperties: false }),
   })),
 ];
-export function effectiveTools(settings: UserSettings, readOnly: boolean): Tool[] {
+export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy): Tool[] {
   if (readOnly) return [];
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
+    .filter((tool) => mode !== "read-only" || readTools.has(tool.name))
+    .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)
     .filter((tool) => !tool.name.startsWith("propose_") || settings.evolution.enabled);
 }
@@ -34,12 +37,15 @@ export function validateTool(call: ToolCall): void {
   const tool = tools.find((tool) => tool.name === call.name);
   if (!tool || !Value.Check(tool.parameters, call.arguments)) throw new MoguriError("invalid_tool", "Unknown tool or invalid arguments. No operation was executed.");
 }
-export async function executeTool(root: string, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall) => Promise<{ text: string; isError: boolean; outcome: string }>): Promise<{ text: string; isError: boolean; outcome: string }> {
+export async function executeTool(root: string, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall) => Promise<{ text: string; isError: boolean; outcome: string }>, safety?: { mode: SessionMode; folders: FolderPolicy }): Promise<{ text: string; isError: boolean; outcome: string }> {
   signal.throwIfAborted();
   validateTool(call);
+  if (safety?.mode === "read-only" && !readTools.has(call.name)) throw new MoguriError("read_only", "Edit and execution tools are disabled for this read-only session.", 403);
+  if (safety && ["list_files", "read_file", "write_file"].includes(call.name)) await assertFolderAccess(root, String(call.arguments.path), call.name === "write_file", safety.folders);
+  if (safety && (safety.folders.denied.length || safety.folders.readOnly.length) && ["run_command", "mcp_gateway"].includes(call.name)) throw new MoguriError("folder_containment", "This host execution cannot enforce configured folder restrictions.", 403);
   const args = call.arguments;
   switch (call.name) {
-    case "list_files": return { text: JSON.stringify(await listProjectFiles(root, String(args.path))), isError: false, outcome: "completed" };
+    case "list_files": return { text: JSON.stringify((await listProjectFiles(root, String(args.path))).filter((path) => !safety || !matchesFolder(path, safety.folders.denied))), isError: false, outcome: "completed" };
     case "read_file": return { text: JSON.stringify(await readProjectFile(root, String(args.path))), isError: false, outcome: "completed" };
     case "write_file": {
       signal.throwIfAborted();

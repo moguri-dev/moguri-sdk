@@ -36,6 +36,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D13 | Remote SSH runs the agent task and model calls on a user-configured reachable machine; the local control plane retains durable authority. | Phase 0 cannot prove secure transport, remote model access, cancellation, and reconnect recovery. |
 | D14 | One importable SDK powers both clients, default-dark branding and user-controlled memory, extensions, MCP and local dictation. | SDK packaging, policy, recovery or physical runtime qualification fails. |
 | D15 | Profile-owned verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
+| D16 | Ghostty embeds the desktop terminal; shared held queues, read-only/side sessions and retained project artifacts extend the same SDK/event authority. | Native input/resize/cancellation, retention-key migration, multi-client policy or packaged-client acceptance fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -303,13 +304,45 @@ Neither integration starts CI, merges, pushes or grants permissions.
 
 CI is restricted to pushes to `main`. Feature/PR checks are performed locally.
 
+## D16. Session workspace, Ghostty and retention
+
+**Decision.** Use maintained `ghostty-web` 0.4.0 (MIT) with Ghostty's actual
+WASM VT core and its supplied renderer. Node-PTY remains only the owned
+transport. No homemade VT renderer or xterm.js substitution. The generated
+[session workspace spike](session-workspace.md) qualifies self-hosted WASM
+under sandboxed Electron and strict CSP before feature work.
+
+Cmd/Ctrl+Enter creates a held prompt without starting work. One SDK slash
+catalogue drives desktop and TUI; native panel actions are thin bindings.
+Read-only mode is enforced at declaration, authorization and execution, not by
+prompt text. User-created side/subsessions are distinct from opt-in model
+subagents. Agent writers serialize; question-only work may run in parallel.
+
+Protocol/database migration 4 retains immutable event identities and sequences,
+using independent encrypted profile/project/session payload compartments.
+Deleting a session removes its payload keys, not project-owned artifacts or
+external PRs. Production keys use an explicit OS-keychain master; tests inject
+generated keys. Missing/corrupt keys fail closed. This is operational retention,
+not forensic erasure or deletion of backups.
+
+User consoles have ephemeral input/output and never enter durable command
+receipts or model context. Restart never relaunches or replays them. Unconfirmed
+ownership requires inspection. Project default files are published only after
+an explicit user action, on a non-protected branch, preserving the current
+checkout/index. Failed or interrupted publication is partial, not successful.
+Repo MCP imports bind the exact reviewed digest and start disabled. Porto is
+read-only inventory access, not daemon/process control.
+
+The isolated browser is a basic native preview, not the deferred Stainless
+automation integration. Sandbox, Remote, managed worktrees and the wider release
+gates remain unqualified. CI remains main-push-only.
+
 ## Still open
 
 - Package manager and monorepo tooling.
 - Protocol schema tool and code generation. `pi-ai` already uses TypeBox.
 - SQLite driver: `better-sqlite3` or Node.js's built-in `node:sqlite` module.
 - Diff renderer: `@pierre/diffs` or CodeMirror's merge view.
-- Terminal renderer: xterm.js or ghostty-web.
 - How the service and runtime are packaged for the CLI and the desktop app.
 - Linux package formats.
 - Default kupo classifier, evaluated candidate pools, quality gates, and per-pattern limits.

@@ -1,9 +1,9 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt } from "./platform.ts";
+import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
 export * from "./platform.ts";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -43,7 +43,7 @@ export const CommandSchema = object({
     object({ type: Type.Literal("session.resume"), ...sessionId }),
     object({ type: Type.Literal("draft.save"), ...sessionId, expectedRevision: revision, text, attachments }),
     object({ type: Type.Literal("attachment.add"), ...sessionId, expectedRevision: revision, path: Type.String({ minLength: 1, maxLength: 4096 }) }),
-    object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]) }),
+    object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]), held: Type.Optional(Type.Boolean()) }),
     object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text }),
     object({ type: Type.Literal("queue.remove"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.make-turn"), ...sessionId, messageId: id, expectedRevision: revision }),
@@ -86,7 +86,7 @@ export interface PublicMessage {
 export interface Usage {
   stepId: string;
   modelId: string;
-  role: "solver" | "subagent";
+  role: "solver" | "subagent" | "side";
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
@@ -104,6 +104,8 @@ export interface QueueItem {
   attachments: Attachment[];
   delivery: "queue" | "steer" | "interrupt";
   targetTurnId?: string;
+  held?: boolean;
+  mode?: SessionMode;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; outcome: string }
@@ -130,6 +132,16 @@ export interface Session {
   updatedAt: string;
   parentSessionId?: string;
   readOnly?: boolean;
+  mode: SessionMode;
+  pendingMode: SessionMode | null;
+  kind: SessionKind;
+  pinned: boolean;
+  unread: boolean;
+  groupId: string | null;
+  archivedAt: string | null;
+  prUrl: string | null;
+  workItemId: string | null;
+  browserUrl: string | null;
 }
 export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean }
 export interface ProviderState {
@@ -160,7 +172,7 @@ export interface Connection {
 
 export interface EventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls; parentSessionId?: string; readOnly?: boolean; contextDigest?: string };
+  "session.created": { title: string; controls: Controls; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null };
   "session.configured": { controls: Controls };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
@@ -198,6 +210,21 @@ export interface EventPayloads {
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
+  "session.organized": { changes: SessionChanges };
+  "session.mode_requested": { mode: SessionMode };
+  "session.mode_changed": { mode: SessionMode };
+  "session.browser_changed": { url: string };
+  "session.deleted": { deletedSessionId: string; usage: Usage[] };
+  "project.removed": { deletedProjectId: string; usage: Usage[] };
+  "project.relocated": { path: string; name: string };
+  "project.configured": { configuration: ProjectConfiguration };
+  "project.folder_saved": { folder: NavigationFolder };
+  "session.group_saved": { group: SessionGroup };
+  "artifact.saved": { artifact: RetainedArtifact };
+  "terminal.changed": { terminal: TerminalState };
+  "turn.prompt_bound": { promptDigest: string };
+  "queue.released": { messageId: string };
+  "queue.held": { messageIds: string[] };
 }
 export type EventType = keyof EventPayloads;
 interface EventMetadata {
@@ -225,6 +252,8 @@ export const eventTypes: readonly EventType[] = [
   "turn.finished", "policy.updated", "provider.changed",
   "settings.updated", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "cache.prepared",
+  "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
+  "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "turn.prompt_bound", "queue.released", "queue.held",
 ];
 
 export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[] } & PlatformSnapshot {
@@ -239,12 +268,35 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
   const boards = new Map<string, IssueBoard>();
   const issues = new Map<string, LocalIssue>();
   const dependencyCaches = new Map<string, CacheReceipt>();
+  const projectConfigurations = new Map<string, ProjectConfiguration>();
+  const projectFolders = new Map<string, NavigationFolder>();
+  const sessionGroups = new Map<string, SessionGroup>();
+  const artifacts = new Map<string, RetainedArtifact>();
+  const terminals = new Map<string, TerminalState>();
   for (const event of events) {
     if (event.profile_id !== PROFILE_ID) continue;
+    if (event.event_type === "session.deleted") {
+      sessions.delete(event.payload.deletedSessionId);
+      for (const [id, terminal] of terminals) if (terminal.sessionId === event.payload.deletedSessionId) terminals.delete(id);
+    }
+    if (event.event_type === "project.removed") {
+      projects.delete(event.payload.deletedProjectId);
+      projectConfigurations.delete(event.payload.deletedProjectId);
+      for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
+      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+    }
+    if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, structuredClone(event.payload.configuration));
+    if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
+    if (event.event_type === "session.group_saved") sessionGroups.set(event.payload.group.id, { ...event.payload.group });
+    if (event.event_type === "artifact.saved") artifacts.set(event.payload.artifact.id, { ...event.payload.artifact });
+    if (event.event_type === "terminal.changed") {
+      terminals.set(event.payload.terminal.id, { ...event.payload.terminal });
+      if (event.payload.terminal.status === "unconfirmed") blockedProjects.add(event.payload.terminal.projectId);
+    }
     if (event.event_type === "board.saved") boards.set(event.payload.board.projectId, structuredClone(event.payload.board));
     if (event.event_type === "issue.saved") issues.set(event.payload.issue.id, structuredClone(event.payload.issue));
     if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
-    if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: event.payload.settings };
+    if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: { ...defaultSettings(), ...event.payload.settings } };
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "proposal.decided") {
@@ -259,11 +311,15 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
-      if (job?.kind === "cache.install" && event.payload.status === "partial" && job.projectId) blockedProjects.add(job.projectId);
+      if (job && ["cache.install", "project.defaults"].includes(job.kind) && event.payload.status === "partial" && job.projectId) blockedProjects.add(job.projectId);
     }
     if (event.event_type === "turn.finished" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) blockedProjects.add(event.project_id);
     if (event.event_type === "session.resumed" && event.project_id) blockedProjects.delete(event.project_id);
     if (event.event_type === "project.added") projects.set(event.payload.project.id, event.payload.project);
+    if (event.event_type === "project.relocated" && event.project_id) {
+      const project = projects.get(event.project_id);
+      if (project) projects.set(project.id, { ...project, ...event.payload });
+    }
     if (event.event_type === "policy.updated") {
       policy = event.payload.policy;
       for (const session of sessions.values()) session.localFinishing = session.turnId !== null && event.payload.finishingTurnIds.includes(session.turnId);
@@ -276,6 +332,9 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
         queue: [], queueRevision: 0, messages: [], usage: [], processes: [], turnId: null, pendingApproval: null,
         lastError: null, localFinishing: false, createdAt: event.timestamp, updatedAt: event.timestamp,
         parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
+        mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
+        kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, unread: false, groupId: null, archivedAt: null,
+        prUrl: event.payload.prUrl ?? null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
       });
     }
     const session = event.session_id ? sessions.get(event.session_id) : undefined;
@@ -288,8 +347,21 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     });
     switch (event.event_type) {
       case "session.configured": session.controls = event.payload.controls; session.revision++; break;
-      case "session.archived": session.beforeArchive = session.status; session.status = "archived"; break;
-      case "session.restored": session.status = session.beforeArchive ?? "idle"; break;
+      case "session.organized": {
+        const changes = event.payload.changes;
+        if (changes.title !== undefined) session.title = changes.title;
+        if (changes.pinned !== undefined) session.pinned = changes.pinned;
+        if (changes.unread !== undefined) session.unread = changes.unread;
+        if (changes.groupId !== undefined) session.groupId = changes.groupId;
+        if (changes.parentSessionId !== undefined) session.parentSessionId = changes.parentSessionId ?? undefined;
+        if (changes.prUrl !== undefined) session.prUrl = changes.prUrl;
+        session.revision++; break;
+      }
+      case "session.mode_requested": session.pendingMode = event.payload.mode; session.revision++; break;
+      case "session.mode_changed": session.mode = event.payload.mode; session.pendingMode = null; session.revision++; break;
+      case "session.browser_changed": session.browserUrl = event.payload.url; session.revision++; break;
+      case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
+      case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
       case "session.resumed": session.status = session.queue.length ? "queued" : "idle"; session.lastError = null; break;
       case "session.blocked": session.status = "waiting_input"; session.lastError = event.payload.diagnostic; break;
       case "draft.saved": session.draft = { ...event.payload, revision: session.draft.revision + 1 }; break;
@@ -310,6 +382,14 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
         session.queueRevision++;
         break;
       }
+      case "queue.released": {
+        const item = session.queue.find((item) => item.id === event.payload.messageId);
+        if (item) item.held = false;
+        session.queueRevision++; break;
+      }
+      case "queue.held":
+        for (const item of session.queue) if (event.payload.messageIds.includes(item.id)) item.held = true;
+        session.queueRevision++; break;
       case "queue.reordered": {
         const items = new Map(session.queue.map((item) => [item.id, item]));
         session.queue = event.payload.messageIds.map((id) => items.get(id)).filter((item): item is QueueItem => item !== undefined);
@@ -328,7 +408,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       case "model.started":
         session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: "assistant", text: "", timestamp: event.timestamp });
         session.usage.push({
-          stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: session.parentSessionId ? "subagent" : "solver",
+          stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
           estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: 0, quality: "unknown", outcome: "running",
         });
@@ -382,5 +462,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects],
     settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()],
-    boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()] };
+    boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
+    projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
+    artifacts: [...artifacts.values()], terminals: [...terminals.values()] };
 }

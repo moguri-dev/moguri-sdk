@@ -18,16 +18,18 @@ export class McpKeychain implements SecretVault {
 export class McpGateway {
   private active = new Set<AbortController>();
   private tasks = new Set<Promise<unknown>>();
+  private contexts = new Map<AbortController, { task: Promise<unknown>; root: string; owner?: string }>();
   constructor(readonly vault: SecretVault = new McpKeychain(), private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./mcp-worker.ts" : "./mcp-worker.mjs", import.meta.url))) {}
   get busy(): boolean { return this.active.size > 0; }
-  async operate(operation: Omit<McpOperation, "token">, requested: AbortSignal): Promise<unknown> {
+  async operate(operation: Omit<McpOperation, "token">, requested: AbortSignal, owner?: string): Promise<unknown> {
     const abort = new AbortController();
     const signal = AbortSignal.any([requested, abort.signal]);
     this.active.add(abort);
     const task = this.execute(operation, signal);
     this.tasks.add(task);
+    this.contexts.set(abort, { task, root: operation.root, owner });
     try { return await task; }
-    finally { this.active.delete(abort); this.tasks.delete(task); }
+    finally { this.active.delete(abort); this.tasks.delete(task); this.contexts.delete(abort); }
   }
   private async execute(operation: Omit<McpOperation, "token">, signal: AbortSignal): Promise<unknown> {
     signal.throwIfAborted();
@@ -87,10 +89,12 @@ export class McpGateway {
       if (signal.aborted) cancel();
     });
   }
-  async tools(server: McpServerConfig | null, root: string, signal: AbortSignal, scripts?: McpOperation["scripts"]): Promise<McpToolInfo[]> {
-    const result = await this.operate({ action: "tools", server, root, scripts }, signal);
+  async tools(server: McpServerConfig | null, root: string, signal: AbortSignal, scripts?: McpOperation["scripts"], owner?: string): Promise<McpToolInfo[]> {
+    const result = await this.operate({ action: "tools", server, root, scripts }, signal, owner);
     if (!Array.isArray(result) || !result.every((tool) => isRecord(tool) && typeof tool.name === "string" && typeof tool.digest === "string" && isRecord(tool.inputSchema))) throw new MoguriError("mcp_protocol", "MCP tool discovery returned an invalid catalog.");
     return result as McpToolInfo[];
   }
   async close(): Promise<void> { for (const abort of this.active) abort.abort(); await Promise.allSettled([...this.tasks]); }
+  async cancelOwner(id: string): Promise<void> { const owned = [...this.contexts].filter(([, context]) => context.owner === id); for (const [abort] of owned) abort.abort(); await Promise.allSettled(owned.map(([, context]) => context.task)); }
+  async cancelRoot(root: string): Promise<void> { const owned = [...this.contexts].filter(([, context]) => context.root === root); for (const [abort] of owned) abort.abort(); await Promise.allSettled(owned.map(([, context]) => context.task)); }
 }

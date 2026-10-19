@@ -66,7 +66,9 @@ export class MoguriClient {
         if (!isSnapshot(snapshot)) {
           throw new Error("The service protocol is incompatible. Update both clients.");
         }
-        this.update({ snapshot, error: null });
+        const projects = new Set(snapshot.projects.map((project) => project.id));
+        const sessions = new Set(snapshot.sessions.map((session) => session.id));
+        this.update({ snapshot, error: null, events: this.state.events.filter((event) => (!event.project_id || projects.has(event.project_id)) && (!event.session_id || sessions.has(event.session_id))) });
       } while (this.refreshAgain && !this.disposed);
     } catch (error) {
       this.update({ status: "disconnected", error: error instanceof Error ? error.message : "Service connection failed." });
@@ -94,7 +96,9 @@ export class MoguriClient {
           this.update({ status: "connected", error: null, snapshot });
         } else if (message.type === "event" && isEvent(message.event)) {
           this.after = Math.max(this.after, message.event.seq);
-          this.update({ events: [...this.state.events.slice(-199), message.event] });
+          const deletedSession = message.event.event_type === "session.deleted" ? message.event.payload.deletedSessionId : null;
+          const deletedProject = message.event.event_type === "project.removed" ? message.event.payload.deletedProjectId : null;
+          this.update({ events: [...this.state.events.filter((event) => (!deletedSession || event.session_id !== deletedSession) && (!deletedProject || event.project_id !== deletedProject)).slice(-199), message.event] });
           if (this.state.status === "connected") this.scheduleRefresh();
         } else if (message.type === "invalidate") this.scheduleRefresh();
       } catch {

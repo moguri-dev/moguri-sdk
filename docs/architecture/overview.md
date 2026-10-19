@@ -10,6 +10,8 @@ Reuse pi-ai (MIT) solely behind the service/worker provider boundary, OpenTUI
 (MIT) for terminal rendering, React (MIT) for both clients, Electron (MIT) and
 Vite (MIT) for desktop, TypeBox (MIT) for validation, `ws` (MIT) for events,
 `node-pty` (MIT) for owned commands, and `@napi-rs/keyring` (MIT) for secrets.
+The embedded desktop terminal uses `ghostty-web` (MIT) and Ghostty's actual
+WASM core, not a Moguri-written terminal parser/renderer.
 Node's SQLite driver avoids an additional database addon. Dependency notices
 are retained in installation and packaged dependencies.
 The [SDK platform contract](sdk-platform.md) adds the official MCP SDK,
@@ -29,8 +31,12 @@ migration and recovery tests, not deletion of user state.
 Migration 2 adds project-scoped derived repository caches and graph tables.
 Migration 3 adds derived dependency-cache object metadata, local board/ticket
 and cache-receipt events. Event envelopes remain schema version 1; the client
-protocol is version 3. The [workspace contract](workspace-platform.md) records
+protocol is version 4. The [workspace contract](workspace-platform.md) records
 cache/advisory, read-only integration and recovery boundaries.
+Migration 4 adds encrypted retention compartments while preserving prior event
+identity/sequence. The [session workspace contract](session-workspace.md)
+records held prompts, hard read-only/side modes, project settings, independent
+artifacts and deletion/restart boundaries.
 
 Both clients share the SDK and subscribe to the same sequenced stream. The
 service owns projects, sessions, transcripts, drafts, queue, pending approvals,

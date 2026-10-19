@@ -5,6 +5,7 @@ import * as vec from "sqlite-vec";
 import { MoguriError, type GraphNode, type GraphEdge, type MemoryHit, type Project } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, scopedPath } from "./files.ts";
 import { EventStore } from "./store.ts";
+import { matchesFolder } from "./project-policy.ts";
 
 const dimensions = 384;
 type IgnoreScope = { base: string; rules: ReturnType<typeof ignore> };
@@ -60,11 +61,12 @@ export class RepositoryMemory {
     }
     return false;
   }
-  private async files(root: string, maxFiles: number, signal: AbortSignal): Promise<string[]> {
+  private async files(root: string, maxFiles: number, signal: AbortSignal, denied: string[] = []): Promise<string[]> {
     const files: string[] = [];
     let directories = 0;
     const walk = async (directory: string, inherited: IgnoreScope[] = []) => {
       signal.throwIfAborted();
+      if (matchesFolder(relative(root, directory) || ".", denied)) return;
       if (++directories > 5000) throw new MoguriError("memory_limit", "The repository directory walk exceeded its bounded limit.");
       const chain = [...inherited, await this.localRules(root, directory)];
       const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
@@ -72,7 +74,7 @@ export class RepositoryMemory {
         if (files.length >= maxFiles) return;
         const absolute = join(directory, entry.name);
         const path = relative(root, absolute);
-        if (entry.isSymbolicLink() || this.excluded(root, absolute, entry.isDirectory(), chain)) continue;
+        if (entry.isSymbolicLink() || matchesFolder(path, denied) || this.excluded(root, absolute, entry.isDirectory(), chain)) continue;
         if (entry.isDirectory()) await walk(absolute, chain);
         else if (entry.isFile()) files.push(path);
       }
@@ -80,9 +82,9 @@ export class RepositoryMemory {
     await walk(root);
     return files;
   }
-  async index(project: Project, maxFiles: number, signal: AbortSignal, progress: (text: string) => void) {
+  async index(project: Project, maxFiles: number, signal: AbortSignal, progress: (text: string) => void, denied: string[] = []) {
     this.ready();
-    const paths = await this.files(project.path, maxFiles, signal);
+    const paths = await this.files(project.path, maxFiles, signal, denied);
     const records: { path: string; digest: string; mtime: number; size: number; chunks: string[] }[] = [];
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
@@ -145,12 +147,13 @@ export class RepositoryMemory {
     } catch (error) { db.exec("ROLLBACK"); throw error; }
     return { indexedFiles: records.length, reusedFiles: reused, excludedFiles: excluded, sourceBytes: bytes, boundedAt: maxFiles, vectorKind: "local lexical vectors", graph: "import/symbol graph" };
   }
-  async search(project: Project, text: string, limit: number): Promise<MemoryHit[]> {
+  async search(project: Project, text: string, limit: number, denied: string[] = []): Promise<MemoryHit[]> {
     this.ready();
     const hits = this.store.db.prepare(`SELECT c.path,c.text,c.digest,f.mtime,f.size,v.distance FROM memory_vectors v JOIN memory_chunks c ON c.id=v.rowid JOIN memory_files f ON f.project_id=c.project_id AND f.path=c.path WHERE v.embedding MATCH ? AND k=? AND v.project_id=? ORDER BY v.distance`).all(lexicalVector(text), BigInt(limit), project.id);
     const result: MemoryHit[] = [];
     const rules = new Map<string, IgnoreScope>();
     for (const hit of hits) {
+      if (matchesFolder(String(hit.path), denied)) continue;
       let stale = true;
       try {
         const file = await stat(await scopedPath(project.path, String(hit.path)));

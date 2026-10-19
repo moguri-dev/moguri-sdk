@@ -1,13 +1,82 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { isRecord, QuerySchema, parse, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager } from "../../protocol/src/index.ts";
+import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput } from "../../protocol/src/index.ts";
+import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
+export * from "./slash.ts";
 export { ClientError };
 export { DraftEditor } from "../../client/src/draft.ts";
 export type { ClientState } from "../../client/src/index.ts";
 
 export class MoguriSdk extends TransportClient {
+  private sessionRevision(id: string): number {
+    const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
+    if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");
+    return session.revision;
+  }
+  readonly sessions = {
+    organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes, expectedRevision }),
+    rename: (sessionId: string, title: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes: { title }, expectedRevision }),
+    mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
+    spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
+    delete: (sessionId: string, confirm: true, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.delete", sessionId, expectedRevision, confirm }),
+    fromWork: (projectId: string, source: { issueId: string } | { prUrl: string }) => this.command({ type: "session.from-work", projectId, ...source }),
+    group: (projectId: string, name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "session.group", projectId, name, order, expectedRevision, ...(id ? { id } : {}) }),
+    browser: (sessionId: string, url: string) => this.command({ type: "session.browser", sessionId, url }),
+  };
+  readonly projects = {
+    configuration: (projectId: string) => this.query({ type: "project.configuration", projectId }),
+    configure: (projectId: string, settings: ProjectSettings, expectedRevision: number) => this.command({ type: "project.settings", projectId, settings, expectedRevision }),
+    organize: (projectId: string, presentation: { folderId: string | null; color: string; order: number }, expectedRevision: number) => this.command({ type: "project.organize", projectId, ...presentation, expectedRevision }),
+    reorder: (folderId: string | null, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.reorder", folderId, projects }),
+    folder: (name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "project.folder", name, order, expectedRevision, ...(id ? { id } : {}) }),
+    relocate: (projectId: string, path: string, expectedRevision: number) => this.command({ type: "project.relocate", projectId, path, expectedRevision }),
+    remove: (projectId: string, confirm: true, expectedRevision: number) => this.command({ type: "project.remove", projectId, expectedRevision, confirm }),
+    git: (projectId: string, diff = true) => this.query({ type: "project.git", projectId, diff }),
+    sources: (projectId: string) => this.query({ type: "project.sources", projectId }),
+    porto: (projectId: string) => this.query({ type: "project.porto", projectId }),
+    initialize: (projectId: string, branch: string, expectedRevision: number, confirmPush: true) => this.command({ type: "project.defaults", projectId, expectedRevision, branch, confirmPush }),
+    importMcp: (projectId: string, expectedRevision: number, confirmReview: true, expectedDigest: string) => this.command({ type: "project.mcp.import", projectId, expectedRevision, confirmReview, expectedDigest }),
+  };
+  readonly prompts = {
+    text: (sessionId: string, id?: string): string => {
+      const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
+      if (!session) throw new ClientError("session_missing", "Choose an existing session.");
+      const queued = id ? session.queue.find((item) => item.id === id) : undefined;
+      const message = id ? session.messages.find((message) => message.id === id) : session.messages.findLast((message) => message.role === "user");
+      if (!queued && !message) throw new ClientError("prompt_missing", "This prompt is no longer available.");
+      return queued?.text ?? message!.text;
+    },
+    release: (sessionId: string, messageId: string, expectedRevision: number) => this.command({ type: "queue.release", sessionId, messageId, expectedRevision }),
+  };
+  readonly plans = {
+    read: (sessionId: string) => this.query({ type: "plan.read", sessionId }),
+    save: (sessionId: string, text: string, expectedDigest: string) => this.command({ type: "plan.save", sessionId, text, expectedDigest }),
+    capture: (sessionId: string, path?: string) => this.command({ type: "artifact.capture", sessionId, ...(path ? { path } : {}) }),
+    artifact: (artifactId: string) => this.query({ type: "artifact.read", artifactId }),
+  };
+  private async terminalInput(request: TerminalInput): Promise<void> {
+    parse(TerminalInputSchema, request);
+    const result = await this.request("/v1/terminal", request);
+    if (!isRecord(result) || result.accepted !== true) throw new ClientError("terminal_input", "Terminal input acknowledgement was not confirmed. It was not automatically replayed.");
+  }
+  readonly terminal = {
+    open: (sessionId: string, cols = 80, rows = 24, scriptId?: string) => this.command({ type: "terminal.open", sessionId, cols, rows, ...(scriptId ? { scriptId } : {}) }),
+    input: async (terminalId: string, data: string) => {
+      if (!data.length) throw new ClientError("terminal_input", "Terminal input must contain at least one character.");
+      for (let offset = 0; offset < data.length;) {
+        let end = Math.min(offset + 16384, data.length);
+        if (end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1]!)) end--;
+        await this.terminalInput({ action: "input", terminalId, data: data.slice(offset, end) }); offset = end;
+      }
+    },
+    resize: (terminalId: string, cols: number, rows: number) => this.terminalInput({ action: "resize", terminalId, cols, rows }),
+    read: (terminalId: string, offset = 0, limit = 65536) => this.query({ type: "terminal.read", terminalId, offset, limit }),
+    close: (terminalId: string) => this.command({ type: "terminal.close", terminalId }),
+    acknowledge: (terminalId: string, confirmInspection: true) => this.command({ type: "terminal.acknowledge", terminalId, confirmInspection }),
+  };
+  slash(sessionId: string, text: string, client: "desktop" | "tui" | "cli" = "desktop"): Promise<SlashResult> { return executeSlash(this, sessionId, text, client); }
   async query<Q extends PlatformQuery>(query: Q): Promise<Extract<PlatformResponse, { type: Q["type"] }>> {
     parse(QuerySchema, query);
     const result = await this.request("/v1/query", query);
@@ -47,9 +116,9 @@ export class MoguriSdk extends TransportClient {
   };
   readonly mcp = {
     tools: (serverId = "builtin", query = "", offset = 0, sessionId?: string) => this.query({ type: "mcp.tools", serverId, query, offset, ...(sessionId ? { sessionId } : {}) }),
-    auth: (serverId: string) => this.query({ type: "mcp.auth", serverId }),
-    setToken: (serverId: string, token: string) => this.command({ type: "mcp.token.set", serverId, token }),
-    clearToken: (serverId: string) => this.command({ type: "mcp.token.clear", serverId }),
+    auth: (serverId: string, sessionId?: string) => this.query({ type: "mcp.auth", serverId, ...(sessionId ? { sessionId } : {}) }),
+    setToken: (serverId: string, token: string, sessionId?: string) => this.command({ type: "mcp.token.set", serverId, token, ...(sessionId ? { sessionId } : {}) }),
+    clearToken: (serverId: string, sessionId?: string) => this.command({ type: "mcp.token.clear", serverId, ...(sessionId ? { sessionId } : {}) }),
     call: (sessionId: string, serverId: string, tool: string, args: Record<string, unknown>, schemaDigest: string) => this.command({ type: "mcp.call", sessionId, serverId, tool, arguments: args, schemaDigest }),
     readResult: (resultId: string, offset = 0, limit = 12000) => this.query({ type: "result.read", resultId, offset, limit }),
   };
