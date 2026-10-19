@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
-import { JsonLineChannel, MAX_WORKER_FRAME } from "../apps/service/src/worker-wire.ts";
+import { JsonLineChannel, MAX_WORKER_FRAME, TTY_FRAME_PREFIX } from "../apps/service/src/worker-wire.ts";
 
 test("worker frames retain split UTF-8 and close both halves after peer EOF", async () => {
   const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output);
@@ -41,4 +41,22 @@ test("truncated worker frames are explicit failures, not accepted empty replies"
   input.end('{"generated":"incomplete');
   assert.match((await failure).message, /incomplete frame/);
   channel.end(); assert.equal(output.writableEnded, true);
+});
+test("TTY frames separate expected terminal diagnostics from canonical bounded control data", async () => {
+  const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output, true);
+  const messages: unknown[] = [], diagnostics: string[] = [], errors: Error[] = [];
+  channel.on("message", (value) => messages.push(value)); channel.on("diagnostic", (text) => diagnostics.push(text)); channel.on("error", (error) => errors.push(error));
+  const message = { kind: "generated", text: "Generated TTY \u{1f600} data." };
+  const frame = `${TTY_FRAME_PREFIX}${Buffer.from(JSON.stringify(message)).toString("base64")}\r\n`;
+  input.write("\u001b[32mGenerated native runtime startup\u001b[0m\r\n");
+  for (let offset = 0; offset < frame.length; offset += 7) input.write(frame.slice(offset, offset + 7));
+  const closed = new Promise<void>((resolve) => channel.once("close", resolve)); input.end(); await closed;
+  assert.deepEqual(messages, [message]); assert.deepEqual(diagnostics, ["Generated native runtime startup"]); assert.equal(errors.length, 0);
+  channel.end();
+});
+test("malformed TTY frames are not silently treated as startup diagnostics", async () => {
+  const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output, true);
+  const failure = new Promise<Error>((resolve) => channel.once("error", resolve));
+  input.end(`${TTY_FRAME_PREFIX}not-canonical-base64\n`);
+  assert.match((await failure).message, /canonical TTY/); channel.end();
 });

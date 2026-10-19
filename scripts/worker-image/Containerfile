@@ -1,0 +1,34 @@
+FROM docker.io/library/node@sha256:2928a235e5af9997b97f8fbe5718cfd40676fc9190b619effc0c0249c41bb4e4
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates nftables python3 make g++ \
+    && rm -r /var/lib/apt/lists
+
+WORKDIR /opt/moguri
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm rebuild node-pty --ignore-scripts=false --no-fund \
+    && npm audit --audit-level=moderate
+
+COPY dist ./dist
+COPY payload.json ./payload.json
+RUN node --input-type=module -e '\
+    import { createHash } from "node:crypto"; \
+    import { readFile } from "node:fs/promises"; \
+    import pty from "node-pty"; \
+    const payload = JSON.parse(await readFile("payload.json", "utf8")); \
+    if (process.versions.node !== "26.12.0") throw new Error("Unexpected workload Node version"); \
+    for (const [path, expected] of Object.entries(payload.files)) { \
+      const actual = createHash("sha256").update(await readFile(path)).digest("hex"); \
+      if (actual !== expected) throw new Error("Workload payload digest mismatch"); \
+    } \
+    const child = pty.spawn("/bin/sh", ["-c", "printf GENERATED_LINUX_PTY_READY"], { cwd: "/tmp", env: { PATH: "/usr/bin:/bin" } }); \
+    let output = ""; child.onData(data => { output += data; }); \
+    const exit = await new Promise(resolve => child.onExit(resolve)); \
+    if (exit.exitCode !== 0 || !output.includes("GENERATED_LINUX_PTY_READY")) throw new Error("Linux PTY primitive failed"); \
+    console.log("GENERATED_LINUX_PAYLOAD_VERIFIED");'
+
+RUN mkdir /workspace && chown node:node /workspace
+USER node
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs"]

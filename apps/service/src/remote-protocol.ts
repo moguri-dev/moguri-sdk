@@ -28,6 +28,7 @@ const BridgeStatusSchema = Type.Object({
 const BridgeFrameSchema = Type.Object({ kind: Type.Literal("frame"), sequence, digest: hash, request: WorkerRequestSchema }, { additionalProperties: false });
 export const SavedStatusSchema = Type.Object({ status: BridgeStatusSchema, info: BridgeInfoSchema, proof: hash }, { additionalProperties: false });
 export const BridgeEnvelopeSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("bootstrap"), protocol: Type.Literal(PROTOCOL_VERSION) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("probe"), info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("ready"), info: BridgeInfoSchema, status: BridgeStatusSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("status"), status: BridgeStatusSchema }, { additionalProperties: false }),

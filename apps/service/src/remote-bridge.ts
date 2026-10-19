@@ -199,11 +199,14 @@ async function supervise(init: BridgeInit): Promise<void> {
   launchDeadline.unref();
 }
 async function frontend(): Promise<void> {
-  const outer = new JsonLineChannel(process.stdin, process.stdout);
+  const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  if (tty) process.stdin.setRawMode(true);
+  const outer = new JsonLineChannel(process.stdin, process.stdout, tty);
   const abort = new AbortController();
   let initialized = false, inner: JsonLineChannel | undefined;
   outer.on("error", () => { inner?.end(); process.exitCode = 1; });
   outer.on("close", () => { abort.abort(); inner?.end(); process.stdin.destroy(); });
+  if (tty) { process.stdout.write("\n"); outer.send({ kind: "bootstrap", protocol: PROTOCOL_VERSION }); }
   let queue = Promise.resolve();
   outer.on("message", (raw) => {
     queue = queue.then(async () => {

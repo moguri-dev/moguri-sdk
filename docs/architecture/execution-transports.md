@@ -68,3 +68,51 @@ execution, host-key/auth failure, exact workspace and attachment transfer,
 configuration races, duplicate frames, reconnect, disconnect cancellation,
 late usage, restart and no Local fallback. A capability becomes ready only
 after the installed worker/runtime and target pass those checks.
+
+## Linux payload preparation
+
+`node scripts/prepare-worker-image.mjs --build` prepares an isolated context
+containing only the dependency manifests and built worker/MCP/bridge modules,
+not the checkout, host home, credentials or model weights. Apple Containerization
+builds it without cache from Node 26.12.0 Bookworm's pinned Linux arm64 manifest
+`sha256:2928a235e5af9997b97f8fbe5718cfd40676fc9190b619effc0c0249c41bb4e4`.
+The upstream Docker Hub tag API supplied that platform digest before work.
+
+The image reuses Node (MIT), existing locked runtime dependencies, Node-PTY
+(MIT), system nftables and the build toolchain. Other dependency lifecycle
+scripts stay disabled; only the explicitly pinned Node-PTY native rebuild runs.
+The image verifies every staged payload digest, Node version and a generated
+Linux PTY primitive before success. It runs as the image's unprivileged node
+user and never publishes an image.
+
+This prepares a workload prerequisite, not a ready Sandbox or a proof of
+Linux-host cancellation, guest policy, model networking or containment.
+Authenticated candidate guest installation remains a separate user action.
+
+The initial no-cache build failed after 6,848.36 ms because Apple's newly
+installed builder defaults to Rosetta while Rosetta is absent. No workload
+success or Sandbox readiness was claimed. Native ARM preparation uses the
+supported `build.rosetta=false` property rather than installing translation,
+changing guest trust or modifying unrelated Porto workloads.
+
+`node scripts/pty-worker-spike.mjs` separately tests a generated bounded ASCII
+frame over an owned raw host PTY, with delayed-reader backpressure and echo
+checks. SendBox's documented interactive channel requires a controlling
+foreground PTY and cannot use `--json`; its own authenticated input-credit
+behavior still needs genuine guest qualification, not inference from this
+host-only primitive.
+
+After selecting native ARM mode, the no-cache workload build passed in
+40,351.79 ms: Node 26.12.0, all staged hashes, a compiled Linux Node-PTY and
+zero npm audit findings. Its initial manifest is
+`sha256:4b2e8c1cfe35d0e1b06c62e7d4bd3a352c6e09af5f2b0ea28b28a814f4b25f30`.
+Apple's image store requires an explicit immutable local repository alias;
+without it a differently qualified name attempts a registry pull. Preparation
+now registers and verifies that alias instead of assuming tag normalization.
+The parent-owned builder was stopped after this check.
+
+The raw host PTY primitive passed 1,398,104 generated payload bytes in
+374.86 ms with a delayed reader and no input echo. The private worker frontend
+can negotiate the same bounded prefixed encoding on an owned TTY while keeping
+ordinary SSH pipes on their existing JSON protocol. This does not enable
+Sandbox or substitute host-only checks for the candidate's genuine guest gate.
