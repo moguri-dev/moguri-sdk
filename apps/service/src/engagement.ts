@@ -3,7 +3,7 @@ import {
   ConfigurationSpecSchema, EngagementCommandSchema, EngagementQuerySchema, SettingsSchema, ProjectSettingsSchema,
   isRecord, MoguriError, parse, PROFILE_ID, SYSTEM_PROMPT_WARNING,
   type CapabilityEntry, type CommandResult, type ConfigurationProposal, type ConfigurationSpec, type Controls,
-  type EngagementCommand, type EngagementQuery, type EngagementResponse, type EventInput, type Session, type Snapshot, type SuggestionPreview, type SuggestionSource, type UserSettings, type ResolvedControls,
+  type EngagementCommand, type EngagementQuery, type EngagementResponse, type EventInput, type Session, type Snapshot, type SuggestionPreview, type SuggestionSource, type UserSettings, type ResolvedControls, type Project,
 } from "../../../packages/protocol/src/index.ts";
 import { Value } from "typebox/value";
 import { digest, EventStore } from "./store.ts";
@@ -23,9 +23,10 @@ interface Host {
   settingsEvent(settings: UserSettings, revision: number, acknowledge: boolean): EventInput;
   skill(content: string): { name: string; description: string };
   startup(projectId: string | null): ResolvedControls;
+  workspaceProject(session: ScopeSession): Project;
 }
 interface Target { before: unknown; revision: number | null }
-type ScopeSession = Pick<Session, "id" | "projectId">;
+type ScopeSession = Pick<Session, "id" | "projectId" | "workspaceId">;
 export class Engagement {
   constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly host: Host) {}
   private snapshot() { return this.host.snapshot(); }
@@ -35,9 +36,7 @@ export class Engagement {
     return session;
   }
   private project(session: ScopeSession) {
-    const project = this.snapshot().projects.find((project) => project.id === session.projectId);
-    if (!project) throw new MoguriError("project_required", "This target requires a selected project. No other project was read.", 409);
-    return project;
+    return this.host.workspaceProject(session);
   }
   preview(session: Session, allProjects: boolean): SuggestionPreview {
     if (allProjects && session.projectId !== null) throw new MoguriError("suggestion_scope", "Cross-project analysis is available only from an explicitly project-free chat.");
@@ -66,7 +65,7 @@ export class Engagement {
     const scope = allProjects ? "all-projects" : session.projectId ? "project" : "project-free";
     return { scope, sources, repeated, digest: digest(JSON.stringify({ scope, sources })), diagnostic: allProjects ? "Explicit cross-project analysis copies these approved excerpts into a profile-owned settings chat. Review scope before generation." : "Only prior user prompts in this scope are included. Preview is local and makes no model call." };
   }
-  private async target(session: ScopeSession, spec: ConfigurationSpec): Promise<Target> {
+  private async target(session: ScopeSession, spec: ConfigurationSpec, legacy = false): Promise<Target> {
     const snapshot = this.snapshot();
     if (spec.target === "global") {
       if (!Object.hasOwn(snapshot.settings.values, spec.section)) throw new MoguriError("configuration_section", "Choose an existing non-secret global settings section.");
@@ -83,7 +82,7 @@ export class Engagement {
       const source = await this.projects.instructionSource(project);
       let fileDigest = "absent";
       if (source.instructions !== null) fileDigest = (await readProjectFile(project.path, source.instructionsPath)).digest;
-      return { before: { text: source.instructions ?? "", digest: fileDigest, path: source.instructionsPath, configurationRevision: configuration.revision }, revision: configuration.revision };
+      return { before: { text: source.instructions ?? "", digest: fileDigest, path: source.instructionsPath, configurationRevision: configuration.revision, ...(legacy ? {} : { workspaceId: session.workspaceId, root: project.path }) }, revision: configuration.revision };
     }
     if (!Object.hasOwn(configuration.values, spec.section)) throw new MoguriError("configuration_section", "Choose an existing project settings section.");
     return { before: configuration.values[spec.section as keyof typeof configuration.values], revision: configuration.revision };
@@ -118,6 +117,7 @@ export class Engagement {
       id: randomUUID(), projectId: spec.target === "global" || spec.target === "policy" ? null : session.projectId, sessionId: session.id, actor, target: spec.target, section: spec.section, reason: spec.reason,
       contentDigest: this.store.putBlob(JSON.stringify(spec)), baseDigest: this.store.putBlob(JSON.stringify(target.before)),
       baseRevision: target.revision, status: "pending", createdAt: new Date().toISOString(), evidence,
+      workspaceId: spec.target === "repo-instructions" ? session.workspaceId : null,
     };
     const events: EventInput[] = [{ event_type: "configuration.proposed", profile_id: PROFILE_ID, project_id: proposal.projectId, payload: { proposal } }];
     if (finish) return finish(events, { id: proposal.id });
@@ -141,6 +141,7 @@ export class Engagement {
     const events: EventInput[] = [{ event_type: "session.created", profile_id: PROFILE_ID, project_id: scope, session_id: id, payload: {
       title: context ? "Moguri suggestions" : "Moguri settings", kind: "metachat", controls, ...(startup ? { defaults: startup.defaults } : {}), ...(parent ? { parentSessionId: parent.id } : {}),
       ...(sources ? { suggestionSources: sources } : {}),
+      workspaceId: parent?.workspaceId ?? null,
       ...(context ? { contextDigest: this.store.putBlob(JSON.stringify([{ role: "user", content: context, timestamp: Date.now() }])) } : {}),
     } }];
     if (run) events.push({ event_type: "queue.enqueued", profile_id: PROFILE_ID, project_id: scope, session_id: id, payload: { item: { id: randomUUID(), text: prompt, attachments: [], delivery: "queue" } } });
@@ -171,12 +172,12 @@ export class Engagement {
     const proposal = this.snapshot().configurationProposals.find((proposal) => proposal.id === command.proposalId);
     if (!proposal || proposal.status !== "pending" || proposal.contentDigest !== command.expectedDigest) throw new MoguriError("configuration_stale", "Review the current pending proposal before deciding.", 409);
     const spec = parse(ConfigurationSpecSchema, JSON.parse(this.store.blob(proposal.contentDigest)));
-    const contextSession: ScopeSession = { projectId: proposal.projectId, id: proposal.sessionId };
+    const contextSession: ScopeSession = { projectId: proposal.projectId, id: proposal.sessionId, workspaceId: proposal.workspaceId ?? null };
     const events: EventInput[] = [];
     let writtenInstructions: string | undefined;
     if (command.approve) {
       if (!command.acknowledgeRisk) throw new MoguriError("configuration_review", "Acknowledge the exact reviewed configuration risk before applying.");
-      const current = await this.target(contextSession, spec);
+      const current = await this.target(contextSession, spec, proposal.workspaceId === undefined);
       const snapshot = this.snapshot();
       const liveRevision = spec.target === "global" ? snapshot.settings.revision : spec.target === "policy" ? snapshot.policy.revision :
         spec.target === "skill" ? snapshot.registry.find((entry) => entry.projectId === proposal.projectId && entry.kind === "skill" && entry.name === spec.section)?.revision ?? 0 :

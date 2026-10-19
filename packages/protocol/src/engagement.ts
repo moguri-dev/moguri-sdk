@@ -16,6 +16,7 @@ export interface ConfigurationProposal {
   contentDigest: string; baseDigest: string; baseRevision: number | null;
   status: "pending" | "applied" | "rejected"; createdAt: string;
   evidence: SuggestionSource[];
+  workspaceId?: string | null;
 }
 export interface SuggestionSource { sessionId: string; messageId: string; title: string; projectId: string | null; text: string }
 export interface SuggestionPreview {

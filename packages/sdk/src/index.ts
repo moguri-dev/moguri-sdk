@@ -32,7 +32,7 @@ export class MoguriSdk extends TransportClient {
     read: (sessionId: string, attachmentId: string) => this.query({ type: "attachment.read", sessionId, attachmentId }),
   };
   readonly sessions = {
-    create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}) }),
+    create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
     configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.configure", sessionId, controls, expectedRevision }),
     env: (sessionId: string, env: Controls["env"], expectedRevision = this.sessionRevision(sessionId)) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((value) => value.id === sessionId);
@@ -53,7 +53,7 @@ export class MoguriSdk extends TransportClient {
     mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
     spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
     delete: (sessionId: string, confirm: true, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.delete", sessionId, expectedRevision, confirm }),
-    fromWork: (projectId: string, source: { issueId: string } | { prUrl: string }) => this.command({ type: "session.from-work", projectId, ...source }),
+    fromWork: (projectId: string, source: { issueId: string } | { prUrl: string }, workspaceId?: string) => this.command({ type: "session.from-work", projectId, ...source, ...(workspaceId ? { workspaceId } : {}) }),
     group: (projectId: string, name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "session.group", projectId, name, order, expectedRevision, ...(id ? { id } : {}) }),
     browser: (sessionId: string, url: string) => this.command({ type: "session.browser", sessionId, url }),
   };
@@ -65,6 +65,28 @@ export class MoguriSdk extends TransportClient {
     refresh: () => this.command({ type: "provider.refresh" }),
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
     clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
+  };
+  readonly workspaces = {
+    discover: (projectId: string) => this.query({ type: "workspace.discover", projectId }),
+    create: (projectId: string, branch: string, options: { baseRef?: string; issueId?: string; prUrl?: string } = {}) => this.command({ type: "workspace.create", projectId, branch, ...options }),
+    inspect: (workspaceId: string) => this.query({ type: "workspace.inspect", workspaceId }),
+    bind: (sessionId: string, workspaceId: string | null, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.workspace", sessionId, workspaceId, expectedRevision }),
+    remove: (workspaceId: string, expectedRevision: number, confirm: true) => this.command({ type: "workspace.remove", workspaceId, expectedRevision, confirm }),
+    reconcile: (workspaceId: string, expectedRevision: number) => this.command({ type: "workspace.reconcile", workspaceId, expectedRevision }),
+    git: (sessionId: string, diff = true) => this.query({ type: "session.git", sessionId, diff }),
+    files: (sessionId: string, path = ".") => this.query({ type: "session.files", sessionId, path }),
+    file: (sessionId: string, path: string) => this.query({ type: "session.file", sessionId, path }),
+    wait: async (workspaceId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
+      const workspace = this.getState().snapshot?.managedWorkspaces.find((value) => value.id === workspaceId);
+      if (!workspace) throw new ClientError("workspace_missing", "Connect and choose an existing managed workspace.");
+      if (workspace.jobId) {
+        const job = await this.jobs.wait(workspace.jobId, options);
+        if (job.status !== "completed") throw new ClientError("workspace_partial", job.error ?? `Workspace work ${job.status}; no success was assumed.`);
+      }
+      const result = this.getState().snapshot?.managedWorkspaces.find((value) => value.id === workspaceId);
+      if (!result) throw new ClientError("workspace_missing", "Workspace metadata was removed while waiting.");
+      return result;
+    },
   };
   readonly remote = {
     status: () => this.query({ type: "remote.status" }),
@@ -160,9 +182,9 @@ export class MoguriSdk extends TransportClient {
     reset: (expectedRevision: number) => this.settings.reset("systemPrompt", expectedRevision),
   };
   readonly memory = {
-    index: (projectId: string) => this.command({ type: "memory.index", projectId }),
-    search: (projectId: string, text: string, limit = 6) => this.query({ type: "memory.search", projectId, text, limit }),
-    graph: (projectId: string, path = "") => this.query({ type: "memory.graph", projectId, path }),
+    index: (projectId: string, workspaceId?: string) => this.command({ type: "memory.index", projectId, ...(workspaceId ? { workspaceId } : {}) }),
+    search: (projectId: string, text: string, limit = 6, workspaceId?: string) => this.query({ type: "memory.search", projectId, text, limit, ...(workspaceId ? { workspaceId } : {}) }),
+    graph: (projectId: string, path = "", workspaceId?: string) => this.query({ type: "memory.graph", projectId, path, ...(workspaceId ? { workspaceId } : {}) }),
     remember: (projectId: string, text: string) => this.command({ type: "memory.remember", projectId, text }),
   };
   readonly capabilities = {
@@ -208,9 +230,9 @@ export class MoguriSdk extends TransportClient {
     refresh: (projectId: string) => this.command({ type: "issues.refresh", projectId }),
   };
   readonly cache = {
-    inspect: (projectId: string, manager: PackageManager) => this.query({ type: "cache.inspect", projectId, manager }),
-    prepare: (projectId: string, manager: PackageManager, expectedDigest: string, acceptMetadataSharing: true) => this.command({ type: "cache.prepare", projectId, manager, expectedDigest, acceptMetadataSharing }),
-    install: (projectId: string, manager: PackageManager, expectedDigest: string, acceptMetadataSharing: true, runScripts = false) => this.command({ type: "cache.install", projectId, manager, expectedDigest, acceptMetadataSharing, runScripts }),
+    inspect: (projectId: string, manager: PackageManager, workspaceId?: string) => this.query({ type: "cache.inspect", projectId, manager, ...(workspaceId ? { workspaceId } : {}) }),
+    prepare: (projectId: string, manager: PackageManager, expectedDigest: string, acceptMetadataSharing: true, workspaceId?: string) => this.command({ type: "cache.prepare", projectId, manager, expectedDigest, acceptMetadataSharing, ...(workspaceId ? { workspaceId } : {}) }),
+    install: (projectId: string, manager: PackageManager, expectedDigest: string, acceptMetadataSharing: true, runScripts = false, workspaceId?: string) => this.command({ type: "cache.install", projectId, manager, expectedDigest, acceptMetadataSharing, runScripts, ...(workspaceId ? { workspaceId } : {}) }),
   };
   readonly linear = {
     status: (projectId: string) => this.query({ type: "linear.status", projectId }),

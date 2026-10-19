@@ -1,7 +1,7 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 
-export type SessionPanel = "Terminal" | "Browser" | "Insights" | "PR" | "Changes" | "Plan" | "Side chat" | "Suggestions" | "Attention";
+export type SessionPanel = "Terminal" | "Browser" | "Insights" | "PR" | "Changes" | "Files" | "Plan" | "Side chat" | "Suggestions" | "Attention";
 export type SlashResult =
   | { kind: "ok"; message: string }
   | { kind: "session"; sessionId: string; side: boolean }
@@ -35,6 +35,9 @@ export const slashCommands = [
   { name: "settings", description: "Open shared settings" },
   { name: "models", description: "Choose a Copilot model" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
+  { name: "workspace", description: "Manage an explicit isolated Local checkout", argument: "[list|discover|create BRANCH [BASE]|new ID|bind ID|inspect ID|remove ID|reconcile ID]" },
+  { name: "files", description: "Read the session's actual bound directory", argument: "[PATH]" },
+  { name: "file", description: "Read one allowed file from the session's actual root", argument: "PATH" },
   { name: "help", description: "List slash commands" },
 ] as const;
 export const attachmentTriggers = { "^": "Local text file", ":": "Folder", "#": "GitHub issue or PR", "!": "Session", "@": "Project file" } as const;
@@ -57,6 +60,27 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "workspace": {
+      if (!session.projectId) throw new ClientError("project_required", "Select a project before managing its worktrees.");
+      const [action, id, baseRef, extra] = command.argument.split(/\s+/), values = sdk.getState().snapshot!.managedWorkspaces.filter((value) => value.projectId === session.projectId);
+      if (!action || action === "list") return { kind: "text", text: JSON.stringify({ current: session.workspaceId, workspaces: values }, null, 2) };
+      if (action === "discover" && !id) return { kind: "text", text: JSON.stringify(await sdk.workspaces.discover(session.projectId), null, 2) };
+      if (action === "create" && id && !extra) { const created = await sdk.workspaces.create(session.projectId, id, { ...(baseRef ? { baseRef } : {}) }); return { kind: "text", text: JSON.stringify(await sdk.workspaces.wait(created.id!), null, 2) }; }
+      const workspace = values.find((value) => value.id === id);
+      if (action === "bind" && id === "base" && !baseRef) { await sdk.workspaces.bind(session.id, null); return { kind: "ok", message: "Fresh session explicitly bound to the base folder." }; }
+      if (!workspace || baseRef) throw new ClientError("workspace_scope", "Choose one exact workspace ID from /workspace list.");
+      if (action === "new") { const created = await sdk.sessions.create(session.projectId, workspace.branch, { env: "Local" }, workspace.id); return { kind: "session", sessionId: created.id!, side: false }; }
+      if (action === "bind") { await sdk.workspaces.bind(session.id, workspace.id); return { kind: "ok", message: "Fresh session bound to the owned Local worktree." }; }
+      if (action === "inspect") return { kind: "text", text: JSON.stringify((await sdk.workspaces.inspect(workspace.id)).inspection, null, 2) };
+      if (action === "reconcile") { await sdk.workspaces.reconcile(workspace.id, workspace.revision); return { kind: "ok", message: "Existing workspace inspected/reconciled; no Git effect was replayed." }; }
+      if (action === "remove") { await sdk.workspaces.remove(workspace.id, workspace.revision, true); return { kind: "text", text: JSON.stringify(await sdk.workspaces.wait(workspace.id), null, 2) }; }
+      throw new ClientError("workspace_action", "Use /workspace list/create/new/bind/inspect/remove/reconcile. Removal preserves branches and refuses bound/dirty roots.");
+    }
+    case "files": return client === "desktop" && !command.argument ? { kind: "panel", panel: "Files" } : { kind: "text", text: JSON.stringify(await sdk.workspaces.files(session.id, command.argument || "."), null, 2) };
+    case "file": {
+      if (!command.argument) throw new ClientError("file_path", "Use /file PROJECT_RELATIVE_PATH.");
+      return { kind: "text", text: (await sdk.workspaces.file(session.id, command.argument)).text };
+    }
     case "remote": {
       const [action, id, extra] = command.argument.split(/\s+/);
       if (!action) return { kind: "text", text: JSON.stringify((await sdk.remote.status()).remote, null, 2) };
@@ -149,7 +173,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (session.controls.env !== "Local") throw new ClientError("diff_env", "Diff transport is not qualified for this env yet. No local checkout was read as a fallback.");
       if (!session.projectId) throw new ClientError("project_required", "Select a project to inspect its local changes.");
       if (client === "desktop") return { kind: "panel", panel: "Changes" };
-      const result = await sdk.projects.git(session.projectId);
+      const result = await sdk.workspaces.git(session.id);
       return { kind: "text", text: `${result.branch}\n${result.status}\n\n${result.diff || "No tracked diff. Untracked files are listed above."}` };
     }
     case "plan": {
@@ -157,8 +181,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (client === "desktop") return { kind: "panel", panel: "Plan" };
       const result = await sdk.plans.read(session.id);
       const project = sdk.getState().snapshot!.projects.find((project) => project.id === session.projectId)!;
+      const workspace = session.workspaceId ? sdk.getState().snapshot!.managedWorkspaces.find((value) => value.id === session.workspaceId) : undefined;
+      if (session.workspaceId && !workspace) throw new ClientError("workspace_missing", "The bound worktree is unavailable. No base plan path was substituted.");
       if (!result.exists) throw new ClientError("plan_missing", `No plan file at ${result.path}. Save one explicitly first.`);
-      return { kind: "panel", panel: "Plan", path: `${project.path.replace(/\/$/, "")}/${result.path}`, text: result.text };
+      return { kind: "panel", panel: "Plan", path: `${(workspace?.path ?? project.path).replace(/\/$/, "")}/${result.path}`, text: result.text };
     }
     case "insights": return { kind: "panel", panel: "Insights" };
     case "pr": {

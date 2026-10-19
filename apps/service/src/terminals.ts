@@ -8,7 +8,7 @@ interface OwnedTerminal { state: TerminalState; pty: pty.IPty; output: string; b
 export class TerminalManager {
   private owned = new Map<string, OwnedTerminal>();
   constructor(private readonly changed: (terminal: TerminalState) => void, private readonly options: TerminalOptions = {}) {}
-  open(scope: { sessionId: string; projectId: string; root: string }, cols: number, rows: number, script?: { name: string; command: string }): TerminalState {
+  open(scope: { sessionId: string; projectId: string; workspaceId?: string | null; root: string }, cols: number, rows: number, script?: { name: string; command: string }): TerminalState {
     if ([...this.owned.values()].filter((entry) => entry.state.status === "running").length >= 16 ||
       [...this.owned.values()].filter((entry) => entry.state.sessionId === scope.sessionId && entry.state.status === "running").length >= 4) throw new MoguriError("terminal_limit", "Close a running terminal first. At most four per session and sixteen overall are supported.");
     const shell = this.options.executable ?? process.env.SHELL ?? "/bin/sh";
@@ -19,7 +19,7 @@ export class TerminalManager {
     });
     let ended!: () => void;
     const done = new Promise<void>((resolve) => { ended = resolve; });
-    const state: TerminalState = { id: randomUUID(), sessionId: scope.sessionId, projectId: scope.projectId,
+    const state: TerminalState = { id: randomUUID(), sessionId: scope.sessionId, projectId: scope.projectId, workspaceId: scope.workspaceId ?? null,
       title: script?.name ?? "Terminal", pid: processPty.pid, cols, rows, status: "running", diagnostic: null };
     const entry: OwnedTerminal = { state, pty: processPty, output: "", baseOffset: 0, done, ended };
     this.owned.set(state.id, entry);

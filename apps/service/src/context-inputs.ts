@@ -18,7 +18,7 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 export const isInputCommand = (value: unknown): value is InputCommand => Value.Check(InputCommandSchema, value);
 export const isInputQuery = (value: unknown): value is InputQuery => Value.Check(InputQuerySchema, value);
 const MAX_TEXT_BYTES = 2 * 1024 * 1024, MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-interface Host { snapshot(): Snapshot; events(): StoredEvent[] }
+interface Host { snapshot(): Snapshot; events(): StoredEvent[]; ownedRoot(path: string): { path: string; projectId: string } | undefined }
 interface Capture { preview: Omit<ContextPreview, "destination">; text: string }
 export class ContextInputs {
   private stateRoot?: string;
@@ -29,21 +29,29 @@ export class ContextInputs {
     return session;
   }
   private async clientPath(input: string, directory = false): Promise<string> {
-    if (!isAbsolute(input) || isProtectedProjectPath(input)) throw new MoguriError("attachment_path", "Select an absolute, unprotected client-side file or folder explicitly.");
+    if (!isAbsolute(input) || this.protectedClientPath(input)) throw new MoguriError("attachment_path", "Select an absolute, unprotected client-side file or folder explicitly.");
     const info = await lstat(input);
     if (info.isSymbolicLink() || (directory ? !info.isDirectory() : !info.isFile())) throw new MoguriError("attachment_path", "Choose a regular file/folder, not a symlink or device.");
     const path = await realpath(input);
     this.stateRoot ??= await realpath(this.stateDir);
-    if (isProtectedProjectPath(path)) throw new MoguriError("attachment_path", "Protected credential/application paths cannot be attached.");
+    if (this.protectedClientPath(path)) throw new MoguriError("attachment_path", "Protected credential/application paths cannot be attached.");
     this.sourcePolicy(path);
     return path;
   }
+  private protectedClientPath(path: string): boolean {
+    const workspace = this.host.ownedRoot(path);
+    return workspace ? isProtectedProjectPath(relative(workspace.path, path)) : isProtectedProjectPath(path);
+  }
   private sourcePolicy(path: string) {
     const internal = relative(this.stateRoot ?? this.stateDir, path);
-    if (!isAbsolute(internal) && internal !== ".." && !internal.startsWith("../")) throw new MoguriError("attachment_path", "Moguri state and connection credentials cannot be attached as client files.");
+    if (!isAbsolute(internal) && internal !== ".." && !internal.startsWith("../") && !this.host.ownedRoot(path)) throw new MoguriError("attachment_path", "Moguri state and connection credentials cannot be attached as client files.");
     for (const project of this.host.snapshot().projects) {
       const child = relative(project.path, path);
       if (!isAbsolute(child) && child !== ".." && !child.startsWith("../") && matchesFolder(child || ".", this.projects.configuration(project.id).values.deniedFolders)) throw new MoguriError("attachment_path", "The selected source is denied by its project policy.");
+    }
+    for (const workspace of this.host.snapshot().managedWorkspaces.filter((workspace) => workspace.status === "ready")) {
+      const child = relative(workspace.path, path);
+      if (!isAbsolute(child) && child !== ".." && !child.startsWith("../") && matchesFolder(child || ".", this.projects.configuration(workspace.projectId).values.deniedFolders)) throw new MoguriError("attachment_path", "The selected managed-workspace source is denied by project policy.");
     }
   }
   private async folder(path: string): Promise<Capture> {

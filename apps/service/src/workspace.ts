@@ -11,16 +11,16 @@ import { EventStore } from "./store.ts";
 export interface WorkspaceOptions { cache?: DependencyCacheOptions; integrations?: IntegrationOptions }
 interface WorkspaceHost {
   snapshot(): Snapshot;
-  project(id: string): Project;
+  project(id: string, workspaceId?: string): Project;
   commit(events: EventInput[]): void;
-  job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (message: string) => void) => Promise<unknown>, settled?: () => void): string;
+  job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (message: string) => void) => Promise<unknown>, settled?: () => void, workspaceId?: string): string;
   wake(): void;
   closing(id: string): boolean;
 }
 export class WorkspaceRuntime {
   readonly cache: DependencyCache;
   readonly integrations: ProjectIntegrations;
-  readonly busyProjects = new Set<string>();
+  private readonly busyRoots = new Set<string>();
   private timer?: ReturnType<typeof setInterval>;
   private refreshing = new Map<string, string>();
   private prAborts = new Map<string, AbortController>();
@@ -40,6 +40,7 @@ export class WorkspaceRuntime {
     this.timer.unref();
   }
   close(): void { clearInterval(this.timer); this.timer = undefined; for (const abort of [...this.linear.values(), ...this.prAborts.values()]) abort.abort(); }
+  isBusy(projectId: string, workspaceId?: string | null): boolean { return this.busyRoots.has(`${projectId}:${workspaceId ?? "base"}`); }
   private board(id: string): IssueBoard {
     this.host.project(id);
     return this.host.snapshot().boards.find((board) => board.projectId === id) ?? defaultBoard(id);
@@ -104,7 +105,7 @@ export class WorkspaceRuntime {
   async query(query: WorkspaceQuery): Promise<WorkspaceResponse> {
     switch (query.type) {
       case "board.get": return { type: query.type, board: this.board(query.projectId), issues: this.host.snapshot().issues.filter((issue) => issue.projectId === query.projectId) };
-      case "cache.inspect": return { type: query.type, plan: await this.cache.inspect(this.host.project(query.projectId), query.manager) };
+      case "cache.inspect": return { type: query.type, plan: { ...await this.cache.inspect(this.host.project(query.projectId, query.workspaceId), query.manager), workspaceId: query.workspaceId ?? null } };
       case "linear.status": {
         const board = this.board(query.projectId);
         const token = await this.integrations.vault.read("linear", AbortSignal.timeout(15_000));
@@ -160,18 +161,21 @@ export class WorkspaceRuntime {
       case "issues.refresh": this.host.project(command.projectId); return finish([], { id: this.refresh(command.projectId, true) });
       case "cache.prepare":
       case "cache.install": {
-        const project = this.host.project(command.projectId);
+        const project = this.host.project(command.projectId, command.workspaceId);
         const snapshot = this.host.snapshot();
         if (!snapshot.policy.allowedEnvs.includes("Local")) throw new MoguriError("cache_env", "Managed cache work has no qualified protected-env broker. It cannot silently run on Local.", 403);
         if (command.type === "cache.install" && command.runScripts) throw new MoguriError("cache_sandbox", "Lifecycle scripts require a qualified real SendBox boundary. It is unavailable; no script, download or host fallback was started.", 409);
-        if (this.busyProjects.has(project.id) || command.type === "cache.install" && (snapshot.sessions.some((session) => session.projectId === project.id && session.turnId) || snapshot.blockedProjects.includes(project.id))) throw new MoguriError("cache_busy", "This project's workspace is busy or unconfirmed. Inspect and finish owned work first.", 409);
-        if (command.type === "cache.install") this.busyProjects.add(project.id);
+        const rootKey = `${project.id}:${command.workspaceId ?? "base"}`;
+        const quarantined = command.workspaceId ? snapshot.blockedWorkspaces.includes(command.workspaceId) : snapshot.blockedProjects.includes(project.id);
+        const active = snapshot.sessions.some((session) => session.projectId === project.id && session.workspaceId === (command.workspaceId ?? null) && session.turnId);
+        if (this.busyRoots.has(rootKey) || command.type === "cache.install" && (active || quarantined)) throw new MoguriError("cache_busy", "This workspace is busy or unconfirmed. Inspect and finish owned work first.", 409);
+        if (command.type === "cache.install") this.busyRoots.add(rootKey);
         const id = this.host.job(command.type, project.id, async (signal, progress) => {
-          const receipt = await (command.type === "cache.install" ? this.cache.install(project, command.manager, command.expectedDigest, signal, progress) : this.cache.prepare(project, command.manager, command.expectedDigest, signal, progress));
+          const receipt = { ...await (command.type === "cache.install" ? this.cache.install(project, command.manager, command.expectedDigest, signal, progress) : this.cache.prepare(project, command.manager, command.expectedDigest, signal, progress)), workspaceId: command.workspaceId ?? null };
           signal.throwIfAborted();
           this.host.commit([{ event_type: "cache.prepared", profile_id: PROFILE_ID, project_id: project.id, payload: { receipt } }]);
           return receipt;
-        }, () => { if (command.type === "cache.install") { this.busyProjects.delete(project.id); this.host.wake(); } });
+        }, () => { if (command.type === "cache.install") { this.busyRoots.delete(rootKey); this.host.wake(); } }, command.workspaceId);
         return finish([], { id });
       }
       case "linear.token.set":

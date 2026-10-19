@@ -9,7 +9,9 @@ import { ControlDefaultsSchema } from "./controls.ts";
 import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
+import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
 export * from "./execution.ts";
+export * from "./worktrees.ts";
 export * from "./workspace.ts";
 export * from "./config.ts";
 export * from "./sessions.ts";
@@ -83,7 +85,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("settings.reset"), expectedRevision: revision, section }),
   object({ type: Type.Literal("models.token.set"), endpointId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
   object({ type: Type.Literal("models.token.clear"), endpointId: id }),
-  object({ type: Type.Literal("memory.index"), projectId: id }),
+  object({ type: Type.Literal("memory.index"), projectId: id, workspaceId: Type.Optional(id) }),
   object({ type: Type.Literal("memory.remember"), projectId: id, text: Type.String({ minLength: 1, maxLength: 8000 }) }),
   object({ type: Type.Literal("skill.import"), projectId: id, path }),
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
@@ -106,13 +108,14 @@ export const PlatformCommandSchema = Type.Union([
   EngagementCommandSchema,
   InputCommandSchema,
   ExecutionCommandSchema,
+  ManagedWorkspaceCommandSchema,
 ]);
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
   object({ type: Type.Literal("prompt.preview"), sessionId: Type.Optional(id) }),
-  object({ type: Type.Literal("memory.search"), projectId: id, text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
-  object({ type: Type.Literal("memory.graph"), projectId: id, path: Type.String({ maxLength: 4096 }) }),
+  object({ type: Type.Literal("memory.search"), projectId: id, workspaceId: Type.Optional(id), text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
+  object({ type: Type.Literal("memory.graph"), projectId: id, workspaceId: Type.Optional(id), path: Type.String({ maxLength: 4096 }) }),
   object({ type: Type.Literal("mcp.tools"), serverId: id, sessionId: Type.Optional(id), query: Type.String({ maxLength: 200 }), offset: Type.Integer({ minimum: 0, maximum: 10000 }) }),
   object({ type: Type.Literal("mcp.auth"), serverId: id, sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("result.read"), resultId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 32768 }) }),
@@ -126,6 +129,7 @@ export const QuerySchema = Type.Union([
   EngagementQuerySchema,
   InputQuerySchema,
   ExecutionQuerySchema,
+  ManagedWorkspaceQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -144,6 +148,7 @@ export interface Proposal {
   baseDigest?: string;
 }
 export interface CapabilityJob {
+  workspaceId?: string | null;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
@@ -157,6 +162,8 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   configurationProposals: ConfigurationProposal[];
   attention: Attention[];
   executions: RemoteExecution[];
+  managedWorkspaces: ManagedWorkspace[];
+  changeSets: ChangeSet[];
 }
 export interface VoiceStatus {
   runtimeReady: boolean; modelReady: boolean; diagnostic: string | null; modelId: string;
@@ -170,6 +177,7 @@ export type PlatformResponse =
   | EngagementResponse
   | InputResponse
   | ExecutionResponse
+  | ManagedWorkspaceResponse
   | { type: "prompt.preview"; editable: string; effective: string; warning: string }
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }

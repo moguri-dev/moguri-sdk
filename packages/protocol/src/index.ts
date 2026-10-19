@@ -8,6 +8,7 @@ import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type
 import { defaultProjectSettings } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
+import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
 export * from "./controls.ts";
 export * from "./providers.ts";
 import type { McpAuthorization } from "./oauth.ts";
@@ -15,7 +16,7 @@ import type { ConfigurationProposal, Attention, SuggestionSource } from "./engag
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -31,7 +32,7 @@ export const CommandSchema = object({
   profileId: Type.Literal("default"),
   command: Type.Union([
     object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }) }),
-    object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema) }),
+    object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema }),
     object({ type: Type.Literal("session.archive"), ...sessionId }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
@@ -115,6 +116,7 @@ export type SessionStatus = "idle" | "queued" | "running" | "waiting_input" | "s
 export interface Session {
   id: string;
   projectId: string | null;
+  workspaceId: string | null;
   title: string;
   controls: Controls;
   defaults?: DefaultsSnapshot;
@@ -167,6 +169,7 @@ export interface Snapshot extends PlatformSnapshot {
   policy: Policy;
   blockedProjects: string[];
   blockedSessions: string[];
+  blockedWorkspaces: string[];
   capabilities: { env: Controls["env"]; ready: boolean; reason: string }[];
 }
 export interface Connection {
@@ -179,7 +182,10 @@ export interface Connection {
 
 export interface EventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[] };
+  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
+  "session.workspace_bound": { workspaceId: string | null };
+  "workspace.saved": { workspace: ManagedWorkspace };
+  "change_set.saved": { changeSet: ChangeSet };
   "session.configured": { controls: Controls };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
@@ -273,14 +279,16 @@ export const eventTypes: readonly EventType[] = [
   "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
+  "workspace.saved", "change_set.saved", "session.workspace_bound",
 ];
 
-export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[] } & PlatformSnapshot {
+export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
   const projects = new Map<string, Project>();
   const sessions = new Map<string, Session>();
   let policy: Policy = { revision: 0, allowedEnvs: ["Local", "Sandbox", "Remote"] };
   const blockedProjects = new Set<string>();
   const blockedSessions = new Set<string>();
+  const blockedWorkspaces = new Set<string>();
   let settings: PlatformSnapshot["settings"] = { revision: 0, permissionRevision: 0, values: defaultSettings(), defaults: defaultSettings() };
   const registry = new Map<string, CapabilityEntry>();
   const proposals = new Map<string, Proposal>();
@@ -297,6 +305,8 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
   const artifacts = new Map<string, RetainedArtifact>();
   const terminals = new Map<string, TerminalState>();
   const executions = new Map<string, RemoteExecution>();
+  const managedWorkspaces = new Map<string, ManagedWorkspace>();
+  const changeSets = new Map<string, ChangeSet>();
   for (const event of events) {
     if (event.profile_id !== PROFILE_ID) continue;
     if (event.event_type === "session.deleted") {
@@ -310,7 +320,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
-      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -322,9 +332,18 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
     if (event.event_type === "session.group_saved") sessionGroups.set(event.payload.group.id, { ...event.payload.group });
     if (event.event_type === "artifact.saved") artifacts.set(event.payload.artifact.id, { ...event.payload.artifact });
+    if (event.event_type === "workspace.saved") {
+      managedWorkspaces.set(event.payload.workspace.id, structuredClone(event.payload.workspace));
+      if (event.payload.workspace.status === "partial") blockedWorkspaces.add(event.payload.workspace.id);
+      if (event.payload.workspace.status === "removed") blockedWorkspaces.delete(event.payload.workspace.id);
+    }
+    if (event.event_type === "change_set.saved") changeSets.set(event.payload.changeSet.id, structuredClone(event.payload.changeSet));
     if (event.event_type === "terminal.changed") {
       terminals.set(event.payload.terminal.id, { ...event.payload.terminal });
-      if (event.payload.terminal.status === "unconfirmed") blockedProjects.add(event.payload.terminal.projectId);
+      if (event.payload.terminal.status === "unconfirmed") {
+        if (event.payload.terminal.workspaceId) blockedWorkspaces.add(event.payload.terminal.workspaceId);
+        else blockedProjects.add(event.payload.terminal.projectId);
+      }
     }
     if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
     if (event.event_type === "execution.changed") {
@@ -337,7 +356,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     }
     if (event.event_type === "board.saved") boards.set(event.payload.board.projectId, structuredClone(event.payload.board));
     if (event.event_type === "issue.saved") issues.set(event.payload.issue.id, structuredClone(event.payload.issue));
-    if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
+    if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.workspaceId ?? "base"}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
     if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: { ...defaultSettings(), ...event.payload.settings } };
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
@@ -353,11 +372,19 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
-      if (job && ["cache.install", "project.defaults"].includes(job.kind) && event.payload.status === "partial" && job.projectId) blockedProjects.add(job.projectId);
+      if (job && ["cache.install", "project.defaults"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
+        if (job.workspaceId) blockedWorkspaces.add(job.workspaceId); else blockedProjects.add(job.projectId);
+      }
     }
-    if (event.event_type === "turn.finished" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) blockedProjects.add(event.project_id);
+    if (event.event_type === "turn.finished" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) {
+      const workspaceId = event.session_id ? sessions.get(event.session_id)?.workspaceId : null;
+      if (workspaceId) blockedWorkspaces.add(workspaceId); else blockedProjects.add(event.project_id);
+    }
     if (event.event_type === "turn.finished" && ["partial", "failed"].includes(event.payload.outcome) && !event.project_id && event.session_id) blockedSessions.add(event.session_id);
-    if (event.event_type === "session.resumed" && event.project_id) blockedProjects.delete(event.project_id);
+    if (event.event_type === "session.resumed" && event.project_id) {
+      const workspaceId = event.session_id ? sessions.get(event.session_id)?.workspaceId : null;
+      if (workspaceId) blockedWorkspaces.delete(workspaceId); else blockedProjects.delete(event.project_id);
+    }
     if (event.event_type === "session.resumed" && event.session_id) blockedSessions.delete(event.session_id);
     if (event.event_type === "project.added") projects.set(event.payload.project.id, event.payload.project);
     if (event.event_type === "project.relocated" && event.project_id) {
@@ -371,7 +398,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "session.created") {
       if (!event.session_id) throw new Error("Invalid session.created event scope.");
       sessions.set(event.session_id, {
-        id: event.session_id, projectId: event.project_id ?? null, title: event.payload.title,
+        id: event.session_id, projectId: event.project_id ?? null, workspaceId: event.payload.workspaceId ?? null, title: event.payload.title,
         controls: structuredClone(event.payload.controls), defaults: event.payload.defaults ? structuredClone(event.payload.defaults) : undefined, revision: 0, status: "idle", draft: { revision: 0, text: "", attachments: [] },
         queue: [], queueRevision: 0, messages: [], usage: [], processes: [], turnId: null, pendingApproval: null,
         lastError: null, localFinishing: false, createdAt: event.timestamp, updatedAt: event.timestamp,
@@ -408,6 +435,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       case "session.mode_requested": session.pendingMode = event.payload.mode; session.revision++; break;
       case "session.mode_changed": session.mode = event.payload.mode; session.pendingMode = null; session.revision++; break;
       case "session.browser_changed": session.browserUrl = event.payload.url; session.revision++; break;
+      case "session.workspace_bound": session.workspaceId = event.payload.workspaceId; session.revision++; break;
       case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
       case "session.resumed": session.status = session.queue.length ? "queued" : "idle"; session.lastError = null; break;
@@ -515,10 +543,10 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
         break;
     }
   }
-  return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions],
+  return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
     settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], terminals: [...terminals.values()], executions: [...executions.values()] };
+    artifacts: [...artifacts.values()], terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

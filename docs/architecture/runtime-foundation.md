@@ -48,8 +48,31 @@ generated qualification-only material. It is not the attested production
 release, and the installed production bundle/trust root remains unchanged.
 Plain Alpine lacks the required `nft` utility; the child separately confirmed
 socket-cgroupv2 support with a locally built digest-pinned Alpine/nftables image.
-Full authenticated candidate qualification is still running. These observations
-do not yet establish a ready Moguri Sandbox adapter.
+Three candidate fixes preserve root namespace checks, make empty socket health
+probes non-consuming and retry controller delegation against refreshed root
+processes on bounded `EBUSY`. The separately user-authenticated R3 development
+install passed genuine Apple VM execution: exact generated output and exit 0,
+non-root UID, NNP=1, seccomp=2, zero effective capabilities and generated workspace
+write/read/delete, followed by empty owned-VM inventory. This is not an attested
+release, and does not yet qualify Moguri's image, foreground PTY or worker/model
+transport. Production remains untouched. Executable entrypoints must be regular
+files: Alpine's symlink `/bin/sh` is correctly rejected by `openat2`.
+
+The separate R3 prefix is `/opt/sendbox-readiness-adc32f48-r3`, host/guest 0.2.0
+on aarch64, trust root `readiness-qualification-adc32f48-r3`, bundle sequence 7
+(minimum accepted 6); integration qualification pins minimum release sequence 7.
+Public candidate identities reported by the coordinated SendBox qualification:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Host | `00867c75f9503a06d0c03a92020114a0180c0a3976e6a1f29bf9ada45d20b085` |
+| Guest tar | `fd0731f8a4757ac27ae3edc18cc3a6b50301990fe9151d923d85f6dcf3381026` |
+| Public key | `cc578a226670ac955e5c4695b557e5d73f3e52f9df62142f751501fef6cee5eb` |
+| Manifest | `3d3dec8fa01a4b5c2d3e1faa74966dd86e9a7ef2e157a36f5ccaf53f440a4f02` |
+
+These identities are developer qualification inputs, not a factory trust-root
+change. Native Moguri probes must verify the installed bytes and boundary
+independently before advertising Sandbox readiness.
 
 SendBox entry allow rules match argv token counts, not shell-style tail globs:
 `/bin/sh -c *` matches the three-token generated probe, while `/bin/sh *` does

@@ -52,13 +52,14 @@ export class ProjectService {
   async context(project: Project): Promise<string> {
     return repositoryContext(project.path, this.configuration(project.id).values);
   }
-  private git(project: Project, args: string[], signal: AbortSignal, env?: NodeJS.ProcessEnv) {
-    return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", ...args], { cwd: project.path, signal, env, label: "Project Git operation", timeoutMs: 30_000, maxBytes: 512 * 1024 });
+  private git(project: Project, args: string[], signal: AbortSignal, env?: NodeJS.ProcessEnv, extra: string[] = []) {
+    return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...extra, "--literal-pathspecs", ...args], { cwd: project.path, signal, env, label: "Project Git operation", timeoutMs: 30_000, maxBytes: 512 * 1024 });
   }
-  async gitView(project: Project, includeDiff: boolean, signal: AbortSignal): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
+  async gitView(project: Project, includeDiff: boolean, signal: AbortSignal, checkoutFilters?: string[]): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
     const settings = this.configuration(project.id).values;
-    const branch = (await this.git(project, ["branch", "--show-current"], signal)).trim() || "(detached)";
-    const raw = await this.git(project, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"], signal);
+    const git = (args: string[]) => this.git(project, args, signal, checkoutFilters ? { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_LFS_SKIP_SMUDGE: "1" } : undefined, checkoutFilters);
+    const branch = (await git(["branch", "--show-current"])).trim() || "(detached)";
+    const raw = await git(["status", "--porcelain=v1", "-z", "--untracked-files=normal"]);
     const entries = raw.split("\0").filter(Boolean);
     const allowed: { name: string; code: string }[] = [];
     for (let index = 0; index < entries.length; index++) {
@@ -75,14 +76,14 @@ export class ProjectService {
       catch (error) { if (!(error instanceof MoguriError && ["path_denied", "folder_denied"].includes(error.code) || error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
     }
     let repository: string | null = null;
-    const remotes = (await this.git(project, ["remote", "-v"], signal)).split("\n");
+    const remotes = (await git(["remote", "-v"])).split("\n");
     const origin = remotes.find((line) => line.startsWith(`${settings.repo.upstream}\t`))?.split(/\s+/)[1];
     if (origin) {
       const match = origin.match(/^(?:git@github\.com:|https:\/\/github\.com\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/);
       if (match) repository = `https://github.com/${match[1]}`;
     }
     const tracked = allowed.filter((entry) => entry.code !== "??").map((entry) => entry.name);
-    const diff = includeDiff && tracked.length ? await this.git(project, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--", ...tracked], signal) : "";
+    const diff = includeDiff && tracked.length ? await git(["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--", ...tracked]) : "";
     return { type: "project.git", branch, repository, status: allowed.map((entry) => `${entry.code} ${entry.name}`).join("\n"), diff };
   }
   async porto(project: Project, signal: AbortSignal): Promise<string> {

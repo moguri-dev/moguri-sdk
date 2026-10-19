@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 8 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-7 history, sessions, drafts,
+This is an alpha API. Protocol 9 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-8 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -111,6 +111,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `projects` | Configuration, ordered folders/color, atomic reorder, relocation/removal, scoped Git/source reads, reviewed MCP imports and explicit default-file publication. |
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
 | `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
+| `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
@@ -241,12 +242,48 @@ partial or cancelled publication is not success.
 Artifacts are project-owned: `plans.save`/`capture` retain a content snapshot
 independent of a session; `plans.artifact` remains readable after session
 deletion. Deletion requires confirmation and an observed session revision.
-Project removal separately forgets project content/derived indexes and project
+Project removal refuses retained managed worktrees; remove them explicitly first.
+It separately forgets project content/derived indexes and project
 MCP credentials, never source files, external PRs or shared caches/models.
 Archived retention is opt-in `settings.values.retention`; `retention.run`
 honors that policy. Production retention uses the explicit OS-keychain backend;
 generated embedders/tests may inject a 32-byte `retentionKey`, never hardcode a
 real key or silently derive one from a path.
+
+### Managed Local roots
+
+```ts
+const intent = await sdk.workspaces.create(projectId, "moguri/generated-work", {
+  baseRef: "main",
+  // Optional issueId and verified-format prUrl retain change-set association.
+});
+const workspace = await sdk.workspaces.wait(intent.id!);
+const created = await sdk.sessions.create(
+  projectId, "Generated isolated work", { env: "Local" }, workspace.id,
+);
+const files = await sdk.workspaces.files(created.id!);
+const file = await sdk.workspaces.file(created.id!, files.entries[0]!);
+const changes = await sdk.workspaces.git(created.id!);
+const registered = await sdk.workspaces.discover(projectId);
+```
+
+`snapshot.managedWorkspaces` and `changeSets` are authoritative projections.
+`sessions.create` accepts an optional fourth workspace ID; `sessions.fromWork`
+accepts an optional third ID. A fresh idle session may explicitly bind/unbind
+with `workspaces.bind(sessionId, workspaceIdOrNull, observedRevision?)`.
+No mapping from a Local checkout to a Remote/Sandbox path is inferred.
+
+Worker tools, repository instructions, plans, terminals, context, MCP cwd,
+cache installs and memory use the same root. Pass the optional workspace ID to
+`memory.index/search/graph` and `cache.inspect/install` when operating outside a
+session facade. Ordinary base-project callers retain their existing behavior.
+Archive/deletion never removes a worktree or branch. Explicit removal requires
+a clean, idle, unbound owned root and `remove(id, observedRevision, true)`.
+Wait observes its job; aborting a wait is not cancelling the job. Use
+`jobs.cancel(workspace.jobId)` for cancellation, then inspect partial outcomes.
+`reconcile` verifies existing identity/absence without re-executing Git.
+Discovery reports Git registrations, not new ownership or filesystem authority.
+External worktree adoption and multi-candidate orchestration remain unavailable.
 
 ### Model context and thinking
 

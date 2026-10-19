@@ -43,9 +43,10 @@ export const defaultProjectConfiguration = (projectId: string): ProjectConfigura
 });
 export interface NavigationFolder { id: string; name: string; order: number; revision: number }
 export interface SessionGroup extends NavigationFolder { projectId: string }
-export interface RetainedArtifact { id: string; projectId: string; originSessionId: string | null; name: string; path: string | null; contentDigest: string; createdAt: string }
+export interface RetainedArtifact { id: string; projectId: string; originSessionId: string | null; name: string; path: string | null; contentDigest: string; createdAt: string; workspaceId?: string | null }
 export interface TerminalState {
   id: string; sessionId: string; projectId: string; title: string; pid: number | null; cols: number; rows: number;
+  workspaceId?: string | null;
   status: "running" | "stopping" | "closed" | "failed" | "unconfirmed" | "acknowledged"; diagnostic: string | null;
 }
 export interface SessionWorkspaceSnapshot {
@@ -61,7 +62,7 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema }),
   object({ type: Type.Literal("session.mode"), sessionId: id, expectedRevision: revision, mode: SessionModeSchema }),
   object({ type: Type.Literal("session.spawn"), sessionId: id, kind: Type.Union([Type.Literal("agent"), Type.Literal("side")]), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })) }),
-  object({ type: Type.Literal("session.from-work"), projectId: id, issueId: Type.Optional(id), prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })) }),
+  object({ type: Type.Literal("session.from-work"), projectId: id, workspaceId: Type.Optional(id), issueId: Type.Optional(id), prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })) }),
   object({ type: Type.Literal("session.delete"), sessionId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("queue.release"), sessionId: id, messageId: id, expectedRevision: revision }),
   object({ type: Type.Literal("project.organize"), projectId: id, expectedRevision: revision, folderId: nullableId, color: Type.String({ pattern: "^#[a-fA-F0-9]{6}$" }), order: Type.Integer({ minimum: 0 }) }),

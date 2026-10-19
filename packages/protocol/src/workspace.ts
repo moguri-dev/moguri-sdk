@@ -44,8 +44,8 @@ export const WorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("issue.move"), issueId: id, expectedRevision: revision, phaseId: id }),
   object({ type: Type.Literal("issue.archive"), issueId: id, expectedRevision: revision, archived: Type.Boolean() }),
   object({ type: Type.Literal("issues.refresh"), projectId: id }),
-  object({ type: Type.Literal("cache.prepare"), projectId: id, manager: PackageManagerSchema, expectedDigest: hash, acceptMetadataSharing: Type.Literal(true) }),
-  object({ type: Type.Literal("cache.install"), projectId: id, manager: PackageManagerSchema, expectedDigest: hash, acceptMetadataSharing: Type.Literal(true), runScripts: Type.Boolean() }),
+  object({ type: Type.Literal("cache.prepare"), projectId: id, workspaceId: Type.Optional(id), manager: PackageManagerSchema, expectedDigest: hash, acceptMetadataSharing: Type.Literal(true) }),
+  object({ type: Type.Literal("cache.install"), projectId: id, workspaceId: Type.Optional(id), manager: PackageManagerSchema, expectedDigest: hash, acceptMetadataSharing: Type.Literal(true), runScripts: Type.Boolean() }),
   object({ type: Type.Literal("linear.token.set"), token: Type.String({ minLength: 1, maxLength: 4096 }) }),
   object({ type: Type.Literal("linear.token.clear") }),
   object({ type: Type.Literal("linear.import"), projectId: id, cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })) }),
@@ -54,18 +54,20 @@ export type WorkspaceCommand = Static<typeof WorkspaceCommandSchema>;
 export const isWorkspaceCommand = (value: unknown): value is WorkspaceCommand => Value.Check(WorkspaceCommandSchema, value);
 export const WorkspaceQuerySchema = Type.Union([
   object({ type: Type.Literal("board.get"), projectId: id }),
-  object({ type: Type.Literal("cache.inspect"), projectId: id, manager: PackageManagerSchema }),
+  object({ type: Type.Literal("cache.inspect"), projectId: id, workspaceId: Type.Optional(id), manager: PackageManagerSchema }),
   object({ type: Type.Literal("linear.status"), projectId: id }),
 ]);
 export type WorkspaceQuery = Static<typeof WorkspaceQuerySchema>;
 export const isWorkspaceQuery = (value: unknown): value is WorkspaceQuery => Value.Check(WorkspaceQuerySchema, value);
 export interface DependencyPackage { name: string; version: string; integrity: string; url: string; hasInstallScript: boolean }
 export interface DependencyPlan {
+  workspaceId?: string | null;
   projectId: string; manager: PackageManager; manifestDigest: string; lockDigest: string; digest: string;
   packages: DependencyPackage[]; cachedPackages: number; npmCache: string; pnpmStore: string;
   scripts: "blocked"; diagnostic: string;
 }
 export interface CacheReceipt {
+  workspaceId?: string | null;
   projectId: string; manager: PackageManager; digest: string; lockDigest: string; checkedAt: string;
   packages: number; reused: number; downloadedBytes: number; scripts: "blocked";
 }

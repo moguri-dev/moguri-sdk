@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 8; immutable event
+Protocol version and database migration version are 9; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -10,8 +10,10 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Entity | Identity and authority |
 | --- | --- |
 | Profile | Only `default` is exposed. Every command/event is scoped; other profile rows are excluded from projection, replay and attachment authorization. Profile creation/switching is not implemented. |
-| Project | Stable UUID/canonical folder, ordered navigation folder/color and revisioned repository/policy/script/MCP bindings. One active agent writer; no implicit managed Git worktree. |
-| Session | UUID/nullable project, controls/revisions/lifecycle, agent/read-only mode, pending safe-boundary mode, explicit agent/side/model-subagent/metachat kind, pin/unread/group/parent metadata, PR/work-item binding, drafts/queue/messages/usage and exact approval. A null project never resolves to another root. |
+| Project | Stable UUID/canonical base folder, ordered navigation folder/color and revisioned repository/policy/script/MCP bindings. Worktrees are explicit owned bindings, never inferred from branch names. |
+| Session | UUID/nullable project and managed-workspace binding, controls/revisions/lifecycle, agent/read-only mode, pending safe-boundary mode, explicit agent/side/model-subagent/metachat kind, pin/unread/group/parent metadata, PR/work-item binding, drafts/queue/messages/usage and exact approval. A null project never resolves to another root. |
+| Managed workspace | Project-owned Local root, exact canonical directory/device/inode, common Git directory, branch/base, revision, change set and creation/removal job. Partial intent never authorizes a base-root fallback. |
+| Change set | Stable project/workspace/branch/base association with optional local issue/PR context. It does not authorize publication or imply compound candidate orchestration. |
 | Turn | Admitted queue item, UUID, immutable controls/policy and prompt-digest snapshot, and worker ownership. Admission removes exactly one unclaimed queue item atomically. |
 | Step | One authorized provider request, normalized final context snapshot, usage quality, request wall time and declared tools. Worker completion requires durable acknowledgement before tools or the next step. |
 | Draft | Text, approved attachment snapshots and optimistic revision. Local unacknowledged edits are explicitly not authoritative. |
@@ -24,12 +26,12 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Capability | Project-scoped skill/script/plugin/style knowledge, immutable content digest, source, enablement revision and optional owning plugin. |
 | Proposal | Exact content/base digests, project, kind, actual user/model actor and pending/approved/rejected decision. Approval installs disabled content. |
 | Capability job | Owned kind/session/turn, progress, terminal status, retained result digest and explicit error. A wait timeout is not cancellation. |
-| Repository index | Derived project-partitioned lexical vectors, source digests/mtime/size, chunks and import/symbol graph. Not a second session store. |
+| Repository index | Derived root-partitioned lexical vectors, source digests/mtime/size, chunks and import/symbol graph. Base project IDs and workspace IDs are distinct namespaces, not a second session store. |
 | Issue board | Project, configuration revision, ordered phase IDs/names, merged destination, explicit PR-observation access and optional Linear team. |
 | Local issue | Stable UUID/project-local number, feature/bug/misc, title/body/phase, optimistic revision, archive state and verified remote-link provenance. No assignee. |
 | Dependency plan | Exact project/manager/manifest/lock digest, unique public package versions and SHA-512 artifacts. Branch names are not mutable cache identities. |
-| Cache receipt | Project/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
-| Retained artifact | Project-owned immutable content snapshot, origin-session reference and optional source path. Session deletion cannot remove its independent grant. |
+| Cache receipt | Project/workspace/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
+| Retained artifact | Project-owned immutable plan snapshot, origin-session/workspace reference and optional source path. Session deletion cannot remove its independent grant. First-class artifact kinds/revisions remain open. |
 | User terminal | Session/project ownership, PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Ghostty owns VT rendering; output and input are bounded ephemeral data. |
 | Model options | Optional working window and supported thinking effort in revisioned session controls; the provider maximum is not changed. Step usage records effective window/effort and labeled estimated context separately from actual token telemetry. |
 | MCP authorization | Non-secret owned OAuth lifecycle, server/scope/expiry and transient-link readiness. State/verifier/authorization URL are ephemeral; issuer/resource-bound clients and grants stay in the secret backend. A durable connected decision gates use. |
@@ -54,7 +56,7 @@ surviving children and forgets only the requested retention compartment.
 
 Steers bind to one turn and never migrate implicitly. Interrupt priorities are
 recorded through queue ordering. Failed or partial work quarantines automatic
-admission for the project, or only the affected project-free session, until explicit user inspection/resumption. Queues
+admission for the bound root, or only the affected project-free session, until explicit user inspection/resumption. Queues
 recovered after restart require explicit resumption even if they were unclaimed.
 
 Allowed-env revisions record the active Local turn IDs permitted to finish.
@@ -133,3 +135,13 @@ are appended atomically with primary effects; restart never creates another
 worker. Remote replay payloads are private encrypted transport data, not a
 second authority. Late accounting can replace unknown telemetry while a partial
 turn remains partial. Inspection acknowledgement remains distinct from cleanup.
+
+Migration 9 adds managed-workspace/change-set events, nullable legacy session
+bindings and root-scoped quarantine without rewriting historical events,
+IDs, grants, defaults or receipts. All filesystem surfaces resolve the same
+binding; one writer leases each root, not the entire logical project.
+Creation/removal intent and its command receipt precede Git effects.
+Interrupted jobs retain partial ownership and require explicit reconciliation,
+never replay. Session deletion preserves worktrees; root removal preserves
+branches and independent plans. Project relocation/removal refuses retained
+worktrees. Remote/Sandbox root mappings and external adoption are unavailable.

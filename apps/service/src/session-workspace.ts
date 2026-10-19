@@ -4,7 +4,7 @@ import { basename, isAbsolute } from "node:path";
 import {
   MoguriError, PROFILE_ID, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
-  type ModelContextPreview, type ResolvedControls,
+  type ModelContextPreview, type ResolvedControls, type Project,
 } from "../../../packages/protocol/src/index.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
 import { readProjectFile, writeProjectFile } from "./files.ts";
@@ -28,6 +28,7 @@ export interface SessionWorkspaceHost {
   verifyPr(projectId: string, url: string): Promise<void>;
   contextPreview(session: Session): Promise<ModelContextPreview>;
   startup(projectId: string | null): ResolvedControls;
+  project(session: Pick<Session, "projectId" | "workspaceId">): Project;
 }
 export class SessionWorkspace {
   readonly projects: ProjectService;
@@ -95,7 +96,7 @@ export class SessionWorkspace {
       case "project.git": return this.projects.gitView(this.project(query.projectId), query.diff, AbortSignal.timeout(30_000));
       case "project.porto": return { type: query.type, output: await this.projects.porto(this.project(query.projectId), AbortSignal.timeout(15_000)) };
       case "plan.read": {
-        const session = this.session(query.sessionId); const project = this.project(session.projectId);
+        const session = this.session(query.sessionId); const project = this.host.project(session);
         if (session.controls.env !== "Local") throw new MoguriError("plan_env", "Plan workspace transport is not qualified for this environment. No local project was read as a fallback.", 409);
         const settings = this.projects.configuration(project.id).values;
         const text = await this.projects.optional(project.path, settings.planPath, folderPolicy(settings));
@@ -157,9 +158,14 @@ export class SessionWorkspace {
         const { pullRequestLink } = await import("./project-integrations.ts");
         const prUrl = command.prUrl ? pullRequestLink(command.prUrl).url : issue?.pullRequest?.url ?? null;
         if (command.prUrl) await this.host.verifyPr(project.id, prUrl!);
+        const startup = this.host.startup(project.id);
+        if (command.workspaceId) {
+          this.host.project({ projectId: project.id, workspaceId: command.workspaceId });
+          if (startup.controls.env !== "Local") throw new MoguriError("workspace_env", "This worktree has a Local location only. No default remote root was inferred.", 409);
+        }
         const id = randomUUID();
         return finish([{ event_type: "session.created", profile_id: PROFILE_ID, project_id: project.id, session_id: id,
-          payload: { title: issue?.title ?? `PR ${prUrl}`, ...this.host.startup(project.id), prUrl, workItemId: issue?.id ?? null } },
+          payload: { title: issue?.title ?? `PR ${prUrl}`, ...startup, workspaceId: command.workspaceId ?? null, prUrl, workItemId: issue?.id ?? null } },
           { event_type: "draft.saved", profile_id: PROFILE_ID, project_id: project.id, session_id: id, payload: { text: issue ? `${issue.title}\n\n${issue.body}` : `Work on ${prUrl}. The folder checkout has not been changed.`, attachments: [] } }], { id });
       }
       case "queue.release": {
@@ -191,6 +197,7 @@ export class SessionWorkspace {
         if (command.type === "project.remove") return this.host.removeProject(project.id, finish);
         if (command.type === "project.defaults") return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });
         if (command.type === "project.relocate") {
+          if (this.snapshot().managedWorkspaces.some((workspace) => workspace.projectId === project.id && workspace.status !== "removed")) throw new MoguriError("managed_workspaces", "Remove managed worktrees explicitly before relocating their repository/common Git directory.", 409);
           if (this.snapshot().sessions.some((session) => session.projectId === project.id && session.turnId) || this.snapshot().terminals.some((terminal) => terminal.projectId === project.id && ["running", "stopping", "unconfirmed"].includes(terminal.status)) || this.snapshot().jobs.some((job) => job.projectId === project.id && ["running", "waiting_input"].includes(job.status)) || this.snapshot().blockedProjects.includes(project.id)) throw new MoguriError("project_busy", "Finish owned work and inspect unconfirmed effects before changing the attached folder.");
           if (!isAbsolute(command.path)) throw new MoguriError("project_path", "Choose an absolute, existing folder.");
           const path = await realpath(command.path);
@@ -232,7 +239,7 @@ export class SessionWorkspace {
       }
       case "plan.save":
       case "artifact.capture": {
-        const session = this.session(command.sessionId); const project = this.project(session.projectId);
+        const session = this.session(command.sessionId); const project = this.host.project(session);
         if (session.controls.env !== "Local") throw new MoguriError("plan_env", "Plan/artifact workspace transport is not qualified for this environment. No local project was read or written as a fallback.", 409);
         const settings = this.projects.configuration(project.id).values;
         const path = command.type === "artifact.capture" ? command.path ?? settings.planPath : settings.planPath;
@@ -244,16 +251,16 @@ export class SessionWorkspace {
           await writeProjectFile(project.path, path, command.text, command.expectedDigest);
         } else await assertFolderAccess(project.path, path, false, folderPolicy(settings));
         const file = await readProjectFile(project.path, path); this.session(session.id);
-        const artifact: RetainedArtifact = { id: randomUUID(), projectId: project.id, originSessionId: session.id, name: basename(path), path, contentDigest: this.store.putBlob(file.text), createdAt: new Date().toISOString() };
+        const artifact: RetainedArtifact = { id: randomUUID(), projectId: project.id, originSessionId: session.id, workspaceId: session.workspaceId, name: basename(path), path, contentDigest: this.store.putBlob(file.text), createdAt: new Date().toISOString() };
         return finish([{ event_type: "artifact.saved", profile_id: PROFILE_ID, project_id: project.id, payload: { artifact } }], { id: artifact.id });
       }
       case "terminal.open": {
-        const session = this.session(command.sessionId); const project = this.project(session.projectId);
+        const session = this.session(command.sessionId); const project = this.host.project(session);
         if (session.status === "archived") throw new MoguriError("archived", "Unarchive this session before opening new owned terminals.");
         if (session.controls.env !== "Local" || !this.snapshot().policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.find((capability) => capability.env === "Local")?.ready) throw new MoguriError("terminal_env", "No qualified terminal transport exists for this environment; there is no Local fallback.");
         const script = command.scriptId ? this.projects.configuration(project.id).values.scripts.find((script) => script.id === command.scriptId) : undefined;
         if (command.scriptId && !script) throw new MoguriError("script_missing", "Choose a configured user script.");
-        const terminal = this.terminals.open({ sessionId: session.id, projectId: project.id, root: project.path }, command.cols, command.rows, script);
+        const terminal = this.terminals.open({ sessionId: session.id, projectId: project.id, workspaceId: session.workspaceId, root: project.path }, command.cols, command.rows, script);
         return finish([], { id: terminal.id });
       }
       case "terminal.close": {

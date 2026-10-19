@@ -1,13 +1,14 @@
 import { readdir, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import * as vec from "sqlite-vec";
-import { MoguriError, type GraphNode, type GraphEdge, type MemoryHit, type Project } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, type GraphNode, type GraphEdge, type MemoryHit } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, scopedPath } from "./files.ts";
 import { EventStore } from "./store.ts";
 import { matchesFolder } from "./project-policy.ts";
 import { ignoredPath, readIgnoreScope, type IgnoreScope } from "./ignore-rules.ts";
 
 const dimensions = 384;
+export interface MemoryScope { id: string; path: string }
 export function lexicalVector(text: string): Buffer {
   const values = new Float32Array(dimensions);
   const words = text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
@@ -65,7 +66,7 @@ export class RepositoryMemory {
     await walk(root);
     return files;
   }
-  async index(project: Project, maxFiles: number, signal: AbortSignal, progress: (text: string) => void, denied: string[] = []) {
+  async index(project: MemoryScope, maxFiles: number, signal: AbortSignal, progress: (text: string) => void, denied: string[] = []) {
     this.ready();
     const paths = await this.files(project.path, maxFiles, signal, denied);
     const records: { path: string; digest: string; mtime: number; size: number; chunks: string[] }[] = [];
@@ -130,7 +131,7 @@ export class RepositoryMemory {
     } catch (error) { db.exec("ROLLBACK"); throw error; }
     return { indexedFiles: records.length, reusedFiles: reused, excludedFiles: excluded, sourceBytes: bytes, boundedAt: maxFiles, vectorKind: "local lexical vectors", graph: "import/symbol graph" };
   }
-  async search(project: Project, text: string, limit: number, denied: string[] = []): Promise<MemoryHit[]> {
+  async search(project: MemoryScope, text: string, limit: number, denied: string[] = []): Promise<MemoryHit[]> {
     this.ready();
     const hits = this.store.db.prepare(`SELECT c.path,c.text,c.digest,f.mtime,f.size,v.distance FROM memory_vectors v JOIN memory_chunks c ON c.id=v.rowid JOIN memory_files f ON f.project_id=c.project_id AND f.path=c.path WHERE v.embedding MATCH ? AND k=? AND v.project_id=? ORDER BY v.distance`).all(lexicalVector(text), BigInt(limit), project.id);
     const result: MemoryHit[] = [];
@@ -147,7 +148,7 @@ export class RepositoryMemory {
     }
     return result;
   }
-  graph(project: Project, path: string): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  graph(project: MemoryScope, path: string): { nodes: GraphNode[]; edges: GraphEdge[] } {
     const nodes = this.store.db.prepare("SELECT id,path,label,kind FROM memory_graph_nodes WHERE project_id=? AND (?='' OR path=?) LIMIT 1000").all(project.id, path, path);
     const edges = this.store.db.prepare("SELECT source,target,kind FROM memory_graph_edges WHERE project_id=? AND (?='' OR source=? OR target=?) LIMIT 2000").all(project.id, path, path, path);
     return {

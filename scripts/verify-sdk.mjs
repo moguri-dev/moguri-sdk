@@ -41,6 +41,11 @@ try {
       const general=await sdk.sessions.create(null);
       await sdk.sessions.env(general.id!,"Local");
       const remote=await sdk.remote.status();void remote.remote.workerDigest;
+      const workspace=await sdk.workspaces.create("generated-id","moguri/generated",{baseRef:"main"});
+      await sdk.workspaces.wait(workspace.id!);
+      const discovered=await sdk.workspaces.discover("generated-id"); void discovered.registrations[0]?.managedId;
+      await sdk.workspaces.files("generated-id");
+      await sdk.workspaces.file("generated-id","generated.ts");
       const folder=await sdk.attachments.folderPreview(general.id!,"/generated/source");
       await sdk.attachments.folder(general.id!,"/generated/source",folder.preview.digest,true);
       const sources=await sdk.suggestions.preview(general.id!);
@@ -63,7 +68,7 @@ try {
   await writeFile(join(consumer, "smoke.mjs"), `
     import assert from "node:assert/strict";
     import {mkdir,writeFile,readFile} from "node:fs/promises";
-    import {spawn} from "node:child_process";
+    import {spawn,execFileSync} from "node:child_process";
     import {createHash} from "node:crypto";
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
@@ -72,6 +77,9 @@ try {
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
+    const git=args=>execFileSync("git",["--no-pager","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",...args],{cwd:project,encoding:"utf8"});
+    git(["init","--initial-branch=main"]);git(["add","--","generated.ts"]);
+    git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated external SDK base"]);
     const provider={state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>provider.onChange(),login:()=>{throw Error("No real authorization in SDK verification")},cancel:async()=>{},logout:async()=>{},prepare:async()=>{throw Error("No paid calls in SDK verification")}};
     const runtime=await createRuntime({stateDir:join(root,"state"),provider,retentionKey:Buffer.alloc(32,0x67),platform:{terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]}}});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
@@ -79,7 +87,16 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,8);
+      assert.equal(sdk.getState().snapshot.protocolVersion,9);
+      const isolated=await sdk.workspaces.create(p.id,"moguri/generated-external");
+      const owned=await sdk.workspaces.wait(isolated.id);
+      assert.ok((await sdk.workspaces.discover(p.id)).registrations.some(entry=>entry.managedId===owned.id&&entry.locked));
+      const bound=await sdk.sessions.create(p.id,"Generated external worktree",{env:"Local"},owned.id);
+      assert.match((await sdk.workspaces.file(bound.id,"generated.ts")).text,/portableSdkMemory/);
+      assert.equal((await sdk.workspaces.git(bound.id)).branch,"moguri/generated-external");
+      await sdk.sessions.delete(bound.id,true);
+      await sdk.workspaces.remove(owned.id,owned.revision,true);
+      assert.equal((await sdk.workspaces.wait(owned.id)).status,"removed");
       const general=await sdk.sessions.create();
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
@@ -93,7 +110,7 @@ try {
           let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
           role.once("error",reject);
           role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
-          role.stdin.write(JSON.stringify({action:"probe",protocol:8,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+          role.stdin.write(JSON.stringify({action:"probe",protocol:9,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
         });
         assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
         role.stdin.end();assert.equal(await roleExit,0);

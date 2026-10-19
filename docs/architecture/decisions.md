@@ -39,6 +39,9 @@ These decisions define the implementation stack and constraints for the [impleme
 | D16 | Ghostty embeds the desktop terminal; shared held queues, read-only/side sessions and retained project artifacts extend the same SDK/event authority. | Native input/resize/cancellation, retention-key migration, multi-client policy or packaged-client acceptance fails. |
 | D17 | Compact icon controls expose shared working-context/thinking settings, estimated context preview and provenance-safe usage, with the original red-pom-pom mascot. | Supported transport options, bounded request sizing, migration/restart or compact native-popover behavior fails. |
 | D18 | Project-free chats, explicit MCP OAuth, scoped suggestions/reviewed metachat and shared attention extend the same SDK authority. | Scope isolation, issuer/resource binding, exact configuration review, cancellation, migration or private notification delivery fails. |
+| D19 | Configured local models, snapshotted startup defaults and typed reviewed context extend the shared runtime. | Provider identity, resource-bound credentials, source consent or migration/recovery fails. |
+| D20 | Core SSH execution uses a pinned owned worker bridge and durable late receipts without replay. | Host/build/root verification, actual remote inference or truthful loss/cancellation accounting fails. |
+| D21 | Managed Local worktrees use explicit owned roots and per-root writer leases across every SDK/client filesystem surface. | Safe Git creation/removal, root consistency, concurrency or restart reconciliation fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -449,6 +452,29 @@ detached-descendant containment. The [transport contract](execution-transports.m
 records measurements, ownership and remaining limits. Native SendBox still
 requires the separately rebuilt/qualified guest and genuine worker transport.
 
+## D21. Managed Local worktrees and root-scoped leases
+
+**Decision.** Use the user's Git executable (GPL-2.0) and existing Node/SDK/store
+without a second workspace database or new library. Unlike explicit Git
+publication, automated worktree setup never executes repository hooks, filters,
+fsmonitor helpers or submodule fetches. It creates a named non-protected branch
+from a resolved local base; no implicit fetch, checkout switch, push or deletion.
+
+Record exact private owned path, directory identity, common Git directory,
+branch/base, change-set association and job intent before effects. Every
+filesystem surface shares this binding, including memory/cache/MCP and terminal
+cwd. Writers serialize per actual root and a failed worktree does not quarantine
+unrelated branches. A changed/missing root fails closed, never becomes the base.
+
+Removal requires clean, idle, unbound owned state, retains the branch/artifacts
+and never force-deletes partial work. Restart marks unfinished intent partial;
+explicit reconciliation checks the filesystem without replaying Git.
+Session retention does not delete a worktree. Project relocation/removal blocks
+while roots remain. Discovery reads registrations without adopting them.
+Protocol/database migration 9 preserves older events, keys, grants, IDs and
+defaults. [The contract](managed-workspaces.md) records the measured primitive,
+Local slice and unimplemented artifact/Remote/Sandbox/orchestration boundaries.
+
 ## Still open
 
 - Package manager and monorepo tooling.
@@ -470,7 +496,7 @@ OpenTUI 0.6.6 on a bundled Node 26.12 runtime; Electron 44 with a same-origin
 credentials via `@napi-rs/keyring`. Packaging uses `@electron/packager`.
 Development macOS artifacts are not notarized releases. Folder attachments,
 images, external references and snapshotted default inheritance follow D19.
-Finite caps, managed worktrees, real isolated profiles and routing remain open.
+Finite caps, real isolated profiles and routing remain open.
 
 The development app deliberately uses unpacked application files (`asar: false`):
 the external pinned Node runtime must execute the service/worker and load their

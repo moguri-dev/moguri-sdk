@@ -57,7 +57,7 @@ export class EventStore {
     this.db = new DatabaseSync(path, { allowExtension: true });
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
-      if (version > 8) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version > 9) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -98,6 +98,9 @@ export class EventStore {
       if (version < 8) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('execution_transport_schema','1');
         PRAGMA user_version=8; COMMIT;`);
+      if (version < 9) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('managed_workspace_schema','1');
+        PRAGMA user_version=9; COMMIT;`);
       const existing = this.db.prepare("SELECT scope,payload FROM retention_keys LIMIT 1").get();
       if (existing) this.key({ scope: String(existing.scope), projectId: null, sessionId: null }, false);
     } catch (error) { this.db.close(); throw error; }
@@ -178,6 +181,7 @@ export class EventStore {
       for (const input of derived) append(input);
       if (receipt) this.db.prepare("INSERT INTO receipts VALUES (?,?,?)").run(receipt.id, receipt.digest, JSON.stringify(receipt.result));
       for (const input of inputs) if (input.event_type === "project.relocated" && input.project_id) this.clearProjectIndex(input.project_id);
+      for (const input of inputs) if (input.event_type === "workspace.saved" && input.payload.workspace.status === "removed") this.clearProjectIndex(input.payload.workspace.id);
       if (forget) this.forget(forget);
       this.db.exec("COMMIT");
       for (const input of [...inputs, ...derived]) for (const hash of references(input)) this.pending.delete(hash);

@@ -43,6 +43,9 @@ Unused scope fields are null in checkpoint 1.
 | `session.browser_changed` | Explicit validated HTTPS/loopback preview association, not model context. |
 | `project.configured`, `project.folder_saved`, `project.relocated` | Typed policy/configuration/navigation and attached-folder changes; atomic exact-membership reorder and index invalidation. |
 | `artifact.saved` | Independently project-owned content grant and origin reference. |
+| `workspace.saved` | Revisioned owned Local root/branch/base/common-directory identity, job and creating/ready/removing/partial/removed outcome. Never a permission or fallback root. |
+| `change_set.saved` | Stable workspace/branch/base and optional ticket/PR association. No publish/merge authorization. |
+| `session.workspace_bound` | Explicit nullable binding for a fresh idle session; existing conversation/queue is not moved. |
 | `terminal.changed` | Owned user-console lifecycle only, never input/output or keystroke hashes. Acknowledged inspection is distinct from proven closure. |
 | `turn.prompt_bound` | Exact effective step prompt digest, including mode, repository instructions and any opted-in retrieved memory. |
 | `session.deleted`, `project.removed` | Transactional tombstone/key erasure with retained sanitized usage; independent artifacts survive session deletion. |
@@ -94,13 +97,17 @@ selected client text/images or exact reviewed folder/GitHub/session snapshots.
 Preview performs no inference. Source revisions and destination-session grants
 are checked again at capture/admission. Image bytes travel only through the
 bounded private query/provider paths, never public event frames.
+Managed-workspace commands add explicit Local creation, clean idle unbound
+removal and identity-based reconciliation. Their job/intents/command receipts
+commit before effects. Session-bound Git/files queries use the actual root;
+discovery reads registrations without adopting arbitrary paths.
 
 ## WebSocket
 
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":8,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":9,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,
