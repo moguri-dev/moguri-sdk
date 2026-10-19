@@ -119,7 +119,7 @@ not just renderer or source-runtime proxies. Unicode paging advances even with
 a one-unit requested page, and generated high-volume output verifies the actual
 128 KiB UTF-8 retention bound.
 
-Delivery includes the ad-hoc-signed app, approximately 326.5 MiB DMG, 257.5 MiB
+Delivery includes the ad-hoc-signed app, approximately 330 MiB DMG, 257.5 MiB
 ZIP and 5.8 MiB SDK tarball. Signature/icon, self-hosted Ghostty assets, pinned
 Node/speech runtime and DMG checksum are verified. No model weights, personal
 keychain, microphone, real authorization or private Porto process was used.
