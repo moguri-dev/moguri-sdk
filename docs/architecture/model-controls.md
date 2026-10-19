@@ -1,0 +1,66 @@
+# Compact composer and model controls
+
+This user-requested slice preserves the dark Operate interface and one shared
+SDK/service authority. It replaces redundant composer rows with labeled icon
+controls and progressive disclosure, not new client-only execution behavior.
+
+## Reuse and Phase 0
+
+Reuse React/native popovers, existing SVG icons and the maintained pi-ai
+`getSupportedThinkingLevels`, context estimator and output/context clamp. The
+provider library remains MIT; no new runtime dependency or tokenizer is added.
+`node scripts/model-controls-spike.mjs` must verify the real maintained adapter
+against a generated loopback endpoint before the controls are wired. No personal
+authorization, provider call, microphone or image download is needed.
+
+The generated loopback probe passed with a 16,384-token working window and
+8,192-token output ceiling. Actual OpenAI Responses and Anthropic payloads
+forwarded low effort. A first attempt with a reasoning-capable Copilot Gemini
+model failed the forwarding assertion: its compatibility metadata explicitly
+disables controllable effort. Those models must expose provider-controlled
+thinking, not a silently ignored choice. The corrected probe validates this
+negative case alongside both supported transports, in about 51 ms.
+
+Context size is a configurable working window up to the selected model's fixed
+maximum, not a claim that the provider's maximum changes. Input sizing is a
+clearly labeled estimate, not exact tokenization. Reserve the library's context
+headroom and reject an overfull request without silently truncating history,
+compacting, selecting another model or adding a paid call.
+
+## Domain and persistence
+
+Protocol/database migration 5 adds optional typed session model options and
+advertised supported thinking levels. Legacy controls retain their defaults and
+all schema-1/2/3/4 data, encrypted grants and immutable event identities survive.
+No user state deletion is an upgrade path.
+
+Thinking options come from the actual model capability list. Unsupported values
+are rejected rather than silently clamped. Each step records its effective
+window, selected effort and estimated context alongside the existing actual/
+unknown usage provenance. Budget/token/cost readouts must not turn unknown
+telemetry into zero; estimated/provider-reported/billed amounts stay distinct.
+The SDK exposes settings identically to CLI/TUI and desktop.
+
+## Client behavior
+
+Attach is a plus at the left, followed by environment, model name and autonomy.
+The trailing group is budget/usage, microphone and paper-plane Send. Holding
+Cmd/Ctrl changes the send affordance to a clock and holds the prompt without
+starting work. Existing explicit Steer/Interrupt delivery remains available.
+Popover dismissal, keyboard focus, disabled states and native browser occlusion
+must work at compact widths and with long model names.
+
+Environment icons are house/box/globe; autonomy is hand/traffic light/car/rocket.
+Unqualified Sandbox, Remote and Autopilot Max remain visibly unavailable.
+Model window and thinking options live in the same model menu. Budget starts
+unlimited and uses infinity; its popover exposes input/output/cache/context and
+available monetary telemetry, not an invented finite-cap implementation.
+
+The original face/bat-wing mascot gains a small red antenna pom-pom. Visual
+reference: <https://en.wikipedia.org/wiki/File:MoogleFFIXConcept.png>, linked by
+the Moogle article. This is trait reference only: no image bytes, tracing,
+third-party artwork or branding are embedded.
+
+Generated tests cover supported/unsupported effort, context admission, migration/
+restart, actual adapter options, Cmd keydown/keyup/blur, popover navigation,
+usage provenance and compact layout. CI remains main-push-only.

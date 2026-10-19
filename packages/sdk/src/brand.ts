@@ -1,4 +1,6 @@
 export const MOGURI_ASCII = String.raw`
+          o
+         /
        /\___/\
   /\  / -   - \  /\
  /  \/    v    \/  \

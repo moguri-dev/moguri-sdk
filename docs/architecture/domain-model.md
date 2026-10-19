@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 4; immutable event
+Protocol version and database migration version are 5; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -31,6 +31,7 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Cache receipt | Project/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
 | Retained artifact | Project-owned immutable content snapshot, origin-session reference and optional source path. Session deletion cannot remove its independent grant. |
 | User terminal | Session/project ownership, PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Ghostty owns VT rendering; output and input are bounded ephemeral data. |
+| Model options | Optional working window and supported thinking effort in revisioned session controls; the provider maximum is not changed. Step usage records effective window/effort and labeled estimated context separately from actual token telemetry. |
 
 Provider-neutral session state is projected from immutable events. Normalized
 pi-ai model messages live in content-addressed blobs referenced by completion
@@ -98,3 +99,8 @@ usage. Project removal also removes derived indexes and historical project MCP
 credentials, not repository files, external PRs, shared caches or service logs.
 Relocating an attached folder invalidates its derived index. This is not
 forensic secure erasure or removal of external backups.
+
+Migration 5 records the optional model-control schema without rewriting event
+identities, ciphertext grants or legacy defaults. Schema-4 state upgrades in
+place. Context preview is a read-only local estimate of the saved draft,
+instructions, declared tools and conversation; it never calls a model.

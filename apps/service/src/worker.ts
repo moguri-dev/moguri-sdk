@@ -42,7 +42,8 @@ async function run(start: WorkerStart): Promise<void> {
           messages: context, tools: start.readOnly ? [] : boundary.tools,
         }, {
           apiKey: boundary.auth.apiKey, headers: boundary.auth.headers, signal: abort.signal,
-          maxTokens: Math.min(model.maxTokens, 8192), maxRetries: 0, timeoutMs: 120_000,
+          maxTokens: boundary.maxTokens, maxRetries: 0, timeoutMs: 120_000,
+          ...(boundary.thinkingEffort && boundary.thinkingEffort !== "off" ? { reasoning: boundary.thinkingEffort } : {}),
           sessionId: process.env.MOGURI_TURN_ID,
           onProviderStreamEvent: (event) => { usageReported ||= usagePresent(event); },
         });

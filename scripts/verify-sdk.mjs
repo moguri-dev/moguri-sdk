@@ -36,6 +36,8 @@ try {
       const editor = new DraftEditor(sdk,"generated-id",{revision:0,text:"",attachments:[]});
       const held = await editor.send("queue",true); void held.id;
       await sdk.sessions.mode("generated-id","read-only");
+      await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
+      const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
       await sdk.slash("generated-id","/rename Generated","cli");
       void slashCommands;
       return settings;
@@ -61,7 +63,9 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,4);
+      assert.equal(sdk.getState().snapshot.protocolVersion,5);
+      const context=(await sdk.sessions.context(s.id)).context;
+      assert.ok(context.estimatedTokens>0);assert.equal(context.source,"estimated");
       if(process.platform==="darwin") {
         const terminal=await sdk.terminal.open(s.id);
         await sdk.terminal.input(terminal.id,"GENERATED_EXTERNAL_PTY_INPUT\\n");

@@ -2,8 +2,10 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
 export * from "./platform.ts";
+export * from "./model.ts";
+import { ModelOptionsSchema, type ThinkingEffort } from "./model.ts";
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -19,6 +21,7 @@ export const ControlsSchema = object({
     object({ kind: Type.Literal("unlimited") }),
     object({ kind: Type.Literal("limited"), tokens: Type.Optional(Type.Integer({ minimum: 1 })), usd: Type.Optional(Type.Number({ exclusiveMinimum: 0 })) }),
   ]),
+  modelOptions: Type.Optional(ModelOptionsSchema),
 });
 export type Controls = Static<typeof ControlsSchema>;
 export const factoryControls = (): Controls => ({ env: "Local", modelId: null, autonomy: "Manual", budget: { kind: "unlimited" } });
@@ -97,6 +100,9 @@ export interface Usage {
   requestMs: number;
   quality: "provider-reported" | "unknown";
   outcome: string;
+  contextWindow?: number;
+  contextEstimate?: number;
+  thinkingEffort?: ThinkingEffort;
 }
 export interface QueueItem {
   id: string;
@@ -143,7 +149,7 @@ export interface Session {
   workItemId: string | null;
   browserUrl: string | null;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean }
+export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[] }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];
@@ -186,7 +192,7 @@ export interface EventPayloads {
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
   "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string };
   "steer.applied": { item: QueueItem };
-  "model.started": { modelId: string };
+  "model.started": { modelId: string; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort };
   "assistant.delta": { text: string };
   "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage };
   "tool.requested": { approval: Approval };
@@ -411,6 +417,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
           stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
           estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: 0, quality: "unknown", outcome: "running",
+          contextWindow: event.payload.contextWindow, contextEstimate: event.payload.contextEstimate, thinkingEffort: event.payload.thinkingEffort,
         });
         break;
       case "assistant.delta": {

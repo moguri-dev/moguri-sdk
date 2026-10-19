@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { McpServerSchema, SandboxSchema } from "./config.ts";
+import type { ModelContextPreview } from "./model.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -83,6 +84,7 @@ export const TerminalInputSchema = Type.Union([
 ]);
 export type TerminalInput = Static<typeof TerminalInputSchema>;
 export const SessionWorkspaceQuerySchema = Type.Union([
+  object({ type: Type.Literal("session.context"), sessionId: id }),
   object({ type: Type.Literal("project.configuration"), projectId: id }),
   object({ type: Type.Literal("project.git"), projectId: id, diff: Type.Boolean() }),
   object({ type: Type.Literal("project.sources"), projectId: id }),
@@ -94,6 +96,7 @@ export const SessionWorkspaceQuerySchema = Type.Union([
 export type SessionWorkspaceQuery = Static<typeof SessionWorkspaceQuerySchema>;
 export const isSessionWorkspaceQuery = (value: unknown): value is SessionWorkspaceQuery => Value.Check(SessionWorkspaceQuerySchema, value);
 export type SessionWorkspaceResponse =
+  | { type: "session.context"; context: ModelContextPreview }
   | { type: "project.configuration"; configuration: ProjectConfiguration }
   | { type: "project.git"; branch: string; repository: string | null; status: string; diff: string }
   | { type: "project.sources"; instructions: string | null; mcp: string | null; instructionsPath: string; mcpPath: string; mcpDigest: string | null }

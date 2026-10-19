@@ -4,6 +4,7 @@ import { basename, isAbsolute } from "node:path";
 import {
   MoguriError, PROFILE_ID, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
+  type ModelContextPreview,
 } from "../../../packages/protocol/src/index.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
 import { readProjectFile, writeProjectFile } from "./files.ts";
@@ -25,6 +26,7 @@ export interface SessionWorkspaceHost {
   validateAdmission(session: Session): void;
   wake(): void;
   verifyPr(projectId: string, url: string): Promise<void>;
+  contextPreview(session: Session): Promise<ModelContextPreview>;
 }
 export class SessionWorkspace {
   readonly projects: ProjectService;
@@ -85,6 +87,7 @@ export class SessionWorkspace {
   }
   async query(query: SessionWorkspaceQuery): Promise<SessionWorkspaceResponse> {
     switch (query.type) {
+      case "session.context": return { type: query.type, context: await this.host.contextPreview(this.session(query.sessionId)) };
       case "project.configuration": return { type: query.type, configuration: this.projects.configuration(query.projectId) };
       case "project.sources": return this.projects.sources(this.project(query.projectId));
       case "project.git": return this.projects.gitView(this.project(query.projectId), query.diff, AbortSignal.timeout(30_000));

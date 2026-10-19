@@ -36,6 +36,7 @@ export interface PlatformHost {
   removeProject: SessionWorkspaceHost["removeProject"];
   validateAdmission: SessionWorkspaceHost["validateAdmission"];
   closingProject(id: string): boolean;
+  contextPreview: SessionWorkspaceHost["contextPreview"];
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions }
 export class PlatformRuntime {
@@ -58,6 +59,7 @@ export class PlatformRuntime {
       snapshot: () => this.snapshot(), commit: (events, forget) => this.host.commit(events, forget),
       invalidate: (id) => this.host.invalidateApprovals(id),
       mode: host.mode, spawn: host.spawnUser, deleteSession: host.deleteSession, removeProject: host.removeProject, validateAdmission: host.validateAdmission,
+      contextPreview: host.contextPreview,
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),

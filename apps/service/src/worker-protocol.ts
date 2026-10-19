@@ -1,6 +1,6 @@
 import { Type, type Static, type Message, type AssistantMessage, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { isRecord, MAX_TEXT, type ToolCall, type SessionMode } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MAX_TEXT, type ToolCall, type SessionMode, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 import type { FolderPolicy } from "./project-policy.ts";
 import type { PreparedModel } from "./provider.ts";
 
@@ -19,7 +19,7 @@ export const WorkerRequestSchema = Type.Union([
 ]);
 export type WorkerRequest = Static<typeof WorkerRequestSchema>;
 export interface WorkerStart { kind: "start"; root: string; context: Message[]; readOnly: boolean }
-export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy }
+export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
 export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean } | DelegatedResult; error?: string };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" };

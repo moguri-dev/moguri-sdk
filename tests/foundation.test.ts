@@ -28,7 +28,7 @@ test("events and command receipts commit together, replay, and cannot be mutated
     assert.equal(restored?.event_type, "project.added");
     if (restored?.event_type === "project.added") assert.equal(restored.payload.project.name, project.name);
     assert.equal(store.events(1).length, 0);
-    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 4);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 5);
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });

@@ -37,6 +37,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D14 | One importable SDK powers both clients, default-dark branding and user-controlled memory, extensions, MCP and local dictation. | SDK packaging, policy, recovery or physical runtime qualification fails. |
 | D15 | Profile-owned verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
 | D16 | Ghostty embeds the desktop terminal; shared held queues, read-only/side sessions and retained project artifacts extend the same SDK/event authority. | Native input/resize/cancellation, retention-key migration, multi-client policy or packaged-client acceptance fails. |
+| D17 | Compact icon controls expose shared working-context/thinking settings, estimated context preview and provenance-safe usage, with the original red-pom-pom mascot. | Supported transport options, bounded request sizing, migration/restart or compact native-popover behavior fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -336,6 +337,27 @@ read-only inventory access, not daemon/process control.
 The isolated browser is a basic native preview, not the deferred Stainless
 automation integration. Sandbox, Remote, managed worktrees and the wider release
 gates remain unqualified. CI remains main-push-only.
+
+## D17. Compact composer and model settings
+
+**Decision.** The user-requested [composer/model contract](model-controls.md)
+uses one icon toolbar with native lightweight popovers. Cmd/Ctrl visibly
+switches Send to a held-queue clock. Default-unlimited usage stays behind the
+infinity icon; unknown usage and dollar values are not fabricated.
+
+Working context is an explicitly configured limit within the model's fixed
+maximum, with labeled estimates and the maintained provider library's output
+headroom. Oversized requests fail without dropping history or adding a paid
+call. Thinking settings expose only the actual transport's qualified values:
+the generated spike proves OpenAI Responses/Anthropic forwarding and detects
+Copilot Gemini's explicitly ignored effort knob. No silent clamping/fallback.
+Model options and context preview are SDK operations, not client-only state.
+
+Protocol/database migration 5 preserves existing encrypted state and event
+identity, while permitting optional typed model settings and per-step sizing/
+effort provenance. The original mascot gains a small red pom-pom using online
+trait references, not embedded/copied artwork. Existing protection, budget
+qualification and model-provider boundaries are unchanged.
 
 ## Still open
 

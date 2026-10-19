@@ -2,6 +2,7 @@ import { AsyncEntry } from "@napi-rs/keyring";
 import { createModels, type AuthOperationOptions, type Credential, type CredentialStore, type Model, type Api, type ModelAuth } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { isRecord, MoguriError, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { supportedThinking } from "./model-controls.ts";
 
 export interface PreparedModel { model: Model<Api>; auth: ModelAuth }
 export interface ProviderAdapter {
@@ -86,7 +87,7 @@ export class CopilotAdapter implements ProviderAdapter {
       signal.throwIfAborted();
       this.update({
         status: auth ? "connected" : "disconnected",
-        models: models.map((model) => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, imageInput: model.input.includes("image") })),
+        models: models.map((model) => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, imageInput: model.input.includes("image"), thinkingLevels: supportedThinking(model) })),
         login: null, diagnostic: auth && models.length === 0 ? "No enabled, compatible Copilot models. Enable a model in your GitHub Copilot account, then reconnect." : null,
       });
     } catch {

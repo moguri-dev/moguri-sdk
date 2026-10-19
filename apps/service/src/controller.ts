@@ -20,6 +20,7 @@ import { authorizeTool } from "./permissions.ts";
 import { assistantMessage, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest } from "./worker-protocol.ts";
 import { assertSessionTool, folderPolicy } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import { estimateModelContext, modelRequest, validateModelOptions } from "./model-controls.ts";
 
 interface Run {
   sessionId: string;
@@ -83,6 +84,7 @@ export class ControlPlane extends EventEmitter {
         this.paused.delete(session.id);
       },
       closingProject: (id) => this.deletingProjects.has(id),
+      contextPreview: (session) => this.previewContext(session),
     }, platformOptions);
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
@@ -304,16 +306,28 @@ export class ControlPlane extends EventEmitter {
   private revision(actual: number, expected: number): void {
     if (actual !== expected) throw new MoguriError("revision_conflict", "Another client changed this data. Reload the current version before editing.", 409);
   }
-  private available(controls: Controls): void {
+  private async previewContext(session: Session) {
+    const project = this.projection.projects.find((project) => project.id === session.projectId)!;
+    const model = this.provider.state.models.find((model) => model.id === session.controls.modelId);
+    const messages = this.context(session.id);
+    if (session.draft.text || session.draft.attachments.length) messages.push(this.contextItem({ text: session.draft.text, attachments: session.draft.attachments }));
+    const settings = this.platform.sessions.projects.configuration(project.id).values;
+    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings));
+    const systemPrompt = await this.platform.effectivePrompt(session);
+    return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools }), contextWindow: model ? session.controls.modelOptions?.contextWindow ?? model.contextWindow : null, modelMaximum: model?.contextWindow ?? null, source: "estimated" as const };
+  }
+  private available(controls: Controls, requireModel = true): void {
     if (!this.projection.policy.allowedEnvs.includes(controls.env)) throw new MoguriError("env_denied", `${controls.env} is excluded by the user-only allowed-env policy.`, 403);
     const capability = this.snapshot().capabilities.find((capability) => capability.env === controls.env);
     if (!capability?.ready) throw new MoguriError("env_unavailable", capability?.reason ?? "Execution environment unavailable.", 409);
     if (controls.autonomy === "Autopilot Max") throw new MoguriError("autonomy_unavailable", "Autopilot Max requires an evaluated decision provider. It cannot silently self-approve.", 409);
     if (controls.autonomy === "Autopilot" && !this.projection.settings.values.permissions.tools.some((rule) => rule.decision === "allow") && !this.projection.settings.values.permissions.commands.some((rule) => rule.decision === "allow")) throw new MoguriError("delegation_required", "Configure explicit bounded tool or exact-command delegations before selecting Autopilot.", 409);
     if (controls.budget.kind !== "unlimited") throw new MoguriError("budget_unavailable", "Finite budgets are not enforceable in this checkpoint. No cap has been applied.", 409);
-    if (!controls.modelId || controls.modelId === "kupo" || !this.provider.state.models.some((model) => model.id === controls.modelId)) {
+    const model = this.provider.state.models.find((model) => model.id === controls.modelId);
+    if (requireModel && !model || controls.modelId !== null && !model) {
       throw new MoguriError("model_unavailable", "Sign in to GitHub Copilot and explicitly select an available fixed model.", 409);
     }
+    validateModelOptions(model, controls.modelOptions);
   }
   private attachments(session: Session, attachments: Session["draft"]["attachments"]): void {
     for (const attachment of attachments) {
@@ -393,7 +407,7 @@ export class ControlPlane extends EventEmitter {
       case "session.configure":
         if (session.turnId) throw new MoguriError("turn_active", "Stop the current turn before changing its controls.", 409);
         this.revision(session.revision, command.expectedRevision);
-        this.available(command.controls);
+        this.available(command.controls, false);
         return finish([this.event(session, "session.configured", { controls: command.controls })], { revision: session.revision + 1 });
       case "session.archive": {
         await this.settleOwned(session.id);
@@ -639,13 +653,16 @@ export class ControlPlane extends EventEmitter {
         run.repositoryContext ??= await this.platform.sessions.projects.context(project);
         const effectivePrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext);
         if (run.done || run.abort.signal.aborted) return;
+        const configured = modelRequest(prepared.model, current.controls.modelOptions, {
+          systemPrompt: effectivePrompt, messages: [...this.context(current.id), ...steers.map((item) => this.contextItem(item))], tools,
+        });
         run.inFlight = true;
         this.commit([
           ...steers.map((item) => this.event(current, "steer.applied", { item }, request.stepId)),
           this.event(current, "turn.prompt_bound", { promptDigest: this.store.putBlob(effectivePrompt) }, request.stepId),
-          this.event(current, "model.started", { modelId: prepared.model.id }, request.stepId),
+          this.event(current, "model.started", { modelId: prepared.model.id, contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens, ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId),
         ]);
-        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, steers: steers.map((item) => this.contextItem(item)), systemPrompt: effectivePrompt, tools, mode: current.mode, folders: folderPolicy(projectSettings) } });
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: configured.model, maxTokens: configured.maxTokens, thinkingEffort: configured.thinkingEffort, steers: steers.map((item) => this.contextItem(item)), systemPrompt: effectivePrompt, tools, mode: current.mode, folders: folderPolicy(projectSettings) } });
       } catch (error) {
         this.reply(run, { kind: "reply", requestId: request.requestId, error: error instanceof MoguriError ? error.message : "Copilot model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       } finally { if (this.writerReservations.get(session.projectId) === session.id) this.writerReservations.delete(session.projectId); }
@@ -681,6 +698,9 @@ export class ControlPlane extends EventEmitter {
           totalTokens: request.usageReported ? message.usage.totalTokens : null,
           estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: request.generationMs,
           quality: request.usageReported ? "provider-reported" : "unknown", outcome: message.stopReason,
+          contextWindow: session.usage.find((usage) => usage.stepId === request.stepId)?.contextWindow,
+          contextEstimate: session.usage.find((usage) => usage.stepId === request.stepId)?.contextEstimate,
+          thinkingEffort: session.usage.find((usage) => usage.stepId === request.stepId)?.thinkingEffort,
         },
       }, request.stepId)]);
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });

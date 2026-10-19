@@ -31,12 +31,15 @@ migration and recovery tests, not deletion of user state.
 Migration 2 adds project-scoped derived repository caches and graph tables.
 Migration 3 adds derived dependency-cache object metadata, local board/ticket
 and cache-receipt events. Event envelopes remain schema version 1; the client
-protocol is version 4. The [workspace contract](workspace-platform.md) records
+protocol is version 5. The [workspace contract](workspace-platform.md) records
 cache/advisory, read-only integration and recovery boundaries.
 Migration 4 adds encrypted retention compartments while preserving prior event
 identity/sequence. The [session workspace contract](session-workspace.md)
 records held prompts, hard read-only/side modes, project settings, independent
 artifacts and deletion/restart boundaries.
+Migration 5 adds optional shared model/window/effort controls, per-step
+provenance and local context previews; the [composer contract](model-controls.md)
+records supported transport qualification and estimate boundaries.
 
 Both clients share the SDK and subscribe to the same sequenced stream. The
 service owns projects, sessions, transcripts, drafts, queue, pending approvals,

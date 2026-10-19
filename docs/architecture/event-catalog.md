@@ -16,7 +16,7 @@ Unused scope fields are null in checkpoint 1.
 | `queue.delivery_changed` | Explicit conversion of an unclaimed steer into a new queued turn. |
 | `turn.started` | Admitted item, controls, allowed-env revision and optional committed prompt digest; claims the item once. |
 | `steer.applied` | One item enters its owning turn at a safe model-step boundary. |
-| `model.started` | Step and actual fixed model. Creates an unknown, in-progress accounting entry. |
+| `model.started` | Step, actual fixed model, effective context window/effort and estimated context. Creates an unknown, in-progress accounting entry; estimates are not provider token telemetry. |
 | `assistant.delta` | Durable streamed text for that step, batched by the worker. |
 | `model.completed` | Public message, normalized-context blob digest and actual/unknown usage. Does not imply overall turn success. |
 | `tool.requested` | Exact declared tool, approval UUID and policy revision. |
@@ -83,7 +83,7 @@ the exact reviewed file digest. No opening/reading action silently pushes.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":4,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":5,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

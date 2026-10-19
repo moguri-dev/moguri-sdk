@@ -5,9 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 4 deliberately rejects incompatible running
-services. Database migration 4 preserves schema-1/2/3 history, sessions, drafts,
-receipts, blobs and indexes while adding retention compartments. Restart a previously running alpha service explicitly with
+This is an alpha API. Protocol 5 deliberately rejects incompatible running
+services. State migrations preserve schema-1/2/3/4 history, sessions, drafts,
+receipts, blobs, indexes and retention compartments. Migration 5 adds optional
+model controls without resetting prior defaults. Restart a previously running alpha service explicitly with
 `node bin/moguri.mjs service restart`; do not delete its state.
 
 ## Build and consume
@@ -18,7 +19,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.4.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.5.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -105,7 +106,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `issues` | Local feature/bug/misc board, create/update/move/archive, revision-checked phases and read-only linked-PR refresh. |
 | `cache` | Local plan inspection, explicit metadata-sharing consent, integrity-verified archive preparation and script-free managed install. |
 | `linear` | Optional team-scoped read-only page import, status and user-only OS-keychain credential setup. |
-| `sessions` | Revisioned rename/mode/pin/unread/group/attach/delete, explicit side/agent children and work-item/verified-PR context. Side sessions cannot acquire write authority. |
+| `sessions` | Revisioned controls/modelOptions, local context preview, rename/mode/pin/unread/group/attach/delete, explicit side/agent children and work-item/verified-PR context. Side sessions cannot acquire write authority. |
 | `projects` | Configuration, ordered folders/color, atomic reorder, relocation/removal, scoped Git/source reads, reviewed MCP imports and explicit default-file publication. |
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
 | `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
@@ -163,6 +164,29 @@ Archived retention is opt-in `settings.values.retention`; `retention.run`
 honors that policy. Production retention uses the explicit OS-keychain backend;
 generated embedders/tests may inject a 32-byte `retentionKey`, never hardcode a
 real key or silently derive one from a path.
+
+### Model context and thinking
+
+`sessions.modelOptions(sessionId, options, observedRevision?)` stores optional
+`contextWindow` and `thinkingEffort` alongside the session controls. The working
+window cannot exceed the selected model's fixed maximum. It is enforced against
+the maintained library's labeled context estimate and output/headroom sizing,
+not represented as exact tokenization or a finite spend cap. Oversized estimates
+stop before inference without silently dropping or compacting history.
+
+Use the selected `provider.models[].thinkingLevels`, not a hardcoded effort
+list. A transport may have reasoning but not expose configurable effort;
+unsupported options fail explicitly. Omitting effort uses the model default.
+`sessions.context(sessionId)` reads an estimate including saved draft,
+instructions, tools and conversation without calling a model. The normalized
+provider payload stays service-side.
+
+Desktop puts these settings in the model-name popover. TUI uses
+`/model-settings` to inspect, `/model-settings JSON` to apply and
+`/model-settings reset` to restore defaults. CLI uses
+`session model-settings options.json --session ID --revision N` and
+`session context --session ID`. Changes require an idle session; running turns
+retain their selected settings and every step records effective provenance.
 
 To enable memory, clone `sdk.settings.get().values`, set `memory.enabled`, then
 call `settings.update` with the observed revision. `memory.index(projectId)`
