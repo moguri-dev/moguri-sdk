@@ -115,3 +115,14 @@ complete isolated rerun passed; no process-containment improvement is claimed
 from that rerun. Known upstream FFI/deprecation and lazy Ghostty chunk notices
 remain visible. No live account, browser authorization, OS banner, microphone
 or model weights were used.
+
+The actual 0.6 app passes all eight hidden Electron workflows. Independent
+bundle checks verify the ad-hoc signature, declared mascot icon, bundled
+Node 26.12, native PTY input/close, Ghostty assets and speech readiness without
+weights. The compiled service also completes generated OAuth and an exactly
+approved HTTP tool call from a project-free session; echoed credentials remain
+redacted. No source-runtime substitution is used for that backend check.
+
+`release/` contains the app, the checksum-verified 348,589,491-byte DMG,
+270,153,686-byte ZIP and independently packed SDK tarball for `0.6.0-alpha.1`.
+These are ad-hoc development artifacts, not notarized releases.

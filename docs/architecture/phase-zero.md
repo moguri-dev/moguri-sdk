@@ -8,6 +8,9 @@ These are the initial checkpoint measurements. The later user-requested
 [SDK platform slice](sdk-platform.md) records its separate capability, package
 and recovery evidence; initial unsupported services are not silently promoted
 to release-ready.
+The [0.6 engagement slice](engagement.md#local-qualification) records later
+OAuth, project-free scope, reviewed metachat, attention and actual-bundle checks
+without replacing these historical baseline measurements.
 
 Initial budgets were set before the run: SQLite append p95 below 20 ms; bounded
 2,000-file listing below 500 ms and Git status below 1 s; Electron shell ready
