@@ -157,6 +157,29 @@ credential forwarding, large input-credit behavior, SDK transport integration
 and cancellation/restart still require genuine qualification. No production
 trust change, attested release or ready Sandbox capability is claimed.
 
+### Foreground control under enforced egress
+
+Actual R4 tests prove normal detached Node fork/IPC works, but arbitrary direct
+loopback TCP times out under deny-first egress. That is intended enforcement,
+not permission to open a control port or weaken nftables. The persistent SSH
+bridge's loopback supervisor is therefore not a native Sandbox transport.
+
+The owned `--foreground` bridge uses the same bounded private wire and real
+Node worker IPC without a TCP daemon, detached supervisor or replay journal.
+It preserves only the runtime's exact proxy variables into the worker, never
+arbitrary ambient secrets or NODE_OPTIONS. Explicit Node launch flags remain
+part of the user-selected command. A terminal outcome is not completed unless
+its actual parent acknowledgement arrived; worker exit still does not prove
+native VM teardown or descendant containment.
+
+The generated native model-loop fixture uses a clearly labeled in-guest fetch
+interceptor with synthetic responses, not a reachable local model endpoint or
+a real credential. It cannot establish provider networking/entitlement. A
+separate optional credential-free metadata probe permits only
+`api.githubcopilot.com` through the signed runtime proxy. All other egress stays
+deny-first. Large input, exact tool effects, native cleanup and SDK/controller
+integration remain independent gates.
+
 SendBox entry allow rules match argv token counts, not shell-style tail globs:
 `/bin/sh -c *` matches the three-token generated probe, while `/bin/sh *` does
 not. `scripts/sendbox-spike.mjs` preserves failed configuration and reports the

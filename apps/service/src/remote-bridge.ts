@@ -11,6 +11,7 @@ import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME } from "./worker-wire.ts
 import { parentMessage, WorkerRequestSchema, type WorkerRequest } from "./worker-protocol.ts";
 import { BridgeInitSchema, SavedStatusSchema, BridgeEnvelopeSchema, type BridgeInit, type BridgeInfo, type BridgeStatus, type BridgeFrame, type SavedStatus } from "./remote-protocol.ts";
 import { repositoryContext } from "./project-policy.ts";
+import { foregroundWorker } from "./foreground-bridge.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -26,14 +27,14 @@ async function privateDirectory(path: string): Promise<string> {
 }
 async function runtimeInfo(init: BridgeInit): Promise<BridgeInfo> {
   const [major, minor] = process.versions.node.split(".").map(Number);
-  if (major !== 26 || minor! < 4 || !["darwin", "linux"].includes(process.platform)) throw new MoguriError("remote_version", "The SSH host needs Node 26.4+ (26.x) and a supported macOS/Linux Moguri worker.");
+  if (major !== 26 || minor! < 4 || !["darwin", "linux"].includes(process.platform)) throw new MoguriError("remote_version", "The execution worker needs Node 26.4+ (26.x) on supported macOS/Linux.");
   const workerDigest = createHash("sha256").update(await readFile(workerPath)).digest("hex");
-  if (workerDigest !== init.workerDigest && !["inspect", "attach"].includes(init.action)) throw new MoguriError("remote_worker_build", "Remote worker build differs. Install this exact Moguri build; no alternative worker was started.");
+  if (workerDigest !== init.workerDigest && !["inspect", "attach"].includes(init.action)) throw new MoguriError("remote_worker_build", "Execution worker build differs. Install this exact Moguri build; no alternative worker was started.");
   let root: string | null = null;
   if (init.root !== null && init.action !== "inspect") {
     if (!isAbsolute(init.root)) throw new MoguriError("remote_workspace", "Approve an absolute canonical remote workspace.");
     root = await realpath(init.root);
-    if (root !== init.root || !(await lstat(root)).isDirectory()) throw new MoguriError("remote_workspace_alias", "Remote workspace moved or is a symlink alias. Approve its canonical path explicitly.");
+    if (root !== init.root || !(await lstat(root)).isDirectory()) throw new MoguriError("remote_workspace_alias", "Execution workspace moved or is a symlink alias. Approve its canonical path explicitly.");
   }
   return { protocol: PROTOCOL_VERSION, workerDigest, nodeVersion: process.versions.node, platform: process.platform, root };
 }
@@ -203,14 +204,14 @@ async function frontend(): Promise<void> {
   if (tty) process.stdin.setRawMode(true);
   const outer = new JsonLineChannel(process.stdin, process.stdout, tty);
   const abort = new AbortController();
-  let initialized = false, inner: JsonLineChannel | undefined;
+  let initialized = false, inner: JsonLineChannel | undefined, foreground: ReturnType<typeof foregroundWorker> | undefined;
   outer.on("error", () => { inner?.end(); process.exitCode = 1; });
-  outer.on("close", () => { abort.abort(); inner?.end(); process.stdin.destroy(); });
+  outer.on("close", () => { abort.abort(); inner?.end(); foreground?.disconnect(); process.stdin.destroy(); });
   if (tty) { process.stdout.write("\n"); outer.send({ kind: "bootstrap", protocol: PROTOCOL_VERSION }); }
   let queue = Promise.resolve();
   outer.on("message", (raw) => {
     queue = queue.then(async () => {
-      if (initialized) { if (!inner) throw new Error("Remote control is not attached."); inner.send(raw); return; }
+      if (initialized) { if (foreground) { foreground.receive(raw); return; } if (!inner) throw new Error("Remote control is not attached."); inner.send(raw); return; }
       initialized = true;
       if (!Value.Check(BridgeInitSchema, raw)) throw new Error("Remote bootstrap does not match this protocol.");
       const init = raw, info = await runtimeInfo(init);
@@ -230,6 +231,10 @@ async function frontend(): Promise<void> {
         try { while (true) { const part = await reader.read(); if (part.done) break; size += part.value.length; if (size > 256 * 1024) { await reader.cancel(); throw new Error("Remote model catalog exceeded 256 KiB."); } chunks.push(part.value); } }
         finally { reader.releaseLock(); }
         outer.send({ kind: "catalog", status: response.status, body: Buffer.concat(chunks).toString("base64"), info }, () => outer.end()); return;
+      }
+      if (process.argv.includes("--foreground")) {
+        if (init.action !== "start") throw new MoguriError("foreground_ephemeral", "Foreground native runs cannot inspect/reattach another execution. No replay or second worker was started.");
+        foreground = foregroundWorker(workerPath, init, info, outer); return;
       }
       const credentials = runCredentials(init), root = await privateDirectory(init.stateDir), directory = join(root, credentials.id);
       if (init.action === "start") {

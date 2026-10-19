@@ -35,4 +35,4 @@ RUN mkdir /workspace && chown node:node /workspace
 USER node
 WORKDIR /workspace
 RUN node -e 'require("node:fs").accessSync("/opt/moguri/payload.json", require("node:fs").constants.R_OK)'
-ENTRYPOINT ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs"]
+ENTRYPOINT ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"]
