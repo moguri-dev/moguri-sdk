@@ -91,7 +91,8 @@ test("archived cleanup is off by default, preserves independent artifacts and su
     assert.equal(sdk.getState().snapshot!.sessions.length, 0);
     assert.equal((await sdk.plans.artifact(artifact.id!)).text, "Generated retained artifact.");
     const configuration = await sdk.projects.configuration(projectId);
-    await sdk.projects.remove(projectId, true, configuration.configuration.revision);
+    const artifacts = (await sdk.artifacts.projectPreview(projectId)).preview;
+    await sdk.projects.remove(projectId, true, configuration.configuration.revision, { action: "delete", expectedDigest: artifacts.digest });
     await assert.rejects(() => sdk.plans.artifact(artifact.id!), /outside|missing/);
     assert.equal(await readFile(join(fixture.project, "docs", "plan.md"), "utf8"), "Generated retained artifact.");
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }

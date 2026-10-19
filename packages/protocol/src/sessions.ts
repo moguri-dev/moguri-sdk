@@ -3,6 +3,8 @@ import { Value } from "typebox/value";
 import { McpServerSchema, SandboxSchema } from "./config.ts";
 import type { ModelContextPreview } from "./model.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
+import { ProjectArtifactChoiceSchema, type RetainedArtifact } from "./artifacts.ts";
+export type { RetainedArtifact } from "./artifacts.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -43,7 +45,6 @@ export const defaultProjectConfiguration = (projectId: string): ProjectConfigura
 });
 export interface NavigationFolder { id: string; name: string; order: number; revision: number }
 export interface SessionGroup extends NavigationFolder { projectId: string }
-export interface RetainedArtifact { id: string; projectId: string; originSessionId: string | null; name: string; path: string | null; contentDigest: string; createdAt: string; workspaceId?: string | null }
 export interface TerminalState {
   id: string; sessionId: string; projectId: string; title: string; pid: number | null; cols: number; rows: number;
   workspaceId?: string | null;
@@ -69,7 +70,7 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("project.reorder"), folderId: nullableId, projects: Type.Array(object({ projectId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("project.settings"), projectId: id, expectedRevision: revision, settings: ProjectSettingsSchema }),
   object({ type: Type.Literal("project.relocate"), projectId: id, expectedRevision: revision, path }),
-  object({ type: Type.Literal("project.remove"), projectId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("project.remove"), projectId: id, expectedRevision: revision, confirm: Type.Literal(true), artifacts: Type.Optional(ProjectArtifactChoiceSchema) }),
   object({ type: Type.Literal("project.defaults"), projectId: id, expectedRevision: revision, branch: Type.String({ minLength: 1, maxLength: 200 }), confirmPush: Type.Literal(true) }),
   object({ type: Type.Literal("project.mcp.import"), projectId: id, expectedRevision: revision, confirmReview: Type.Literal(true), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("project.folder"), id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision }),
@@ -96,7 +97,6 @@ export const SessionWorkspaceQuerySchema = Type.Union([
   object({ type: Type.Literal("project.sources"), projectId: id }),
   object({ type: Type.Literal("project.porto"), projectId: id }),
   object({ type: Type.Literal("plan.read"), sessionId: id }),
-  object({ type: Type.Literal("artifact.read"), artifactId: id }),
   object({ type: Type.Literal("terminal.read"), terminalId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 65536 }) }),
 ]);
 export type SessionWorkspaceQuery = Static<typeof SessionWorkspaceQuerySchema>;
@@ -108,5 +108,4 @@ export type SessionWorkspaceResponse =
   | { type: "project.sources"; instructions: string | null; mcp: string | null; instructionsPath: string; mcpPath: string; mcpDigest: string | null }
   | { type: "project.porto"; output: string }
   | { type: "plan.read"; path: string; text: string; digest: string; exists: boolean }
-  | { type: "artifact.read"; text: string; artifact: RetainedArtifact }
   | { type: "terminal.read"; terminal: TerminalState; data: string; baseOffset: number; nextOffset: number };

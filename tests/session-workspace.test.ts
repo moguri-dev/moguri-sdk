@@ -102,7 +102,8 @@ test("session deletion destroys its retained payloads but preserves project arti
     assert.ok(Number(fixture.service.store.db.prepare("SELECT count(*) AS total FROM events").get()?.total) > rawBefore);
     assert.throws(() => fixture.service.store.db.exec("DELETE FROM events"), /append-only/);
     assert.equal(await readFile(join(fixture.project, "fixture.txt"), "utf8"), "generated original\n");
-    await sdk.projects.remove(projectId, true, 0);
+    const removal = (await sdk.artifacts.projectPreview(projectId)).preview;
+    await sdk.projects.remove(projectId, true, 0, { action: "delete", expectedDigest: removal.digest });
     assert.equal(sdk.getState().snapshot!.projects.length, 0);
     await assert.rejects(() => sdk.plans.artifact(artifact.id!), /outside|missing/);
     assert.equal(existsSync(join(fixture.project, "docs", "plan.md")), true);

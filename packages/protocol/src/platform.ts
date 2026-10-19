@@ -10,6 +10,8 @@ import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
 import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
+import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse } from "./artifacts.ts";
+export * from "./artifacts.ts";
 export * from "./execution.ts";
 export * from "./worktrees.ts";
 export * from "./workspace.ts";
@@ -81,6 +83,7 @@ const section = Type.Union([
   Type.Literal("remote"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  ArtifactCommandSchema,
   object({ type: Type.Literal("settings.update"), expectedRevision: revision, settings: SettingsSchema, acknowledgePromptRisk: Type.Boolean() }),
   object({ type: Type.Literal("settings.reset"), expectedRevision: revision, section }),
   object({ type: Type.Literal("models.token.set"), endpointId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
@@ -130,6 +133,7 @@ export const QuerySchema = Type.Union([
   InputQuerySchema,
   ExecutionQuerySchema,
   ManagedWorkspaceQuerySchema,
+  ArtifactQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -178,6 +182,7 @@ export type PlatformResponse =
   | InputResponse
   | ExecutionResponse
   | ManagedWorkspaceResponse
+  | ArtifactResponse
   | { type: "prompt.preview"; editable: string; effective: string; warning: string }
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }

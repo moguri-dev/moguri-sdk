@@ -1,5 +1,5 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults } from "../../protocol/src/index.ts";
+import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -66,6 +66,18 @@ export class MoguriSdk extends TransportClient {
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
     clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
   };
+  readonly artifacts = {
+    create: (sessionId: string | null, artifact: { kind: ArtifactKind; name: string; text: string; projectId?: string | null }) => this.command({ type: "artifact.create", sessionId, ...artifact }),
+    source: (sessionId: string, sourceKind: "message" | "tool", sourceId: string) => this.query({ type: "artifact.source", sessionId, sourceKind, sourceId }),
+    promote: (sessionId: string, source: { sourceKind: "message" | "tool"; sourceId: string; kind: ArtifactKind; name: string; expectedDigest: string }) => this.command({ type: "artifact.promote", sessionId, ...source }),
+    read: (artifactId: string, revision?: number) => this.query({ type: "artifact.read", artifactId, ...(revision === undefined ? {} : { revision }) }),
+    history: (artifactId: string, offset = 0, limit = 20) => this.query({ type: "artifact.history", artifactId, offset, limit }),
+    update: (artifactId: string, changes: ArtifactChanges, expectedRevision: number) => this.command({ type: "artifact.update", artifactId, changes, expectedRevision }),
+    delete: (artifactId: string, expectedRevision: number, confirm: true) => this.command({ type: "artifact.delete", artifactId, expectedRevision, confirm }),
+    export: (artifactId: string) => this.query({ type: "artifact.export", artifactId }),
+    projectPreview: (projectId: string) => this.query({ type: "project.artifacts.preview", projectId }),
+    projectExport: (projectId: string) => this.query({ type: "project.artifacts.export", projectId }),
+  };
   readonly workspaces = {
     discover: (projectId: string) => this.query({ type: "workspace.discover", projectId }),
     create: (projectId: string, branch: string, options: { baseRef?: string; issueId?: string; prUrl?: string } = {}) => this.command({ type: "workspace.create", projectId, branch, ...options }),
@@ -114,7 +126,7 @@ export class MoguriSdk extends TransportClient {
     reorder: (folderId: string | null, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.reorder", folderId, projects }),
     folder: (name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "project.folder", name, order, expectedRevision, ...(id ? { id } : {}) }),
     relocate: (projectId: string, path: string, expectedRevision: number) => this.command({ type: "project.relocate", projectId, path, expectedRevision }),
-    remove: (projectId: string, confirm: true, expectedRevision: number) => this.command({ type: "project.remove", projectId, expectedRevision, confirm }),
+    remove: (projectId: string, confirm: true, expectedRevision: number, artifacts?: ProjectArtifactChoice) => this.command({ type: "project.remove", projectId, expectedRevision, confirm, ...(artifacts ? { artifacts } : {}) }),
     git: (projectId: string, diff = true) => this.query({ type: "project.git", projectId, diff }),
     sources: (projectId: string) => this.query({ type: "project.sources", projectId }),
     porto: (projectId: string) => this.query({ type: "project.porto", projectId }),

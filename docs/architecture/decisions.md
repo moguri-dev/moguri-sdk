@@ -42,6 +42,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D19 | Configured local models, snapshotted startup defaults and typed reviewed context extend the shared runtime. | Provider identity, resource-bound credentials, source consent or migration/recovery fails. |
 | D20 | Core SSH execution uses a pinned owned worker bridge and durable late receipts without replay. | Host/build/root verification, actual remote inference or truthful loss/cancellation accounting fails. |
 | D21 | Managed Local worktrees use explicit owned roots and per-root writer leases across every SDK/client filesystem surface. | Safe Git creation/removal, root consistency, concurrency or restart reconciliation fails. |
+| D22 | Typed text artifacts have independent encryption/revisions and exact source provenance; project removal binds an explicit reviewed retention choice. | Legacy rekeying, source-actor separation, deletion isolation or persistent client export fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -473,7 +474,27 @@ Session retention does not delete a worktree. Project relocation/removal blocks
 while roots remain. Discovery reads registrations without adopting them.
 Protocol/database migration 9 preserves older events, keys, grants, IDs and
 defaults. [The contract](managed-workspaces.md) records the measured primitive,
-Local slice and unimplemented artifact/Remote/Sandbox/orchestration boundaries.
+Local slice and remaining Remote/Sandbox/orchestration boundaries.
+
+## D22. Independent artifact keys and canonical provenance
+
+**Decision.** Reuse Node AES-GCM, the explicit keychain and append-only SQLite
+authority. Give each typed text document its own key and revision history,
+separate from its source conversation. Plan, decision, answer, research note
+and report are real classes, not headings in a session transcript.
+
+Migration 10 transactionally rekeys legacy plans while preserving event
+plaintext, IDs/sequences, receipts and content digests. Source promotion binds
+the canonical event/text and actual user/model/tool actor; file authorship is
+unknown, and manual entry is not proof of human authorship. User edits do not
+relabel model text or grant instructions/permissions.
+
+Project removal reviews an exact set/digest and explicitly retains to profile,
+exports then deletes, or deletes artifact grants. Client exports use an explicit
+save action and a new private file, never silent overwrite or repository
+publication. Restart, concurrency, shared-content grants and rollback are
+generated acceptance. Structured questions, repository materialization/commit
+and work-item/folder organization remain separate first-release capabilities.
 
 ## Still open
 

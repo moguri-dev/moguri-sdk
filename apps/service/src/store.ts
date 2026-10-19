@@ -6,7 +6,7 @@ import { eventTypes, isRecord, MoguriError, type CommandResult, type EventInput,
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
-export interface ForgetRequest { sessions?: string[]; projects?: string[] }
+export interface ForgetRequest { sessions?: string[]; projects?: string[]; artifacts?: string[] }
 function seal(text: string, key: Buffer, scope: string, aad: string): Sealed {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv); cipher.setAAD(Buffer.from(aad));
@@ -25,7 +25,10 @@ function initialKey(path: string): Buffer {
   if (path !== ":memory:") throw new Error("Persistent EventStore requires an explicit retention key. Use the Moguri service/Node SDK to resolve its OS-keychain backend.");
   return randomBytes(32);
 }
-function scopeFor(input: EventInput): Scope {
+const artifactIdentity = (input: EventInput): string | null => input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id : null;
+const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
+function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
+  if (artifactId && (input.event_type === "artifact.saved" || input.event_type === "artifact.revised")) return artifactScope(input.profile_id, artifactId);
   const projectId = input.project_id ?? null;
   const sessionId = input.session_id ?? null;
   return { scope: `profile/${input.profile_id}${projectId ? `/project/${projectId}` : ""}${sessionId ? `/session/${sessionId}` : ""}`, projectId, sessionId };
@@ -42,6 +45,7 @@ function references(input: EventInput): string[] {
     case "capability.saved": return [input.payload.entry.contentDigest];
     case "capability.proposed": return [input.payload.proposal.contentDigest];
     case "artifact.saved": return [input.payload.artifact.contentDigest];
+    case "artifact.revised": return [input.payload.artifact.contentDigest];
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
     case "job.finished": return input.payload.resultDigest ? [input.payload.resultDigest] : [];
@@ -57,7 +61,7 @@ export class EventStore {
     this.db = new DatabaseSync(path, { allowExtension: true });
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
-      if (version > 9) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version > 10) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -103,6 +107,7 @@ export class EventStore {
         PRAGMA user_version=9; COMMIT;`);
       const existing = this.db.prepare("SELECT scope,payload FROM retention_keys LIMIT 1").get();
       if (existing) this.key({ scope: String(existing.scope), projectId: null, sessionId: null }, false);
+      if (version < 10) this.migrateArtifacts();
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {
@@ -155,6 +160,44 @@ export class EventStore {
       this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); this.keys.clear(); throw error; }
   }
+  private migrateArtifacts(): void {
+    const rows = this.db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all();
+    const live: Array<{ event: StoredEvent; scope: Scope }> = [];
+    for (const row of rows) {
+      const event = this.validEvent(JSON.parse(String(row.data)), Number(row.seq));
+      const encrypted: unknown = event.payload, normal = scopeFor(event, event.artifact_id ?? null), legacy = scopeFor(event);
+      if (!isRecord(encrypted) || encrypted.scope !== normal.scope && encrypted.scope !== legacy.scope) throw new Error("Retained event scope is corrupt. State was preserved.");
+      const scope = encrypted.scope === normal.scope ? normal : legacy, key = this.key(scope, false);
+      if (key) live.push({ event: this.validEvent({ ...event, payload: JSON.parse(unseal(encrypted, key, `event:${event.id}`)) }, event.seq), scope });
+    }
+    const needed = new Set(live.flatMap(({ event }) => references(event).map((hash) => JSON.stringify([scopeFor(event, artifactIdentity(event)).scope, hash]))));
+    const byId = new Map(live.map((entry) => [entry.event.id, entry]));
+    this.db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE events_v10(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,data TEXT NOT NULL,payload TEXT NOT NULL);`);
+    try {
+      for (const row of rows) {
+        const entry = byId.get(String(row.id)), id = entry ? artifactIdentity(entry.event) : null;
+        if (!entry || !id) {
+          this.db.prepare("INSERT INTO events_v10 VALUES (?,?,?,?)").run(Number(row.seq), String(row.id), String(row.data), String(row.payload));
+          continue;
+        }
+        const scope = scopeFor(entry.event, id);
+        for (const hash of references(entry.event)) {
+          this.bind(hash, scope);
+          if (entry.scope.scope !== scope.scope && !needed.has(JSON.stringify([entry.scope.scope, hash]))) this.db.prepare("DELETE FROM blob_payloads WHERE digest=? AND scope=?").run(hash, entry.scope.scope);
+        }
+        const payload = seal(JSON.stringify(entry.event.payload), this.key(scope, true)!, scope.scope, `event:${entry.event.id}`);
+        const { seq: _seq, ...data } = entry.event;
+        this.db.prepare("INSERT INTO events_v10 VALUES (?,?,?,?)").run(entry.event.seq, entry.event.id, JSON.stringify({ ...data, artifact_id: id, payload }), JSON.stringify(payload));
+      }
+      this.db.exec(`DROP TABLE events; ALTER TABLE events_v10 RENAME TO events;
+        CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END;
+        CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END;
+        INSERT INTO retention_metadata(id,value) VALUES ('retained_artifact_schema','1');
+        PRAGMA user_version=10; COMMIT;`);
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); this.keys.clear(); throw error; }
+  }
   receipt(id: string, expectedDigest: string): CommandResult | undefined {
     const row = this.db.prepare("SELECT digest,result FROM receipts WHERE id=?").get(id);
     if (!row) return undefined;
@@ -168,9 +211,9 @@ export class EventStore {
       const append = (input: EventInput) => {
         const data = {
           project_id: null, session_id: null, turn_id: null, step_id: null, correlation_id: null,
-          ...input, id: randomUUID(), schema_version: 1, timestamp: new Date().toISOString(), work_item_id: null, parent_event_id: null,
+          ...input, id: randomUUID(), schema_version: 1, timestamp: new Date().toISOString(), work_item_id: null, parent_event_id: null, artifact_id: artifactIdentity(input),
         };
-        const scope = scopeFor(input);
+        const scope = scopeFor(input, data.artifact_id);
         for (const hash of references(input)) this.bind(hash, scope);
         const payload = seal(JSON.stringify(input.payload), this.key(scope, true)!, scope.scope, `event:${data.id}`);
         const row = this.db.prepare("INSERT INTO events (id,data,payload) VALUES (?,?,?)").run(data.id, JSON.stringify({ ...data, payload }), JSON.stringify(payload));
@@ -201,10 +244,12 @@ export class EventStore {
     return this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after).flatMap((row) => {
       const event: unknown = JSON.parse(String(row.data));
       const data = this.validEvent(event, Number(row.seq));
-      const scope = scopeFor(data);
+      const scope = scopeFor(data, data.artifact_id ?? null);
       const key = this.key(scope, false);
       if (!key) return [];
-      return [this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, Number(row.seq))];
+      const decoded = this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, Number(row.seq));
+      if (artifactIdentity(decoded) !== (data.artifact_id ?? null)) throw new Error("Artifact retention identity is corrupt. State was preserved.");
+      return [decoded];
     });
   }
   putBlob(content: string): string {
@@ -232,6 +277,7 @@ export class EventStore {
       for (const row of this.db.prepare("SELECT scope FROM retention_keys WHERE project_id=? AND scope LIKE 'profile/default/%'").all(id)) scopes.add(String(row.scope));
       this.clearProjectIndex(id);
     }
+    for (const id of request.artifacts ?? []) scopes.add(artifactScope("default", id).scope);
     for (const scope of scopes) {
       this.db.prepare("INSERT OR REPLACE INTO retention_forgotten VALUES (?,?)").run(scope, new Date().toISOString());
       this.db.prepare("DELETE FROM blob_payloads WHERE scope=?").run(scope);

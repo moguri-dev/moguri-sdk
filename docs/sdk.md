@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 9 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-8 history, sessions, drafts,
+This is an alpha API. Protocol 10 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-9 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -111,6 +111,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `projects` | Configuration, ordered folders/color, atomic reorder, relocation/removal, scoped Git/source reads, reviewed MCP imports and explicit default-file publication. |
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
 | `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
+| `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
@@ -239,16 +240,57 @@ Project MCP auth/token operations must include their bound session ID.
 not an implicit effect of reading settings. Inspect its terminal result:
 partial or cancelled publication is not success.
 
-Artifacts are project-owned: `plans.save`/`capture` retain a content snapshot
-independent of a session; `plans.artifact` remains readable after session
-deletion. Deletion requires confirmation and an observed session revision.
+Artifacts are independently encrypted in project/profile scope.
+`plans.save`/`capture` retain a plan snapshot with unknown file authorship;
+`plans.artifact` remains readable after session deletion. Source-session
+deletion requires confirmation and an observed session revision.
 Project removal refuses retained managed worktrees; remove them explicitly first.
-It separately forgets project content/derived indexes and project
+It requires a reviewed artifact choice before forgetting project content/derived indexes and project
 MCP credentials, never source files, external PRs or shared caches/models.
 Archived retention is opt-in `settings.values.retention`; `retention.run`
 honors that policy. Production retention uses the explicit OS-keychain backend;
 generated embedders/tests may inject a 32-byte `retentionKey`, never hardcode a
 real key or silently derive one from a path.
+
+### Independent artifacts
+
+```ts
+const created = await sdk.artifacts.create(null, {
+  projectId, kind: "decision", name: "Generated decision", text: "Explicit text.",
+});
+await sdk.artifacts.update(created.id!, { text: "Explicit revised text." }, 0);
+const old = await sdk.artifacts.read(created.id!, 0);
+const revisions = await sdk.artifacts.history(created.id!, 0, 20);
+const source = await sdk.artifacts.source(sessionId, "message", messageId);
+const answer = await sdk.artifacts.promote(sessionId, {
+  sourceKind: "message", sourceId: messageId, kind: "answer",
+  name: "Reviewed answer", expectedDigest: source.preview.digest,
+});
+const exported = await sdk.artifacts.export(answer.id!);
+```
+
+`create(sessionIdOrNull, document)` uses that session's explicit scope, or the
+supplied project/profile scope with no invented conversation/filesystem root.
+Promotion copies the exact canonical completed user/model message or terminal
+tool result, preserving its real actor, source event, digest and outcome.
+Later edits set `edited`, never relabel model text as a user answer.
+Archive is `update(id, {status: "archived"}, observedRevision)`; restore uses
+`active`. `delete(id, observedRevision, true)` forgets that artifact's grants
+and all revisions, not other copies or source files. Reads/history reject deleted
+IDs even when another artifact contains identical text.
+
+`projectPreview(projectId)` binds the exact current set to a digest.
+`projects.remove(projectId, true, observedRevision, choice)` accepts
+`{action: "retain"|"delete"|"export", expectedDigest, exportedDigest?}`.
+Export requires the exact `projectExport` digest and explicit client saving
+before deletion; retain creates a new profile-owned revision. Concurrent edits
+invalidate the choice. The explicit Node entrypoint exports
+`saveArtifactExport(absoluteNewPath, export)`: private atomic new-file delivery,
+digest verification and fsync, no overwrite or automatic app opening.
+
+Text is bounded to 128 KiB UTF-8, history pages to 100 records, JSON exports to
+8 MiB with no truncation. No structured-question answer policy, repository
+materialization/commit or work-item/folder artifact organization is claimed yet.
 
 ### Managed Local roots
 

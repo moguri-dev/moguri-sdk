@@ -1,13 +1,17 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
+import { ArtifactKindSchema, parse, type ArtifactExport, type ArtifactKind } from "../../protocol/src/index.ts";
 
-export type SessionPanel = "Terminal" | "Browser" | "Insights" | "PR" | "Changes" | "Files" | "Plan" | "Side chat" | "Suggestions" | "Attention";
+export type SessionPanel = "Terminal" | "Browser" | "Insights" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Side chat" | "Suggestions" | "Attention";
+export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived" }
 export type SlashResult =
   | { kind: "ok"; message: string }
   | { kind: "session"; sessionId: string; side: boolean }
   | { kind: "panel"; panel: SessionPanel | "Settings" | "Models" | "Queue"; url?: string; path?: string; text?: string; allProjects?: boolean }
   | { kind: "text"; text: string }
-  | { kind: "copy"; text: string };
+  | { kind: "copy"; text: string }
+  | { kind: "artifact-editor"; artifact: ArtifactEditorRequest }
+  | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
   { name: "attach-file", description: "Capture an explicitly selected local UTF-8 file", argument: "ABSOLUTE_PATH" },
   { name: "attach-image", description: "Capture a local PNG/JPEG/WebP; terminal clipboard images need this fallback", argument: "ABSOLUTE_PATH" },
@@ -27,6 +31,9 @@ export const slashCommands = [
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
   { name: "plan", description: "Open the project plan" },
+  { name: "artifacts", description: "View independent retained documents" },
+  { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
+  { name: "project-removal", description: "Preview independent artifacts before explicit project-data removal", argument: "[preview|export [ABSOLUTE_PATH]|retain DIGEST confirm-remove|delete DIGEST confirm-remove|export-delete PREVIEW_SHA EXPORT_SHA confirm-remove]" },
   { name: "insights", description: "Inspect session metadata and usage" },
   { name: "pr", description: "Open the connected pull request" },
   { name: "copy", description: "Copy a queued or sent prompt", argument: "[ID]" },
@@ -60,6 +67,46 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "project-removal": {
+      if (!session.projectId) throw new ClientError("project_required", "Select a project for its explicit removal workflow. No previous project was inferred.");
+      const [action, ...args] = command.argument.split(/\s+/);
+      if (!action || action === "preview") return { kind: "text", text: JSON.stringify({ ...(await sdk.artifacts.projectPreview(session.projectId)), workspaces: sdk.getState().snapshot!.managedWorkspaces.filter((workspace) => workspace.projectId === session.projectId && workspace.status !== "removed"), warning: "Removal forgets project data. Choose retain/export/delete for artifacts; source files and branches are never deleted." }, null, 2) };
+      if (action === "export") {
+        if (client !== "desktop" && !args.length) throw new ClientError("artifact_export_path", "Use /project-removal export ABSOLUTE_NEW_FILE_PATH, then preserve the returned export digest.");
+        if (client === "desktop" && args.length) throw new ClientError("artifact_export_path", "Desktop uses the explicit native save dialog. Use /project-removal export.");
+        return { kind: "export", document: (await sdk.artifacts.projectExport(session.projectId)).export, ...(args.length ? { path: args.join(" ") } : {}) };
+      }
+      const matches = (action === "retain" || action === "delete") && args.length === 2 && args[1] === "confirm-remove" || action === "export-delete" && args.length === 3 && args[2] === "confirm-remove";
+      if (!matches || !/^[a-f0-9]{64}$/.test(args[0] ?? "") || action === "export-delete" && !/^[a-f0-9]{64}$/.test(args[1] ?? "")) throw new ClientError("project_removal", "Preview first. Use retain/delete PREVIEW_SHA confirm-remove, or export-delete PREVIEW_SHA SAVED_EXPORT_SHA confirm-remove. Worktrees must be removed separately.");
+      const configuration = (await sdk.projects.configuration(session.projectId)).configuration;
+      await sdk.projects.remove(session.projectId, true, configuration.revision, { action: action === "export-delete" ? "export" : action === "retain" ? "retain" : "delete", expectedDigest: args[0]!, ...(action === "export-delete" ? { exportedDigest: args[1]! } : {}) });
+      return { kind: "ok", message: "Project data removed with your exact artifact choice. Repository files, branches, external PRs and shared stores were preserved." };
+    }
+    case "artifacts": return client === "desktop" || client === "tui" ? { kind: "panel", panel: "Artifacts" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.artifacts, null, 2) };
+    case "artifact": {
+      const [action, id, ...rest] = command.argument.split(/\s+/);
+      if (action === "new" && id && rest.length) return { kind: "artifact-editor", artifact: { id: null, revision: 0, kind: parse(ArtifactKindSchema, id), name: rest.join(" "), text: "", projectId: session.projectId, sessionId: session.id, status: "active" } };
+      if (!action) return { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.artifacts, null, 2) };
+      if (action === "edit" && id && !rest.length) {
+        const value = await sdk.artifacts.read(id);
+        return { kind: "artifact-editor", artifact: { ...value.artifact, text: value.text, sessionId: value.artifact.originSessionId } };
+      }
+      if (action === "history" && id && !rest.length) return { kind: "text", text: JSON.stringify(await sdk.artifacts.history(id), null, 2) };
+      if ((action === "archive" || action === "restore") && id && !rest.length) {
+        const value = await sdk.artifacts.read(id); await sdk.artifacts.update(id, { status: action === "archive" ? "archived" : "active" }, value.artifact.revision);
+        return { kind: "ok", message: `Artifact ${action === "archive" ? "archived" : "restored"}; no source session or file was changed.` };
+      }
+      if (action === "delete" && id && rest.length === 2 && /^\d+$/.test(rest[0]!) && rest[1] === "confirm-delete") {
+        await sdk.artifacts.delete(id, Number(rest[0]), true); return { kind: "ok", message: "Selected artifact grants deleted. Source files/conversations and other copies were not erased." };
+      }
+      if (action === "export" && id) {
+        if (client !== "desktop" && !rest.length) throw new ClientError("artifact_export_path", "Use /artifact export ID ABSOLUTE_NEW_FILE_PATH. Existing files are preserved.");
+        if (client === "desktop" && rest.length) throw new ClientError("artifact_export_path", "Desktop uses the explicit native save dialog. Use /artifact export ID.");
+        return { kind: "export", document: (await sdk.artifacts.export(id)).export, ...(rest.length ? { path: rest.join(" ") } : {}) };
+      }
+      if (!id) { const value = await sdk.artifacts.read(action); return { kind: "text", text: JSON.stringify(value, null, 2) }; }
+      throw new ClientError("artifact_command", "Use /artifacts, /artifact ID, new KIND NAME, edit/history/archive/restore ID, delete ID REV confirm-delete, or export ID PATH.");
+    }
     case "workspace": {
       if (!session.projectId) throw new ClientError("project_required", "Select a project before managing its worktrees.");
       const [action, id, baseRef, extra] = command.argument.split(/\s+/), values = sdk.getState().snapshot!.managedWorkspaces.filter((value) => value.projectId === session.projectId);

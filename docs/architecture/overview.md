@@ -31,7 +31,7 @@ migration and recovery tests, not deletion of user state.
 Migration 2 adds project-scoped derived repository caches and graph tables.
 Migration 3 adds derived dependency-cache object metadata, local board/ticket
 and cache-receipt events. Event envelopes remain schema version 1; the client
-protocol is version 9. The [workspace contract](workspace-platform.md) records
+protocol is version 10. The [workspace contract](workspace-platform.md) records
 cache/advisory, read-only integration and recovery boundaries.
 Migration 4 adds encrypted retention compartments while preserving prior event
 identity/sequence. The [session workspace contract](session-workspace.md)
@@ -54,6 +54,9 @@ side-effect replay. Native SendBox remains unqualified.
 Migration 9 adds [managed Local roots](managed-workspaces.md), per-root writer
 leases and consistent filesystem surfaces. Git intent is recorded before effects;
 restart reconciles partial state without replay or base-root fallback.
+Migration 10 gives typed text artifacts independent encryption, source actors,
+revisions and reviewed project retain/export/delete. Legacy event plaintext and
+identity survive transactional rekeying; no source-session retention is implied.
 
 Both clients share the SDK and subscribe to the same sequenced stream. The
 service owns projects, sessions, transcripts, drafts, queue, pending approvals,

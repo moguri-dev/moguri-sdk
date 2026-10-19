@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 9; immutable event
+Protocol version and database migration version are 10; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -31,7 +31,7 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Local issue | Stable UUID/project-local number, feature/bug/misc, title/body/phase, optimistic revision, archive state and verified remote-link provenance. No assignee. |
 | Dependency plan | Exact project/manager/manifest/lock digest, unique public package versions and SHA-512 artifacts. Branch names are not mutable cache identities. |
 | Cache receipt | Project/workspace/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
-| Retained artifact | Project-owned immutable plan snapshot, origin-session/workspace reference and optional source path. Session deletion cannot remove its independent grant. First-class artifact kinds/revisions remain open. |
+| Retained artifact | Independent project/profile text document: plan/decision/answer/research-note/report, immutable revisions, archive, origin-session/workspace/file and exact user/model/tool/unknown source provenance. Per-artifact grants survive session retention; model content never becomes a user answer. |
 | User terminal | Session/project ownership, PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Ghostty owns VT rendering; output and input are bounded ephemeral data. |
 | Model options | Optional working window and supported thinking effort in revisioned session controls; the provider maximum is not changed. Step usage records effective window/effort and labeled estimated context separately from actual token telemetry. |
 | MCP authorization | Non-secret owned OAuth lifecycle, server/scope/expiry and transient-link readiness. State/verifier/authorization URL are ephemeral; issuer/resource-bound clients and grants stay in the secret backend. A durable connected decision gates use. |
@@ -145,3 +145,16 @@ Interrupted jobs retain partial ownership and require explicit reconciliation,
 never replay. Session deletion preserves worktrees; root removal preserves
 branches and independent plans. Project relocation/removal refuses retained
 worktrees. Remote/Sandbox root mappings and external adoption are unavailable.
+
+Migration 10 transactionally re-encrypts legacy plan events/blobs into independent
+artifact compartments. Plaintext event content, IDs, sequences, receipts and
+digests remain unchanged; opaque optional `artifact_id` envelope metadata binds
+the key scope. Old project blob grants are removed only when no other event
+references them. Append-only triggers are restored before commit; interruption
+rolls back to a complete schema-9 state. New revisions/deletion use typed events.
+Exact source preview/promotion distinguishes actual user/model/tool authors;
+manual text is user-entered, not verified authorship. Project removal binds an
+explicit retain/export/delete choice to the reviewed set. Retain detaches
+documents without retaining source sessions; deletion forgets all artifact
+revisions. Repository materialization/commit and structured-question policy
+remain open, not inferred from artifact storage.

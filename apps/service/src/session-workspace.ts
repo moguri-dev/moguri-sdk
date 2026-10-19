@@ -4,9 +4,9 @@ import { basename, isAbsolute } from "node:path";
 import {
   MoguriError, PROFILE_ID, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
-  type ModelContextPreview, type ResolvedControls, type Project,
+  type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice,
 } from "../../../packages/protocol/src/index.ts";
-import { EventStore, type ForgetRequest } from "./store.ts";
+import type { ForgetRequest } from "./store.ts";
 import { readProjectFile, writeProjectFile } from "./files.ts";
 import { ProjectService } from "./project-service.ts";
 import { assertFolderAccess, assertFolderName, folderPolicy } from "./project-policy.ts";
@@ -21,7 +21,8 @@ export interface SessionWorkspaceHost {
   mode(session: Session, mode: SessionMode, finish: WorkspaceFinish): CommandResult;
   spawn(session: Session, kind: "agent" | "side", title: string | undefined, finish: WorkspaceFinish): CommandResult;
   deleteSession(session: Session, finish: WorkspaceFinish): Promise<CommandResult>;
-  removeProject(id: string, finish: WorkspaceFinish): Promise<CommandResult>;
+  removeProject(id: string, finish: WorkspaceFinish, artifacts?: ProjectArtifactChoice): Promise<CommandResult>;
+  retainArtifact(session: Session, path: string, text: string): RetainedArtifact;
   job(kind: string, projectId: string, execute: (signal: AbortSignal) => Promise<unknown>): string;
   validateAdmission(session: Session, attachments?: Session["draft"]["attachments"]): void;
   wake(): void;
@@ -35,7 +36,7 @@ export class SessionWorkspace {
   readonly terminals: TerminalManager;
   private timer?: ReturnType<typeof setInterval>;
   private cleaning = false;
-  constructor(private readonly store: EventStore, private readonly host: SessionWorkspaceHost, stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
+  constructor(private readonly host: SessionWorkspaceHost, stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
     this.projects = new ProjectService(() => host.snapshot(), stateDir);
     this.terminals = new TerminalManager((terminal) => {
       if (!this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) return;
@@ -104,11 +105,6 @@ export class SessionWorkspace {
         await assertFolderAccess(project.path, settings.planPath, false, folderPolicy(settings));
         const file = await readProjectFile(project.path, settings.planPath);
         return { type: query.type, path: file.path, text: file.text, digest: file.digest, exists: true };
-      }
-      case "artifact.read": {
-        const artifact = this.snapshot().artifacts.find((artifact) => artifact.id === query.artifactId);
-        if (!artifact) throw new MoguriError("artifact_missing", "Artifact is outside this profile.", 404);
-        return { type: query.type, text: this.store.blob(artifact.contentDigest), artifact };
       }
       case "terminal.read": {
         const terminal = this.snapshot().terminals.find((terminal) => terminal.id === query.terminalId);
@@ -194,7 +190,7 @@ export class SessionWorkspace {
       case "project.mcp.import": {
         const project = this.project(command.projectId); const current = this.projects.configuration(project.id);
         this.revision(current.revision, command.expectedRevision);
-        if (command.type === "project.remove") return this.host.removeProject(project.id, finish);
+        if (command.type === "project.remove") return this.host.removeProject(project.id, finish, command.artifacts);
         if (command.type === "project.defaults") return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });
         if (command.type === "project.relocate") {
           if (this.snapshot().managedWorkspaces.some((workspace) => workspace.projectId === project.id && workspace.status !== "removed")) throw new MoguriError("managed_workspaces", "Remove managed worktrees explicitly before relocating their repository/common Git directory.", 409);
@@ -250,9 +246,16 @@ export class SessionWorkspace {
           await assertFolderAccess(project.path, path, true, folderPolicy(settings));
           await writeProjectFile(project.path, path, command.text, command.expectedDigest);
         } else await assertFolderAccess(project.path, path, false, folderPolicy(settings));
-        const file = await readProjectFile(project.path, path); this.session(session.id);
-        const artifact: RetainedArtifact = { id: randomUUID(), projectId: project.id, originSessionId: session.id, workspaceId: session.workspaceId, name: basename(path), path, contentDigest: this.store.putBlob(file.text), createdAt: new Date().toISOString() };
-        return finish([{ event_type: "artifact.saved", profile_id: PROFILE_ID, project_id: project.id, payload: { artifact } }], { id: artifact.id });
+        try {
+          const file = await readProjectFile(project.path, path); this.session(session.id);
+          const artifact = this.host.retainArtifact(session, path, file.text);
+          return finish([{ event_type: "artifact.revised", profile_id: PROFILE_ID, project_id: project.id, payload: { artifact } }], { id: artifact.id });
+        }
+        catch (error) {
+          if (command.type !== "plan.save") throw error;
+          console.error("Plan file was written but independent artifact retention failed:", path);
+          throw new MoguriError("plan_partial", "The plan file was written, but its retained snapshot was not committed. Inspect the file before retrying; no complete success was recorded.", 409);
+        }
       }
       case "terminal.open": {
         const session = this.session(command.sessionId); const project = this.host.project(session);

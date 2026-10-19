@@ -3,6 +3,8 @@
 Every durable event carries `id`, `seq`, `schema_version`, `timestamp`,
 `profile_id`, `project_id`, `work_item_id`, `session_id`, `turn_id`, `step_id`,
 `parent_event_id`, `correlation_id`, `event_type` and a typed `payload`.
+Migration 10 adds optional opaque `artifact_id` key-scope metadata without
+changing event identities or plaintext payloads.
 Unused scope fields are null in checkpoint 1.
 
 | Event family | Payload and invariant |
@@ -42,7 +44,8 @@ Unused scope fields are null in checkpoint 1.
 | `session.mode_requested`, `session.mode_changed` | Immediate restriction of new approvals and safe-boundary mode acknowledgement. Side/model-subagent sessions cannot gain edit authority. |
 | `session.browser_changed` | Explicit validated HTTPS/loopback preview association, not model context. |
 | `project.configured`, `project.folder_saved`, `project.relocated` | Typed policy/configuration/navigation and attached-folder changes; atomic exact-membership reorder and index invalidation. |
-| `artifact.saved` | Independently project-owned content grant and origin reference. |
+| `artifact.saved` | Legacy immutable plan snapshot; migration preserves its payload/identity while moving encryption into an independent artifact compartment. |
+| `artifact.revised`, `artifact.deleted` | Typed document revisions, exact source/actual-actor provenance and user edits/archive or profile-owned deletion tombstone. Source sessions/files and other grants are not deleted. |
 | `workspace.saved` | Revisioned owned Local root/branch/base/common-directory identity, job and creating/ready/removing/partial/removed outcome. Never a permission or fallback root. |
 | `change_set.saved` | Stable workspace/branch/base and optional ticket/PR association. No publish/merge authorization. |
 | `session.workspace_bound` | Explicit nullable binding for a fresh idle session; existing conversation/queue is not moved. |
@@ -101,13 +104,19 @@ Managed-workspace commands add explicit Local creation, clean idle unbound
 removal and identity-based reconciliation. Their job/intents/command receipts
 commit before effects. Session-bound Git/files queries use the actual root;
 discovery reads registrations without adopting arbitrary paths.
+Artifact commands add standalone or session-scoped typed documents, exact
+canonical source promotion and optimistic edits/archive/delete. Queries expose
+bounded revision reads/history/exports and reviewed project artifact impact.
+Model content is never recorded as a user answer; export/materialization is not
+implicit filesystem authority. Project removal requires the explicit reviewed
+retain/export/delete choice when documents exist.
 
 ## WebSocket
 
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":9,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":10,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

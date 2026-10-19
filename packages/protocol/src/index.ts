@@ -14,9 +14,10 @@ export * from "./providers.ts";
 import type { McpAuthorization } from "./oauth.ts";
 import type { ConfigurationProposal, Attention, SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
+import { legacyArtifact, type LegacyRetainedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -238,12 +239,14 @@ export interface EventPayloads {
   "session.mode_changed": { mode: SessionMode };
   "session.browser_changed": { url: string };
   "session.deleted": { deletedSessionId: string; usage: Usage[] };
-  "project.removed": { deletedProjectId: string; usage: Usage[] };
+  "project.removed": { deletedProjectId: string; usage: Usage[]; artifactChoice?: ProjectArtifactChoice["action"] };
   "project.relocated": { path: string; name: string };
   "project.configured": { configuration: ProjectConfiguration };
   "project.folder_saved": { folder: NavigationFolder };
   "session.group_saved": { group: SessionGroup };
-  "artifact.saved": { artifact: RetainedArtifact };
+  "artifact.saved": { artifact: LegacyRetainedArtifact };
+  "artifact.revised": { artifact: RetainedArtifact };
+  "artifact.deleted": { artifactId: string };
   "terminal.changed": { terminal: TerminalState };
   "turn.prompt_bound": { promptDigest: string };
   "queue.released": { messageId: string };
@@ -266,6 +269,7 @@ export type StoredEvent = EventInput & {
   timestamp: string;
   work_item_id: null;
   parent_event_id: null;
+  artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
   "project.added", "session.created", "session.configured", "session.archived", "session.restored", "session.resumed", "session.blocked",
@@ -279,7 +283,7 @@ export const eventTypes: readonly EventType[] = [
   "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
-  "workspace.saved", "change_set.saved", "session.workspace_bound",
+  "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted",
 ];
 
 export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -331,7 +335,9 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "attention.cleared") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.active = false; }
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
     if (event.event_type === "session.group_saved") sessionGroups.set(event.payload.group.id, { ...event.payload.group });
-    if (event.event_type === "artifact.saved") artifacts.set(event.payload.artifact.id, { ...event.payload.artifact });
+    if (event.event_type === "artifact.saved") artifacts.set(event.payload.artifact.id, legacyArtifact(event.payload.artifact, event.id));
+    if (event.event_type === "artifact.revised") artifacts.set(event.payload.artifact.id, structuredClone(event.payload.artifact));
+    if (event.event_type === "artifact.deleted") artifacts.delete(event.payload.artifactId);
     if (event.event_type === "workspace.saved") {
       managedWorkspaces.set(event.payload.workspace.id, structuredClone(event.payload.workspace));
       if (event.payload.workspace.status === "partial") blockedWorkspaces.add(event.payload.workspace.id);

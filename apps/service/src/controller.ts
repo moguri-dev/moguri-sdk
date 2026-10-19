@@ -9,7 +9,7 @@ import {
   CommandSchema, isPlatformCommand, isRecord, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
-  type ExecutionCommand, type RemoteExecution, type Usage,
+  type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -115,7 +115,7 @@ export class ControlPlane extends EventEmitter {
       mode: (session, mode, finish) => this.changeMode(session, mode, finish),
       spawnUser: (session, kind, title, finish) => this.spawnUser(session, kind, title, finish),
       deleteSession: (session, finish) => this.deleteSession(session, finish),
-      removeProject: (id, finish) => this.removeProject(id, finish),
+      removeProject: (id, finish, artifacts) => this.removeProject(id, finish, artifacts),
       validateAdmission: (session, attachments = []) => {
         if (session.status === "archived") throw new MoguriError("archived", "Restore the session before running queued work.");
         this.available(session.controls, true, session);
@@ -374,9 +374,10 @@ export class ControlPlane extends EventEmitter {
       this.paused.delete(session.id); return result;
     } finally { for (const id of owned) this.deletingSessions.delete(id); }
   }
-  private async removeProject(id: string, finish: WorkspaceFinish): Promise<CommandResult> {
+  private async removeProject(id: string, finish: WorkspaceFinish, choice?: ProjectArtifactChoice): Promise<CommandResult> {
     if (this.projection.managedWorkspaces.some((workspace) => workspace.projectId === id && workspace.status !== "removed")) throw new MoguriError("managed_workspaces", "Remove each clean owned worktree explicitly before removing the project. Its filesystem/branch was not silently deleted.", 409);
     if (this.deletingProjects.has(id)) throw new MoguriError("project_busy", "This project is already being removed.", 409);
+    this.platform.artifacts.removal(id, choice);
     this.deletingProjects.add(id);
     try {
       const revision = this.platform.sessions.projects.configuration(id).revision;
@@ -404,7 +405,8 @@ export class ControlPlane extends EventEmitter {
         console.error("Project credential cleanup was not acknowledged:", error instanceof Error ? error.message : "Unknown secret-backend error");
         throw new MoguriError("project_secrets", "Project credential cleanup is unconfirmed. Unlock the configured secret backend and retry; project records were preserved.", 503);
       }
-      return finish([{ event_type: "project.removed", profile_id: PROFILE_ID, payload: { deletedProjectId: id, usage } }], { id }, { projects: [id] });
+      const artifacts = this.platform.artifacts.removal(id, choice);
+      return finish([...artifacts.events, { event_type: "project.removed", profile_id: PROFILE_ID, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }], { id }, { projects: [id], artifacts: artifacts.forget });
     } finally { this.deletingProjects.delete(id); }
   }
   private subagent(parent: Session, prompt: string): string {

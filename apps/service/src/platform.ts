@@ -9,6 +9,7 @@ import {
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
   isManagedWorkspaceCommand, isManagedWorkspaceQuery,
+  isArtifactCommand, isArtifactQuery,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
@@ -27,6 +28,7 @@ import type { ModelRegistryOptions } from "./model-registry.ts";
 import { ContextInputs, isInputCommand, isInputQuery } from "./context-inputs.ts";
 import type { RemoteOptions } from "./remote.ts";
 import { ManagedWorkspaces } from "./managed-workspaces.ts";
+import { ArtifactRuntime } from "./artifacts.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
@@ -63,6 +65,7 @@ export class PlatformRuntime {
   readonly workspace: WorkspaceRuntime;
   readonly sessions: SessionWorkspace;
   readonly managed: ManagedWorkspaces;
+  readonly artifacts: ArtifactRuntime;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
     this.memory = new RepositoryMemory(store);
@@ -71,6 +74,7 @@ export class PlatformRuntime {
       changed: (authorization) => this.host.commit([{ event_type: "mcp.oauth_changed", profile_id: PROFILE_ID, project_id: authorization.projectId, payload: { authorization } }]),
     });
     this.voice = new LocalDictation(stateDir, options.speech);
+    this.artifacts = new ArtifactRuntime(store, { snapshot: () => this.snapshot(), events: () => this.host.events(), closingProject: host.closingProject });
     this.managed = new ManagedWorkspaces(stateDir, {
       snapshot: () => this.snapshot(), project: (id) => this.project(id), commit: (events) => this.host.commit(events), wake: host.wake,
       job: (kind, projectId, execute, start, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, start, workspaceId),
@@ -80,12 +84,13 @@ export class PlatformRuntime {
       job: (kind, projectId, execute, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, undefined, workspaceId), wake: () => this.host.wake(),
       closing: host.closingProject,
     }, store, stateDir, options);
-    this.sessions = new SessionWorkspace(store, {
+    this.sessions = new SessionWorkspace({
       snapshot: () => this.snapshot(), commit: (events, forget) => this.host.commit(events, forget),
       invalidate: (id) => this.host.invalidateApprovals(id),
       mode: host.mode, spawn: host.spawnUser, deleteSession: host.deleteSession, removeProject: host.removeProject, validateAdmission: host.validateAdmission,
       contextPreview: host.contextPreview,
       startup: host.startup,
+      retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session) => this.managed.project(session),
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
@@ -168,6 +173,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isArtifactQuery(query)) return this.artifacts.query(query);
     if (isManagedWorkspaceQuery(query)) return this.managed.query(query);
     if (isExecutionQuery(query)) return { type: query.type, remote: this.host.remoteStatus() };
     if (isInputQuery(query)) return this.inputs.query(query);
@@ -302,6 +308,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isArtifactCommand(command)) return this.artifacts.execute(command, finish);
     if (isManagedWorkspaceCommand(command)) return this.managed.execute(command, finish);
     if (isExecutionCommand(command)) return this.host.remoteCommand(command, finish);
     if (isInputCommand(command)) return this.inputs.execute(command, finish);

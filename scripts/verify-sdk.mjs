@@ -23,7 +23,7 @@ try {
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
     import {MoguriSdk, DraftEditor, slashCommands, type UserSettings} from "moguri";
-    import {connectMoguri, createRuntime} from "moguri/node";
+    import {connectMoguri, createRuntime, saveArtifactExport} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
     async function typedConsumer() {
@@ -39,6 +39,11 @@ try {
       await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
       const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
       const general=await sdk.sessions.create(null);
+      const document=await sdk.artifacts.create(null,{kind:"decision",name:"Generated independent note",text:"Generated retained text"});
+      await sdk.artifacts.update(document.id!,{text:"Generated edited note"},0);
+      const revisions=await sdk.artifacts.history(document.id!);void revisions.revisions[0]?.sources;
+      const exported=(await sdk.artifacts.export(document.id!)).export;
+      await saveArtifactExport("/generated/explicit-export.json",exported);
       await sdk.sessions.env(general.id!,"Local");
       const remote=await sdk.remote.status();void remote.remote.workerDigest;
       const workspace=await sdk.workspaces.create("generated-id","moguri/generated",{baseRef:"main"});
@@ -72,7 +77,7 @@ try {
     import {createHash} from "node:crypto";
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
-    import {createRuntime,connectMoguri} from "moguri/node";
+    import {createRuntime,connectMoguri,saveArtifactExport} from "moguri/node";
     import {DraftEditor} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
@@ -87,7 +92,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,9);
+      assert.equal(sdk.getState().snapshot.protocolVersion,10);
       const isolated=await sdk.workspaces.create(p.id,"moguri/generated-external");
       const owned=await sdk.workspaces.wait(isolated.id);
       assert.ok((await sdk.workspaces.discover(p.id)).registrations.some(entry=>entry.managedId===owned.id&&entry.locked));
@@ -110,7 +115,7 @@ try {
           let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
           role.once("error",reject);
           role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
-          role.stdin.write(JSON.stringify({action:"probe",protocol:9,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+          role.stdin.write(JSON.stringify({action:"probe",protocol:10,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
         });
         assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
         role.stdin.end();assert.equal(await roleExit,0);
@@ -178,8 +183,20 @@ try {
       await sdk.sessions.delete(s.id,true);
       assert.equal((await sdk.plans.artifact(artifact.id)).text,"Generated external retained plan.");
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===side.id).parentSessionId,undefined);
+      const retained=await sdk.artifacts.create(null,{projectId:p.id,kind:"decision",name:"Generated independent project decision",text:"Generated first decision."});
+      await sdk.artifacts.update(retained.id,{text:"Generated revised decision."},0);
+      assert.equal((await sdk.artifacts.read(retained.id,0)).text,"Generated first decision.");
+      const exported=(await sdk.artifacts.projectExport(p.id));
+      const saved=await saveArtifactExport(join(root,"generated-external-artifacts.json"),exported.export);
+      assert.equal(saved.digest,exported.export.digest);
+      assert.equal(await readFile(saved.path,"utf8"),exported.export.text);
+      const configuration=(await sdk.projects.configuration(p.id)).configuration;
+      await sdk.projects.remove(p.id,true,configuration.revision,{action:"retain",expectedDigest:exported.preview.digest});
+      assert.equal((await sdk.artifacts.read(retained.id)).artifact.projectId,null);
+      await sdk.artifacts.delete(retained.id,2,true);
+      await assert.rejects(()=>sdk.artifacts.read(retained.id),/missing|deleted|outside/);
     } finally {sdk.disconnect();await runtime.close();}
-    console.log("External SDK imports/types, approved/audited install, real installed SSH-worker handshake, typed context, project-free/metachat/config review, real macOS PTY transport, held prompts/slash/side sessions, retained plans, vectors, native MCP and script-free cache install passed.");
+    console.log("External SDK imports/types, approved/audited install, installed SSH-worker handshake, typed context, owned worktrees, real macOS PTY, independent artifact revisions/exports/project retention, metachat/config review, vectors, MCP and script-free cache install passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }
