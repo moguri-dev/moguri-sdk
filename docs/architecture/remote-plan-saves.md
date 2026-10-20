@@ -128,3 +128,10 @@ authorization and before result receipt passes without replay, preserving
 actual late-frame/Remote artifact provenance. These are generated mechanical
 checks, not filesystem power-loss or containment qualification. Complete source,
 packaged-client and exact installed-consumer evidence is recorded in setup.
+
+The complete source now passes **402 local checks in 317.05 s**. That run
+includes the actual native TUI pending-save/exact-stop flow in **1,535.71 ms**
+and reviewed edit/save/retained-inspection flow in **1,452.70 ms**, alongside
+existing profiles, budgets, context, Local behavior and recovery. Source and
+external-consumer locked installs/audits report zero vulnerabilities. Exact
+versioned app/archive qualification is recorded separately after packaging.

@@ -26,8 +26,10 @@ selection and execution through the compiled transport.
 
 This qualifies the macOS core agent path, not Linux release readiness or live
 Copilot entitlement. Protocol 17 separately qualifies read-only SSH files,
-Git changes and plan views below. Embedded Remote consoles, executable MCP
-transport, repository-memory retrieval and direct plan saves remain blocked. Explicit
+Git changes and plan views below. Protocol 20 adds
+[exact user-requested Remote plan saves](remote-plan-saves.md) through the
+same owned worker with no model or Local fallback. Embedded Remote consoles,
+executable MCP transport and repository-memory retrieval remain blocked. Explicit
 client-side browser URLs do not create an implicit remote-port tunnel.
 
 ## Authority and identities
@@ -149,11 +151,16 @@ owned one-shot queries. Nonblocking regular-file opens reject FIFOs rather than
 leaving a filesystem thread waiting for a writer.
 
 Desktop Files/Changes views remount on binding changes; dirty Plan edits remain
-preserved and cannot save into a new root. Remote plans are read-only and
-viewing never retains an independent artifact implicitly. `/files`, `/file`,
+preserved and cannot save into a new root. At the protocol-17 checkpoint,
+Remote plans were read-only; viewing still never retains an independent artifact
+implicitly. `/files`, `/file`,
 `/diff` and `/plan` share the SDK in both clients; Remote CLI/TUI plans return
-text, never a path handed to a Local opener. Direct Remote plan saves, consoles,
-executable MCP and repository-memory transport remain unavailable.
+text, never a path handed to a Local opener. Protocol 20's explicit `/plan edit`
+and `plans.save` now use a reviewed binding, typed provider-free control purpose,
+actual result/terminal acknowledgement, owned-worker exit and independent
+artifact/receipt settlement. Partial writes remain partial through real
+control-plane SIGKILL and exact late-frame reconciliation without replay.
+Consoles, executable MCP and repository-memory transport remain unavailable.
 
 The updated inspector verifies authenticated protocol-16 saved metadata and
 existing receipts without attaching or resuming that worker. New queries and
