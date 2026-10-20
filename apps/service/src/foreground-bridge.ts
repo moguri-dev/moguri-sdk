@@ -3,7 +3,9 @@ import { Value } from "typebox/value";
 import { isRecord } from "../../../packages/protocol/src/index.ts";
 import { parentMessage, WorkerRequestSchema, type WorkerRequest } from "./worker-protocol.ts";
 import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME } from "./worker-wire.ts";
-import type { BridgeInfo, BridgeInit, BridgeStatus } from "./remote-protocol.ts";
+import { ForegroundQuerySchema, type BridgeInfo, type BridgeInit, type BridgeStatus } from "./remote-protocol.ts";
+import { workerCatalog } from "./worker-queries.ts";
+import { repositoryContext } from "./project-policy.ts";
 
 const proxyVariables = ["ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "NODE_USE_ENV_PROXY"] as const;
 export function foregroundEnvironment(runId: string): NodeJS.ProcessEnv {
@@ -11,16 +13,19 @@ export function foregroundEnvironment(runId: string): NodeJS.ProcessEnv {
   for (const key of proxyVariables) if (process.env[key] !== undefined) env[key] = process.env[key];
   return env;
 }
-export function foregroundWorker(workerPath: string, init: BridgeInit, info: BridgeInfo, wire: JsonLineChannel): { receive(raw: unknown): void; disconnect(): void } {
+export function foregroundWorker(workerPath: string, init: BridgeInit, info: BridgeInfo, wire: JsonLineChannel): { receive(raw: unknown): Promise<void>; disconnect(): void } {
   if (!init.runId || !init.key) throw new Error("Foreground execution needs its exact run identity.");
   const status: BridgeStatus = { runId: init.runId, workerPid: null, port: 0, acknowledged: 0, sequence: 0, status: "launching", cancellation: "none", cleanup: "pending", diagnostic: null };
   const child = fork(workerPath, [], { execPath: process.execPath, execArgv: process.execArgv, stdio: ["ignore", "ignore", "pipe", "ipc"], env: foregroundEnvironment(init.runId) });
   let started = false, settled = false, lost = false, finalAcknowledged = false, final: Extract<WorkerRequest, { kind: "finished" }> | undefined, queued = 0;
   const pending = new Map<number, number>();
+  const queries = new Set<AbortController>();
+  const queryIds = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined, escalation: ReturnType<typeof setTimeout> | undefined;
   const publish = () => wire.send({ kind: "status", status });
   const stop = (controlLost: boolean) => {
     if (settled) return;
+    for (const query of queries) query.abort();
     lost ||= controlLost; status.cancellation = status.cancellation === "acknowledged" ? "acknowledged" : "requested"; status.status = "stopping"; publish();
     if (child.connected) child.send({ kind: controlLost ? "control-lost" : "stop" });
     timer ??= setTimeout(() => {
@@ -48,6 +53,7 @@ export function foregroundWorker(workerPath: string, init: BridgeInit, info: Bri
   child.once("error", () => fail("The foreground Node worker could not launch. No Local fallback or alternate worker was used."));
   child.once("exit", (code, signal) => {
     settled = true; clearTimeout(timer); clearTimeout(escalation); clearTimeout(launchDeadline);
+    for (const query of queries) query.abort();
     status.status = final && finalAcknowledged ? final.outcome : lost || status.cancellation !== "none" || final ? "partial" : "failed";
     status.cleanup = "owned-worker-stopped";
     status.diagnostic = final && finalAcknowledged ? final.diagnostic : `Foreground worker ended (${signal ?? code}) without an acknowledged terminal result. Native VM cleanup still requires verification.`;
@@ -56,8 +62,25 @@ export function foregroundWorker(workerPath: string, init: BridgeInit, info: Bri
   });
   return {
     disconnect: () => stop(true),
-    receive(raw) {
+    async receive(raw) {
       if (!isRecord(raw)) { fail("Invalid foreground parent frame."); return; }
+      if (raw.kind === "query") {
+        if (lost || settled || !Value.Check(ForegroundQuerySchema, raw) || queryIds.has(raw.requestId) || queries.size >= 8) { fail("Foreground query is duplicate, unbounded or outside the current control authority."); return; }
+        const abort = new AbortController(); queries.add(abort);
+        queryIds.add(raw.requestId);
+        void (async () => {
+          try {
+            const result = raw.query.type === "catalog" ? await workerCatalog(raw.query.catalog, abort.signal) :
+              info.root ? { type: "context" as const, text: await repositoryContext(info.root, raw.query.settings) } : null;
+            abort.signal.throwIfAborted();
+            if (!result) throw new Error("No filesystem root was approved for repository context.");
+            wire.send({ kind: "query-result", runId: init.runId, requestId: raw.requestId, result });
+          } catch {
+            wire.send({ kind: "query-error", runId: init.runId, requestId: raw.requestId, code: "foreground_query", message: abort.signal.aborted ? "Owned foreground query was cancelled; no fallback." : "The execution-side query failed. Check the approved root, endpoint and native proxy policy; no Local fallback or alternate provider." });
+          } finally { queries.delete(abort); queryIds.delete(raw.requestId); }
+        })();
+        return;
+      }
       if (raw.kind === "ack") {
         if (typeof raw.sequence !== "number" || !Number.isSafeInteger(raw.sequence) || raw.sequence < status.acknowledged || raw.sequence > status.sequence) { fail("Invalid foreground durable cursor."); return; }
         for (const [sequence, bytes] of pending) if (sequence <= raw.sequence) { queued -= bytes; pending.delete(sequence); }

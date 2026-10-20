@@ -6,15 +6,24 @@ const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const sequence = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const nullableText = Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]);
+const catalog = Type.Object({
+  url: Type.String({ maxLength: 4096 }), key: Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]),
+  headers: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]), { maxProperties: 32 })),
+}, { additionalProperties: false });
+export const ForegroundQuerySchema = Type.Object({
+  kind: Type.Literal("query"), requestId: Type.String({ minLength: 1, maxLength: 128 }),
+  query: Type.Union([
+    Type.Object({ type: Type.Literal("catalog"), catalog }, { additionalProperties: false }),
+    Type.Object({ type: Type.Literal("context"), settings: ProjectSettingsSchema }, { additionalProperties: false }),
+  ]),
+}, { additionalProperties: false });
+export type ForegroundQuery = Static<typeof ForegroundQuerySchema>;
 export const BridgeInitSchema = Type.Object({
   action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
   protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
   stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
   runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
-  catalog: Type.Optional(Type.Object({
-    url: Type.String({ maxLength: 4096 }), key: Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]),
-    headers: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]), { maxProperties: 32 })),
-  }, { additionalProperties: false })),
+  catalog: Type.Optional(catalog),
   context: Type.Optional(ProjectSettingsSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText }, { additionalProperties: false });
@@ -28,6 +37,11 @@ const BridgeStatusSchema = Type.Object({
 const BridgeFrameSchema = Type.Object({ kind: Type.Literal("frame"), sequence, digest: hash, request: WorkerRequestSchema }, { additionalProperties: false });
 export const SavedStatusSchema = Type.Object({ status: BridgeStatusSchema, info: BridgeInfoSchema, proof: hash }, { additionalProperties: false });
 export const BridgeEnvelopeSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("query-result"), runId, requestId: Type.String({ minLength: 1, maxLength: 128 }), result: Type.Union([
+    Type.Object({ type: Type.Literal("catalog"), status: Type.Integer({ minimum: 100, maximum: 599 }), body: Type.String({ maxLength: 512 * 1024 }) }, { additionalProperties: false }),
+    Type.Object({ type: Type.Literal("context"), text: Type.String({ maxLength: 256 * 1024 }) }, { additionalProperties: false }),
+  ]) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("query-error"), runId, requestId: Type.String({ minLength: 1, maxLength: 128 }), code: Type.String({ maxLength: 128 }), message: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("bootstrap"), protocol: Type.Literal(PROTOCOL_VERSION) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("probe"), info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("ready"), info: BridgeInfoSchema, status: BridgeStatusSchema }, { additionalProperties: false }),

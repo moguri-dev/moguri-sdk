@@ -6,12 +6,12 @@ import { join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Value } from "typebox/value";
 import { isRecord, MoguriError, PROTOCOL_VERSION } from "../../../packages/protocol/src/index.ts";
-import { localEndpointUrl } from "./model-registry.ts";
 import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME } from "./worker-wire.ts";
 import { parentMessage, WorkerRequestSchema, type WorkerRequest } from "./worker-protocol.ts";
 import { BridgeInitSchema, SavedStatusSchema, BridgeEnvelopeSchema, type BridgeInit, type BridgeInfo, type BridgeStatus, type BridgeFrame, type SavedStatus } from "./remote-protocol.ts";
 import { repositoryContext } from "./project-policy.ts";
 import { foregroundWorker } from "./foreground-bridge.ts";
+import { workerCatalog } from "./worker-queries.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -85,10 +85,14 @@ async function supervise(init: BridgeInit): Promise<void> {
   const { id, key } = runCredentials(init), info = await runtimeInfo(init), root = await privateDirectory(init.stateDir), directory = join(root, id);
   try { await mkdir(directory, { mode: 0o700 }); }
   catch (error) { if (error instanceof Error && "code" in error && error.code === "EEXIST") throw new MoguriError("remote_duplicate", "This run identity already exists. Inspect/reattach it; no second worker was created."); throw error; }
-  let worker: ChildProcess | undefined, client: JsonLineChannel | undefined, queue = Promise.resolve(), bytes = 0, started = false, finalRequest: Extract<WorkerRequest, { kind: "finished" }> | undefined;
+  let worker: ChildProcess | undefined, client: JsonLineChannel | undefined, queue = Promise.resolve(), bytes = 0, started = false, workerExited = false, closing = false, terminalAcknowledged = false, finalRequest: Extract<WorkerRequest, { kind: "finished" }> | undefined;
   let stopTimer: ReturnType<typeof setTimeout> | undefined;
   const status: BridgeStatus = { runId: id, workerPid: null, port: 0, acknowledged: 0, sequence: 0, status: "launching", cancellation: "none", cleanup: "pending", diagnostic: null };
   const persist = async () => { await saveStatus(directory, key, status, info); client?.send({ kind: "status", status }); };
+  const closeWhenDrained = () => {
+    if (!workerExited || closing || client && status.acknowledged < status.sequence) return;
+    closing = true; server.close(); client?.end();
+  };
   const stop = async (reason: string, lostControl = false) => {
     if (["completed", "stopped", "failed", "partial"].includes(status.status) && status.cleanup !== "pending") return;
     status.cancellation = status.cancellation === "none" ? "requested" : status.cancellation; status.status = "stopping"; status.diagnostic = reason;
@@ -101,11 +105,13 @@ async function supervise(init: BridgeInit): Promise<void> {
     }
     if (worker?.connected) worker.send({ kind: lostControl ? "control-lost" : "stop" });
     stopTimer ??= setTimeout(() => {
-      status.status = "unconfirmed"; status.cancellation = "unconfirmed"; status.cleanup = "unconfirmed";
-      status.diagnostic = "Remote worker did not settle cancellation. Worker termination was requested; descendants remain unconfirmed.";
-      worker?.kill("SIGTERM");
-      void persist().catch(() => console.error("Remote cancellation metadata could not be saved."));
-      stopTimer = setTimeout(() => worker?.kill("SIGKILL"), 1000);
+      queue = queue.then(async () => {
+        if (closing || workerExited) return;
+        status.status = "unconfirmed"; status.cancellation = "unconfirmed"; status.cleanup = "unconfirmed";
+        status.diagnostic = "Remote worker did not settle cancellation. Worker termination was requested; descendants remain unconfirmed.";
+        await persist(); worker?.kill("SIGTERM");
+        stopTimer = setTimeout(() => worker?.kill("SIGKILL"), 1000);
+      }).catch(() => console.error("Remote cancellation metadata could not be saved."));
     }, 5000);
   };
   const server = createServer((socket: Socket) => {
@@ -114,10 +120,15 @@ async function supervise(init: BridgeInit): Promise<void> {
     connection.on("error", () => socket.destroy());
     connection.on("close", () => {
       clearTimeout(authenticationDeadline);
-      if (client === connection) { client = undefined; void stop("SSH control disconnected. Owned cancellation requested; no duplicate worker or Local fallback.", true).catch(() => console.error("Remote disconnect cleanup could not be recorded.")); }
+      if (client === connection) {
+        client = undefined;
+        if (workerExited) closeWhenDrained();
+        else queue = queue.then(() => stop("SSH control disconnected. Owned cancellation requested; no duplicate worker or Local fallback.", true)).catch(() => console.error("Remote disconnect cleanup could not be recorded."));
+      }
     });
     connection.on("message", (raw) => {
       queue = queue.then(async () => {
+        if (closing) return;
         if (!authenticated) {
           if (!isRecord(raw) || typeof raw.key !== "string" || !/^[a-f0-9]{64}$/.test(raw.key) || !timingSafeEqual(Buffer.from(raw.key, "hex"), key) || typeof raw.after !== "number" || !Number.isSafeInteger(raw.after) || raw.after < 0 || raw.after > status.sequence) throw new Error("Remote run authentication/cursor failed.");
           if (client) throw new Error("This remote run already has a control connection.");
@@ -135,12 +146,13 @@ async function supervise(init: BridgeInit): Promise<void> {
         if (!isRecord(raw)) throw new Error("Invalid remote parent frame.");
         if (raw.kind === "ack") {
           if (typeof raw.sequence !== "number" || !Number.isSafeInteger(raw.sequence) || raw.sequence < status.acknowledged || raw.sequence > status.sequence) throw new Error("Invalid remote durable cursor.");
+          if (raw.sequence === status.acknowledged) { closeWhenDrained(); return; }
           for (let sequence = status.acknowledged + 1; sequence <= raw.sequence; sequence++) {
             const path = join(directory, frameName(sequence));
             try { const metadata = await lstat(path); await unlink(path); bytes -= metadata.size; }
             catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
           }
-          status.acknowledged = raw.sequence; await persist(); return;
+          status.acknowledged = raw.sequence; await persist(); closeWhenDrained(); return;
         }
         if (raw.kind !== "parent") throw new Error("Unknown remote parent frame.");
         const message = parentMessage(raw.message);
@@ -166,25 +178,27 @@ async function supervise(init: BridgeInit): Promise<void> {
               await saveStatus(directory, key, status, info); client?.send(frame);
             }).catch(async (error: unknown) => { console.error("Remote worker framing/storage failed:", diagnosticCode(error)); await stop("Remote worker framing or replay storage failed; effects and accounting may be unconfirmed."); });
           });
-          worker.on("error", () => { void stop("Remote worker could not be launched. Check its runtime and native dependencies."); });
+          worker.on("error", () => { queue = queue.then(() => stop("Remote worker could not be launched. Check its runtime and native dependencies.")).catch(() => console.error("Remote launch failure could not be recorded.")); });
           worker.stderr?.on("data", (data: Buffer) => {
             const codes = [...new Set(data.toString().match(/\b(?:ERR_[A-Z_]+|MODULE_NOT_FOUND|EACCES|ENOENT|EPERM)\b/g) ?? [])];
             const text = `Remote worker emitted credential-private stderr${codes.length ? ` (${codes.join(", ")})` : ""}. Check its installed runtime/native dependencies if it cannot start.`;
             console.error(text); client?.send({ kind: "stderr", text });
           });
           worker.once("exit", (code, signal) => {
-            void queue.then(async () => {
+            queue = queue.then(async () => {
               clearTimeout(stopTimer);
-              const clean = Boolean(finalRequest) && code === 0 && signal === null;
+              workerExited = true;
+              const clean = Boolean(finalRequest) && terminalAcknowledged && code === 0 && signal === null;
               status.status = clean ? finalRequest!.outcome : "unconfirmed";
-              status.cleanup = clean ? "owned-worker-stopped" : "unconfirmed";
-              status.diagnostic = clean ? finalRequest!.diagnostic : "Remote worker exited without a confirmed terminal exchange. Effects/descendants may remain.";
-              await persist(); server.close(); setTimeout(() => { client?.end(); }, 30).unref();
+              status.cleanup = "owned-worker-stopped";
+              status.diagnostic = clean ? finalRequest!.diagnostic : "Owned remote worker exited, but its terminal result was not acknowledged. Model/tool outcomes and detached descendants may remain unconfirmed.";
+              await persist(); closeWhenDrained();
             }).catch(() => { console.error("Remote terminal status could not be recorded."); process.exitCode = 1; server.close(); client?.end(); });
           });
           await persist(); worker.send(message); return;
         }
         if (!worker?.connected) throw new Error("The owned remote worker is no longer connected; no request was replayed.");
+        if (message.kind === "reply" && message.requestId === finalRequest?.requestId && !message.error && message.value && "accepted" in message.value && message.value.accepted === true) terminalAcknowledged = true;
         worker.send(message);
       }).catch(async (error: unknown) => {
         console.error("Remote control failed:", diagnosticCode(error)); socket.destroy();
@@ -196,7 +210,13 @@ async function supervise(init: BridgeInit): Promise<void> {
   const address = server.address(); if (!address || typeof address === "string") throw new Error("Remote control listener failed.");
   status.port = address.port; await saveStatus(directory, key, status, info);
   process.send?.({ kind: "supervisor-ready", port: status.port }); process.disconnect?.();
-  const launchDeadline = setTimeout(() => { if (!started) { status.status = "failed"; status.cleanup = "owned-worker-stopped"; status.diagnostic = "No authenticated start arrived; no worker was launched."; void persist().finally(() => { server.close(); client?.end(); }); } }, 15_000);
+  const launchDeadline = setTimeout(() => {
+    queue = queue.then(async () => {
+      if (started || closing) return;
+      status.status = "failed"; status.cleanup = "owned-worker-stopped"; status.diagnostic = "No authenticated start arrived; no worker was launched.";
+      await persist(); workerExited = true; closeWhenDrained();
+    }).catch(() => { console.error("Remote unstarted-run cleanup could not be recorded."); server.close(); client?.end(); });
+  }, 15_000);
   launchDeadline.unref();
 }
 async function frontend(): Promise<void> {
@@ -211,7 +231,7 @@ async function frontend(): Promise<void> {
   let queue = Promise.resolve();
   outer.on("message", (raw) => {
     queue = queue.then(async () => {
-      if (initialized) { if (foreground) { foreground.receive(raw); return; } if (!inner) throw new Error("Remote control is not attached."); inner.send(raw); return; }
+      if (initialized) { if (foreground) { await foreground.receive(raw); return; } if (!inner) throw new Error("Remote control is not attached."); inner.send(raw); return; }
       initialized = true;
       if (!Value.Check(BridgeInitSchema, raw)) throw new Error("Remote bootstrap does not match this protocol.");
       const init = raw, info = await runtimeInfo(init);
@@ -222,15 +242,8 @@ async function frontend(): Promise<void> {
       }
       if (init.action === "catalog") {
         if (!init.catalog) throw new Error("Missing explicit remote model endpoint.");
-        const headers = new Headers();
-        for (const [name, value] of Object.entries(init.catalog.headers ?? {})) if (value !== null) headers.set(name, value);
-        if (init.catalog.key && init.catalog.headers?.Authorization !== null && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${init.catalog.key}`);
-        const response = await fetch(new URL("models", localEndpointUrl(init.catalog.url)), { headers, redirect: "error", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]) });
-        if (!response.body) throw new Error("Remote model endpoint returned no catalog.");
-        const chunks: Uint8Array[] = []; let size = 0; const reader = response.body.getReader();
-        try { while (true) { const part = await reader.read(); if (part.done) break; size += part.value.length; if (size > 256 * 1024) { await reader.cancel(); throw new Error("Remote model catalog exceeded 256 KiB."); } chunks.push(part.value); } }
-        finally { reader.releaseLock(); }
-        outer.send({ kind: "catalog", status: response.status, body: Buffer.concat(chunks).toString("base64"), info }, () => outer.end()); return;
+        const result = await workerCatalog(init.catalog, abort.signal);
+        outer.send({ kind: "catalog", status: result.status, body: result.body, info }, () => outer.end()); return;
       }
       if (process.argv.includes("--foreground")) {
         if (init.action !== "start") throw new MoguriError("foreground_ephemeral", "Foreground native runs cannot inspect/reattach another execution. No replay or second worker was started.");

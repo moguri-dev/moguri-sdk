@@ -143,7 +143,7 @@ worker-thread IPC, non-root/NNP=1/seccomp=2/no-capabilities, generated workspace
 write/read/delete and the **real protocol-10 Moguri foreground-PTY bootstrap**
 in **3,816.87 ms**. Owned inventory is empty afterward.
 
-The current local-only image is
+The bootstrap-qualified protocol-10 local-only image is
 `docker.io/library/moguri-worker@sha256:759564d72938010e79109a223362f6a3f90077ea8226be85502ff1389bc95fdf`;
 worker SHA-256 is
 `d3755c349096417a4d09cc252f06ab800b3ee1e2487491e6dc514ea55cfe277b`.
@@ -179,6 +179,35 @@ separate optional credential-free metadata probe permits only
 `api.githubcopilot.com` through the signed runtime proxy. All other egress stays
 deny-first. Large input, exact tool effects, native cleanup and SDK/controller
 integration remain independent gates.
+
+The direct foreground primitive subsequently passed actual worker fork/IPC,
+three maintained pi-ai steps with that explicit generated fetch fixture, two
+exact approved read/write effects and a generated PNG above 1 MiB through the
+real native TTY in **4,806.24 ms**. Exact image bytes/digests and preserved proxy
+environment were checked in the guest; owned VM inventory was empty.
+Local-only image:
+`docker.io/library/moguri-worker@sha256:54be7fc3bb256841b39adaa4f83e8e99f761b7824df18b7bb0c337cba4cb2f8a`.
+
+The separate live metadata-egress gate is still **failed/unqualified**: with
+DNS enabled and only `api.githubcopilot.com` allowed, two preceding fresh
+thread/Node probes passed, but the next fresh VM timed out before readiness,
+before its metadata fetch ran. No later pass rewrites that failed run. The
+coordinated native repair is diagnosing it; SDK readiness must not be enabled
+from the synthetic model-loop result.
+
+Retained evidence for that exact failed run identifies an Apple 0.10.0
+`containerStartProcess` failure (`vmexec error read ack pipe`) for the stdio
+relay: it never started, while `containerWait` stayed blocked until timeout
+cleanup. This is not evidence of HMAC/byte corruption. Separate readiness
+passes do not rewrite the failed run. Later workloads reached Node but their
+live fetches failed with CONNECT proxy responses 502/403; Undici's outer
+`Request was cancelled` was not proof of an SDK/user cancellation. Networking
+remains unqualified. The upstream wait-before-start fix in
+[apple/container#1289](https://github.com/apple/container/pull/1289), included
+in 0.11.0, does not by itself prove the underlying acknowledgement failure fixed.
+No global runtime upgrade or policy relaxation is part of this evidence.
+The images above remain historical protocol-10 primitive fixtures, not current
+protocol-11 SDK payloads.
 
 SendBox entry allow rules match argv token counts, not shell-style tail globs:
 `/bin/sh -c *` matches the three-token generated probe, while `/bin/sh *` does

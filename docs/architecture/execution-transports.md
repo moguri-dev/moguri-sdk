@@ -61,6 +61,14 @@ and late accounting stay distinct. Recovery reconciles an existing run without
 admitting new work or supplying new model access. Late usage can improve an
 unknown ledger entry without rewriting a partial turn as successful.
 
+The persistent bridge closes only after the actual final durable cursor drains,
+not after an assumed 30ms delay. Final status/journal writes share the control
+queue, so closing cannot race a late acknowledgement's filesystem writes.
+Actual worker exit confirms only `owned-worker-stopped`; it does not invent an
+acknowledged successful outcome or descendant containment. Generated coverage
+holds the terminal cursor deliberately and exercises genuine control-plane
+SIGKILL recovery.
+
 Protocol/database migration 8 adds transport configuration, run identities,
 frame receipts and late-usage events without rewriting prior event identities
 or encrypted grants. Generated acceptance must cover actual SSH worker/model
@@ -74,9 +82,11 @@ after the installed worker/runtime and target pass those checks.
 `node scripts/prepare-worker-image.mjs --build` prepares an isolated context
 containing only the dependency manifests and built worker/MCP/bridge modules,
 not the checkout, host home, credentials or model weights. Apple Containerization
-builds it without cache from Node 26.12.0 Bookworm's pinned Linux arm64 manifest
-`sha256:2928a235e5af9997b97f8fbe5718cfd40676fc9190b619effc0c0249c41bb4e4`.
+builds it without cache from Node 26.12.0/Trixie's pinned Linux arm64 manifest
+`sha256:f6e55fb0e92f7f115549278ab36f68f0659790f5d4fd7cb4446486d8ed70d842`.
 The upstream Docker Hub tag API supplied that platform digest before work.
+The original Bookworm digest/build measurements below are historical
+prerequisites, not the current compatible native workload.
 
 The image reuses Node (MIT), existing locked runtime dependencies, Node-PTY
 (MIT), system nftables and the build toolchain. Other dependency lifecycle
@@ -116,3 +126,53 @@ The raw host PTY primitive passed 1,398,104 generated payload bytes in
 can negotiate the same bounded prefixed encoding on an owned TTY while keeping
 ordinary SSH pipes on their existing JSON protocol. This does not enable
 Sandbox or substitute host-only checks for the candidate's genuine guest gate.
+
+## Native foreground primitive
+
+SendBox is reused as its maintained Apache-2.0 CLI, not reimplemented or
+described as a process group. The separately installed development R4 bundle,
+public key, version pair, trust-root ID, release sequence and host ownership/
+hashes remain explicit; they do not replace production trust.
+
+Signed egress intentionally blocks direct loopback TCP. Native control therefore
+uses the same bounded private wire with an owned foreground process and real
+Node fork/IPC, not the SSH loopback daemon. The runtime's exact proxy environment
+is preserved into the worker; arbitrary ambient secrets and NODE_OPTIONS are
+not. Actual worker/provider-step/tool/large-image gates use synthetic fetch
+responses and are labeled as such; live proxy/networking is a separate gate.
+
+## Native SDK contract being qualified
+
+The control plane must record an owned native execution before CLI effects:
+profile/session/turn, immutable configuration signature, pinned image/worker,
+actual host/guest mount mapping, trust metadata, unique runtime prefix and
+eventual CLI/worker/VM identities. The same SDK serves both clients. No selected
+configuration or executable-presence check makes Sandbox ready.
+
+User-provided policy is bounded/validated, and cannot implicitly forward Git,
+SSH, IDE, refresh or unrelated secret-store credentials. Copilot delegation is
+separate and explicit; only per-request access crosses the authenticated raw
+channel. Prepared model metadata/inference and repository instruction reads
+must originate in the guest. Unqualified model/extension/console/panel surfaces
+remain blocked, not run against a same-named host root.
+
+Native frame sequence/digest receipts commit atomically with their primary
+events. A worker terminal report is only a report: acknowledge it durably, then
+wait for actual owned VM teardown before recording a successful turn. Stopped,
+failed, partially cancelled and cleanup-unconfirmed outcomes remain distinct.
+Unknown model usage never becomes zero. No credential-bearing reply is logged.
+
+Stop propagates through owned work and private queries. Host CLI termination
+does not prove teardown. Inspect only the exact persisted runtime prefix,
+verified bootstrap executable and approved mount/image, then stop/delete only
+that VM. Never kill a stale/reused host PID or foreign Apple/Porto workload.
+Restart marks interrupted work partial and inspects/cleans existing owned
+resources without launching another worker, replaying a tool or promoting a
+late model result into success.
+
+Durable native execution/report/frame events require migration and recovery
+coverage. Generated acceptance must include genuine SDK/CLI/TUI/Electron
+execution, private provider access, root mapping, input-credit/backpressure,
+concurrent runs, configuration/approval races, cancellation failure and actual
+control-plane loss. A failing live gate remains a failure, not a skip or a
+reason to weaken guest controls.
