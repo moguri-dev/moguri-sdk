@@ -15,6 +15,8 @@ import { QuestionCommandSchema, type UserQuestion } from "./questions.ts";
 import { BudgetCommandSchema, BudgetQuerySchema, BudgetSettingsSchema, type BudgetResponse, type BudgetEntry, type BudgetLimit } from "./budgets.ts";
 import { ProfileCommandSchema, ProfileQuerySchema, type ProfileResponse } from "./profiles.ts";
 import { KupoSettingsSchema, defaultKupoSettings, type RoutingTurn } from "./routing.ts";
+import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
+export * from "./compaction.ts";
 export * from "./routing.ts";
 export * from "./profiles.ts";
 export * from "./budgets.ts";
@@ -99,6 +101,7 @@ const section = Type.Union([
   Type.Literal("kupo"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  CompactionCommandSchema,
   ArtifactCommandSchema,
   QuestionCommandSchema,
   BudgetCommandSchema,
@@ -135,6 +138,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  CompactionQuerySchema,
   BudgetQuerySchema,
   ProfileQuerySchema,
   object({ type: Type.Literal("prompt.preview"), sessionId: Type.Optional(id) }),
@@ -180,6 +184,7 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
+  compactions: ContextCompaction[];
   routings: RoutingTurn[];
   questions: UserQuestion[];
   budgetEntries: BudgetEntry[];
@@ -201,6 +206,7 @@ export interface VoiceStatus {
 }
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
+  | CompactionResponse
   | ProfileResponse
   | BudgetResponse
   | WorkspaceResponse

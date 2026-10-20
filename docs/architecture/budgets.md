@@ -33,6 +33,11 @@ remain unchanged.
 
 ## Protocol-18 telemetry and dated views
 
+Protocol 19 additionally meters the actual `compaction` role through this same
+ledger. Reviewed context estimates/history are exposed by `sdk.compactions`;
+applying/restoring a summary never resets admission or substitutes its
+context-only synthetic normalization for the real compactor report.
+
 The owned worker now retains observed first-output delay, first-to-last
 normalized output delivery interval, event count and cache-report presence.
 Observations come from the execution host, not controller/UI delivery times.

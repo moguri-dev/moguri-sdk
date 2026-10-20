@@ -57,25 +57,37 @@ history remain. Restoration uses original history without another model call,
 replay, refund or provider substitution. A restored context may exceed the
 working window; normal admission must still fail rather than truncate it.
 
-Protocol/database 19 is intended to add a compaction model role, a typed
-control-turn start, retained compaction revisions and explicit user context
-changes. Its migration must preserve all previous ciphertexts, receipts,
+Protocol/database 19 adds a compaction model role, `turn.control_started`,
+`compaction.saved` revisions and explicit user `context.changed` events.
+Its migration preserves all previous ciphertexts, receipts,
 grants and ledger entries, with failed-migration and restart recovery coverage.
 Pending generation, cancellation, failure, partial/control-loss and stale
 source cannot be relabeled as a successful/applied summary. No restart retry
 or hidden use of a model's confidence is authorized.
 
-## Required client and recovery coverage
+## Shared clients and recovery coverage
 
 The SDK is the capability API; CLI/native TUI and desktop expose preview,
-generation, history/content review, apply, discard and restore. Desktop must
-keep draft text independent of these operations, display errors and actual
-pending lifecycle, and require review before the context changes.
+generation, history/content review, apply, discard and restore. Desktop keeps
+draft text independent of these operations, displays errors and actual
+pending lifecycle, and requires review before the context changes. Closing the
+review does not stop the service's call; reopen it to inspect or explicitly stop.
+Stops bind the exact compaction/turn, never whichever solver happens to be
+running when a late click arrives. Admission and application also bind the
+current global cap without depending on another profile's changing usage.
 
-Integration coverage must include real Local/SSH calls, role/cap settlement,
+The first external-consumer check observed `running` through a stale peer SDK
+snapshot rather than awaiting the operation's authoritative lifecycle. Its
+qualification now polls the typed compaction state, not a nullable cached turn
+ID. This does not add retries, infer a successful result or release capacity.
+
+Targeted integration coverage includes real Local/SSH calls, role/cap settlement,
 unknown usage, output bounds, concurrent source/policy changes, no tool effects,
 stopped/partial results, idempotent commands, source deletion, migration and
-restart. An externally packed consumer and both actual clients must exercise
-the delivered surface. At this prerequisite checkpoint those APIs, migration
-and client workflows are not yet implemented or qualified. Sandbox remains
-paused; nothing here establishes descendant containment.
+restart. The same actual pinned SSH compactor passes in **5,083.46 ms**, and
+the actual native TUI preview/generate/read/apply/restore flow in **1,371.46 ms**.
+Five focused hidden desktop flows pass in **10.3 s**, including required review,
+draft preservation, compact layout, close/reopen/acknowledged stop and the
+existing model-request lifecycle cases. Source/packaged full qualification and
+exact external-consumer evidence are recorded separately in setup.
+Sandbox remains paused; nothing here establishes descendant containment.

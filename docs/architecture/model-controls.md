@@ -77,6 +77,12 @@ verify disabled submission/preserved drafts, then exercise both successful
 settlement and explicit refusal. Keyboard tests wait for actual enabled
 controls, not a completed click that merely started an asynchronous request.
 
+**Review context and compactions** opens the shared SDK's explicit text-history
+workflow. Preview, metered generation, proposal review/apply and restoring the
+retained originals are separate actions. It never silently truncates history,
+chooses a kupo compactor, changes the model selection or grants tool authority.
+See [reviewed compaction](context-compaction.md).
+
 The original face/bat-wing mascot gains a small red antenna pom-pom. Visual
 reference: <https://en.wikipedia.org/wiki/File:MoogleFFIXConcept.png>, linked by
 the Moogle article. This is trait reference only: no image bytes, tracing,

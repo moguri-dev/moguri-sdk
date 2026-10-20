@@ -12,6 +12,7 @@ import {
   isArtifactCommand, isArtifactQuery, isQuestionCommand,
   isBudgetCommand, isBudgetQuery,
   isProfileCommand, isProfileQuery,
+  isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
@@ -51,6 +52,8 @@ export interface PlatformHost {
   validateAdmission: SessionWorkspaceHost["validateAdmission"];
   closingProject(id: string): boolean;
   contextPreview: SessionWorkspaceHost["contextPreview"];
+  compactionQuery(query: CompactionQuery): CompactionResponse;
+  compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult;
   validateControls(controls: Controls): void;
   startup(projectId: string | null): ResolvedControls;
   modelCredential(endpointId: string, token: string | undefined, finish: WorkspaceFinish): Promise<CommandResult>;
@@ -194,6 +197,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isCompactionQuery(query)) return this.host.compactionQuery(query);
     if (isProfileQuery(query)) throw new MoguriError("profile_authority", "Profile registry queries require the root service authority, not a profile fallback.", 409);
     if (isBudgetQuery(query)) return this.budgets.query(query);
     if (isArtifactQuery(query)) return this.artifacts.query(query);
@@ -332,6 +336,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isCompactionCommand(command)) return this.host.compactionCommand(command, finish);
     if (isProfileCommand(command)) throw new MoguriError("profile_authority", "Profile registry actions require the root service authority.", 409);
     if (isBudgetCommand(command)) {
       const policy = this.snapshot().budgetPolicy;

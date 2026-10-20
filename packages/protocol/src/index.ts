@@ -19,9 +19,10 @@ import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./question
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 import type { RoutingTurn, SingleRoutingPlan } from "./routing.ts";
+import type { ContextCompaction } from "./compaction.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -158,6 +159,7 @@ export interface Session {
   browserUrl: string | null;
   suggestionSources?: SuggestionSource[];
   inheritedImages?: boolean;
+  activeCompactionId?: string | null;
 }
 export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
@@ -215,6 +217,9 @@ export interface EventPayloads {
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
   "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string };
+  "turn.control_started": { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string };
+  "compaction.saved": { compaction: ContextCompaction };
+  "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string };
   "steer.applied": { item: QueueItem };
   "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole };
   "routing.started": { routing: RoutingTurn };
@@ -313,6 +318,7 @@ export const eventTypes: readonly EventType[] = [
   "budget.recorded", "budget.policy_changed", "budget.blocked",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
+  "turn.control_started", "compaction.saved", "context.changed",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -338,6 +344,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const artifacts = new Map<string, RetainedArtifact>();
   const questions = new Map<string, UserQuestion>();
   const routings = new Map<string, RoutingTurn>();
+  const compactions = new Map<string, ContextCompaction>();
   const budgetEntries = new Map<string, BudgetEntry>();
   let budgetPolicy: PlatformSnapshot["budgetPolicy"] = { revision: 0, limit: null };
   const terminals = new Map<string, TerminalState>();
@@ -348,6 +355,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.profile_id !== profileId) continue;
     if (event.event_type === "budget.recorded") budgetEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
     if (event.event_type === "budget.policy_changed") budgetPolicy = structuredClone(event.payload);
+    if (event.event_type === "compaction.saved") compactions.set(event.payload.compaction.id, structuredClone(event.payload.compaction));
     if (event.event_type === "routing.started") routings.set(event.payload.routing.id, structuredClone(event.payload.routing));
     if (event.event_type === "routing.planned") {
       const routing = routings.get(event.payload.routingId);
@@ -365,12 +373,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       for (const [id, execution] of executions) if (execution.sessionId === event.payload.deletedSessionId) executions.delete(id);
       for (const [id, question] of questions) if (question.sessionId === event.payload.deletedSessionId) questions.delete(id);
       for (const [id, routing] of routings) if (routing.sessionId === event.payload.deletedSessionId) routings.delete(id);
+      for (const [id, compaction] of compactions) if (compaction.sessionId === event.payload.deletedSessionId) compactions.delete(id);
     }
     if (event.event_type === "project.removed") {
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
-      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings, compactions]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -469,6 +478,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         prUrl: event.payload.prUrl ?? null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
         suggestionSources: event.payload.suggestionSources,
         inheritedImages: event.payload.inheritedImages,
+        activeCompactionId: null,
       });
     }
     const session = event.session_id ? sessions.get(event.session_id) : undefined;
@@ -505,6 +515,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "session.mode_changed": session.mode = event.payload.mode; session.pendingMode = null; session.revision++; break;
       case "session.browser_changed": session.browserUrl = event.payload.url; session.revision++; break;
       case "session.workspace_bound": session.workspaceId = event.payload.workspaceId; session.revision++; break;
+      case "context.changed": session.activeCompactionId = event.payload.activeCompactionId; session.revision++; break;
       case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
       case "session.resumed": session.status = session.queue.length ? "queued" : "idle"; session.lastError = null; break;
@@ -546,13 +557,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         session.queue = session.queue.filter((item) => item.id !== event.payload.item.id); session.queueRevision++;
         addUser(event.payload.item);
         break;
+      case "turn.control_started":
+        session.turnId = event.turn_id ?? null; session.status = "running"; session.lastError = null; session.localFinishing = false;
+        break;
       case "steer.applied":
         session.queue = session.queue.filter((item) => item.id !== event.payload.item.id); session.queueRevision++;
         addUser(event.payload.item);
         break;
       case "model.started":
         for (const routing of routings.values()) if (routing.turnId === event.turn_id && routing.status === "ready" && event.payload.role !== "router") routing.status = "running";
-        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: event.payload.role === "router" ? "notice" : "assistant", text: event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : "", timestamp: event.timestamp });
+        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: event.payload.role === "router" || event.payload.role === "compaction" ? "notice" : "assistant",
+          text: event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : "", timestamp: event.timestamp });
         session.usage.push({
           stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: event.payload.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
@@ -614,7 +629,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
-    settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()],
+    settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],

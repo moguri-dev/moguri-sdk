@@ -17,10 +17,12 @@ Unused scope fields are null in checkpoint 1.
 | `queue.enqueued`, `queue.edited`, `queue.removed`, `queue.reordered` | Exact unclaimed message mutation, each with a queue revision. |
 | `queue.delivery_changed` | Explicit conversion of an unclaimed steer into a new queued turn. |
 | `turn.started` | Admitted item, controls, allowed-env revision and optional committed prompt digest; claims the item once. |
+| `turn.control_started` | Explicit user-requested compaction purpose/ID, unchanged session controls, policy and inspectable contract digest. Owns the existing worker without a fake user message or queue claim. |
+| `compaction.saved`, `context.changed` | Retained source/model-bound proposal revisions and actual lifecycle, then exact user apply/restore. Original event/blob history and ledger charges stay intact; rejected, stale or stopped proposals cannot become active context. |
 | `steer.applied` | One item enters its owning turn at a safe model-step boundary. |
 | `model.started` | Step, actual role/canonical model/provider/API model, effective context window/effort and estimated context. The session may retain the synthetic selection; actual role/model never become `kupo` charges. Creates an unknown, in-progress accounting entry; estimates are not provider token telemetry. |
 | `routing.started`, `routing.planned`, `routing.finished` | Single owning-turn policy/task/revision snapshot, exact classifier/eligible pool, untrusted plan and actual lifecycle/diagnostic. Completion/accounting and accepted-plan commitment precede any solver continuation. Restart never replays a routed effect. |
-| `assistant.delta` | Durable streamed text for that step, batched by the worker. Router deltas remain audit events and never append to a public assistant answer or solver context. |
+| `assistant.delta` | Durable streamed text for that step, batched by the worker. Router/compactor deltas remain audit events and never append to a public assistant answer or solver context. |
 | `model.completed` | Public message, normalized-context blob digest and actual/unknown usage, nullable cache categories and execution-host stream observations. Inconsistent timing becomes unknown without discarding independently valid token charges. Does not imply overall turn success. |
 | `model.late_usage` | Exact owned remote step/frame improves unknown accounting after disconnect; no new continuation, tool replay or rewrite of a partial turn. |
 | `execution.started`, `execution.changed` | Pinned target/build/root/run, actual worker and cancellation/cleanup status. SSH exit is not descendant-containment proof. |

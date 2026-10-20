@@ -5,9 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 18 deliberately rejects incompatible running
-services and requires the matching SSH worker for new model telemetry. State
-migrations preserve schema-1 through schema-17 history, sessions, drafts,
+This is an alpha API. Protocol 19 deliberately rejects incompatible running
+services and requires the matching SSH worker for reviewed compaction and model
+telemetry. State migrations preserve schema-1 through schema-18 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -21,7 +21,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.12.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.13.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -52,10 +52,11 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.12.0-alpha.1.tgz`.
+repacking: `npm run verify:sdk -- release/moguri-0.13.0-alpha.1.tgz`.
 Current verification also exercises actual installed-worker SSH files,
-Git/plan reads and dated/per-call telemetry on macOS. Historical archives retain their separately
-recorded qualification; protocol-16/17 SSH receipts remain inspectable without
+Git/plan reads, dated/per-call telemetry and actual metered compaction with the
+installed CLI/worker. Historical archives retain their separately
+recorded qualification; protocol-16/17/18 SSH receipts remain inspectable without
 reattaching or continuing an old worker.
 
 ## Connect to the shared service
@@ -123,6 +124,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
+| `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single policy/configure with an observed settings revision and session-owned plan history. Actual router/solver roles use the existing worker/ledger; finite caps, images and model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
@@ -133,6 +135,41 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `models` | Explicit Copilot/local catalog refresh, synthetic Single availability and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download or automatic model substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
+
+### Reviewed context compaction
+
+`sdk.compactions.state(sessionId)` returns actual retained history, active ID,
+current source digest and labeled active/original conversation estimates.
+Preview is free of inference:
+
+```ts
+const { preview } = await sdk.compactions.preview(sessionId, {
+  keepRecentTurns: 2,
+  modelId: actualAvailableModelId,
+});
+const requested = await sdk.compactions.generate(sessionId, preview, true);
+// Inspect state after actual settlement, then read the exact proposal.
+const { compaction, text } = await sdk.compactions.read(sessionId, requested.id!);
+// Only after the actual user reviewed text and compaction.status is proposed:
+await sdk.compactions.apply(sessionId, compaction.id, compaction.revision);
+```
+
+Generation owns one read-only control turn, not a fake user prompt or optional
+subagent. It uses an actual selected model, at most 1,024 output tokens (or its
+stricter model/budget bound), normal cancellation and all-role admission.
+`sdk.compactions.stop(sessionId, compactionId)` targets only that exact running
+operation; a stale request cannot stop newer solver work.
+Synthetic kupo requires an explicit real compactor. Missing usage stays held;
+tools, incomplete/expanding output and changed source/model/policy cannot be
+applied. Text-only support rejects image history without dropping it.
+
+Original encrypted history, complete recent turns and drafts remain retained.
+The synthetic context-only summary has no usage anchor; it never replaces the
+actual compactor report or ledger charges. Read/discard/restoration do not make
+paid calls. Restore with the current state's `activeId` and `sourceDigest`:
+`sdk.compactions.restore(sessionId, activeId, sourceDigest, true)`.
+Restoring may exceed the working window; normal admission still fails closed.
+See [the compaction contract](architecture/context-compaction.md).
 
 ### Opt-in Single routing
 

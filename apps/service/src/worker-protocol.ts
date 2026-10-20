@@ -19,7 +19,7 @@ export const WorkerRequestSchema = Type.Union([
 ]);
 export type WorkerRequest = Static<typeof WorkerRequestSchema>;
 export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean }
-export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver"; context?: Message[] }
+export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction"; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
 export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean; continue?: true } | DelegatedResult; error?: string; halt?: true };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" };
@@ -51,6 +51,17 @@ const assistantSchema = Type.Object({
 export function assistantMessage(value: unknown): AssistantMessage {
   if (!Value.Check(assistantSchema, value)) throw new Error("Worker returned an invalid normalized model message.");
   return value as AssistantMessage;
+}
+const textBlock = Type.Object({ type: Type.Literal("text"), text: Type.String() });
+const imageBlock = Type.Object({ type: Type.Literal("image"), data: Type.String(), mimeType: Type.String() });
+const contextSchema = Type.Array(Type.Union([
+  assistantSchema,
+  Type.Object({ role: Type.Literal("user"), content: Type.Union([Type.String(), Type.Array(Type.Union([textBlock, imageBlock]))]), timestamp: Type.Number() }),
+  Type.Object({ role: Type.Literal("toolResult"), toolCallId: Type.String(), toolName: Type.String(), content: Type.Array(Type.Union([textBlock, imageBlock])), isError: Type.Boolean(), timestamp: Type.Number() }),
+]));
+export function contextMessages(value: unknown): Message[] {
+  if (!Value.Check(contextSchema, value)) throw new Error("Retained context is not a valid normalized conversation. Original data was preserved; no source was silently dropped.");
+  return value as Message[];
 }
 export function toolCalls(message: AssistantMessage): ToolCall[] {
   return message.content.filter((block) => block.type === "toolCall").map((block) => ({ id: block.id, name: block.name, arguments: block.arguments }));

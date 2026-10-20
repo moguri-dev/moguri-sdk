@@ -1,6 +1,6 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, BudgetQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, BudgetQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind } from "../../protocol/src/index.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Side chat" | "Suggestions" | "Attention";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -38,6 +38,7 @@ export const slashCommands = [
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
   { name: "dashboard", description: "Inspect profile-wide actual model accounting", argument: "[FILTERS_JSON]" },
+  { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
   { name: "profiles", description: "Choose or manage isolated profiles" },
   { name: "profile", description: "Explicit profile navigation and metadata", argument: "[use ID|create NAME|rename ID REV NAME|retry ID REV confirm-review|stop ID]" },
   { name: "kupo", description: "Inspect or explicitly configure experimental Single routing", argument: "[status|history|set POLICY_JSON]" },
@@ -126,6 +127,41 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const query = parse(BudgetQuerySchema, { ...filters, type: calls ? "budget.calls" : "budget.dashboard" });
       if (query.type === "budget.status") throw new ClientError("budget_query", "Use dashboard/calls filter fields, not another query type.");
       return { kind: "text", text: JSON.stringify(await sdk.query(query), null, 2) };
+    }
+    case "compact": {
+      const [action = "state", ...parts] = command.argument ? command.argument.split(/\s+/) : [];
+      if (action === "state" && !parts.length) return { kind: "text", text: JSON.stringify(await sdk.compactions.state(session.id), null, 2) };
+      if (action === "read" && parts.length === 1) {
+        const result = await sdk.compactions.read(session.id, parts[0]!);
+        return { kind: "text", text: `Model-produced context proposal ${result.compaction.id}, revision ${result.compaction.revision}, ${result.compaction.status}.\nOriginal history is retained; this is not a user answer or permission.\n\n${result.text ?? "No summary was retained."}\n\n${JSON.stringify(result.compaction, null, 2)}` };
+      }
+      if (action === "stop" && parts.length === 1) {
+        await sdk.compactions.stop(session.id, parts[0]!);
+        return { kind: "ok", message: "Stop requested for this exact compaction. Inspect its actual stopped/partial outcome; no newer turn was targeted." };
+      }
+      if (action === "preview") {
+        const value: unknown = parts.length ? JSON.parse(parts.join(" ")) : {};
+        if (!isRecord(value) || Object.keys(value).some((key) => key !== "modelId" && key !== "keepRecentTurns")) throw new ClientError("compaction_command", "Preview options are modelId and keepRecentTurns only.");
+        const query = parse(CompactionQuerySchema, { type: "compaction.preview", sessionId: session.id, ...value });
+        return { kind: "text", text: JSON.stringify(await sdk.query(query), null, 2) };
+      }
+      if (action === "generate" && parts.at(-1) === "confirm-cost") {
+        const value: unknown = JSON.parse(parts.slice(0, -1).join(" "));
+        if (!isRecord(value) || Object.keys(value).some((key) => !["digest", "modelId", "keepRecentTurns"].includes(key))) throw new ClientError("compaction_command", "Use the reviewed preview's digest, modelId and keepRecentTurns, followed by confirm-cost.");
+        const request = parse(CompactionCommandSchema, { type: "compaction.generate", sessionId: session.id, expectedDigest: value.digest, modelId: value.modelId, keepRecentTurns: value.keepRecentTurns, confirmCost: true });
+        const result = await sdk.command(request);
+        return { kind: "ok", message: `Compaction ${result.id} requested. Inspect /compact state and /compact read ID after settlement. Original context is unchanged; no result was automatically applied.` };
+      }
+      if ((action === "apply" || action === "discard") && parts.length === (action === "apply" ? 3 : 2) && /^\d+$/.test(parts[1]!) && (action !== "apply" || parts[2] === "confirm-reviewed")) {
+        if (action === "apply") await sdk.compactions.apply(session.id, parts[0]!, Number(parts[1]));
+        else await sdk.compactions.discard(session.id, parts[0]!, Number(parts[1]));
+        return { kind: "ok", message: action === "apply" ? "Reviewed context prefix applied. Recent turns, original history, drafts and charges remain retained." : "Proposal discarded. Original context and all actual charges were preserved." };
+      }
+      if (action === "restore" && parts.length === 3 && parts[2] === "confirm-restore") {
+        await sdk.compactions.restore(session.id, parts[0]!, parts[1]!, true);
+        return { kind: "ok", message: "Original retained context restored without a model call, replay or accounting reset. Normal context-window admission still applies." };
+      }
+      throw new ClientError("compaction_command", "Use /compact state, preview OPTIONS_JSON, generate {digest,modelId,keepRecentTurns} confirm-cost, read ID, stop ID, apply ID REV confirm-reviewed, discard ID REV, or restore ACTIVE_ID SOURCE_SHA confirm-restore.");
     }
     case "budget": {
       const [action, ...args] = command.argument.split(/\s+/);

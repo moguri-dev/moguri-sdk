@@ -46,6 +46,14 @@ try {
       await sdk.sessions.mode("generated-id","read-only");
       await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
       const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
+      const compactionState=await sdk.compactions.state("generated-id");void compactionState.originalEstimatedTokens;
+      const compactionPreview=(await sdk.compactions.preview("generated-id",{modelId:"generated-model",keepRecentTurns:1})).preview;
+      const compaction=await sdk.compactions.generate("generated-id",compactionPreview,true);
+      const summary=await sdk.compactions.read("generated-id",compaction.id!);void summary.compaction.afterTokens;
+      await sdk.compactions.apply("generated-id",compaction.id!,summary.compaction.revision);
+      await sdk.compactions.restore("generated-id",compaction.id!,compactionState.sourceDigest,true);
+      await sdk.compactions.discard("generated-id",compaction.id!,summary.compaction.revision);
+      await sdk.compactions.stop("generated-id",compaction.id!);
       const budget=await sdk.budgets.status("generated-id");void budget.status.totals.heldTokens;
       await sdk.budgets.policy({basis:"estimate",tokens:100000},0,true);
       const dashboard=await sdk.budgets.dashboard({role:"solver",limit:50});void dashboard.nextOffset;
@@ -376,7 +384,39 @@ try {
       const cliCalls=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"budget","calls","--profile",beta.profileId,"--filters",JSON.stringify({range:{kind:"days",days:7},sessionId:routed.id,limit:1})],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
       assert.equal(JSON.parse(cliCalls.stdout).type,"budget.calls");assert.equal(JSON.parse(cliCalls.stdout).calls[0].reportedTokens,42);
       assert.deepEqual(sdk.routing.policy(),defaultKupoSettings());
-      await sdk.profiles.globalBudget({basis:"estimate",tokens:252},0,true);
+      if(PROTOCOL_VERSION>=19){
+        const compact=await beta.sessions.create(null,"Generated installed compaction",{modelId:generatedModel.id,autonomy:"Manual"});
+        for(let turn=0;turn<3;turn++){
+          const current=beta.getState().snapshot.sessions.find(value=>value.id===compact.id);
+          await beta.command({type:"draft.save",sessionId:compact.id,expectedRevision:current.draft.revision,text:"Generated installed retained turn "+turn+". "+"Generated retained compaction detail. ".repeat(80),attachments:[]});
+          await beta.command({type:"message.send",sessionId:compact.id,expectedRevision:current.draft.revision+1,delivery:"queue"});
+          for(let n=0;n<400&&beta.getState().snapshot.sessions.find(value=>value.id===compact.id).turnId;n++)await new Promise(resolve=>setTimeout(resolve,20));
+          assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===compact.id).status,"completed");
+        }
+        const invoke=async text=>JSON.parse((await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"slash",text,"--session",compact.id,"--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}})).stdout);
+        const preview=JSON.parse((await invoke('/compact preview {"keepRecentTurns":1}')).text).preview;
+        assert.equal(generatedRequests.length,9);
+        const requested=await invoke("/compact generate "+JSON.stringify({digest:preview.digest,modelId:preview.modelId,keepRecentTurns:preview.keepRecentTurns})+" confirm-cost");
+        assert.equal(requested.kind,"ok");
+        let proposal;
+        for(let n=0;n<400;n++){
+          proposal=(await beta.compactions.state(compact.id)).compactions[0];
+          if(proposal&&proposal.status!=="running")break;
+          await new Promise(resolve=>setTimeout(resolve,20));
+        }
+        assert.equal(proposal.status,"proposed");assert.match((await invoke("/compact read "+proposal.id)).text,/Generated external budget response/);
+        await assert.rejects(()=>beta.compactions.stop(compact.id,proposal.id),/settled|ownership|newer/);
+        await assert.rejects(()=>sdk.compactions.read(compact.id,proposal.id),{code:"not_found"});
+        await beta.compactions.apply(compact.id,proposal.id,proposal.revision);
+        const active=await beta.compactions.state(compact.id);
+        assert.equal(active.activeId,proposal.id);assert.ok(active.estimatedTokens<active.originalEstimatedTokens);
+        assert.equal((await beta.budgets.calls({sessionId:compact.id,role:"compaction"})).calls[0].reportedTokens,42);
+        await invoke("/compact restore "+proposal.id+" "+active.sourceDigest+" confirm-restore");
+        const restored=await beta.compactions.state(compact.id);assert.equal(restored.activeId,null);assert.equal(restored.estimatedTokens,restored.originalEstimatedTokens);
+        assert.equal(generatedRequests.length,10);
+      }
+      const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
+      await sdk.profiles.globalBudget({basis:"estimate",tokens:rootCharges},0,true);
       assert.equal((await beta.budgets.status(betaMetered.id)).status.remainingTokens,0);
       await assert.rejects(()=>beta.sessions.configure(routed.id,routedSession.controls),/finite budgets|wind-down/);
       const globals=(await beta.profiles.list()).catalog.globalDefaults;
@@ -392,7 +432,7 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed worker handshake, macOS SSH workspace files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction preview/generate/read/apply/restore CLI and real metered SDK history, installed worker handshake, macOS SSH workspace files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "" } });
 } finally { try { await ssh?.close(); } finally { await rm(temporary, { recursive: true, force: true }); } }

@@ -53,6 +53,7 @@ export function compactionProposal(selection: CompactionSelection, message: Assi
   const summary = message.content.filter((block) => block.type === "text").map((block) => block.text).join("").trim();
   if (message.stopReason !== "stop" || message.content.some((block) => block.type === "toolCall") || !summary || Buffer.byteLength(summary) > 32 * 1024) throw new MoguriError("compaction_result", "The compactor did not return one complete bounded tool-less summary. Original context was preserved.", 409);
   const original = [...selection.prefix, ...selection.tail].map((entry) => entry.message);
+  // Context-only replacement invalidates old prefix usage; actual metering stays on model.completed.
   const replacement: AssistantMessage = { ...message, timestamp: original.reduce((latest, entry) => Math.max(latest, entry.timestamp), message.timestamp) + 1,
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
     content: [{ type: "text", text:
