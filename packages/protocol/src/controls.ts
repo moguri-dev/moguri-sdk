@@ -1,14 +1,12 @@
 import { Type, type Static } from "typebox";
 import { ModelOptionsSchema } from "./model.ts";
+import { SessionBudgetSchema } from "./budgets.ts";
 
 export const ControlsSchema = Type.Object({
   env: Type.Union([Type.Literal("Local"), Type.Literal("Sandbox"), Type.Literal("Remote")]),
   modelId: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
   autonomy: Type.Union([Type.Literal("Manual"), Type.Literal("Guided"), Type.Literal("Autopilot"), Type.Literal("Autopilot Max")]),
-  budget: Type.Union([
-    Type.Object({ kind: Type.Literal("unlimited") }, { additionalProperties: false }),
-    Type.Object({ kind: Type.Literal("limited"), tokens: Type.Optional(Type.Integer({ minimum: 1 })), usd: Type.Optional(Type.Number({ exclusiveMinimum: 0 })) }, { additionalProperties: false }),
-  ]),
+  budget: SessionBudgetSchema,
   modelOptions: Type.Optional(ModelOptionsSchema),
 }, { additionalProperties: false });
 export type Controls = Static<typeof ControlsSchema>;

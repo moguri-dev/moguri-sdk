@@ -12,6 +12,8 @@ import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type 
 import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
 import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type ArtifactMaterializationPreview } from "./artifacts.ts";
 import { QuestionCommandSchema, type UserQuestion } from "./questions.ts";
+import { BudgetCommandSchema, BudgetQuerySchema, BudgetSettingsSchema, type BudgetResponse, type BudgetEntry, type BudgetLimit } from "./budgets.ts";
+export * from "./budgets.ts";
 export * from "./questions.ts";
 export * from "./artifacts.ts";
 export * from "./execution.ts";
@@ -59,6 +61,7 @@ export const SettingsSchema = object({
   sandbox: SandboxSchema,
   retention: object({ deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }) }),
   artifacts: object({ retainAnswers: Type.Boolean() }),
+  budgets: BudgetSettingsSchema,
   notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
@@ -74,6 +77,7 @@ export const defaultSettings = (): UserSettings => ({
   sandbox: { executable: "sendbox", configPath: null, image: null, bundlePath: null, trustRootPath: null },
   retention: { deleteArchived: false, afterDays: 30 },
   artifacts: { retainAnswers: true },
+  budgets: { rates: [], maxPriceAgeDays: 30 },
   notifications: { inApp: true, os: false, previewContent: false },
   localModels: [], startup: { global: {}, profile: {} },
   remote: null,
@@ -85,11 +89,12 @@ const section = Type.Union([
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("startup"),
-  Type.Literal("remote"), Type.Literal("artifacts"),
+  Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   ArtifactCommandSchema,
   QuestionCommandSchema,
+  BudgetCommandSchema,
   object({ type: Type.Literal("settings.update"), expectedRevision: revision, settings: SettingsSchema, acknowledgePromptRisk: Type.Boolean() }),
   object({ type: Type.Literal("settings.reset"), expectedRevision: revision, section }),
   object({ type: Type.Literal("models.token.set"), endpointId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
@@ -122,6 +127,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  BudgetQuerySchema,
   object({ type: Type.Literal("prompt.preview"), sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("memory.search"), projectId: id, workspaceId: Type.Optional(id), text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
   object({ type: Type.Literal("memory.graph"), projectId: id, workspaceId: Type.Optional(id), path: Type.String({ maxLength: 4096 }) }),
@@ -166,6 +172,8 @@ export interface CapabilityJob {
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
   questions: UserQuestion[];
+  budgetEntries: BudgetEntry[];
+  budgetPolicy: { revision: number; limit: BudgetLimit | null };
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
   proposals: Proposal[];
@@ -183,6 +191,7 @@ export interface VoiceStatus {
 }
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
+  | BudgetResponse
   | WorkspaceResponse
   | SessionWorkspaceResponse
   | OAuthResponse

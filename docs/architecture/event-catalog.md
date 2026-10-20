@@ -56,6 +56,8 @@ Unused scope fields are null in checkpoint 1.
 | `configuration.proposed`, `configuration.decided` | Exact scoped content/base digests and revision, verified source excerpts, actual user/model origin and a real user decision. No self-approval, authentication, automatic enablement or publication. |
 | `attention.raised`, `attention.cleared`, `attention.acknowledged` | Atomically derived question/approval/failure/done state; heuristic provenance is explicit and read acknowledgement never resolves or approves. |
 | `question.asked`, `question.answered`, `question.cancelled` | Exact model/step/call and owning-turn question, actual answer actor and cancellation. Actual-user answers cannot be forged by a model, heuristic or queue item. Optional retained answer artifacts are derived atomically. |
+| `budget.recorded` | Immutable profile-owned reservation/settlement/import: actual model role/owner, held unknowns, explicit price basis and reported total. Source deletion/restart never refunds unconfirmed calls. |
+| `budget.policy_changed`, `budget.blocked` | Explicit revision-bound profile cap or actual admission rejection. A blocked request retains a diagnostic checkpoint without inventing an answer, extra paid call or Git success. |
 
 ## HTTP commands
 
@@ -122,13 +124,19 @@ question revision and optional exact draft consumption. Question, draft,
 artifact/source provenance and receipt failures roll back together. Stop/restart
 cancels waiting requests without inventing facts, changing permissions or
 holding the worker's cancellation chain behind a human response.
+Budget policy is separate from factory/settings resets. Model dispatch binds
+its reservation and `model.started` atomically before authorization. Complete
+and authenticated late usage settle the same entry once. Unknown/lost
+completion retains its full hold. Source/project forgetting does not delete
+profile-owned sanitized accounting. Finite preferences explicitly accept
+estimated admission; missing historical pricing is not free usage.
 
 ## WebSocket
 
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":12,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":13,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

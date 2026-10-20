@@ -20,7 +20,7 @@ export interface RetainedArtifact {
   folderId: string | null; workItemId: string | null;
   kind: ArtifactKind; name: string; path: string | null; contentDigest: string;
   revision: number; status: "active" | "archived"; createdAt: string; updatedAt: string;
-  origin: "manual" | "message" | "tool" | "file" | "question"; edited: boolean; sources: ArtifactSource[];
+  origin: "manual" | "message" | "tool" | "file" | "question" | "checkpoint"; edited: boolean; sources: ArtifactSource[];
   questionId?: string;
 }
 export const legacyArtifact = (artifact: LegacyRetainedArtifact, eventId: string): RetainedArtifact => ({

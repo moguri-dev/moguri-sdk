@@ -10,6 +10,7 @@ import {
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
   isManagedWorkspaceCommand, isManagedWorkspaceQuery,
   isArtifactCommand, isArtifactQuery, isQuestionCommand,
+  isBudgetCommand, isBudgetQuery,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
@@ -29,6 +30,7 @@ import { ContextInputs, isInputCommand, isInputQuery } from "./context-inputs.ts
 import type { RemoteOptions } from "./remote.ts";
 import { ManagedWorkspaces } from "./managed-workspaces.ts";
 import { ArtifactRuntime } from "./artifacts.ts";
+import { BudgetRuntime } from "./budgets.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
@@ -66,8 +68,10 @@ export class PlatformRuntime {
   readonly sessions: SessionWorkspace;
   readonly managed: ManagedWorkspaces;
   readonly artifacts: ArtifactRuntime;
+  readonly budgets: BudgetRuntime;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
+    this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events });
     this.memory = new RepositoryMemory(store);
     this.gateway = new McpGateway(options.vault, options.mcpWorkerPath, { oauth: options.oauth,
       authorized: (id) => this.snapshot().oauthAuthorizations.some((authorization) => authorization.id === id && authorization.state === "connected"),
@@ -181,6 +185,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isBudgetQuery(query)) return this.budgets.query(query);
     if (isArtifactQuery(query)) return this.artifacts.query(query);
     if (isManagedWorkspaceQuery(query)) return this.managed.query(query);
     if (isExecutionQuery(query)) return { type: query.type, remote: this.host.remoteStatus() };
@@ -277,6 +282,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (expectedRevision !== snapshot.settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before saving.", 409);
     if (settings.systemPrompt !== snapshot.settings.values.systemPrompt && !acknowledge) throw new MoguriError("prompt_warning", SYSTEM_PROMPT_WARNING, 409);
     validateSettings(settings);
+    this.budgets.validateSettings(settings);
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
     const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote]);
     return { event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
@@ -316,6 +322,13 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isBudgetCommand(command)) {
+      const policy = this.snapshot().budgetPolicy;
+      if (policy.revision !== command.expectedRevision) throw new MoguriError("budget_policy_changed", "Profile budget policy changed. Review the current limits before editing.", 409);
+      this.budgets.validateLimit(command.limit);
+      const result = finish([{ event_type: "budget.policy_changed", profile_id: PROFILE_ID, payload: { revision: policy.revision + 1, limit: command.limit } }], { revision: policy.revision + 1 });
+      this.host.wake(); return result;
+    }
     if (isQuestionCommand(command)) throw new MoguriError("question_authority", "Question answers must pass the authoritative owning-turn controller.", 409);
     if (isArtifactCommand(command)) return this.artifacts.execute(command, finish);
     if (isManagedWorkspaceCommand(command)) return this.managed.execute(command, finish);

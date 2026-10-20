@@ -53,6 +53,8 @@ test("a real control-plane SIGKILL preserves remote identity and reconciles canc
     const execution = restarted.controller.snapshot().executions[0]!;
     assert.equal(execution.status, "unconfirmed");
     assert.equal(provider.requests.length, 1);
+    assert.equal(restarted.controller.snapshot().budgetEntries[0]?.status, "unknown");
+    assert.ok(restarted.controller.snapshot().budgetEntries[0]!.reservedTokens! > 0);
     let settled = false;
     for (let index = 0; index < 50; index++) {
       const inspection = await restarted.controller.remote.inspect(execution);
@@ -64,6 +66,7 @@ test("a real control-plane SIGKILL preserves remote identity and reconciles canc
     assert.equal(restarted.controller.snapshot().sessions.find((value) => value.id === current.id)?.status, "partial");
     assert.equal(restarted.controller.snapshot().executions[0]?.cleanup, "owned-worker-stopped");
     assert.equal(restarted.controller.snapshot().executions.length, 1); assert.equal(provider.requests.length, 1);
+    assert.equal(restarted.controller.snapshot().budgetEntries.length, 1);
   } finally {
     sdk?.disconnect();
     if (child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); await exited; }

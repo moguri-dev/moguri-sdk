@@ -16,9 +16,10 @@ import type { ConfigurationProposal, Attention, SuggestionSource } from "./engag
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import type { UserQuestion, QuestionAnswer } from "./questions.ts";
+import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -88,7 +89,7 @@ export interface Usage {
   providerId?: string;
   apiModelId?: string;
   source?: "copilot" | "local";
-  role: "solver" | "subagent" | "side";
+  role: ModelRole;
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
@@ -252,6 +253,9 @@ export interface EventPayloads {
   "artifact.saved": { artifact: LegacyRetainedArtifact };
   "artifact.revised": { artifact: LegacyVersionedArtifact };
   "artifact.deleted": { artifactId: string };
+  "budget.recorded": { entry: BudgetEntry };
+  "budget.policy_changed": { limit: BudgetLimit | null; revision: number };
+  "budget.blocked": { sessionId: string; ownerSessionId: string; stepId: string; diagnostic: string; remainingTokens: number | null; remainingUsd: number | null };
   "terminal.changed": { terminal: TerminalState };
   "turn.prompt_bound": { promptDigest: string };
   "queue.released": { messageId: string };
@@ -289,6 +293,7 @@ export const eventTypes: readonly EventType[] = [
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
+  "budget.recorded", "budget.policy_changed", "budget.blocked",
 ];
 
 export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -313,12 +318,16 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
   const sessionGroups = new Map<string, SessionGroup>();
   const artifacts = new Map<string, RetainedArtifact>();
   const questions = new Map<string, UserQuestion>();
+  const budgetEntries = new Map<string, BudgetEntry>();
+  let budgetPolicy: PlatformSnapshot["budgetPolicy"] = { revision: 0, limit: null };
   const terminals = new Map<string, TerminalState>();
   const executions = new Map<string, RemoteExecution>();
   const managedWorkspaces = new Map<string, ManagedWorkspace>();
   const changeSets = new Map<string, ChangeSet>();
   for (const event of events) {
     if (event.profile_id !== PROFILE_ID) continue;
+    if (event.event_type === "budget.recorded") budgetEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
+    if (event.event_type === "budget.policy_changed") budgetPolicy = structuredClone(event.payload);
     if (event.event_type === "session.deleted") {
       sessions.delete(event.payload.deletedSessionId);
       blockedSessions.delete(event.payload.deletedSessionId);
@@ -578,5 +587,5 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], questions: [...questions.values()], terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], questions: [...questions.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

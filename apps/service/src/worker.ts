@@ -34,6 +34,7 @@ async function run(start: WorkerStart): Promise<void> {
       abort.signal.throwIfAborted();
       const stepId = randomUUID();
       const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId });
+      if (reply.halt && reply.error) { await finish("partial", reply.error); return; }
       if (reply.error || !reply.value || !("model" in reply.value)) throw new Error(reply.error ?? "Missing model authorization.");
       const boundary: BoundaryReply = reply.value;
       const secrets = [...new Set([
@@ -70,6 +71,7 @@ async function run(start: WorkerStart): Promise<void> {
           kind: "model.complete", requestId: randomUUID(), stepId, message,
           usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started,
         });
+        if (accepted.halt && accepted.error) { await finish("partial", accepted.error); return; }
         if (accepted.error) throw new Error(accepted.error);
         context.push(message);
         abort.signal.throwIfAborted();
@@ -153,4 +155,10 @@ process.on("disconnect", () => {
   for (const waiter of pending.values()) waiter.reject(new Error("Control plane disconnected."));
   pending.clear();
 });
-process.on("SIGTERM", () => { abort.abort(); });
+process.on("SIGTERM", () => {
+  authority = false;
+  abort.abort();
+  for (const waiter of pending.values()) waiter.reject(new Error("Worker termination cancelled the unacknowledged exchange. Its outcome remains unconfirmed."));
+  pending.clear();
+  if (!started && process.connected) process.disconnect?.();
+});

@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 12; immutable event
+Protocol version and database migration version are 13; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -22,6 +22,8 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Owned process | Tool-call ID, PID, process group, owning turn and actual outcome. Unknown cleanup remains unconfirmed. |
 | Attachment | Session-authorized project/client text, normalized image, exact folder/GitHub/session snapshot, SHA-256, bytes and source revision. Explicit selection grants captured content only, never arbitrary filesystem access. |
 | Usage | Solver/side/subagent model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
+| Budget entry | Independent profile-owned step/actual-role/owning-session record: estimated reservation, actual reported total, held unknowns, explicit dated rate and request outcome. Source deletion never refunds it. |
+| Budget policy | Revision-bound profile hard cap, separate from resettable preferences/rates. Unlimited session defaults do not widen it. No billing guarantee is inferred from input estimates. |
 | Settings | Revisioned shared values and factory defaults; separate permission revision invalidates stale approvals. Prompt text is not policy. |
 | Capability | Project-scoped skill/script/plugin/style knowledge, immutable content digest, source, enablement revision and optional owning plugin. |
 | Proposal | Exact content/base digests, project, kind, actual user/model actor and pending/approved/rejected decision. Approval installs disabled content. |
@@ -179,3 +181,12 @@ optional new local commits preserve checkout/index and never push. A completed
 job, current source set and actual bytes/commit must be revalidated before
 project deletion forgets grants. Partial/restarted jobs retain inspectable
 destination intent and never replay effects.
+
+Migration 13 adds role-aware independent accounting and separate hard profile
+policy without rewriting old source events, receipts or keys. Legacy reported
+totals import once by actual step identity; missing prices/bounds/attribution
+remain labeled unknown. Model-created children charge the real parent.
+Reservations share the dispatch transaction, complete/late reports reconcile
+once, and stopped/interrupted requests keep capacity held. Price-free is an
+explicit configured estimate, never a default provider bill. Profile/source
+retention does not erase these sanitized counters.

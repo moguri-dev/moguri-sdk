@@ -76,6 +76,17 @@ export class ArtifactRuntime {
       return [this.event({ ...artifact, questionId: question.id })];
     });
   }
+  checkpointEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
+    return events.flatMap((event) => {
+      if (event.event_type !== "budget.blocked") return [];
+      const session = snapshot.sessions.find((session) => session.id === event.payload.ownerSessionId);
+      if (!session) throw new MoguriError("budget_checkpoint", "The budget checkpoint has no actual owning session. No source facts were invented.", 409);
+      const text = `# Budget checkpoint\n\n${event.payload.diagnostic}\n\n` +
+        `Session: ${session.id}\nStep: ${event.payload.stepId}\nRemaining tokens: ${event.payload.remainingTokens ?? "unlimited or unknown"}\nRemaining estimated USD: ${event.payload.remainingUsd ?? "unlimited or unknown"}\n\n` +
+        "Existing work, pending diff and source events were preserved. This checkpoint performed no extra model call or Git commit. A commit needs accepted changes, qualified transport and explicit Git authorization; no clean final commit is claimed.\n";
+      return [this.event(this.create(session, "report", "Budget checkpoint", text, "checkpoint", [{ eventId: event.id, sessionId: event.payload.sessionId, messageId: null, actor: "tool", modelId: null, outcome: "blocked", contentDigest: digest(text) }]))];
+    });
+  }
   private event(artifact: RetainedArtifact): EventInput { return { event_type: "artifact.revised", profile_id: PROFILE_ID, project_id: artifact.projectId, payload: { artifact } }; }
   private revisions(id: string): RetainedArtifact[] {
     this.artifact(id);

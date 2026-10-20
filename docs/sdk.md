@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 12 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-11 history, sessions, drafts,
+This is an alpha API. Protocol 13 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-12 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -113,6 +113,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
+| `budgets` | Cumulative owning-session/profile status, revision-bound hard policy and filtered/paged role/model/provider dashboard. Reservations precede dispatch; unknown usage is held, not free. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
@@ -334,6 +335,38 @@ draft clearing and command receipt commit together; failure rolls back all.
 Disabling retention preserves canonical source events until their session
 retention applies. Model/delegated-decision answers require their own future
 policy/call provenance, never this actual-user endpoint.
+
+### Estimated limits and independent accounting
+
+Session controls accept `{kind:"limited", basis:"estimate", tokens?, usd?}` with
+at least one positive limit. A finite control without explicit estimate policy
+is rejected. `budgets.status(sessionId)` returns actual/held/incomplete totals,
+effective session/profile caps and unavailable-unit diagnostics.
+`budgets.policy(limitOrNull, observedRevision, true)` is a separate explicit
+profile-policy action; settings/default resets never lift it.
+
+USD admission requires a fresh model-specific
+`settings.values.budgets.rates` entry with canonical `modelId`,
+`inputUsdPerMillion`, `outputUsdPerMillion`, UTC `effectiveAt` date and
+`source:"user-estimate"`. Default rates are empty, not Copilot zero prices.
+The configured conservative input rate includes cache categories; provider
+totals are never increased by adding those categories twice.
+
+Reservation and `model.started` commit before the real worker is authorized.
+The actual reduced output limit reaches maintained pi-ai. Complete reports
+settle once; stop, lost frames and restart retain full unknown reservations.
+Authenticated late SSH receipts can improve accounting without replaying work
+or completing partial turns. Profile-owned entries survive session/project
+retention. Historical unknown bounds/prices block affected finite units.
+
+`budgets.dashboard({projectId?,folderId?,sessionId?,providerId?,modelId?,role?,offset?,limit?})`
+returns complete matching totals plus paged actual role/model groups.
+Estimates, provider reports and bills are separate; no billed USD is invented.
+Input reservation is estimated and provider charges can lag or exceed it.
+A provider exceeding its forwarded output bound is partial/unqualified for
+finite retry. A blocked request creates a deterministic retained checkpoint,
+not a model answer or successful commit. Kupo wind-down and committed checkpoints
+remain separate scheduler/Git qualification.
 
 ### Managed Local roots
 

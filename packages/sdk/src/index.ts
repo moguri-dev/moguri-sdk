@@ -1,5 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -65,6 +66,11 @@ export class MoguriSdk extends TransportClient {
     refresh: () => this.command({ type: "provider.refresh" }),
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
     clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
+  };
+  readonly budgets = {
+    status: (sessionId: string) => this.query({ type: "budget.status", sessionId }),
+    dashboard: (filters: Omit<Extract<BudgetQuery, { type: "budget.dashboard" }>, "type"> = {}) => this.query({ type: "budget.dashboard", ...filters }),
+    policy: (limit: BudgetLimit | null, expectedRevision: number, confirmRisk: true) => this.command({ type: "budget.policy", limit, expectedRevision, confirmRisk }),
   };
   readonly artifacts = {
     create: (sessionId: string | null, artifact: { kind: ArtifactKind; name: string; text: string; projectId?: string | null; folderId?: string | null; workItemId?: string | null }) => this.command({ type: "artifact.create", sessionId, ...artifact }),

@@ -6,8 +6,9 @@
 authorize a deliberately smaller development checkpoint: macOS Local execution,
 fixed GitHub Copilot models, Manual approvals, and Unlimited budget through both
 clients. This is not completion of the first milestone. Unsupported environments,
-routing, delegation, attachment types and finite budgets must report unavailable,
-never approximate their guarantees or fall back to Local. External-service and
+routing, delegation, attachment types and finite budgets were initially
+unavailable. Later qualified slices below do not silently approximate guarantees
+or fall back to Local. External-service and
 release-packaging failures remain release blockers.
 
 The [D14 SDK platform slice](#d14-one-importable-sdk-and-user-controlled-capability-platform)
@@ -45,6 +46,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D22 | Typed text artifacts have independent encryption/revisions and exact source provenance; project removal binds an explicit reviewed retention choice. | Legacy rekeying, source-actor separation, deletion isolation or persistent client export fails. |
 | D23 | Structured clarifications record actual owning-turn answers; optional retained artifacts and saved-draft consumption are one transaction, never permissions. | Actor/turn/revision isolation, cancellation, atomic retention or cross-client answer/queue behavior fails. |
 | D24 | Artifact repository copies bind exact source/root/policy and optional new local commit intent; deleting stored grants requires real copy/commit verification. | Copy persistence, no-overwrite/index isolation, cancellation/recovery or deletion proof fails. |
+| D25 | Every owned model dispatch has an atomic profile-owned reservation. Finite limits require explicit estimates; unknown completion holds capacity and settings resets cannot lift policy. | Concurrent/late/restart accounting, actual output forwarding, unknown-price handling or role/source retention fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -539,6 +541,32 @@ set, actual bytes and requested local commit before forgetting grants.
 Independent exports, repository copies and automated answers never become
 instructions or user-only memory. Remote/Sandbox publication remains
 unavailable until its own qualified transport exists.
+
+## D25. Cumulative reservations and explicit estimated admission
+
+**Decision.** Reuse maintained pi-ai metering and SQLite events; never treat
+adapter default cost zero as reported pricing. The generated
+[metering prerequisite](budgets.md) proves cache totals and actual output-limit
+forwarding before feature work.
+
+Migration 13 preserves source history and imports legacy usage once by actual
+step. Model-created children charge their owner; solver/side/subagent and future
+routing/decision roles share admission. Persist the profile-owned reservation
+with model start before dispatch. Provider reports settle once; unknown/lost
+completion keeps capacity through source deletion, stop and restart. Late SSH
+usage never rewrites a partial turn as successful.
+
+Only explicit estimate-based finite controls are offered. USD needs fresh,
+dated model-specific approved estimates; unbounded/unpriced history blocks
+affected units. Separate hard profile policy is not a preference and cannot
+be lifted by factory/default reset. Reported overages and output-bound
+violations remain visible, never hidden by increasing a cap or refund.
+
+SDK/CLI/TUI/desktop share cumulative status, policy and role/provider/model
+dashboard. Budget exhaustion retains a deterministic checkpoint without an
+extra model call or claimed commit. Exact bills, routed kupo wind-down,
+approved committed checkpoints and broader repository/visibility metadata
+remain separate qualification.
 
 ## Still open
 

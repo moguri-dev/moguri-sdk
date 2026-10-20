@@ -149,6 +149,8 @@ export class ControlPlane extends EventEmitter {
     };
   }
   async initialize(): Promise<void> {
+    const legacyAccounting = this.platform.budgets.legacyEvents();
+    if (legacyAccounting.length) this.commit(legacyAccounting);
     this.platform.recover();
     const interruptedExecutions = this.projection.executions.filter((execution) => ["launching", "running", "stopping"].includes(execution.status));
     if (interruptedExecutions.length) this.commit(interruptedExecutions.map((execution) => ({
@@ -198,7 +200,9 @@ export class ControlPlane extends EventEmitter {
     const appended = this.store.commit(events, receipt, forget, (primary) => {
       const next = { ...this.snapshot(), ...projectEvents([...this.history, ...primary]) };
       const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
-      return [...answers, ...attentionEvents(next, primary)];
+      const accounting = this.platform.budgets.derived(next, primary);
+      const checkpoints = primary.some((event) => event.event_type === "budget.blocked") ? this.platform.artifacts.checkpointEvents(next, primary) : [];
+      return [...answers, ...accounting, ...checkpoints, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended);
@@ -227,7 +231,7 @@ export class ControlPlane extends EventEmitter {
   }
   private modelUsage(session: Session, request: Extract<WorkerRequest, { kind: "model.complete" }>): Usage {
     const message = assistantMessage(request.message), prior = session.usage.find((usage) => usage.stepId === request.stepId);
-    return {
+    return this.platform.budgets.estimated({
       stepId: request.stepId, modelId: prior?.modelId ?? message.model, providerId: prior?.providerId, apiModelId: prior?.apiModelId, source: prior?.source,
       role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
       inputTokens: request.usageReported ? message.usage.input : null, outputTokens: request.usageReported ? message.usage.output : null,
@@ -235,7 +239,7 @@ export class ControlPlane extends EventEmitter {
       estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: request.generationMs,
       quality: request.usageReported ? "provider-reported" : "unknown", outcome: message.stopReason,
       contextWindow: prior?.contextWindow, contextEstimate: prior?.contextEstimate, thinkingEffort: prior?.thinkingEffort,
-    };
+    });
   }
   private async remoteCommand(command: ExecutionCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     if (command.type === "remote.probe") { await this.remote.probe(); await this.remoteModels.refresh(); this.emit("change", []); return finish([]); }
@@ -501,7 +505,7 @@ export class ControlPlane extends EventEmitter {
     if (!capability?.ready) throw new MoguriError("env_unavailable", capability?.reason ?? "Execution environment unavailable.", 409);
     if (controls.autonomy === "Autopilot Max") throw new MoguriError("autonomy_unavailable", "Autopilot Max requires an evaluated decision provider. It cannot silently self-approve.", 409);
     if (controls.autonomy === "Autopilot" && !this.projection.settings.values.permissions.tools.some((rule) => rule.decision === "allow") && !this.projection.settings.values.permissions.commands.some((rule) => rule.decision === "allow")) throw new MoguriError("delegation_required", "Configure explicit bounded tool or exact-command delegations before selecting Autopilot.", 409);
-    if (controls.budget.kind !== "unlimited") throw new MoguriError("budget_unavailable", "Finite budgets are not enforceable in this checkpoint. No cap has been applied.", 409);
+    this.platform.budgets.validateControls(controls);
     if (requireModel && session && session.kind === "agent" && session.mode === "agent" && this.projection.executions.some((execution) => (session.projectId ? execution.projectId === session.projectId : execution.sessionId === session.id) && this.runs.get(execution.sessionId)?.executionId !== execution.id && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("remote_cleanup", "Owned remote cleanup is still pending/unconfirmed. Wait for its terminal status, reconcile it, or explicitly acknowledge actual process inspection before new work.", 409);
     if (controls.env === "Remote") {
       this.remote.assertReady();
@@ -926,15 +930,26 @@ export class ControlPlane extends EventEmitter {
         const configured = modelRequest(prepared.model, current.controls.modelOptions, {
           systemPrompt: effectivePrompt, messages: [...this.context(current.id), ...steers.map((item) => this.contextItem(item))], tools,
         });
+        const reservation = this.platform.budgets.reserve(current, {
+          stepId: request.stepId, turnId: run.turnId, providerId: this.provider.state.models.find((model) => model.id === current.controls.modelId)?.providerId ?? prepared.model.provider,
+          apiModelId: prepared.model.id, role: current.kind === "side" ? "side" : current.kind === "subagent" ? "subagent" : "solver",
+          inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens,
+        });
         run.inFlight = true;
         this.commit([
+          reservation.event,
           ...steers.map((item) => this.event(current, "steer.applied", { item }, request.stepId)),
           this.event(current, "turn.prompt_bound", { promptDigest: this.store.putBlob(effectivePrompt) }, request.stepId),
           this.event(current, "model.started", { modelId: current.controls.modelId!, providerId: this.provider.state.models.find((model) => model.id === current.controls.modelId)?.providerId ?? prepared.model.provider, apiModelId: prepared.model.id, source: this.provider.state.models.find((model) => model.id === current.controls.modelId)?.source ?? "copilot", contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens, ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId),
         ]);
-        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: configured.model, maxTokens: configured.maxTokens, thinkingEffort: configured.thinkingEffort, steers: steers.map((item) => this.contextItem(item)), systemPrompt: effectivePrompt, tools, mode: current.mode, folders: folderPolicy(projectSettings) } });
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: { ...configured.model, maxTokens: reservation.maxTokens }, maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, steers: steers.map((item) => this.contextItem(item)), systemPrompt: effectivePrompt, tools, mode: current.mode, folders: folderPolicy(projectSettings) } });
       } catch (error) {
-        this.reply(run, { kind: "reply", requestId: request.requestId, error: error instanceof MoguriError ? error.message : "Copilot model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
+        const budget = error instanceof MoguriError && error.code.startsWith("budget_");
+        if (budget) {
+          const current = this.session(run.sessionId), status = this.platform.budgets.status(current.id);
+          this.commit([{ event_type: "budget.blocked", profile_id: PROFILE_ID, payload: { sessionId: current.id, ownerSessionId: status.ownerSessionId, stepId: request.stepId, diagnostic: error.message, remainingTokens: status.remainingTokens, remainingUsd: status.remainingUsd } }]);
+        }
+        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       } finally { const key = this.platform.managed.leaseKey(session); if (key && this.writerReservations.get(key) === session.id) this.writerReservations.delete(key); }
       return;
     }
@@ -962,7 +977,8 @@ export class ControlPlane extends EventEmitter {
         },
         usage: this.modelUsage(session, request),
       }, request.stepId)]);
-      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
+      const metering = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
+      this.reply(run, { kind: "reply", requestId: request.requestId, ...(metering?.outputLimitViolation ? { halt: true, error: "The provider exceeded its actual forwarded output limit. Reported usage was retained; finite admission for this model remains unqualified." } : { value: { accepted: true } }) });
       return;
     }
     if (request.kind === "output") {

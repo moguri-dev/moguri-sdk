@@ -78,6 +78,7 @@ test("an SSH disconnect retains late model usage without replay, duplicate infer
     await fixture.send("generated late-accounting answer");
     await waitFor(() => fixture.session().status === "partial");
     assert.equal(fixture.requests.length, 1); assert.equal(fixture.session().usage[0]?.totalTokens, null);
+    assert.equal(fixture.controller.snapshot().budgetEntries[0]?.status, "unknown");
     const execution = fixture.controller.snapshot().executions[0]!;
     let terminal = false;
     for (let index = 0; index < 100; index++) {
@@ -89,9 +90,12 @@ test("an SSH disconnect retains late model usage without replay, duplicate infer
     await fixture.controller.dispatch(envelope({ type: "remote.reconcile", executionId: execution.id }));
     assert.equal(fixture.session().status, "partial"); assert.equal(fixture.session().usage[0]?.totalTokens, 42);
     assert.equal(fixture.session().usage[0]?.quality, "provider-reported");
+    assert.equal(fixture.controller.snapshot().budgetEntries[0]?.reportedTokens, 42);
+    assert.equal(fixture.controller.snapshot().budgetEntries[0]?.status, "settled");
     assert.equal(fixture.controller.events(0).filter((event) => event.event_type === "model.late_usage").length, 1);
     await fixture.controller.dispatch(envelope({ type: "remote.reconcile", executionId: execution.id }));
     assert.equal(fixture.requests.length, 1); assert.equal(fixture.session().usage.length, 1);
+    assert.equal(fixture.controller.snapshot().budgetEntries.length, 1);
   } finally { await fixture.close(); }
 });
 

@@ -7,7 +7,7 @@ import type { PreparedModel } from "./provider.ts";
 const toolCall = Type.Object({ id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()) });
 export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("boundary"), requestId: Type.String(), stepId: Type.String() }),
-  Type.Object({ kind: Type.Literal("model.complete"), requestId: Type.String(), stepId: Type.String(), message: Type.Unknown(), usageReported: Type.Boolean(), generationMs: Type.Number() }),
+  Type.Object({ kind: Type.Literal("model.complete"), requestId: Type.String(), stepId: Type.String(), message: Type.Unknown(), usageReported: Type.Boolean(), generationMs: Type.Number({ minimum: 0 }) }),
   Type.Object({ kind: Type.Literal("approval"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("delegate"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: MAX_TEXT + 4096 }), isError: Type.Boolean(), outcome: Type.String() }),
@@ -21,13 +21,14 @@ export type WorkerRequest = Static<typeof WorkerRequestSchema>;
 export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
-export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean } | DelegatedResult; error?: string };
+export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean } | DelegatedResult; error?: string; halt?: true };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" };
 export function parentMessage(value: unknown): ParentMessage {
   if (!isRecord(value)) throw new Error("Invalid parent message.");
   if (value.kind === "stop") return { kind: "stop" };
   if (value.kind === "control-lost") return { kind: "control-lost" };
   if (value.kind === "reply" && typeof value.requestId === "string" &&
+    (value.halt === undefined || value.halt === true) &&
     (value.error === undefined || typeof value.error === "string") &&
     (value.value === undefined || isRecord(value.value))) return value as ParentMessage;
   if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) return value as ParentMessage;
