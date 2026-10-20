@@ -90,9 +90,10 @@ SSH receipts remain inspectable without attachment or continuation.
 Desktop exposes UTC range/bucket controls, token details, observed streaming,
 periods, captured prices and per-call/owning-turn views. The SDK and shared
 CLI/TUI `/dashboard` / `/dashboard calls` paths expose the same data.
-Compaction history, repository/org/visibility metadata and routed wind-down
-still require their separate qualified implementations; this is not a claim
-that every Phase-4 or first-release metric is complete.
+That protocol-18 checkpoint did not qualify compaction, repository metadata
+or routed wind-down. Protocol 19 subsequently added reviewed compaction, and
+protocol 22 adds [verified repository attribution](repository-telemetry.md).
+Routed wind-down and the wider first-release metrics remain separate.
 
 The corrected protocol-18 source passes **341 complete local checks in
 261.37 s**, all **24** hidden desktop flows in **48.6 s**, and all 24 from the
@@ -166,8 +167,9 @@ with a 16-token forwarded bound, settles 42 reported tokens, then applies a
 profile cap and proves the next request is blocked with a retained diagnostic
 checkpoint. This is synthetic qualification, not real Copilot billing.
 No extra model or Git commit is performed by the fixed-model stop path.
-Routed wind-down/accepted-work commit and repository/visibility filters remain
-open alongside their scheduler/transport dependencies.
+Routed wind-down/accepted-work commit remains open alongside its scheduler/
+transport dependencies. Repository/visibility filters now use explicit
+observations captured immutably at admission, never cumulative-policy filters.
 
 ## Qualification
 

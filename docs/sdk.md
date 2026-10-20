@@ -5,10 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 21 deliberately rejects incompatible running
+This is an alpha API. Protocol 22 deliberately rejects incompatible running
 services and requires the matching SSH worker for exact user plan operations,
 reviewed compaction and model telemetry. State migrations preserve schema-1
-through schema-20 history, sessions, drafts,
+through schema-21 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -59,7 +59,7 @@ repacking: `npm run verify:sdk -- release/moguri-0.15.0-alpha.1.tgz`.
 Current verification also exercises actual installed-worker SSH files,
 Git/plan reads, dated/per-call telemetry and actual metered compaction with the
 installed CLI/worker. Historical archives retain their separately
-recorded qualification; protocol-16/17/18/19/20 SSH receipts remain inspectable without
+recorded qualification; protocol-16/17/18/19/20/21 SSH receipts remain inspectable without
 reattaching or continuing an old worker.
 
 ## Connect to the shared service
@@ -128,6 +128,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
+| `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single policy/configure with an observed settings revision and session-owned plan history. Actual router/solver roles use the existing worker/ledger; finite caps, images and model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
@@ -569,6 +570,35 @@ Use CLI `telemetry operations --filters JSON`, `telemetry storage`, or shared
 `/dashboard operations JSON` and `/dashboard storage`. F7 and desktop Dashboard
 expose the same SDK projections. See [the exact contract and prerequisite
 measurements](architecture/operation-telemetry.md).
+
+### Verified repository filters
+
+`repositories.preview(sessionId)` reads the actual Local/worktree or pinned SSH
+origin without GitHub access. Review its root, `lookupBoundary`, repository,
+`bindingDigest` and observation `revision`.
+`repositories.refresh(sessionId, bindingDigest, revision, true)` starts one
+owned job; inspect `jobs.wait(id)` and `repositories.state(sessionId)`.
+`repositories.clear(sessionId, revision, true)` affects future attribution,
+not historical names, metadata or charges.
+
+Public metadata uses the control-plane API without credentials; Local
+`gh-cli` requires explicitly selected project access. Remote authenticated CLI
+is unavailable, never a Local account fallback. Copilot credentials are not
+reused. No network lookup occurs at model admission: configured calls recheck
+their actual Git identity and capture previously verified metadata or remain
+unassigned.
+
+Budget/call/tool queries accept `repositoryId`, `organization` and
+`visibility:"public"|"private"|"internal"|"open-source"`. Each result discloses
+`repositoryCoverage` before those filters. `open-source` is only the documented
+public-plus-detected-OSI category; missing license evidence stays unknown.
+`entry.repository` is an immutable admission snapshot, not today's GitHub
+state. Never sum filtered pages to infer cumulative charges.
+
+CLI `repository` and shared `/repository` review/refresh/state/clear/stop
+commands expose the same API; `/dashboard JSON` accepts the new filters.
+See [repository attribution](architecture/repository-telemetry.md) for exact
+scope, cancellation, privacy, licensing and recovery semantics.
 
 ### Managed Local roots
 

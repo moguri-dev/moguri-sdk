@@ -18,6 +18,8 @@ import { KupoSettingsSchema, defaultKupoSettings, type RoutingTurn } from "./rou
 import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
 import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type RemotePlanSave } from "./plan-saves.ts";
 import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
+import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
+export * from "./repositories.ts";
 export * from "./telemetry.ts";
 export * from "./plan-saves.ts";
 export * from "./compaction.ts";
@@ -105,6 +107,7 @@ const section = Type.Union([
   Type.Literal("kupo"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  RepositoryCommandSchema,
   PlanSaveCommandSchema,
   CompactionCommandSchema,
   ArtifactCommandSchema,
@@ -143,6 +146,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  RepositoryQuerySchema,
   TelemetryQuerySchema,
   PlanSaveQuerySchema,
   CompactionQuerySchema,
@@ -191,6 +195,7 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
+  repositoryObservations: RepositoryObservation[];
   operationEntries: OperationEntry[];
   operationCoverage: OperationCoverage | null;
   planSaves: RemotePlanSave[];
@@ -216,6 +221,7 @@ export interface VoiceStatus {
 }
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
+  | RepositoryResponse
   | TelemetryResponse
   | PlanSaveResponse
   | CompactionResponse

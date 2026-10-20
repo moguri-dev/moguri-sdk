@@ -3,8 +3,11 @@
 The post-0.15 audit found safe Local/SSH Git views and exact GitHub issue/PR
 reads, but no durable repository/organization/visibility attribution or usage
 filters. `ProjectIntegrations.githubRead` still permits only selected issue/PR
-endpoints. The new private prototype is not an application capability and does
-not broaden that production whitelist.
+endpoints. The original private prototype in commit `168820d` was not an application
+capability and did not broaden that production whitelist. Its validated
+normalizer/read guard is now extracted into `apps/service/src/repository-metadata.ts`;
+the application uses a separate exact repository read, not a broadened issue
+endpoint.
 
 ## Reused implementation and data
 

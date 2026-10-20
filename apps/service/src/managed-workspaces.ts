@@ -103,14 +103,14 @@ export class ManagedWorkspaces {
     return { id: profileIndexId(this.host.snapshot().profileId, session.workspaceId ?? project.id), path: project.path };
   }
   leaseKey(session: Session): string | null { return session.projectId ? `${session.projectId}:${session.workspaceId ?? "base"}` : null; }
-  async assert(session: Pick<Session, "projectId" | "workspaceId">): Promise<void> {
+  async assert(session: Pick<Session, "projectId" | "workspaceId">, signal?: AbortSignal): Promise<void> {
     this.project(session);
     if (!session.workspaceId) return;
-    const inspection = await this.inspect(session.workspaceId);
+    const inspection = await this.inspect(session.workspaceId, signal);
     if (!inspection.registered || !inspection.canonical || inspection.diagnostic) throw new MoguriError("workspace_changed", inspection.diagnostic ?? "Managed Git/workspace binding changed. Inspect it before admitting another effect.", 409);
   }
-  async inspect(id: string): Promise<WorkspaceInspection> {
-    const workspace = this.workspace(id), project = this.host.project(workspace.projectId), signal = AbortSignal.timeout(15_000);
+  async inspect(id: string, requestedSignal?: AbortSignal): Promise<WorkspaceInspection> {
+    const workspace = this.workspace(id), project = this.host.project(workspace.projectId), signal = requestedSignal ? AbortSignal.any([requestedSignal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
     const disabledFilters = await this.filters(project, signal);
     this.expectedPath(workspace);
     const registration = (await this.registrations(project, signal)).find((registration) => registration.path === workspace.path), registered = Boolean(registration), locked = Boolean(registration?.locked);

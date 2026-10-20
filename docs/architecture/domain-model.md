@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 21; immutable event
+Protocol version and database migration version are 22; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -34,6 +34,12 @@ at the profile root, independently of source session/project keys. Startup
 imports only provable retained events once; earlier forgotten contents are
 not reconstructed. Schema-20 ciphertext, grants and receipts are unchanged.
 Current-profile key-backed byte queries add no durable storage/deletion policy.
+
+Migration 22 adds independent profile-root repository observations and nullable,
+immutable admission attribution in model/tool records. Legacy rows remain
+unassigned, never reclassified using current GitHub/Git state. Schema-21
+ciphertext, grants and receipts remain unchanged. Lookup jobs recover partial
+without retry; observed metadata is not model input or permission authority.
 
 ## Implemented entities
 

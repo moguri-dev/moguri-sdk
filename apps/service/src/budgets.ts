@@ -1,8 +1,9 @@
 import {
   BUDGET_WARNING, isModelRole, MoguriError, type BudgetEntry, type BudgetLimit, type BudgetQuery, type BudgetRate,
   type BudgetResponse, type BudgetStatus, type BudgetTotals, type Controls, type EventInput, type ModelRole, type Session,
-  type Snapshot, type StoredEvent, type Usage, type UserSettings, type GlobalBudgetCapacity, type BudgetRange, type BudgetBucket, type BudgetWindow,
+  type Snapshot, type StoredEvent, type Usage, type UserSettings, type GlobalBudgetCapacity, type BudgetRange, type BudgetBucket, type BudgetWindow, type RepositoryCapture,
 } from "../../../packages/protocol/src/index.ts";
+import { matchesRepository, repositoryCoverage } from "./repository-telemetry.ts";
 
 const integer = (value: number | null | undefined): value is number => value !== null && value !== undefined && Number.isSafeInteger(value) && value >= 0;
 export const reportedModelUsage = (usage: Usage): usage is Usage & { totalTokens: number; outputTokens: number } =>
@@ -180,7 +181,7 @@ export class BudgetRuntime {
       remainingTokens: remainingTokens.length ? Math.min(...remainingTokens) : null, remainingUsd: remainingUsd.length ? Math.min(...remainingUsd) : null,
       basis: "estimate", warning: BUDGET_WARNING, diagnostics, rate };
   }
-  reserve(session: Session, input: { stepId: string; turnId: string; providerId: string | null; apiModelId: string; role: ModelRole; inputEstimate: number; maxOutputTokens: number; modelId?: string }): { event: EventInput; maxTokens: number } {
+  reserve(session: Session, input: { stepId: string; turnId: string; providerId: string | null; apiModelId: string; role: ModelRole; inputEstimate: number; maxOutputTokens: number; modelId?: string; repositoryCapture?: RepositoryCapture }): { event: EventInput; maxTokens: number } {
     const snapshot = this.host.snapshot(), owner = this.owner(session), limits = this.limits(owner), entries = snapshot.budgetEntries;
     if (entries.some((entry) => entry.id === input.stepId)) throw new MoguriError("budget_duplicate", "This exact model step already has an accounting reservation. It was not charged/dispatched again.", 409);
     const selectedModelId = input.modelId ?? session.controls.modelId;
@@ -205,6 +206,7 @@ export class BudgetRuntime {
       reservedTokens: input.inputEstimate + low, reportedTokens: null, reservedUsdMicros: rate ? price(rate, input.inputEstimate, low) : null,
       estimatedUsdMicros: null, rate, requestMs: 0, outcome: "running", diagnostic: null,
       ...usageMetrics(), timeBasis: "admission", ownerTurnId: owner.id === session.id ? input.turnId : owner.turnId,
+      repository: input.repositoryCapture?.repository ?? null, repositoryDiagnostic: input.repositoryCapture ? input.repositoryCapture.repositoryDiagnostic : "not-configured",
     };
     return { event: recorded(entry, snapshot.profileId), maxTokens: low };
   }
@@ -273,15 +275,16 @@ export class BudgetRuntime {
       (query.turnId === undefined || entry.turnId === query.turnId || entry.ownerTurnId === query.turnId) && (query.env === undefined || entry.env === query.env) &&
       (query.modelId === undefined || entry.modelId === query.modelId) && (query.providerId === undefined || entry.providerId === query.providerId) && (query.role === undefined || entry.role === query.role));
     const bounds = budgetWindow(query.range), uncertainTimeCalls = scoped.filter((entry) => callTime(entry) === null).length;
-    const entries = scoped.filter((entry) => {
+    const dated = scoped.filter((entry) => {
       const time = callTime(entry);
       return bounds.from === null || time !== null && time >= bounds.from && time < bounds.to!;
     });
+    const repositoryAccounting = repositoryCoverage(dated), entries = dated.filter((entry) => matchesRepository(entry.repository, query));
     const window: BudgetWindow = { from: bounds.from === null ? null : dateText(bounds.from), to: bounds.to === null ? null : dateText(bounds.to - DAY), timezone: "UTC", uncertainTimeCalls, excludedUncertainTimeCalls: bounds.from === null ? 0 : uncertainTimeCalls };
     const offset = query.offset ?? 0, end = offset + (query.limit ?? 50);
     if (query.type === "budget.calls") {
       const calls = [...entries].sort((left, right) => (callTime(right) ?? -Infinity) - (callTime(left) ?? -Infinity) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
-      return { type: query.type, calls: structuredClone(calls.slice(offset, end)), nextOffset: end < calls.length ? end : null, window };
+      return { type: query.type, calls: structuredClone(calls.slice(offset, end)), nextOffset: end < calls.length ? end : null, window, repositoryCoverage: repositoryAccounting };
     }
     const grouped = new Map<string, BudgetEntry[]>();
     for (const entry of entries) {
@@ -296,6 +299,6 @@ export class BudgetRuntime {
     if (prices.size > 2000) throw new MoguriError("telemetry_prices", "More than 2,000 distinct captured rates match. Choose a model or date filter; no price history was silently truncated.", 409);
     const groups = [...grouped.values()], bucket = query.bucket ?? "month";
     return { type: query.type, totals: budgetTotals(entries), groups: groups.slice(offset, end).map((entries) => ({ role: entries[0]!.role, modelId: entries[0]!.modelId, providerId: entries[0]!.providerId, totals: budgetTotals(entries) })), policy: snapshot.budgetPolicy, nextOffset: end < groups.length ? end : null,
-      window, bucket, periods: periods(entries, bucket, bounds), pricing: [...prices.values()].map(({ rate, entries }) => ({ rate: structuredClone(rate), calls: entries.length, estimatedUsd: budgetTotals(entries).estimatedUsd })), currency: "USD" };
+      window, bucket, periods: periods(entries, bucket, bounds), pricing: [...prices.values()].map(({ rate, entries }) => ({ rate: structuredClone(rate), calls: entries.length, estimatedUsd: budgetTotals(entries).estimatedUsd })), currency: "USD", repositoryCoverage: repositoryAccounting };
   }
 }

@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
+import { lstatSync, realpathSync } from "node:fs";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
@@ -13,7 +14,7 @@ import {
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   type RemotePlanSave, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse, type PlanFileResult, type SessionWorkspaceCommand,
-  PlanFileResultSchema, type RetainedArtifact,
+  PlanFileResultSchema, type RetainedArtifact, type RepositoryScope,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -131,6 +132,17 @@ export class ControlPlane extends EventEmitter {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events, forget) => this.commit(events, undefined, forget),
       invalidateApprovals: (id) => this.invalidateApprovals(id),
       externalCall: (session, call, execute) => this.externalCall(session, call, execute),
+      repositoryScope: (session) => this.repositoryScope(session),
+      repositoryGit: async (session, signal) => {
+        const bounded = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
+        if (session.controls.env === "Remote") {
+          const result = await this.remoteRead(session, { type: "session.git", diff: false }, bounded);
+          if (result.type !== "session.git") throw new MoguriError("repository_response", "Remote Git response did not match its exact request.", 409);
+          return result.repository;
+        }
+        await this.platform.managed.assert(session, bounded);
+        return (await this.platform.sessions.projects.gitView(this.platform.managed.project(session), false, bounded)).repository;
+      },
       subagent: (session, prompt) => this.subagent(session, prompt),
       stopOwnedSession: (id) => this.stop(id),
       cancelExternalJob: (id) => {
@@ -327,7 +339,7 @@ export class ControlPlane extends EventEmitter {
     const project = this.platform.managed.project(session);
     return session.controls.env === "Remote" ? this.remote.context(this.remoteWorkspace(session)!, this.platform.sessions.projects.configuration(project.id).values) : this.platform.sessions.projects.context(project);
   }
-  private async remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult> {
+  private async remoteRead(session: Session, query: WorkspaceReadQuery, signal?: AbortSignal): Promise<WorkspaceReadResult> {
     const binding = () => {
       const current = this.session(session.id);
       if (current.controls.env !== "Remote" || !current.projectId || current.workspaceId) throw new MoguriError("remote_workspace_read", "This session no longer has an explicitly mapped Remote project. No Local or previous root was reused.", 409);
@@ -337,9 +349,33 @@ export class ControlPlane extends EventEmitter {
     const captured = binding(), signature = frameDigest(captured);
     const result = await this.remote.readWorkspace(captured.root, { query, policy: {
       deniedFolders: captured.settings.deniedFolders, planPath: captured.settings.planPath, upstream: captured.settings.repo.upstream,
-    } }, AbortSignal.timeout(15_000));
+    } }, signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000));
     if (frameDigest(binding()) !== signature) throw new MoguriError("remote_workspace_changed", "The Remote session, workspace or read policy changed. Reload the current mapping; no stale result was relabeled.", 409);
     return result;
+  }
+  private repositoryScope(session: Session): RepositoryScope {
+    if (!session.projectId || session.controls.env === "Sandbox") throw new MoguriError("repository_scope", "Repository metadata needs a bound Local or qualified Remote project. No other root/environment was substituted.", 409);
+    const configuration = this.platform.sessions.projects.configuration(session.projectId), env = session.controls.env;
+    let root: string, identity: unknown;
+    if (env === "Remote") {
+      root = this.remoteWorkspace(session)!;
+      const target = this.remote.assertReady();
+      identity = { peer: remoteFingerprint(target), host: target.host, port: target.port, user: target.user, worker: this.remote.readiness.workerDigest, config: this.remote.readiness.configDigest };
+    } else {
+      root = this.platform.managed.project(session).path;
+      const state = lstatSync(root, { bigint: true });
+      if (!state.isDirectory() || state.isSymbolicLink() || realpathSync(root) !== root) throw new MoguriError("repository_scope", "The bound repository directory is no longer canonical. Inspect it; no alternate checkout was used.", 409);
+      identity = { device: String(state.dev), inode: String(state.ino) };
+    }
+    const key = [this.profileId, session.projectId, session.workspaceId, env];
+    const scopeDigest = frameDigest([key, root, identity, configuration.revision, configuration.values.repo, this.projection.policy.revision]);
+    return { scopeKey: frameDigest(key), scopeDigest, profileId: this.profileId, projectId: session.projectId, workspaceId: session.workspaceId, env, root, access: configuration.values.repo.githubAccess };
+  }
+  private admissionSignature(session: Session): string {
+    const root = session.projectId ? session.controls.env === "Remote" ? this.remoteWorkspace(session) : this.platform.managed.project(session).path : null;
+    return frameDigest([session.id, session.controls, session.mode, session.pendingMode, session.workspaceId, session.projectId, root,
+      session.projectId ? this.platform.sessions.projects.configuration(session.projectId).revision : null,
+      session.controls.env === "Remote" ? this.projection.settings.values.remote : null, this.projection.policy.revision, this.projection.settings.permissionRevision]);
   }
   private executionStatus(id: string, status: BridgeStatus): void {
     const execution = this.projection.executions.find((value) => value.id === id);
@@ -580,7 +616,8 @@ export class ControlPlane extends EventEmitter {
     queueMicrotask(() => this.pumpAll());
     return id;
   }
-  private externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): string {
+  private eligibleExternal(sessionId: string, call: ToolCall): Session {
+    const session = this.session(sessionId);
     if (session.projectId && (this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId))) throw new MoguriError("workspace_busy", "A managed install or artifact publication owns this workspace. Wait for it to settle.", 409);
     if (session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only") throw new MoguriError("subagent_readonly", "Read-only sessions cannot own external tool calls.", 403);
     if (session.turnId || session.queue.length || session.status === "archived") throw new MoguriError("session_busy", "Use an idle, restored session for an external MCP client. The active agent already owns its turn.", 409);
@@ -590,6 +627,15 @@ export class ControlPlane extends EventEmitter {
     const project = session.projectId ? this.platform.managed.project(session) : undefined;
     const authorization = authorizeTool(this.projection.settings.values, call, project?.path ?? null);
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
+    return session;
+  }
+  private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): Promise<string> {
+    session = this.eligibleExternal(session.id, call);
+    const admission = this.admissionSignature(session);
+    const captured = await this.platform.repositories.capture(session, AbortSignal.timeout(5000));
+    session = this.eligibleExternal(session.id, call);
+    if (this.admissionSignature(session) !== admission) throw new MoguriError("mcp_scope_changed", "The exact external MCP root, controls or authority changed before admission. No call was started.", 409);
+    const repositoryCapture = this.platform.repositories.finalize(session, captured);
     const turnId = randomUUID();
     const stepId = randomUUID();
     const jobId = randomUUID();
@@ -598,7 +644,7 @@ export class ControlPlane extends EventEmitter {
     const external: ExternalRun = { sessionId: session.id, turnId, stepId, jobId, call, approvalId, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision, abort: new AbortController(), execute, started: false };
     this.externalRuns.set(session.id, external);
     this.commit([
-      { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}`, attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: this.projection.policy.revision } },
+      { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}`, attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: this.projection.policy.revision, repositoryCapture } },
       { ...scope, event_type: "job.started", payload: { job: { id: jobId, kind: "mcp.call", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: turnId, status: "waiting_input", progress: "Exact external-tool approval required", resultDigest: null, error: null } } },
       { ...scope, event_type: "tool.requested", payload: { approval: { id: approvalId, stepId, call, policyRevision: external.policyRevision, permissionRevision: external.permissionRevision } } },
     ]);
@@ -1275,9 +1321,15 @@ export class ControlPlane extends EventEmitter {
     this.checkCompaction(current, entry);
     if (prepared.model.contextWindow !== selected.model.contextWindow || prepared.model.maxTokens !== selected.model.maxTokens) throw new MoguriError("compaction_model", "The prepared model no longer matches its reviewed capacity. Refresh its preview; no request was sent.", 409);
     const configured = modelRequest({ ...prepared.model, maxTokens: Math.min(COMPACTION_OUTPUT_LIMIT, prepared.model.maxTokens) }, selected.controls.modelOptions, { systemPrompt: COMPACTION_PROMPT, messages: run.compaction!.context, tools: [] });
+    const admission = this.admissionSignature(current);
+    const capturedRepository = await this.platform.repositories.capture(current, run.abort.signal);
+    if (run.done || run.abort.signal.aborted) return;
+    this.checkCompaction(this.session(run.sessionId), entry);
+    if (this.admissionSignature(this.session(run.sessionId)) !== admission) throw new MoguriError("compaction_scope_changed", "Compaction root or authority changed before admission. No request was sent.", 409);
     const reservation = this.platform.budgets.reserve({ ...current, controls: selected.controls }, {
       stepId: request.stepId, turnId: run.turnId, providerId: selected.model.providerId ?? prepared.model.provider, apiModelId: prepared.model.id,
       role: "compaction", modelId: entry.modelId, inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens,
+      repositoryCapture: this.platform.repositories.finalize(this.session(run.sessionId), capturedRepository),
     });
     run.stepId = request.stepId; run.inFlight = true; run.calls.clear(); run.granted.clear(); run.declaredTools.clear();
     this.commit([reservation.event, this.compactionEvent(current, { ...entry, revision: entry.revision + 1, stepId: request.stepId }),
@@ -1427,9 +1479,16 @@ export class ControlPlane extends EventEmitter {
           systemPrompt: effectivePrompt, messages: routedContext ?? canonicalContext, tools,
         });
         const metadata = this.provider.state.models.find((model) => model.id === modelId), role = phase === "router" ? "router" : current.kind === "side" ? "side" : current.kind === "subagent" ? "subagent" : "solver";
+        const admissionScope = this.admissionSignature(current);
+        const capturedRepository = await this.platform.repositories.capture(current, run.abort.signal);
+        if (run.done || run.abort.signal.aborted) return;
+        current = this.session(run.sessionId);
+        if (admissionScope !== this.admissionSignature(current)) throw new MoguriError(synthetic ? "routing_stale" : "model_scope_changed", "Model root, controls or authority changed during repository attribution. No stale request was admitted.", 409);
+        if (synthetic && (policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || permissionRevision !== this.projection.settings.permissionRevision || policyRevision !== this.projection.policy.revision || contextAtPrepare !== this.routingContextDigest(current))) throw new MoguriError("routing_stale", "Routing authority or input changed during repository attribution. No stale request was admitted.", 409);
         const reservation = this.platform.budgets.reserve(current, {
           stepId: request.stepId, turnId: run.turnId, providerId: metadata?.providerId ?? prepared.model.provider,
           apiModelId: prepared.model.id, role, modelId, inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens,
+          repositoryCapture: this.platform.repositories.finalize(current, capturedRepository),
         });
         run.inFlight = true;
         this.commit([

@@ -9,7 +9,7 @@ import { readWorkspaceGit } from "../apps/service/src/project-git.ts";
 import { generatedGit as git, generatedRepository } from "./fixtures/git.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
-import { observedRepository, lookupRepository, type RepositoryReadBinding } from "./fixtures/repository-attribution-prototype.ts";
+import { observedRepository, lookupRepository, type RepositoryReadBinding } from "../apps/service/src/repository-metadata.ts";
 
 const repository = "https://github.com/generated/example";
 const response = (changes: Record<string, unknown> = {}) => ({
@@ -30,6 +30,9 @@ test("observed repository metadata has exact response identity, real owner kind,
   assert.equal(privateRepo.visibility, "private"); assert.equal(privateRepo.publicOsiLicensed, false);
   assert.equal(observedRepository(repository, response({ visibility: "internal", private: true })).visibility, "internal");
   assert.equal(observedRepository(repository, response({ license: null })).publicOsiLicensed, null);
+  assert.equal(observedRepository(repository, response({ license: undefined })).publicOsiLicensed, null);
+  assert.equal(observedRepository(repository, response({ license: { spdx_id: null } })).publicOsiLicensed, null);
+  assert.equal(observedRepository(repository, response({ license: {} })).publicOsiLicensed, null);
   assert.equal(observedRepository(repository, response({ license: { spdx_id: "NOASSERTION" } })).osiApproved, null);
   assert.equal(observedRepository(repository, response({ license: { spdx_id: "BUSL-1.1" } })).osiApproved, false);
 });

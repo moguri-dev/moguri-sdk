@@ -9,6 +9,8 @@ import { waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
 import { dependencyArchive, dependencyProject } from "./fixtures/dependencies.ts";
+import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+import { generatedRepositoryMetadata } from "./fixtures/repository-info.ts";
 
 test("concurrent revision-bound global preferences and caps admit exactly one durable edit each", async () => {
   const fixture = await profileFixture();
@@ -81,6 +83,26 @@ test("foreign tool attempts and retained ciphertext do not leak into another liv
     const after = (await fixture.sdk.telemetry.storage()).storage;
     assert.deepEqual({ ...after, measuredAt: own.measuredAt }, own);
     assert.equal(after.profileId, "default"); assert.equal((await beta.telemetry.storage()).storage.profileId, beta.profileId);
+  } finally { await fixture.close(); }
+});
+
+test("repository observations and attributed charges stay private to the exact SDK profile", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await profileFixture(() => ({ integrations: { fetch: async () => Response.json(generatedRepositoryMetadata()) } }));
+  try {
+    const root = join(fixture.directory, "generated-repository-attribution"); await mkdir(root); await writeFile(join(root, "fixture.txt"), "Generated profile repository.\n");
+    const git = initializeGeneratedRepository(root); git(["remote", "add", "origin", "https://github.com/generated/example.git"]);
+    const { client: beta } = await fixture.create("Generated repository Beta"), project = await beta.command({ type: "project.add", path: root });
+    const session = await beta.sessions.create(project.id!, "Generated private attribution", { modelId: fixture.providers[1]!.modelId });
+    const preview = (await beta.repositories.preview(session.id!)).preview;
+    const refresh = await beta.repositories.refresh(session.id!, preview.bindingDigest, preview.revision, true);
+    assert.equal((await beta.jobs.wait(refresh.id!)).status, "completed");
+    await fixture.send(beta, session.id!, "Generated profile-private attributed response.");
+    await waitFor(() => fixture.session(beta, session.id!).status === "completed");
+    assert.equal((await beta.budgets.dashboard({ repositoryId: 42 })).totals.calls, 1);
+    assert.equal((await fixture.sdk.budgets.dashboard({ repositoryId: 42 })).totals.calls, 0);
+    assert.equal(fixture.sdk.getState().snapshot!.repositoryObservations.length, 0);
+    assert.equal(JSON.stringify(fixture.sdk.getState()).includes("generated/example"), false);
+    await assert.rejects(() => fixture.sdk.repositories.state(session.id!), { code: "repository_session" });
   } finally { await fixture.close(); }
 });
 

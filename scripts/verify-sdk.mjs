@@ -64,6 +64,12 @@ try {
       const operations=await sdk.telemetry.operations({range:{kind:"days",days:30},family:"mcp",actor:"external",limit:20});
       void operations.totals.failureRate;void operations.entries[0]?.sourceEventId;
       const retained=(await sdk.telemetry.storage()).storage;void retained.bytes.blobGrants;void retained.integrity;
+      const repositoryPreview=(await sdk.repositories.preview("generated-id")).preview;
+      await sdk.repositories.refresh("generated-id",repositoryPreview.bindingDigest,repositoryPreview.revision,true);
+      const repositoryState=await sdk.repositories.state("generated-id");void repositoryState.observation?.repository?.osiApproved;
+      await sdk.repositories.clear("generated-id",repositoryState.observation?.revision??0,true);
+      const repositoryCalls=await sdk.budgets.dashboard({repositoryId:42,organization:"generated",visibility:"open-source"});
+      void repositoryCalls.repositoryCoverage.unattributedCalls;
       const routingPolicy:KupoSettings=defaultKupoSettings();
       await sdk.routing.configure(routingPolicy,snapshot.revision);void sdk.routing.policy();
       const routing=sdk.routing.history("generated-id");void routing[0]?.plan?.modelId;void KUPO_MODEL_ID;
@@ -141,7 +147,9 @@ try {
     const provider=makeProvider(),providers=new Map([["default",provider]]),vaults=new Map();
     const remoteSecrets=new Map();
     const remoteVault={read:async id=>remoteSecrets.get(id)??null,write:async(id,value)=>{remoteSecrets.set(id,value);},remove:async id=>{remoteSecrets.delete(id);}};
-    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault}};
+    let repositoryLookups=0;
+    const repositoryMetadata={id:42,name:"example",full_name:"generated/example",html_url:"https://github.com/generated/example",owner:{login:"generated",type:"Organization"},private:false,visibility:"public",license:{spdx_id:"MIT"},description:"GENERATED_UNRETAINED_REPOSITORY_BODY"};
+    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{assert.equal(String(url),"https://api.github.com/repos/generated/example");repositoryLookups++;return Response.json(repositoryMetadata);}}};
     const runtime=await createRuntime({stateDir:join(root,"state"),retentionKey:Buffer.alloc(32,0x67),platform,profiles:{
       provider:id=>{if(!providers.has(id))providers.set(id,makeProvider());return providers.get(id);},
       platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
@@ -444,6 +452,31 @@ try {
         const actualCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","operations","--session",operationSessionId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
         assert.equal(JSON.parse(actualCli.stdout).totals.completed,1);
         assert.equal(JSON.stringify(actualOutcome).includes("portableSdkMemory"),false);assert.equal(generatedRequests.length,6);
+      }
+      if(PROTOCOL_VERSION>=22){
+        const directory=join(root,"generated-repository-attribution");await mkdir(directory);
+        await writeFile(join(directory,"fixture.txt"),"Generated installed attributed MCP bytes.");
+        git(["init","--initial-branch=main"],directory);git(["add","--","fixture.txt"],directory);
+        git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated attribution base"],directory);
+        git(["remote","add","origin","https://github.com/generated/example.git"],directory);
+        const project=await sdk.command({type:"project.add",path:directory}),session=await sdk.sessions.create(project.id,"Generated installed attributed source",{env:"Local"});
+        const preview=(await sdk.repositories.preview(session.id)).preview;assert.equal(preview.lookupBoundary,"control-plane-public");assert.equal(repositoryLookups,0);
+        const refresh=await sdk.repositories.refresh(session.id,preview.bindingDigest,preview.revision,true);assert.equal((await sdk.jobs.wait(refresh.id)).status,"completed");
+        assert.equal((await sdk.repositories.state(session.id)).observation.repository.publicOsiLicensed,true);assert.equal(repositoryLookups,1);
+        const tool=(await sdk.mcp.tools("builtin","grep",0,session.id)).tools.find(value=>value.name==="grep_logs"),job=await sdk.mcp.call(session.id,"builtin",tool.name,{path:"fixture.txt",query:"Generated"},tool.digest);
+        let approval;
+        for(let n=0;n<400&&!approval;n++){approval=sdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval;if(!approval)await new Promise(resolve=>setTimeout(resolve,20));}
+        assert.ok(approval);await sdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});assert.equal((await sdk.jobs.wait(job.id)).status,"completed");
+        const observed=await sdk.telemetry.operations({repositoryId:42,visibility:"open-source"});
+        assert.equal(observed.totals.completed,1);assert.equal(observed.entries[0].repository.fullName,"generated/example");assert.equal(observed.entries[0].actor,"external");
+        assert.equal(JSON.stringify(observed).includes("GENERATED_UNRETAINED_REPOSITORY_BODY"),false);assert.equal((await beta.telemetry.operations({repositoryId:42})).totals.attempts,0);
+        const cli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"repository","state","--session",session.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+        assert.equal(JSON.parse(cli.stdout).observation.repository.id,42);
+        const slash=await sdk.slash(session.id,"/repository state","tui");assert.equal(slash.kind,"text");assert.equal(JSON.parse(slash.text).observation.repository.licenseId,"MIT");
+        await sdk.refresh();await sdk.sessions.delete(session.id,true);
+        const removal=(await sdk.artifacts.projectPreview(project.id)).preview,configuration=(await sdk.projects.configuration(project.id)).configuration;
+        await sdk.projects.remove(project.id,true,configuration.revision,{action:"retain",expectedDigest:removal.digest});
+        assert.equal((await sdk.telemetry.operations({repositoryId:42})).totals.completed,1);assert.equal(repositoryLookups,1);assert.equal(generatedRequests.length,6);
       }
       assert.deepEqual(sdk.routing.policy(),defaultKupoSettings());
       if(PROTOCOL_VERSION>=19){

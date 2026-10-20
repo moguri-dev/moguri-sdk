@@ -130,8 +130,9 @@ Application coverage includes real owned Local/SSH tool effects, model and
 external MCP actors, declined approval, cancellation, identical scoped IDs,
 source deletion/restart, legacy retained-only import, schema-marker/derived
 append failure, exact date filters, profile isolation, native TUI and hidden
-desktop views. The wider repository/org/visibility, full active-time and retry
-attribution roadmap remains unimplemented.
+desktop views. Protocol 22 subsequently adds captured repository/org/visibility
+filters through the [repository contract](repository-telemetry.md); full
+active-time and semantic retry attribution remain unimplemented.
 
 The protocol-21 delivery passes 425 complete local checks in 310.09 s, 30 hidden
 source-desktop flows in 1.0 min and 30 against the actual packaged app in 1.1 min.

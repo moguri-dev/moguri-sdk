@@ -32,6 +32,12 @@ same owned worker with no model or Local fallback. Embedded Remote consoles,
 executable MCP transport and repository-memory retrieval remain blocked. Explicit
 client-side browser URLs do not create an implicit remote-port tunnel.
 
+Protocol 22 reuses the qualified Git view for optional immutable repository
+attribution at model admission. It reads the actual pinned Remote origin and
+rechecks authority after await; metadata lookup is separately explicit and
+displayed as public control-plane access. Remote authenticated GitHub CLI
+metadata is unavailable, never a host-local credential/root fallback.
+
 ## Authority and identities
 
 Remote requires an explicitly configured SSH host, pinned public host key,

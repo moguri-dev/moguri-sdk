@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { ModelRoleSchema, UsageFiltersSchema, type BudgetWindow } from "./budgets.ts";
+import { RepositoryAttributionSchema, RepositoryDiagnosticSchema, type RepositoryCoverage } from "./repositories.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -24,6 +25,7 @@ export const OperationEntrySchema = object({
   firstEventId: id, sourceEventId: id, sourceSeq: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   timeBasis: Type.Union([Type.Literal("request"), Type.Literal("tool-start"), Type.Literal("completion-only"), Type.Literal("unknown")]),
   diagnostic: nullable(Type.Union([Type.Literal("unknown-outcome"), Type.Literal("clock-regressed"), Type.Literal("inconsistent-result"), Type.Literal("duplicate-start"), Type.Literal("invalid-identifier"), Type.Literal("unlinked-source")])),
+  repository: Type.Optional(nullable(RepositoryAttributionSchema)), repositoryDiagnostic: Type.Optional(nullable(RepositoryDiagnosticSchema)),
 });
 export type OperationEntry = Static<typeof OperationEntrySchema>;
 export type OperationOutcome = Static<typeof OperationOutcomeSchema>;
@@ -48,5 +50,5 @@ export type TelemetryQuery = Static<typeof TelemetryQuerySchema>;
 export const isTelemetryQuery = (value: unknown): value is TelemetryQuery => Value.Check(TelemetryQuerySchema, value);
 export type TelemetryResponse =
   | { type: "telemetry.operations"; totals: OperationTotals; groups: Array<{ family: OperationEntry["family"]; name: string | null; serverId: string | null; actor: OperationEntry["actor"]; totals: OperationTotals }>;
-      entries: OperationEntry[]; nextOffset: number | null; window: BudgetWindow; coverage: OperationCoverage | null }
+      entries: OperationEntry[]; nextOffset: number | null; window: BudgetWindow; coverage: OperationCoverage | null; repositoryCoverage: RepositoryCoverage }
   | { type: "telemetry.storage"; storage: ProfileStorage };

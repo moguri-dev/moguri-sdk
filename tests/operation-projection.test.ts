@@ -74,7 +74,7 @@ test("schema-21 marker failure preserves exact schema-20 ciphertext and can be r
   try {
     store.commit(inputs);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
-    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id='operation_metrics_schema'; PRAGMA user_version=20;
+    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('operation_metrics_schema','repository_attribution_schema'); PRAGMA user_version=20;
       CREATE TRIGGER generated_marker_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='operation_metrics_schema'
       BEGIN SELECT RAISE(ABORT,'Generated operation marker failure'); END; COMMIT;`);
     store.close(); store = undefined;
@@ -86,7 +86,7 @@ test("schema-21 marker failure preserves exact schema-20 ciphertext and can be r
       raw.exec("DROP TRIGGER generated_marker_failure");
     } finally { raw.close(); }
     store = new EventStore(path, key, "generated-retention-key");
-    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 21);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all(), before);
   } finally { store?.close(); await rm(root, { recursive: true, force: true }); }
 });

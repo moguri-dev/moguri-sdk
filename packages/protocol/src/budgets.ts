@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import type { ModelStreamObservation } from "./model.ts";
+import { RepositoryFiltersSchema, type RepositoryAttribution, type RepositoryDiagnostic, type RepositoryCoverage } from "./repositories.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -37,6 +38,8 @@ export interface BudgetEntry {
   stream?: ModelStreamObservation | null; telemetryDiagnostic?: string | null;
   timeBasis?: "admission" | "model-start" | "unknown";
   ownerTurnId?: string | null;
+  repository?: RepositoryAttribution | null;
+  repositoryDiagnostic?: RepositoryDiagnostic | null;
 }
 export interface BudgetTotals {
   calls: number; reportedTokens: number | null; knownReportedTokens: number; unknownTokenCalls: number;
@@ -70,6 +73,7 @@ export type BudgetRange = Static<typeof BudgetRangeSchema>;
 export const BudgetBucketSchema = Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("all")]);
 export type BudgetBucket = Static<typeof BudgetBucketSchema>;
 const dashboardFilters = {
+  ...RepositoryFiltersSchema.properties,
   projectId: Type.Optional(id), folderId: Type.Optional(id), sessionId: Type.Optional(id), turnId: Type.Optional(id),
   modelId: Type.Optional(id), providerId: Type.Optional(id), role: Type.Optional(ModelRoleSchema),
   env: Type.Optional(Type.Union([Type.Literal("Local"), Type.Literal("Remote"), Type.Literal("Sandbox"), Type.Literal("unknown")])),
@@ -92,5 +96,5 @@ export type BudgetResponse =
   | { type: "budget.status"; status: BudgetStatus }
   | { type: "budget.dashboard"; totals: BudgetTotals; groups: Array<{ role: ModelRole; modelId: string; providerId: string | null; totals: BudgetTotals }>; policy: { revision: number; limit: BudgetLimit | null }; nextOffset: number | null;
       window: BudgetWindow; bucket: BudgetBucket; periods: Array<{ from: string | null; to: string | null; totals: BudgetTotals }>;
-      pricing: Array<{ rate: BudgetRate; calls: number; estimatedUsd: number | null }>; currency: "USD" }
-  | { type: "budget.calls"; calls: BudgetEntry[]; nextOffset: number | null; window: BudgetWindow };
+      pricing: Array<{ rate: BudgetRate; calls: number; estimatedUsd: number | null }>; currency: "USD"; repositoryCoverage: RepositoryCoverage }
+  | { type: "budget.calls"; calls: BudgetEntry[]; nextOffset: number | null; window: BudgetWindow; repositoryCoverage: RepositoryCoverage };

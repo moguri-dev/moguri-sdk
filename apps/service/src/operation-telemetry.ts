@@ -1,5 +1,6 @@
 import { digest, type EventStore } from "./store.ts";
 import { budgetWindow } from "./budgets.ts";
+import { matchesRepository, repositoryCoverage } from "./repository-telemetry.ts";
 import { MoguriError, type StoredEvent, type ToolCall, type Snapshot, type EventInput, type OperationEntry, type OperationOutcome,
   type OperationTotals, type ProfileStorage, type TelemetryQuery, type TelemetryResponse, type BudgetWindow } from "../../../packages/protocol/src/index.ts";
 
@@ -9,11 +10,12 @@ const outcome = (value: string): OperationOutcome => {
   const known: OperationOutcome[] = ["completed", "failed", "denied", "stopped", "partial", "unconfirmed"];
   return known.find((item) => item === value) ?? "unknown";
 };
-type Provenance = Pick<OperationEntry, "actor" | "env" | "modelId" | "providerId" | "role" | "folderId" | "ownerSessionId" | "ownerTurnId">;
+type Provenance = Pick<OperationEntry, "actor" | "env" | "modelId" | "providerId" | "role" | "folderId" | "ownerSessionId" | "ownerTurnId" | "repository" | "repositoryDiagnostic">;
 const scopedStep = (event: StoredEvent) => JSON.stringify([event.session_id, event.turn_id, event.step_id]);
 const operationEvent = (event: StoredEvent) => ["tool.requested", "tool.decided", "tool.started", "tool.completed", "turn.finished"].includes(event.event_type);
 function provenance(events: StoredEvent[], snapshot?: Snapshot) {
   const modelSteps = new Map<string, Extract<StoredEvent, { event_type: "model.started" }>>(), externalTurns = new Set<string>(), planTurns = new Set<string>(), envs = new Map<string, OperationEntry["env"]>();
+  const externalCaptures = new Map(events.flatMap((event) => event.event_type === "turn.started" && event.turn_id && event.payload.repositoryCapture ? [[event.turn_id, event.payload.repositoryCapture] as const] : []));
   for (const event of events) {
     if (event.event_type === "model.started") modelSteps.set(scopedStep(event), event);
     if (event.event_type === "job.started" && event.payload.job.kind === "mcp.call" && event.turn_id) externalTurns.add(event.turn_id);
@@ -27,12 +29,14 @@ function provenance(events: StoredEvent[], snapshot?: Snapshot) {
     describe: (event: StoredEvent): Provenance => {
       const start = modelSteps.get(scopedStep(event));
       const budget = snapshot?.budgetEntries.find((entry) => entry.id === event.step_id && entry.sessionId === event.session_id && entry.turnId === event.turn_id);
+      const captured = budget ?? externalCaptures.get(event.turn_id ?? "");
       return {
         actor: externalTurns.has(event.turn_id ?? "") ? "external" : start || budget && !budget.imported ? "model" : "unknown",
         env: envs.get(event.turn_id ?? "") ?? (budget && !budget.imported ? budget.env : "unknown"),
         modelId: start?.payload.modelId ?? budget?.modelId ?? null, providerId: start?.payload.providerId ?? budget?.providerId ?? null,
         role: start?.payload.role ?? budget?.role ?? null, folderId: snapshot?.projectConfigurations.find((configuration) => configuration.projectId === event.project_id)?.folderId ?? null,
         ownerSessionId: budget?.ownerSessionId ?? event.session_id ?? null, ownerTurnId: budget?.ownerTurnId ?? event.turn_id ?? null,
+        repository: captured?.repository ?? null, repositoryDiagnostic: captured?.repositoryDiagnostic ?? null,
       };
     },
   };
@@ -184,7 +188,8 @@ export class OperationTelemetry {
       (query.family === undefined || entry.family === query.family) && (query.actor === undefined || entry.actor === query.actor) && (query.name === undefined || entry.name === query.name) &&
       (query.serverId === undefined || entry.serverId === query.serverId) && (query.outcome === undefined || entry.outcome === query.outcome));
     const bounds = budgetWindow(query.range), uncertainTimeCalls = scoped.filter((entry) => requestTime(entry) === null).length;
-    const entries = scoped.filter((entry) => { const time = requestTime(entry); return bounds.from === null || time !== null && time >= bounds.from && time < bounds.to!; });
+    const dated = scoped.filter((entry) => { const time = requestTime(entry); return bounds.from === null || time !== null && time >= bounds.from && time < bounds.to!; });
+    const repositoryAccounting = repositoryCoverage(dated), entries = dated.filter((entry) => matchesRepository(entry.repository, query));
     const date = (value: number) => new Date(value).toISOString().slice(0, 10);
     const window: BudgetWindow = { from: bounds.from === null ? null : date(bounds.from), to: bounds.to === null ? null : date(bounds.to - 1), timezone: "UTC", uncertainTimeCalls, excludedUncertainTimeCalls: bounds.from === null ? 0 : uncertainTimeCalls };
     const grouped = new Map<string, OperationEntry[]>();
@@ -195,7 +200,7 @@ export class OperationTelemetry {
     const offset = query.offset ?? 0, end = offset + (query.limit ?? 20);
     if (!Number.isSafeInteger(end)) throw new MoguriError("telemetry_page", "The requested history page exceeds safe integer precision.", 409);
     entries.sort((left, right) => right.sourceSeq - left.sourceSeq || left.id.localeCompare(right.id));
-    return { type: query.type, totals: operationTotals(entries), coverage: structuredClone(snapshot.operationCoverage), window,
+    return { type: query.type, totals: operationTotals(entries), coverage: structuredClone(snapshot.operationCoverage), window, repositoryCoverage: repositoryAccounting,
       groups: [...grouped.values()].map((entries) => ({ family: entries[0]!.family, name: entries[0]!.name, serverId: entries[0]!.serverId, actor: entries[0]!.actor, totals: operationTotals(entries) })),
       entries: structuredClone(entries.slice(offset, end)), nextOffset: end < entries.length ? end : null };
   }

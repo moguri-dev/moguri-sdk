@@ -10,7 +10,7 @@ import {
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
   isManagedWorkspaceCommand, isManagedWorkspaceQuery,
   isArtifactCommand, isArtifactQuery, isQuestionCommand,
-  isBudgetCommand, isBudgetQuery, isTelemetryQuery,
+  isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   isPlanSaveCommand, isPlanSaveQuery, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse,
@@ -35,6 +35,7 @@ import { ManagedWorkspaces } from "./managed-workspaces.ts";
 import { ArtifactRuntime } from "./artifacts.ts";
 import { BudgetRuntime } from "./budgets.ts";
 import { OperationTelemetry } from "./operation-telemetry.ts";
+import { RepositoryTelemetry } from "./repository-telemetry.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
@@ -42,7 +43,9 @@ export interface PlatformHost {
   commit(events: EventInput[], forget?: ForgetRequest): void;
   finish: WorkspaceFinish;
   invalidateApprovals(sessionId?: string): void;
-  externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): string;
+  externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): Promise<string>;
+  repositoryScope(session: Session): RepositoryScope;
+  repositoryGit(session: Session, signal: AbortSignal): Promise<string | null>;
   subagent(session: Session, prompt: string): string;
   stopOwnedSession(id: string): void;
   cancelExternalJob(id: string): boolean;
@@ -83,6 +86,7 @@ export class PlatformRuntime {
   readonly artifacts: ArtifactRuntime;
   readonly budgets: BudgetRuntime;
   readonly telemetry: OperationTelemetry;
+  readonly repositories: RepositoryTelemetry;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
@@ -128,6 +132,12 @@ export class PlatformRuntime {
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
     }, stateDir, options);
     this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);
+    this.repositories = new RepositoryTelemetry({
+      snapshot: () => this.snapshot(), scope: host.repositoryScope, git: host.repositoryGit,
+      lookupRoot: (session) => session.controls.env === "Local" ? this.managed.project(session).path : stateDir,
+      commit: (events) => this.host.commit(events),
+      job: (session, execute, settled) => this.job("repository.refresh", session.projectId, session.id, (signal, _progress, id) => execute(signal, id), settled),
+    }, this.workspace.integrations);
     this.engagement = new Engagement(store, this.sessions.projects, {
       snapshot: () => this.snapshot(), commit: (events) => this.host.commit(events),
       invalidate: () => this.host.invalidateApprovals(), wake: () => this.host.wake(),
@@ -205,6 +215,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isRepositoryQuery(query)) return this.repositories.query(query);
     if (isTelemetryQuery(query)) return this.telemetry.query(query);
     if (isPlanSaveQuery(query)) return this.host.planSaveQuery(query);
     if (isCompactionQuery(query)) return this.host.compactionQuery(query);
@@ -334,7 +345,8 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       abort.signal.throwIfAborted();
       this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null } }]);
     }).catch((error: unknown) => {
-      const partial = error instanceof MoguriError && ["install_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted;
+      const partial = error instanceof MoguriError && ["install_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
+        kind === "repository.refresh" && this.snapshot().repositoryObservations.some((observation) => observation.jobId === id);
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
       console.error(`Moguri capability ${kind} (${id}) ${partial ? "partial" : cancelled ? "cancelled" : "failed"}:`, error instanceof Error ? error.message : "Unknown capability error");
       this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: {
@@ -346,6 +358,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isRepositoryCommand(command)) return this.repositories.execute(command, finish);
     if (isPlanSaveCommand(command)) return this.host.planSaveCommand(command, finish);
     if (isCompactionCommand(command)) return this.host.compactionCommand(command, finish);
     if (isProfileCommand(command)) throw new MoguriError("profile_authority", "Profile registry actions require the root service authority.", 409);
@@ -483,7 +496,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "mcp.call": {
         const session = this.session(command.sessionId);
         const call: ToolCall = { id: randomUUID(), name: "mcp_gateway", arguments: { action: "call", serverId: command.serverId, tool: command.tool, arguments: command.arguments, schemaDigest: command.schemaDigest } };
-        const id = this.host.externalCall(session, call, (signal) => this.callMcp(session, call.arguments, signal));
+        const id = await this.host.externalCall(session, call, (signal) => this.callMcp(this.session(session.id), call.arguments, signal));
         return finish([], { id });
       }
       case "subagent.run":

@@ -64,6 +64,7 @@ Unused scope fields are null in checkpoint 1.
 | `budget.policy_changed`, `budget.blocked` | Explicit revision-bound profile cap or actual admission rejection. A blocked request retains a diagnostic checkpoint without inventing an answer, extra paid call or Git success. |
 | `operation.recorded` | Atomic sanitized profile-root tool/MCP attempt revision: actual actor, safe identifiers, owning scope, exact outcome and nullable timing/source provenance. No arguments, command/output/error text or prompt contents. |
 | `operation.coverage_started` | Versioned tracking boundary and retained-only historical coverage. Previously forgotten history is unavailable, not zero calls. |
+| `repository.recorded` | Explicit user refresh/clear revision, encrypted at the profile root: exact Git/root scope, verified owner/visibility/license evidence, lookup location, timestamp and job provenance. Future reservations capture immutable snapshots; legacy charges are not backfilled. |
 | `profile.saved`, `global.controls_changed`, `global.policy_changed`, `global.budget_changed` | Root-only profile lifecycle and shared preference/policy/cap revisions. Atomic scoped replicas preserve enforcement without exposing foreign payloads. These internal events never enter a user's scoped replay. |
 
 ## HTTP commands
@@ -149,7 +150,7 @@ estimated admission; missing historical pricing is not free usage.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":21,"profileId":"default","token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":22,"profileId":"default","token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

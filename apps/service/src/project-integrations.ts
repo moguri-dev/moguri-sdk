@@ -2,6 +2,7 @@ import { isRecord, MoguriError, type IssueBoard, type LocalIssue, type PullReque
 import { fetchJson } from "./network.ts";
 import { runProgram } from "./program.ts";
 import type { SecretVault } from "./gateway.ts";
+import { loadRepository, lookupRepository, type RepositoryReadBinding } from "./repository-metadata.ts";
 
 export interface IntegrationOptions { fetch?: typeof fetch; vault?: SecretVault; prRefreshMs?: number }
 export function pullRequestLink(input: string): PullRequestLink {
@@ -16,9 +17,18 @@ export class ProjectIntegrations {
   constructor(readonly vault: SecretVault, private readonly options: IntegrationOptions = {}) {}
   async githubRead(endpoint: string, access: "public" | "gh-cli", root: string, signal: AbortSignal): Promise<unknown> {
     if (!/^repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:pulls|issues)\/[1-9]\d*$/.test(endpoint)) throw new MoguriError("github_endpoint", "Choose an exact repository issue or PR read endpoint.");
+    return this.githubRequest(endpoint, access, root, signal);
+  }
+  async repositoryMetadata(readBinding: () => Promise<RepositoryReadBinding>, access: "public" | "gh-cli", root: string, signal: AbortSignal) {
+    if (access === "gh-cli") return loadRepository(readBinding, (fullName) => this.githubRequest(`repos/${fullName}`, access, root, signal), signal);
+    const result = await lookupRepository(readBinding, this.options.fetch ?? fetch, signal);
+    if (result.repository.visibility !== "public") throw new MoguriError("repository_access", "A private/internal repository needs explicitly selected authenticated GitHub access. No credential fallback was used.", 403);
+    return result;
+  }
+  private async githubRequest(endpoint: string, access: "public" | "gh-cli", root: string, signal: AbortSignal): Promise<unknown> {
     if (access === "gh-cli") {
       const text = await runProgram("gh", ["api", "--hostname", "github.com", "--method", "GET", endpoint], {
-        cwd: root, signal, timeoutMs: 15_000, maxBytes: 2 * 1024 * 1024, label: "Read selected GitHub issue or PR",
+        cwd: root, signal, timeoutMs: 15_000, maxBytes: 2 * 1024 * 1024, label: "Read selected GitHub metadata",
         env: { GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" },
       });
       try { return JSON.parse(text); } catch { throw new MoguriError("issue_pr_response", "GitHub CLI returned invalid reference JSON. Nothing was applied."); }

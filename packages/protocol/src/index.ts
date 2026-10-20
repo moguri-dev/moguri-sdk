@@ -22,9 +22,10 @@ import type { RoutingTurn, SingleRoutingPlan } from "./routing.ts";
 import type { ContextCompaction } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
+import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 21;
+export const PROTOCOL_VERSION = 22;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -218,7 +219,7 @@ export interface EventPayloads {
   "queue.removed": { messageId: string };
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
-  "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string };
+  "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string; repositoryCapture?: RepositoryCapture };
   "turn.control_started":
     | { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string }
     | { purpose: "plan.save"; saveId: string; controls: Controls; policyRevision: number; intentDigest: string };
@@ -279,6 +280,7 @@ export interface EventPayloads {
   "budget.recorded": { entry: BudgetEntry };
   "operation.recorded": { entry: OperationEntry };
   "operation.coverage_started": { version: 1; priorHistory: "retained-events-only" };
+  "repository.recorded": { observation: RepositoryObservation };
   "budget.policy_changed": { limit: BudgetLimit | null; revision: number };
   "budget.blocked": { sessionId: string; ownerSessionId: string; stepId: string; diagnostic: string; remainingTokens: number | null; remainingUsd: number | null };
   "profile.saved": { profile: Profile };
@@ -325,7 +327,7 @@ export const eventTypes: readonly EventType[] = [
   "budget.recorded", "budget.policy_changed", "budget.blocked", "operation.recorded", "operation.coverage_started",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
-  "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded",
+  "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -356,6 +358,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const budgetEntries = new Map<string, BudgetEntry>();
   const operationEntries = new Map<string, OperationEntry>();
   let operationCoverage: OperationCoverage | null = null;
+  const repositoryObservations = new Map<string, RepositoryObservation>();
   let budgetPolicy: PlatformSnapshot["budgetPolicy"] = { revision: 0, limit: null };
   const terminals = new Map<string, TerminalState>();
   const executions = new Map<string, RemoteExecution>();
@@ -363,6 +366,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const changeSets = new Map<string, ChangeSet>();
   for (const event of events) {
     if (event.profile_id !== profileId) continue;
+    if (event.event_type === "repository.recorded") {
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(RepositoryObservationSchema, event.payload.observation) || event.payload.observation.profileId !== profileId) throw new MoguriError("repository_corrupt", "Repository observation is invalid or outside its independent owning profile. State was preserved.", 409);
+      repositoryObservations.set(event.payload.observation.scopeKey, structuredClone(event.payload.observation));
+    }
     if (event.event_type === "operation.recorded") {
       if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(OperationEntrySchema, event.payload.entry) || event.payload.entry.profileId !== profileId) throw new MoguriError("telemetry_corrupt", "A retained operation entry is invalid, not profile-root retained or outside its owning profile. State was preserved.", 409);
       operationEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
@@ -653,5 +660,5 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

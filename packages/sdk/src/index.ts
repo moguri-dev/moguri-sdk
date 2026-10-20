@@ -1,6 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -9,6 +9,8 @@ export * from "./slash.ts";
 export { ClientError };
 export { DraftEditor } from "../../client/src/draft.ts";
 export type { ClientState } from "../../client/src/index.ts";
+export const sessionTitle = (session: Session, limit = 64, fallback = "New session"): string =>
+  session.title !== "New session" ? session.title : session.messages.find((message) => message.role === "user")?.text.split("\n")[0]?.slice(0, limit) || fallback;
 
 export class MoguriSdk extends TransportClient {
   private sessionRevision(id: string): number {
@@ -103,6 +105,12 @@ export class MoguriSdk extends TransportClient {
       if (!profile || profile.status !== "ready") throw new ClientError("profile_unready", profile?.diagnostic ?? "Choose a ready registered profile. No Default fallback was used.");
       return new MoguriSdk(this.connection, this.resolveConnection, profileId).ready();
     },
+  };
+  readonly repositories = {
+    preview: (sessionId: string) => this.query({ type: "repository.preview", sessionId }),
+    state: (sessionId: string) => this.query({ type: "repository.state", sessionId }),
+    refresh: (sessionId: string, expectedBinding: string, expectedRevision: number, confirm: true) => this.command({ type: "repository.refresh", sessionId, expectedBinding, expectedRevision, confirm }),
+    clear: (sessionId: string, expectedRevision: number, confirm: true) => this.command({ type: "repository.clear", sessionId, expectedRevision, confirm }),
   };
   readonly telemetry = {
     operations: (filters: Omit<Extract<TelemetryQuery, { type: "telemetry.operations" }>, "type"> = {}) => this.query({ type: "telemetry.operations", ...filters }),
