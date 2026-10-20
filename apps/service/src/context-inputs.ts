@@ -13,10 +13,11 @@ import { matchesFolder } from "./project-policy.ts";
 import type { ProjectService } from "./project-service.ts";
 import type { ProjectIntegrations } from "./project-integrations.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import { MAX_CONTEXT_TEXT_BYTES, MAX_CONTEXT_FOLDER_FILES } from "./input-limits.ts";
 
 export const isInputCommand = (value: unknown): value is InputCommand => Value.Check(InputCommandSchema, value);
 export const isInputQuery = (value: unknown): value is InputQuery => Value.Check(InputQuerySchema, value);
-const MAX_TEXT_BYTES = 2 * 1024 * 1024, MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_TEXT_BYTES = MAX_CONTEXT_TEXT_BYTES, MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 interface Host { snapshot(): Snapshot; events(): StoredEvent[]; ownedRoot(path: string): { path: string; projectId: string } | undefined }
 interface Capture { preview: Omit<ContextPreview, "destination">; text: string }
 export class ContextInputs {
@@ -70,7 +71,7 @@ export class ContextInputs {
         let file;
         try { file = await readProjectFile(root, name); }
         catch (error) { if (error instanceof MoguriError && error.code === "file_limit") { exclude(name, error.message); continue; } throw error; }
-        if (files.length >= 200 || bytes + file.bytes > MAX_TEXT_BYTES) throw new MoguriError("attachment_folder_limit", "Folder capture is limited to 200 text files and 2 MiB. Select a smaller exact file set.");
+        if (files.length >= MAX_CONTEXT_FOLDER_FILES || bytes + file.bytes > MAX_TEXT_BYTES) throw new MoguriError("attachment_folder_limit", "Folder capture is limited to 200 text files and 2 MiB. Select a smaller exact file set.");
         files.push({ path: name, bytes: file.bytes, digest: file.digest }); bytes += file.bytes;
         content.push(`\n<untrusted-file path=${JSON.stringify(name)} sha256="${file.digest}">\n${file.text}\n</untrusted-file>`);
       }

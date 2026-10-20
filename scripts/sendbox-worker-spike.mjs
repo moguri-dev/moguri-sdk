@@ -13,6 +13,7 @@ import { parse, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { tools, validateTool } from "../apps/service/src/tools.ts";
 import { assistantMessage } from "../apps/service/src/worker-protocol.ts";
 import { readNativeRollback } from "../apps/service/src/native-evidence.ts";
+import { captureNativeSource, assertNativeSource, inspectNativeStage, materializeNativeStage } from "../apps/service/src/native-staging.ts";
 import sharp from "sharp";
 
 const { values } = parseArgs({ options: { candidate: { type: "string" }, workload: { type: "string" }, turn: { type: "boolean" }, network: { type: "boolean" }, stop: { type: "string" } } });
@@ -36,14 +37,17 @@ assert.equal(manifest.trust_root_id, candidate.trustRootId); assert.ok(manifest.
 const inventory = () => JSON.parse(execFileSync("container", ["ls", "--all", "--format", "json"], { encoding: "utf8", timeout: 10_000 }));
 const before = inventory(), beforeIds = new Set(before.map((vm) => vm.configuration.id));
 const root = resolve(".native/qualification"); await mkdir(root, { recursive: true, mode: 0o700 });
-const directory = await mkdtemp(join(root, "sendbox-worker-")), workspace = join(directory, "workspace"), config = join(directory, "sendbox.json");
-await mkdir(workspace, { mode: 0o700 });
-await writeFile(join(workspace, "generated.txt"), "Generated real guest worker original.\n", { mode: 0o600 });
+const directory = await mkdtemp(join(root, "sendbox-worker-")), sourceRoot = join(directory, "source"), stateRoot = join(directory, "stage-state"), config = join(directory, "sendbox.json");
+const runId = randomUUID(), key = randomBytes(32).toString("hex"), sourceSignal = new AbortController().signal;
+await mkdir(sourceRoot, { mode: 0o700 }); await mkdir(stateRoot, { mode: 0o700 });
+await writeFile(join(sourceRoot, "generated.txt"), "Generated real guest worker original.\n", { mode: 0o600 });
+const source = await captureNativeSource(sourceRoot, ["generated.txt"], { denied: [], readOnly: [] }, sourceSignal);
+const stage = await materializeNativeStage(stateRoot, { profileId: "generated-native-qualification", sessionId: randomUUID(), turnId: runId }, source, sourceSignal);
+const workspace = (await inspectNativeStage(stage)).workspace;
 if (values.turn) await cp("scripts/worker-image/generated-provider.mjs", join(workspace, "generated-provider.mjs"));
 if (values.stop) await writeFile(join(workspace, "generated-mode.json"), JSON.stringify({ stop: values.stop === "control" ? "model" : values.stop }), { mode: 0o600 });
 const fixtureDigest = values.turn ? hash(await readFile(join(workspace, "generated-provider.mjs"))) : null;
 const pixels = values.turn ? await sharp(randomBytes(1024 * 1024 * 3), { raw: { width: 1024, height: 1024, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer() : null;
-const runId = randomUUID(), key = randomBytes(32).toString("hex");
 const startMessage = { kind: "start", root: "/workspace", context: [{ role: "user", timestamp: Date.now(), content: [{ type: "text", text: "Generated image and exact read/write qualification." }, ...(pixels ? [{ type: "image", mimeType: "image/png", data: pixels.toString("base64") }] : [])] }], readOnly: false };
 const name = `mgw-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
 const ownedVms = () => inventory().filter((vm) => {
@@ -124,7 +128,12 @@ try {
     assert.ok(response.status === 401 || response.status === 403); assert.equal(response.proxy, true); assert.equal(response.credentials, false);
   }
   const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output, true);
-  const stop = () => { if (!transport.stopRequested) { transport.stopRequested = true; transport.stopStartedAt = performance.now(); channel.send({ kind: "parent", message: { kind: values.stop === "control" ? "control-lost" : "stop" } }); } };
+  const stop = async () => {
+    if (transport.stopRequested) return;
+    transport.stopRequested = true;
+    await writeFile(join(sourceRoot, "generated.txt"), "Generated concurrent source edit.\n");
+    transport.stopStartedAt = performance.now(); channel.send({ kind: "parent", message: { kind: values.stop === "control" ? "control-lost" : "stop" } });
+  };
   let info, failure, retention = null, bootstraps = 0, diagnostics = 0, finished = false, modelCalls = 0, toolCalls = 0, sequence = 0, queue = Promise.resolve();
   const main = values.turn ? ["/usr/local/bin/node", "--import", "/workspace/generated-provider.mjs", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"] : ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"];
   const priorMain = new Set(ownedVms().map((vm) => vm.configuration.id));
@@ -179,8 +188,8 @@ try {
           } else if (request.kind === "finished") {
             if (values.stop !== "control") reply({ accepted: true }); finished = true; transport.outcomes.push({ kind: "finished", outcome: request.outcome, diagnostic: request.diagnostic });
           } else if (request.kind === "ack") transport.cancellationAck = true;
-          else if (request.kind === "delta" && (values.stop === "model" || values.stop === "control") && request.text.includes("GENERATED_NATIVE_MODEL_PENDING")) stop();
-          else if (request.kind === "output" && values.stop === "command" && request.text.includes("GENERATED_NATIVE_COMMAND_READY")) stop();
+          else if (request.kind === "delta" && (values.stop === "model" || values.stop === "control") && request.text.includes("GENERATED_NATIVE_MODEL_PENDING")) await stop();
+          else if (request.kind === "output" && values.stop === "command" && request.text.includes("GENERATED_NATIVE_COMMAND_READY")) await stop();
           channel.send({ kind: "ack", sequence: message.sequence });
         }).catch((error) => { failure = error; channel.send({ kind: "parent", message: { kind: "stop" } }); });
       }
@@ -239,8 +248,13 @@ try {
       assert.ok(Buffer.byteLength(JSON.stringify(startMessage)) > 1024 * 1024);
     }
   } finally { clearTimeout(timer); input.end(); channel.end(); }
+  assert.equal(await readFile(join(sourceRoot, "generated.txt"), "utf8"), values.stop ? "Generated concurrent source edit.\n" : "Generated real guest worker original.\n");
+  if (values.stop) {
+    await assert.rejects(() => assertNativeSource(source, sourceSignal), /reviewed source changed/i);
+    await assert.rejects(() => inspectNativeStage(stage), /workspace was replaced/);
+  } else await assertNativeSource(source, sourceSignal);
   cleanup();
-  const receipt = { status: "PASS", primitive: values.stop ? `Actual native ${values.stop} cancellation with acknowledged ${expectedOutcome} worker and verified owned VM absence` : values.turn ? "Actual Moguri worker fork/IPC and maintained pi-ai loop with generated fetch fixture, exact approved read/write and >1 MiB image through real SendBox foreground PTY" : "Actual SendBox Node ELF with non-root/NNP/seccomp/no capabilities and workspace I/O, then real Moguri raw foreground-PTY bootstrap", stopMode: values.stop ?? null, stopRequested: transport.stopRequested, cancellationAck: transport.cancellationAck, stopMs: transport.stopMs, workerStatus: transport.finalStatus, cliExit: transport.cliExit, nativeSessionId: transport.nativeSessionId, retention, fixtureDigest, unauthenticatedMetadataEgress: Boolean(values.network), generatedImageBytes: pixels?.length ?? 0, startFrameBytes: values.turn ? Buffer.byteLength(JSON.stringify(startMessage)) : 0, modelCalls, toolCalls, image: workload.image, protocol: PROTOCOL_VERSION, workerDigest: info.workerDigest, candidate: { hostSha256: candidate.hostSha256, manifestSha256: candidate.manifestSha256, trustRootId: candidate.trustRootId, minimumReleaseSequence: candidate.minimumReleaseSequence }, ms: performance.now() - started, qualification: "Development candidate/worker primitive with generated model fetch only; optional real egress is credential-free metadata, never inference. No real credentials, paid inference, SDK/controller lifecycle/restart, real provider-completion guarantee or production release qualification." };
+  const receipt = { status: "PASS", primitive: values.stop ? `Actual native ${values.stop} cancellation with acknowledged ${expectedOutcome} worker and verified owned VM absence` : values.turn ? "Actual Moguri worker fork/IPC and maintained pi-ai loop with generated fetch fixture, exact approved read/write and >1 MiB image through real SendBox foreground PTY" : "Actual SendBox Node ELF with non-root/NNP/seccomp/no capabilities and workspace I/O, then real Moguri raw foreground-PTY bootstrap", sourceStaging: { digest: source.digest, separateMount: workspace !== sourceRoot, sourceEditPreserved: Boolean(values.stop), changedBaseRejected: Boolean(values.stop), replacedExecutionBindingRejected: Boolean(values.stop), publication: "none" }, stopMode: values.stop ?? null, stopRequested: transport.stopRequested, cancellationAck: transport.cancellationAck, stopMs: transport.stopMs, workerStatus: transport.finalStatus, cliExit: transport.cliExit, nativeSessionId: transport.nativeSessionId, retention, fixtureDigest, unauthenticatedMetadataEgress: Boolean(values.network), generatedImageBytes: pixels?.length ?? 0, startFrameBytes: values.turn ? Buffer.byteLength(JSON.stringify(startMessage)) : 0, modelCalls, toolCalls, image: workload.image, protocol: PROTOCOL_VERSION, workerDigest: info.workerDigest, candidate: { hostSha256: candidate.hostSha256, manifestSha256: candidate.manifestSha256, trustRootId: candidate.trustRootId, minimumReleaseSequence: candidate.minimumReleaseSequence }, ms: performance.now() - started, qualification: "Development candidate/worker primitive with generated model fetch only; optional real egress is credential-free metadata, never inference. No real credentials, paid inference, SDK/controller lifecycle/restart, real provider-completion guarantee or production release qualification." };
   await writeFile(join(directory, "qualification.json"), JSON.stringify(receipt, null, 2), { mode: 0o600 });
   console.log(JSON.stringify({ ...receipt, directory }, null, 2)); passed = true;
 } finally {

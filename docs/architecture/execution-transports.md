@@ -223,6 +223,35 @@ Generated acceptance must include stop/nonzero rollback, retained after-state,
 publication failure, changed host base and concurrent source edits, alongside
 the model/control/VM gates below.
 
+The internal `native-staging.ts` prerequisite uses Node filesystem/crypto (MIT),
+the existing protected-path and folder-policy readers, and the same explicit
+**200-file / 2-MiB UTF-8** bounds as reviewed folder context. It captures only an
+explicit approved file set, never scans or silently copies ignored credentials,
+Git metadata, dependencies or a whole host home. Immutable source/root/policy
+digests and mode metadata are checked again after copying into a separate
+0700 profile/session/turn-owned root. An ownership marker sits outside the
+runtime-restorable workspace; it is not another workflow store or permission.
+
+Cancellation preserves partial owned staging without writing the source.
+Changed source digests invalidate later base acceptance, while changed parent
+or workspace directory identity rejects reuse, including expected R5 rollback
+replacement. This primitive has no source-publication API and does not create
+an alternate Git history, new SDK capability or ready Sandbox choice. Durable
+execution/stage lifecycle still belongs in versioned service events when the
+controller integration is added; it is not inferred from a marker file.
+
+Nine generated staging groups now cover exact private copies and permissions,
+immutable arguments, protected/denied/symlink/binary/aggregate bounds,
+cancelled partial preparation, empty scopes, forged metadata, root replacement
+and source conflicts. A genuine R5 command-stop run uses that separate stage,
+writes its partial file, then deliberately changes the generated source
+concurrently. R5 rollback affects only staging: the source edit survives,
+source-base acceptance and replaced-stage reuse both reject, and retained
+after-state hashes remain verified. It completes in **5,673.40 ms**, settling
+as **partial / CLI 2** in **1,207.54 ms**, without publishing to the source.
+This qualifies the isolated text-set primitive, not source application or
+complete native Git/command/project mapping.
+
 ### Current protocol-16 R5 prerequisite
 
 The separate user-authenticated R5 prefix is

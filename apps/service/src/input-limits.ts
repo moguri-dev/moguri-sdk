@@ -1,0 +1,2 @@
+export const MAX_CONTEXT_TEXT_BYTES = 2 * 1024 * 1024;
+export const MAX_CONTEXT_FOLDER_FILES = 200;
