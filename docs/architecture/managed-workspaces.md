@@ -194,3 +194,10 @@ and missing-commit deletion rejection; stale/denied/symlink destinations; and
 actual managed-root identity separation. Cases combine related assertions.
 The focused 26-check CLI/native-TUI/service run and all three hidden artifact
 desktop flows pass. No paid calls or personal credentials are used.
+
+The complete protocol-12 gate passes **194** local checks in **143,085.56 ms**
+and all **16** hidden Electron workflows in **34.3 s**. A fresh packed external
+consumer builds/checks all four entrypoints, installs its approved exact package,
+performs real repository copying/local commits and folder/work-item retention,
+and reports zero audit findings. Source/build audit also reports zero findings.
+This does not qualify an installer, delegated decisions or native Sandbox.
