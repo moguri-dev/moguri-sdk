@@ -139,5 +139,11 @@ without model dispatch. Source types/build/audit pass; audit has zero findings.
 The initial second-send desktop assertion reused the previous terminal status;
 the corrected fixture waits for the real next provider request. Its failed
 trace/context remain retained. Both bounded desktop/compact visual rounds are
-complete. Packed consumer and actual artifact qualification are not inferred
-from these source results.
+complete. Independent artifact qualification also passes: 31 real packaged
+desktop flows in 1.1 min; strict ad-hoc signature/assets and DMG integrity; an
+actual bundled service/worker model call with verified repository/owner/license
+provenance; and the exact archive freshly installed, script-approved, rebuilt,
+audited and exercised through four external type entrypoints plus real
+repository/CLI/TUI/MCP retention/private-profile behavior. Audits report zero
+findings. No archive was rebuilt for the final notes. Exact hashes and remaining
+scope are in [setup](../setup.md#current-016-checkpoint).
