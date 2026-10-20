@@ -61,6 +61,9 @@ coverage:
 passes **13 checks in 11,729.92 ms** on macOS arm64/Node 26.11.1: ten real SSH
 MCP cases and three exact connector admission/cleanup cases. Type checks pass.
 The combined duration is not presented as the isolated SSH measurement.
+After building the 0.18 development source, the combined Local gateway/OAuth
+and final prerequisite gate passes **28/28 checks in 77,166.05 ms**. This is
+not full application, native client or delivered-archive qualification.
 
 - Actual Remote internal discovery/grep reads the selected Remote bytes and
   leaves the Local marker unchanged, with no model boundary/request.
