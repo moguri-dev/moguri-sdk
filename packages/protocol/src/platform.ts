@@ -10,7 +10,7 @@ import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
 import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
-import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse } from "./artifacts.ts";
+import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type ArtifactMaterializationPreview } from "./artifacts.ts";
 import { QuestionCommandSchema, type UserQuestion } from "./questions.ts";
 export * from "./questions.ts";
 export * from "./artifacts.ts";
@@ -159,6 +159,7 @@ export interface Proposal {
 }
 export interface CapabilityJob {
   workspaceId?: string | null;
+  materialization?: ArtifactMaterializationPreview;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;

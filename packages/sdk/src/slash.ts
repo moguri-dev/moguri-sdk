@@ -3,7 +3,7 @@ import type { MoguriSdk } from "./index.ts";
 import { ArtifactKindSchema, parse, type ArtifactExport, type ArtifactKind } from "../../protocol/src/index.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Side chat" | "Suggestions" | "Attention";
-export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived" }
+export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
 export type SlashResult =
   | { kind: "ok"; message: string }
   | { kind: "session"; sessionId: string; side: boolean }
@@ -34,7 +34,7 @@ export const slashCommands = [
   { name: "artifacts", description: "View independent retained documents" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
-  { name: "project-removal", description: "Preview independent artifacts before explicit project-data removal", argument: "[preview|export [ABSOLUTE_PATH]|retain DIGEST confirm-remove|delete DIGEST confirm-remove|export-delete PREVIEW_SHA EXPORT_SHA confirm-remove]" },
+  { name: "project-removal", description: "Review artifact retention, repository copies and explicit project removal", argument: "[preview|export PATH|materialize-preview [WORKSPACE|-] [NEW_BRANCH]|materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write|materialization JOB|materialize-delete SET_SHA JOB confirm-remove|retain/delete SET_SHA confirm-remove|export-delete SET_SHA EXPORT_SHA confirm-remove]" },
   { name: "insights", description: "Inspect session metadata and usage" },
   { name: "pr", description: "Open the connected pull request" },
   { name: "copy", description: "Copy a queued or sent prompt", argument: "[ID]" },
@@ -79,16 +79,29 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "project-removal": {
       if (!session.projectId) throw new ClientError("project_required", "Select a project for its explicit removal workflow. No previous project was inferred.");
       const [action, ...args] = command.argument.split(/\s+/);
-      if (!action || action === "preview") return { kind: "text", text: JSON.stringify({ ...(await sdk.artifacts.projectPreview(session.projectId)), workspaces: sdk.getState().snapshot!.managedWorkspaces.filter((workspace) => workspace.projectId === session.projectId && workspace.status !== "removed"), warning: "Removal forgets project data. Choose retain/export/delete for artifacts; source files and branches are never deleted." }, null, 2) };
+      if (!action || action === "preview") return { kind: "text", text: JSON.stringify({ ...(await sdk.artifacts.projectPreview(session.projectId)), workspaces: sdk.getState().snapshot!.managedWorkspaces.filter((workspace) => workspace.projectId === session.projectId && workspace.status !== "removed"), warning: "Removal forgets project data. Choose retain/export/materialize/delete for artifacts; source files and branches are never deleted. Materialization explicitly writes only a reviewed new repository copy." }, null, 2) };
+      if (action === "materialize-preview" && args.length <= 2) {
+        return { kind: "text", text: JSON.stringify(await sdk.artifacts.materializePreview(session.projectId, { ...(args[0] && args[0] !== "-" ? { workspaceId: args[0] } : {}), ...(args[1] && args[1] !== "-" ? { commitBranch: args[1] } : {}) }), null, 2) };
+      }
+      if ((action === "materialization" || action === "materialize-stop") && args.length === 1) {
+        const result = await sdk.artifacts.materialization(args[0]!);
+        if (result.job.projectId !== session.projectId) throw new ClientError("artifact_scope", "Choose a materialization owned by this project.");
+        if (action === "materialize-stop") { await sdk.jobs.cancel(args[0]!); return { kind: "ok", message: "Repository stop requested. Inspect actual job status; partial copies or local commits were not deleted." }; }
+        return { kind: "text", text: JSON.stringify(result, null, 2) };
+      }
+      if (action === "materialize" && args.length === 4 && args[3] === "confirm-write" && /^[a-f0-9]{64}$/.test(args[0]!)) {
+        const created = await sdk.artifacts.materialize(session.projectId, args[0]!, { ...(args[1] !== "-" ? { workspaceId: args[1]! } : {}), ...(args[2] !== "-" ? { commitBranch: args[2]! } : {}) });
+        return { kind: "ok", message: `Owned repository job ${created.id}. Use /project-removal materialization ${created.id} to inspect actual status; no source documents were deleted.` };
+      }
       if (action === "export") {
         if (client !== "desktop" && !args.length) throw new ClientError("artifact_export_path", "Use /project-removal export ABSOLUTE_NEW_FILE_PATH, then preserve the returned export digest.");
         if (client === "desktop" && args.length) throw new ClientError("artifact_export_path", "Desktop uses the explicit native save dialog. Use /project-removal export.");
         return { kind: "export", document: (await sdk.artifacts.projectExport(session.projectId)).export, ...(args.length ? { path: args.join(" ") } : {}) };
       }
-      const matches = (action === "retain" || action === "delete") && args.length === 2 && args[1] === "confirm-remove" || action === "export-delete" && args.length === 3 && args[2] === "confirm-remove";
-      if (!matches || !/^[a-f0-9]{64}$/.test(args[0] ?? "") || action === "export-delete" && !/^[a-f0-9]{64}$/.test(args[1] ?? "")) throw new ClientError("project_removal", "Preview first. Use retain/delete PREVIEW_SHA confirm-remove, or export-delete PREVIEW_SHA SAVED_EXPORT_SHA confirm-remove. Worktrees must be removed separately.");
+      const matches = (action === "retain" || action === "delete") && args.length === 2 && args[1] === "confirm-remove" || (action === "export-delete" || action === "materialize-delete") && args.length === 3 && args[2] === "confirm-remove";
+      if (!matches || !/^[a-f0-9]{64}$/.test(args[0] ?? "") || action === "export-delete" && !/^[a-f0-9]{64}$/.test(args[1] ?? "")) throw new ClientError("project_removal", "Preview first. Use retain/delete SET_SHA confirm-remove, export-delete SET_SHA EXPORT_SHA confirm-remove, or materialize-delete SET_SHA COMPLETED_JOB confirm-remove. Repository copies use materialize-preview, then materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write. Worktrees must be removed separately.");
       const configuration = (await sdk.projects.configuration(session.projectId)).configuration;
-      await sdk.projects.remove(session.projectId, true, configuration.revision, { action: action === "export-delete" ? "export" : action === "retain" ? "retain" : "delete", expectedDigest: args[0]!, ...(action === "export-delete" ? { exportedDigest: args[1]! } : {}) });
+      await sdk.projects.remove(session.projectId, true, configuration.revision, { action: action === "export-delete" ? "export" : action === "materialize-delete" ? "materialize" : action === "retain" ? "retain" : "delete", expectedDigest: args[0]!, ...(action === "export-delete" ? { exportedDigest: args[1]! } : {}), ...(action === "materialize-delete" ? { materializationId: args[1]! } : {}) });
       return { kind: "ok", message: "Project data removed with your exact artifact choice. Repository files, branches, external PRs and shared stores were preserved." };
     }
     case "artifacts": return client === "desktop" || client === "tui" ? { kind: "panel", panel: "Artifacts" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.artifacts, null, 2) };

@@ -67,7 +67,7 @@ export class MoguriSdk extends TransportClient {
     clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
   };
   readonly artifacts = {
-    create: (sessionId: string | null, artifact: { kind: ArtifactKind; name: string; text: string; projectId?: string | null }) => this.command({ type: "artifact.create", sessionId, ...artifact }),
+    create: (sessionId: string | null, artifact: { kind: ArtifactKind; name: string; text: string; projectId?: string | null; folderId?: string | null; workItemId?: string | null }) => this.command({ type: "artifact.create", sessionId, ...artifact }),
     source: (sessionId: string, sourceKind: "message" | "tool", sourceId: string) => this.query({ type: "artifact.source", sessionId, sourceKind, sourceId }),
     promote: (sessionId: string, source: { sourceKind: "message" | "tool"; sourceId: string; kind: ArtifactKind; name: string; expectedDigest: string }) => this.command({ type: "artifact.promote", sessionId, ...source }),
     read: (artifactId: string, revision?: number) => this.query({ type: "artifact.read", artifactId, ...(revision === undefined ? {} : { revision }) }),
@@ -77,6 +77,9 @@ export class MoguriSdk extends TransportClient {
     export: (artifactId: string) => this.query({ type: "artifact.export", artifactId }),
     projectPreview: (projectId: string) => this.query({ type: "project.artifacts.preview", projectId }),
     projectExport: (projectId: string) => this.query({ type: "project.artifacts.export", projectId }),
+    materializePreview: (projectId: string, options: { workspaceId?: string; commitBranch?: string } = {}) => this.query({ type: "project.artifacts.materialize.preview", projectId, ...options }),
+    materialize: (projectId: string, expectedDigest: string, options: { workspaceId?: string; commitBranch?: string } = {}) => this.command({ type: "project.artifacts.materialize", projectId, expectedDigest, confirm: true, ...options }),
+    materialization: (jobId: string) => this.query({ type: "artifact.materialization", jobId }),
   };
   readonly questions = {
     answer: (questionId: string, text: string, expectedRevision: number, consumeDraft?: { sessionId: string; expectedRevision: number }) => this.command({ type: "question.answer", questionId, text, expectedRevision, ...(consumeDraft ? { consumeDraft } : {}) }),

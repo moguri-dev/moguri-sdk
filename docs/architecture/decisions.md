@@ -44,6 +44,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D21 | Managed Local worktrees use explicit owned roots and per-root writer leases across every SDK/client filesystem surface. | Safe Git creation/removal, root consistency, concurrency or restart reconciliation fails. |
 | D22 | Typed text artifacts have independent encryption/revisions and exact source provenance; project removal binds an explicit reviewed retention choice. | Legacy rekeying, source-actor separation, deletion isolation or persistent client export fails. |
 | D23 | Structured clarifications record actual owning-turn answers; optional retained artifacts and saved-draft consumption are one transaction, never permissions. | Actor/turn/revision isolation, cancellation, atomic retention or cross-client answer/queue behavior fails. |
+| D24 | Artifact repository copies bind exact source/root/policy and optional new local commit intent; deleting stored grants requires real copy/commit verification. | Copy persistence, no-overwrite/index isolation, cancellation/recovery or deletion proof fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -494,8 +495,8 @@ Project removal reviews an exact set/digest and explicitly retains to profile,
 exports then deletes, or deletes artifact grants. Client exports use an explicit
 save action and a new private file, never silent overwrite or repository
 publication. Restart, concurrency, shared-content grants and rollback are
-generated acceptance. Structured questions, repository materialization/commit
-and work-item/folder organization remain separate first-release capabilities.
+generated acceptance. Structured questions, repository materialization/local
+commits and work-item/folder organization are separate slices in D23/D24.
 
 ## D23. Structured questions and actual-answer authority
 
@@ -516,6 +517,28 @@ keyed artifact/source actors, optional draft clearing and receipt commit
 together. Models and delegated decision providers cannot reuse this endpoint
 or promote automated answers into user-only Core memory. Their own evaluated
 policy/call path remains a separate capability.
+
+## D24. Reviewed repository artifact copies and associations
+
+**Decision.** Reuse Node filesystem/crypto and system Git's independent-index
+publication path. Folders and same-project work items are revisioned artifact
+associations, never filesystem authority. Migration 12 projects missing legacy
+associations as null without rewriting history; project retain clears the
+removed work-item link.
+
+Explicit Local previews bind source/history, canonical directory identity,
+policy and optional new local branch/base. The owned job/receipt precede
+effects. Copy an exact new private history bundle under `artifacts/`, without
+overwrites or symlink aliases. Optional commit creates only a reviewed new
+non-protected local branch; no checkout, push, signing or hook/filter execution,
+and no changes to the real index or unrelated edits.
+
+Partial/cancelled/interrupted effects preserve documents and quarantine the
+root, never replay. Project removal revalidates a completed job, exact source
+set, actual bytes and requested local commit before forgetting grants.
+Independent exports, repository copies and automated answers never become
+instructions or user-only memory. Remote/Sandbox publication remains
+unavailable until its own qualified transport exists.
 
 ## Still open
 

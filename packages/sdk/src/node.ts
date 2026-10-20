@@ -2,10 +2,10 @@ import { fileURLToPath } from "node:url";
 import { ensureConnection as ensureTransportConnection, readConnection, stateDirectory } from "../../client/src/node.ts";
 import { startService, type ServiceOptions } from "../../../apps/service/src/server.ts";
 import { MoguriSdk } from "./index.ts";
-import { basename, dirname, isAbsolute, join } from "node:path";
-import { link, lstat, open, readFile, realpath, unlink } from "node:fs/promises";
-import { createHash, randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
+import { lstat, readFile } from "node:fs/promises";
 import { isRecord, PROTOCOL_VERSION, type ArtifactExport, type Connection } from "../../protocol/src/index.ts";
+import { writeArtifactExport } from "../../../apps/service/src/artifact-export.ts";
 
 export { readConnection, stateDirectory };
 const source = import.meta.url.endsWith(".ts");
@@ -51,24 +51,6 @@ export async function stopMoguriService(stateDir = stateDirectory()): Promise<vo
 export function sdkServicePath(): string { return source ? worker("main") : join(dirname(fileURLToPath(import.meta.url)), "..", "service.mjs"); }
 export const protocolVersion = PROTOCOL_VERSION;
 export async function saveArtifactExport(path: string, document: ArtifactExport): Promise<{ path: string; digest: string }> {
-  if (!isAbsolute(path) || Buffer.byteLength(document.text) > 8 * 1024 * 1024 || createHash("sha256").update(document.text).digest("hex") !== document.digest) throw new Error("Choose an absolute export destination and an exact bounded SDK export. No file was written.");
-  const parent = await realpath(dirname(path)), target = join(parent, basename(path)), temporary = join(parent, `.moguri-export-${randomUUID()}.tmp`);
-  let created = false, published = false;
-  try {
-    const file = await open(temporary, "wx", 0o600); created = true;
-    try { await file.writeFile(document.text); await file.sync(); }
-    finally { await file.close(); }
-    await link(temporary, target); published = true;
-    await unlink(temporary); created = false;
-    const directory = await open(parent, "r");
-    try { await directory.sync(); } finally { await directory.close(); }
-    return { path: target, digest: document.digest };
-  } catch (error) {
-    throw new Error(published ? "Export file was created, but persistence was not fully acknowledged. Inspect its checksum; no project copy was deleted." :
-      error instanceof Error && "code" in error && error.code === "EEXIST" ? "The export destination already exists and was preserved. Choose a new file." :
-      `Export failed; no stored artifact was deleted. ${error instanceof Error ? error.message : "Check destination permissions."}`, { cause: error });
-  } finally {
-    if (created) await unlink(temporary);
-  }
+  return writeArtifactExport(path, document);
 }
 export type { Connection };

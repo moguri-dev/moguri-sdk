@@ -42,6 +42,10 @@ try {
       const document=await sdk.artifacts.create(null,{kind:"decision",name:"Generated independent note",text:"Generated retained text"});
       await sdk.artifacts.update(document.id!,{text:"Generated edited note"},0);
       const revisions=await sdk.artifacts.history(document.id!);void revisions.revisions[0]?.sources;
+      await sdk.artifacts.update(document.id!,{folderId:null,workItemId:null},1);
+      const repositoryCopy=(await sdk.artifacts.materializePreview("generated-project",{commitBranch:"docs/generated-copy"})).preview;
+      const publication=await sdk.artifacts.materialize("generated-project",repositoryCopy.digest,{commitBranch:"docs/generated-copy"});
+      const materialized=await sdk.artifacts.materialization(publication.id!);void materialized.result?.commit?.commit;
       const question=sdk.getState().snapshot?.questions[0];
       if(question){await sdk.questions.answer(question.id,"Generated actual user answer",question.revision);await sdk.questions.answerDraft(question.id,question.revision);}
       const exported=(await sdk.artifacts.export(document.id!)).export;
@@ -87,6 +91,7 @@ try {
     const git=args=>execFileSync("git",["--no-pager","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",...args],{cwd:project,encoding:"utf8"});
     git(["init","--initial-branch=main"]);git(["add","--","generated.ts"]);
     git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated external SDK base"]);
+    git(["config","user.name","Generated fixture"]);git(["config","user.email","fixture@example.invalid"]);
     const provider={state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>provider.onChange(),login:()=>{throw Error("No real authorization in SDK verification")},cancel:async()=>{},logout:async()=>{},prepare:async()=>{throw Error("No paid calls in SDK verification")}};
     const runtime=await createRuntime({stateDir:join(root,"state"),provider,retentionKey:Buffer.alloc(32,0x67),platform:{terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]}}});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
@@ -94,7 +99,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,11);
+      assert.equal(sdk.getState().snapshot.protocolVersion,12);
       const isolated=await sdk.workspaces.create(p.id,"moguri/generated-external");
       const owned=await sdk.workspaces.wait(isolated.id);
       assert.ok((await sdk.workspaces.discover(p.id)).registrations.some(entry=>entry.managedId===owned.id&&entry.locked));
@@ -117,7 +122,7 @@ try {
           let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
           role.once("error",reject);
           role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
-          role.stdin.write(JSON.stringify({action:"probe",protocol:11,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+          role.stdin.write(JSON.stringify({action:"probe",protocol:12,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
         });
         assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
         role.stdin.end();assert.equal(await roleExit,0);
@@ -185,20 +190,31 @@ try {
       await sdk.sessions.delete(s.id,true);
       assert.equal((await sdk.plans.artifact(artifact.id)).text,"Generated external retained plan.");
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===side.id).parentSessionId,undefined);
-      const retained=await sdk.artifacts.create(null,{projectId:p.id,kind:"decision",name:"Generated independent project decision",text:"Generated first decision."});
+      const artifactFolder=await sdk.projects.folder("Generated external artifact folder");
+      const retained=await sdk.artifacts.create(null,{projectId:p.id,kind:"decision",name:"Generated independent project decision",text:"Generated first decision.",folderId:artifactFolder.id,workItemId:ticket.id});
       await sdk.artifacts.update(retained.id,{text:"Generated revised decision."},0);
       assert.equal((await sdk.artifacts.read(retained.id,0)).text,"Generated first decision.");
       const exported=(await sdk.artifacts.projectExport(p.id));
       const saved=await saveArtifactExport(join(root,"generated-external-artifacts.json"),exported.export);
       assert.equal(saved.digest,exported.export.digest);
       assert.equal(await readFile(saved.path,"utf8"),exported.export.text);
+      const copyOptions={commitBranch:"moguri/generated-external-artifacts"};
+      const copyPreview=(await sdk.artifacts.materializePreview(p.id,copyOptions)).preview;
+      const publication=await sdk.artifacts.materialize(p.id,copyPreview.digest,copyOptions);
+      assert.equal((await sdk.jobs.wait(publication.id)).status,"completed");
+      const materialized=(await sdk.artifacts.materialization(publication.id)).result;
+      assert.equal(createHash("sha256").update(await readFile(join(materialized.root,materialized.path))).digest("hex"),copyPreview.fileDigest);
+      assert.equal(git(["rev-parse","HEAD"]).trim(),copyPreview.commit.base);
+      assert.equal(git(["rev-parse",copyOptions.commitBranch]).trim(),materialized.commit.commit);
       const configuration=(await sdk.projects.configuration(p.id)).configuration;
       await sdk.projects.remove(p.id,true,configuration.revision,{action:"retain",expectedDigest:exported.preview.digest});
       assert.equal((await sdk.artifacts.read(retained.id)).artifact.projectId,null);
+      assert.equal((await sdk.artifacts.read(retained.id)).artifact.workItemId,null);
+      assert.equal((await sdk.artifacts.read(retained.id)).artifact.folderId,artifactFolder.id);
       await sdk.artifacts.delete(retained.id,2,true);
       await assert.rejects(()=>sdk.artifacts.read(retained.id),/missing|deleted|outside/);
     } finally {sdk.disconnect();await runtime.close();}
-    console.log("External SDK imports/types, approved/audited install, installed SSH-worker handshake, typed context, owned worktrees, real macOS PTY, independent artifact revisions/exports/project retention, metachat/config review, vectors, MCP and script-free cache install passed.");
+    console.log("External SDK imports/types, approved/audited install, installed SSH-worker handshake, typed context, owned worktrees, real macOS PTY, independent artifacts/organization/repository copies/local commits/project retention, metachat/config review, vectors, MCP and script-free cache install passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }

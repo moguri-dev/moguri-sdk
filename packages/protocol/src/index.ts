@@ -14,11 +14,11 @@ export * from "./providers.ts";
 import type { McpAuthorization } from "./oauth.ts";
 import type { ConfigurationProposal, Attention, SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
-import { legacyArtifact, type LegacyRetainedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
+import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import type { UserQuestion, QuestionAnswer } from "./questions.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -250,7 +250,7 @@ export interface EventPayloads {
   "project.folder_saved": { folder: NavigationFolder };
   "session.group_saved": { group: SessionGroup };
   "artifact.saved": { artifact: LegacyRetainedArtifact };
-  "artifact.revised": { artifact: RetainedArtifact };
+  "artifact.revised": { artifact: LegacyVersionedArtifact };
   "artifact.deleted": { artifactId: string };
   "terminal.changed": { terminal: TerminalState };
   "turn.prompt_bound": { promptDigest: string };
@@ -343,7 +343,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
     if (event.event_type === "session.group_saved") sessionGroups.set(event.payload.group.id, { ...event.payload.group });
     if (event.event_type === "artifact.saved") artifacts.set(event.payload.artifact.id, legacyArtifact(event.payload.artifact, event.id));
-    if (event.event_type === "artifact.revised") artifacts.set(event.payload.artifact.id, structuredClone(event.payload.artifact));
+    if (event.event_type === "artifact.revised") artifacts.set(event.payload.artifact.id, normalizeArtifact(structuredClone(event.payload.artifact)));
     if (event.event_type === "artifact.deleted") artifacts.delete(event.payload.artifactId);
     if (event.event_type === "question.asked") questions.set(event.payload.question.id, { ...structuredClone(event.payload.question), sourceEventId: event.id });
     if (event.event_type === "question.answered") {
@@ -394,7 +394,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
-      if (job && ["cache.install", "project.defaults"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
+      if (job && ["cache.install", "project.defaults", "project.artifacts.materialize"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
         if (job.workspaceId) blockedWorkspaces.add(job.workspaceId); else blockedProjects.add(job.projectId);
       }
     }

@@ -30,6 +30,7 @@ export interface SessionWorkspaceHost {
   contextPreview(session: Session): Promise<ModelContextPreview>;
   startup(projectId: string | null): ResolvedControls;
   project(session: Pick<Session, "projectId" | "workspaceId">): Project;
+  rootBusy(projectId: string, workspaceId: string | null): boolean;
 }
 export class SessionWorkspace {
   readonly projects: ProjectService;
@@ -240,6 +241,7 @@ export class SessionWorkspace {
         const settings = this.projects.configuration(project.id).values;
         const path = command.type === "artifact.capture" ? command.path ?? settings.planPath : settings.planPath;
         if (command.type === "plan.save") {
+          if (this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No plan write was started.", 409);
           if (session.mode !== "agent" || session.pendingMode === "read-only" || session.kind === "side" || session.status === "archived") throw new MoguriError("read_only", "This session cannot edit a plan.");
           assertFolderName(path, true, folderPolicy(settings));
           await this.projects.prepareDirectory(project.path, path);
@@ -259,6 +261,7 @@ export class SessionWorkspace {
       }
       case "terminal.open": {
         const session = this.session(command.sessionId); const project = this.host.project(session);
+        if (this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
         if (session.status === "archived") throw new MoguriError("archived", "Unarchive this session before opening new owned terminals.");
         if (session.controls.env !== "Local" || !this.snapshot().policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.find((capability) => capability.env === "Local")?.ready) throw new MoguriError("terminal_env", "No qualified terminal transport exists for this environment; there is no Local fallback.");
         const script = command.scriptId ? this.projects.configuration(project.id).values.scripts.find((script) => script.id === command.scriptId) : undefined;

@@ -383,7 +383,7 @@ export class ControlPlane extends EventEmitter {
   private async removeProject(id: string, finish: WorkspaceFinish, choice?: ProjectArtifactChoice): Promise<CommandResult> {
     if (this.projection.managedWorkspaces.some((workspace) => workspace.projectId === id && workspace.status !== "removed")) throw new MoguriError("managed_workspaces", "Remove each clean owned worktree explicitly before removing the project. Its filesystem/branch was not silently deleted.", 409);
     if (this.deletingProjects.has(id)) throw new MoguriError("project_busy", "This project is already being removed.", 409);
-    this.platform.artifacts.removal(id, choice);
+    await this.platform.artifacts.removal(id, choice);
     this.deletingProjects.add(id);
     try {
       const revision = this.platform.sessions.projects.configuration(id).revision;
@@ -411,7 +411,7 @@ export class ControlPlane extends EventEmitter {
         console.error("Project credential cleanup was not acknowledged:", error instanceof Error ? error.message : "Unknown secret-backend error");
         throw new MoguriError("project_secrets", "Project credential cleanup is unconfirmed. Unlock the configured secret backend and retry; project records were preserved.", 503);
       }
-      const artifacts = this.platform.artifacts.removal(id, choice);
+      const artifacts = await this.platform.artifacts.removal(id, choice);
       return finish([...artifacts.events, { event_type: "project.removed", profile_id: PROFILE_ID, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }], { id }, { projects: [id], artifacts: artifacts.forget });
     } finally { this.deletingProjects.delete(id); }
   }
@@ -429,7 +429,7 @@ export class ControlPlane extends EventEmitter {
     return id;
   }
   private externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): string {
-    if (session.projectId && this.platform.workspace.isBusy(session.projectId, session.workspaceId)) throw new MoguriError("workspace_busy", "A managed dependency install owns this workspace. Wait for it to settle.", 409);
+    if (session.projectId && (this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId))) throw new MoguriError("workspace_busy", "A managed install or artifact publication owns this workspace. Wait for it to settle.", 409);
     if (session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only") throw new MoguriError("subagent_readonly", "Read-only sessions cannot own external tool calls.", 403);
     if (session.turnId || session.queue.length || session.status === "archived") throw new MoguriError("session_busy", "Use an idle, restored session for an external MCP client. The active agent already owns its turn.", 409);
     if (this.otherWriter(session)) throw new MoguriError("workspace_busy", "Another session owns this workspace. Wait for it to settle before requesting an external MCP call.", 409);
@@ -742,7 +742,7 @@ export class ControlPlane extends EventEmitter {
   private pumpAll(): void {
     if (this.shuttingDown) return;
     for (const session of this.projection.sessions) {
-      if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId)) || this.deletingSessions.has(session.id) || session.turnId || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
+      if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.deletingSessions.has(session.id) || session.turnId || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
       if (session.kind === "subagent" && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
@@ -812,6 +812,7 @@ export class ControlPlane extends EventEmitter {
   }
   private otherWriter(session: Session): boolean {
     if (session.projectId === null) return false;
+    if (this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) return true;
     const key = this.platform.managed.leaseKey(session)!;
     return this.projection.sessions.some((other) => other.id !== session.id && this.platform.managed.leaseKey(other) === key && other.turnId && other.kind === "agent" && other.mode === "agent") ||
       Boolean(this.writerReservations.has(key) && this.writerReservations.get(key) !== session.id);

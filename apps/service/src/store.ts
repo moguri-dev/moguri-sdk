@@ -61,7 +61,7 @@ export class EventStore {
     this.db = new DatabaseSync(path, { allowExtension: true });
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
-      if (version > 11) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version > 12) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -109,6 +109,7 @@ export class EventStore {
       if (existing) this.key({ scope: String(existing.scope), projectId: null, sessionId: null }, false);
       if (version < 10) this.migrateArtifacts();
       if (version < 11) this.db.exec(`BEGIN IMMEDIATE; INSERT INTO retention_metadata(id,value) VALUES ('structured_question_schema','1'); PRAGMA user_version=11; COMMIT;`);
+      if (version < 12) this.db.exec(`BEGIN IMMEDIATE; INSERT INTO retention_metadata(id,value) VALUES ('artifact_repository_schema','1'); PRAGMA user_version=12; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

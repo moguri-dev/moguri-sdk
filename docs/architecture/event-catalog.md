@@ -110,7 +110,13 @@ canonical source promotion and optimistic edits/archive/delete. Queries expose
 bounded revision reads/history/exports and reviewed project artifact impact.
 Model content is never recorded as a user answer; export/materialization is not
 implicit filesystem authority. Project removal requires the explicit reviewed
-retain/export/delete choice when documents exist.
+retain/export/materialize/delete choice when documents exist. Materialization
+job intent and command receipt precede repository effects. Folder/same-project
+work-item associations use immutable artifact revisions. A completed owned job,
+current source set, actual copied bytes and optional new local commit must all
+be reverified before deleting source grants. Partial/restarted publication is
+quarantined and never replayed; current checkout/index and unrelated edits stay
+unchanged.
 Question commands accept only actual owning-turn user input with an observed
 question revision and optional exact draft consumption. Question, draft,
 artifact/source provenance and receipt failures roll back together. Stop/restart
@@ -122,7 +128,7 @@ holding the worker's cancellation chain behind a human response.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":11,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":12,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

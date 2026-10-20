@@ -207,7 +207,14 @@ remains unqualified. The upstream wait-before-start fix in
 in 0.11.0, does not by itself prove the underlying acknowledgement failure fixed.
 No global runtime upgrade or policy relaxation is part of this evidence.
 The images above remain historical protocol-10 primitive fixtures, not current
-protocol-11 SDK payloads.
+SDK payloads.
+
+A subsequent targeted native-kernel control reproduces an `EBUSY` attach to a
+stale init-root cgroup after memory-controller delegation, while the stable
+runtime leaf accepts the same generated process. That control is not a full
+workload qualification. An early init/runtime migration candidate is being
+qualified separately; no proposed R5 fix or Apple upgrade is counted as a pass
+here. Live provider networking and the SDK adapter remain independent gates.
 
 SendBox entry allow rules match argv token counts, not shell-style tail globs:
 `/bin/sh -c *` matches the three-token generated probe, while `/bin/sh *` does

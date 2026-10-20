@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 11 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-10 history, sessions, drafts,
+This is an alpha API. Protocol 12 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-11 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -290,8 +290,29 @@ invalidate the choice. The explicit Node entrypoint exports
 digest verification and fsync, no overwrite or automatic app opening.
 
 Text is bounded to 128 KiB UTF-8, history pages to 100 records, JSON exports to
-8 MiB with no truncation. Repository materialization/commit and work-item/folder
-artifact organization are not claimed yet.
+8 MiB with no truncation.
+
+Artifact create/update accepts nullable `folderId` and `workItemId`. Folders
+belong to this profile; a work item must belong to the artifact's project.
+These are versioned associations, not a filesystem path or model permission.
+
+`artifacts.materializePreview(projectId, {workspaceId?, commitBranch?})` returns
+the exact source-set/file/review digests, canonical root identity, destination,
+policy revision and optional new local branch/base. Explicit
+`artifacts.materialize(projectId, reviewDigest, sameOptions)` durably starts an
+owned job before effects. Wait with `jobs.wait`, inspect the typed
+`artifacts.materialization(jobId)` and request stop through `jobs.cancel`.
+A timeout is not cancellation. Partial/interrupted jobs preserve source grants
+and their original destination intent; restart never replays publication.
+
+Copying writes one exact private history bundle under that selected Local
+root's `artifacts/`. Optional commit uses a temporary index and a new
+non-protected local branch, preserving checkout, index and unrelated edits,
+with no push/signing/hooks/filters. `projects.remove` may use
+`{action:"materialize", expectedDigest:setDigest, materializationId:completedJobId}`.
+The service rechecks real bytes and any requested local commit before
+forgetting source grants. Changed source/file/root/branch rejects deletion.
+Remote/Sandbox publication is unavailable, not mapped to Local.
 
 ### Actual structured answers
 

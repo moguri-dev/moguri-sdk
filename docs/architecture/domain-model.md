@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 11; immutable event
+Protocol version and database migration version are 12; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -31,7 +31,8 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Local issue | Stable UUID/project-local number, feature/bug/misc, title/body/phase, optimistic revision, archive state and verified remote-link provenance. No assignee. |
 | Dependency plan | Exact project/manager/manifest/lock digest, unique public package versions and SHA-512 artifacts. Branch names are not mutable cache identities. |
 | Cache receipt | Project/workspace/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
-| Retained artifact | Independent project/profile text document: plan/decision/answer/research-note/report, immutable revisions, archive, origin-session/workspace/file and exact user/model/tool/unknown source provenance. Per-artifact grants survive session retention; model content never becomes a user answer. |
+| Retained artifact | Independent project/profile text document with folder/same-project work-item associations: plan/decision/answer/research-note/report, immutable revisions, archive, origin-session/workspace/file and exact source actors. Per-artifact grants survive session retention; model content never becomes a user answer. |
+| Artifact repository job | Exact source/history/root/policy and optional new local branch/base intent, durable receipt and verified copy/commit result. Partial effects are quarantined, never replayed or proof authorizing source deletion. |
 | User terminal | Session/project ownership, PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Ghostty owns VT rendering; output and input are bounded ephemeral data. |
 | Model options | Optional working window and supported thinking effort in revisioned session controls; the provider maximum is not changed. Step usage records effective window/effort and labeled estimated context separately from actual token telemetry. |
 | MCP authorization | Non-secret owned OAuth lifecycle, server/scope/expiry and transient-link readiness. State/verifier/authorization URL are ephemeral; issuer/resource-bound clients and grants stay in the secret backend. A durable connected decision gates use. |
@@ -167,5 +168,14 @@ owner/turn/revision and optional exact saved-draft revision. Primary answer,
 derived independent artifact/source actors, draft consumption and command
 receipt commit atomically. Stop/restart cancels waits without fake answers or
 tool replay; a heuristic badge/queued prompt never resolves a real question.
-Factory answer retention is on with explicit opt-out. Repository materialization
-and delegated decision-provider answer policy remain open.
+Factory answer retention is on with explicit opt-out. Delegated
+decision-provider answer policy remains open.
+
+Migration 12 adds folder/work-item association and repository-job metadata
+without rewriting old event identities, receipts or ciphertext. Old revisions
+project null associations. Project retain clears the removed work-item link.
+Explicit Local materialization verifies an independent private history copy;
+optional new local commits preserve checkout/index and never push. A completed
+job, current source set and actual bytes/commit must be revalidated before
+project deletion forgets grants. Partial/restarted jobs retain inspectable
+destination intent and never replay effects.

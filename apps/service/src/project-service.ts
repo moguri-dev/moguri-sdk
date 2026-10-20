@@ -53,7 +53,7 @@ export class ProjectService {
     return repositoryContext(project.path, this.configuration(project.id).values);
   }
   private git(project: Project, args: string[], signal: AbortSignal, env?: NodeJS.ProcessEnv, extra: string[] = []) {
-    return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...extra, "--literal-pathspecs", ...args], { cwd: project.path, signal, env, label: "Project Git operation", timeoutMs: 30_000, maxBytes: 512 * 1024 });
+    return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsync=all", ...extra, "--literal-pathspecs", ...args], { cwd: project.path, signal, env, label: "Project Git operation", timeoutMs: 30_000, maxBytes: 512 * 1024 });
   }
   async gitView(project: Project, includeDiff: boolean, signal: AbortSignal, checkoutFilters?: string[]): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
     const settings = this.configuration(project.id).values;
@@ -108,6 +108,44 @@ export class ProjectService {
     });
     values.mcpServers = servers; this.validate(values, project.id); return values;
   }
+  async artifactCommitPreview(project: Project, branch: string, signal: AbortSignal): Promise<{ branch: string; base: string }> {
+    if (["main", "master", this.configuration(project.id).values.repo.mainBranch].includes(branch) || branch.startsWith("-") || branch.startsWith("refs/")) throw new MoguriError("protected_branch", "Choose a new non-protected local branch; no checkout or push will occur.");
+    await this.git(project, ["check-ref-format", "--branch", branch], signal);
+    const refs = (await this.git(project, ["for-each-ref", "--format=%(refname)", "refs/heads/"], signal)).split("\n");
+    if (refs.includes(`refs/heads/${branch}`)) throw new MoguriError("artifact_branch", "The selected local branch already exists. Choose a new branch so its history and the current index remain unchanged.", 409);
+    return { branch, base: (await this.git(project, ["rev-parse", "--verify", "HEAD"], signal)).trim() };
+  }
+  async artifactCommit(project: Project, path: string, text: string, expected: { branch: string; base: string }, signal: AbortSignal): Promise<{ branch: string; base: string; commit: string }> {
+    const current = await this.artifactCommitPreview(project, expected.branch, signal);
+    if (current.base !== expected.base) throw new MoguriError("artifact_base", "Repository HEAD changed after review. Inspect the persisted copy and review a new commit; no branch was created.", 409);
+    const commit = await this.commitFiles(project, [{ path, text }], expected.base, "docs: retain reviewed Moguri artifact history", signal);
+    signal.throwIfAborted();
+    if ((await this.git(project, ["rev-parse", "--verify", "HEAD"], signal)).trim() !== expected.base) throw new MoguriError("artifact_base", "Repository HEAD changed during commit preparation. No branch was created.", 409);
+    await this.git(project, ["update-ref", `refs/heads/${expected.branch}`, commit, "0".repeat(commit.length)], signal);
+    return { ...expected, commit };
+  }
+  async verifyArtifactCommit(project: Project, path: string, expected: { branch: string; commit: string }, signal: AbortSignal): Promise<void> {
+    const ref = (await this.git(project, ["rev-parse", "--verify", `refs/heads/${expected.branch}`], signal)).trim();
+    const blob = (await this.git(project, ["rev-parse", "--verify", `${expected.commit}:${path}`], signal)).trim();
+    const file = (await this.git(project, ["hash-object", "--no-filters", "--", path], signal)).trim();
+    if (ref !== expected.commit || blob !== file) throw new MoguriError("artifact_commit_changed", "The reviewed local branch or committed artifact copy changed. Stored documents were preserved.", 409);
+  }
+  private async commitFiles(project: Project, files: Array<{ path: string; text: string }>, base: string, message: string, signal: AbortSignal): Promise<string> {
+    const temporary = await mkdtemp(join(this.stateDir, "repo-commit-"));
+    try {
+      const env = { GIT_INDEX_FILE: join(temporary, "index"), GIT_CONFIG_NOSYSTEM: "1" };
+      await this.git(project, ["read-tree", base], signal, env);
+      for (const file of files) {
+        validateProjectPath(file.path);
+        const staged = join(temporary, randomUUID()); await writeFile(staged, file.text, { mode: 0o600, signal });
+        const hash = (await this.git(project, ["hash-object", "-w", "--no-filters", staged], signal, env)).trim();
+        await this.git(project, ["update-index", "--add", "--cacheinfo", `100644,${hash},${file.path}`], signal, env);
+      }
+      signal.throwIfAborted();
+      const tree = (await this.git(project, ["write-tree"], signal, env)).trim();
+      return (await this.git(project, ["commit-tree", tree, "-p", base, "--no-gpg-sign", "-m", message], signal, env)).trim();
+    } finally { await rm(temporary, { recursive: true, force: true }); }
+  }
   async defaults(project: Project, branch: string, signal: AbortSignal): Promise<{ branch: string; commit: string; created: string[] }> {
     const settings = this.configuration(project.id).values;
     if (["main", "master", settings.repo.mainBranch].includes(branch) || branch.startsWith("-")) throw new MoguriError("protected_branch", "Publish defaults only to an explicitly selected non-protected branch.");
@@ -124,36 +162,28 @@ export class ProjectService {
     }
     const base = (await this.git(project, ["rev-parse", "--verify", "HEAD"], signal)).trim();
     for (const file of files) if (await this.git(project, ["ls-tree", "-z", base, "--", file.path], signal)) throw new MoguriError("defaults_tracked", "A missing working-tree default is already tracked in HEAD. Review the deletion explicitly; initialization will not overwrite it.");
-    const temporary = await mkdtemp(join(this.stateDir, "repo-defaults-"));
     const created: string[] = [];
     let commit: string | null = null;
     let attempted = false;
     let pushing = false;
     try {
-      const index = join(temporary, "index");
-      const env = { GIT_INDEX_FILE: index, GIT_CONFIG_NOSYSTEM: "1" };
-      await this.git(project, ["read-tree", base], signal, env);
       for (const file of files) {
         attempted = true;
         await this.prepareDirectory(project.path, file.path);
         await assertFolderAccess(project.path, file.path, true, folderPolicy(settings));
         await writeProjectFile(project.path, file.path, file.text, "absent");
         created.push(file.path);
-        const staged = join(temporary, randomUUID()); await writeFile(staged, file.text, { mode: 0o600 });
-        const hash = (await this.git(project, ["hash-object", "-w", staged], signal, env)).trim();
-        await this.git(project, ["update-index", "--add", "--cacheinfo", `100644,${hash},${file.path}`], signal, env);
       }
       signal.throwIfAborted();
-      const tree = (await this.git(project, ["write-tree"], signal, env)).trim();
-      commit = (await this.git(project, ["commit-tree", tree, "-p", base, "--no-gpg-sign", "-m", "chore: initialize repository instructions and MCP defaults"], signal, env)).trim();
+      commit = await this.commitFiles(project, files, base, "chore: initialize repository instructions and MCP defaults", signal);
       pushing = true;
-      await this.git(project, ["push", settings.repo.upstream, `${commit}:refs/heads/${branch}`], signal, env);
+      await this.git(project, ["push", settings.repo.upstream, `${commit}:refs/heads/${branch}`], signal);
       signal.throwIfAborted();
       return { branch, commit, created };
     } catch (error) {
       if (!attempted) throw error;
       throw new MoguriError("repo_defaults_partial", `Repository defaults are partial. Created: ${created.join(", ") || "unconfirmed"}. Commit: ${commit ?? "not confirmed"}. ${pushing ? `Push to ${branch} may have completed; inspect the remote before retrying.` : "No push was attempted."} ${error instanceof MoguriError ? error.message : "Inspect local files and Git diagnostics."}`, 409);
-    } finally { await rm(temporary, { recursive: true, force: true }); }
+    }
   }
   async prepareDirectory(root: string, path: string): Promise<void> {
     validateProjectPath(path);

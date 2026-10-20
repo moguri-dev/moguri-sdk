@@ -107,7 +107,7 @@ export class ManagedWorkspaces {
     return { id: session.workspaceId ?? project.id, path: project.path };
   }
   leaseKey(session: Session): string | null { return session.projectId ? `${session.projectId}:${session.workspaceId ?? "base"}` : null; }
-  async assert(session: Session): Promise<void> {
+  async assert(session: Pick<Session, "projectId" | "workspaceId">): Promise<void> {
     this.project(session);
     if (!session.workspaceId) return;
     const inspection = await this.inspect(session.workspaceId);

@@ -16,6 +16,7 @@ interface WorkspaceHost {
   job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (message: string) => void) => Promise<unknown>, settled?: () => void, workspaceId?: string): string;
   wake(): void;
   closing(id: string): boolean;
+  publicationBusy(projectId: string, workspaceId?: string | null): boolean;
 }
 export class WorkspaceRuntime {
   readonly cache: DependencyCache;
@@ -168,7 +169,7 @@ export class WorkspaceRuntime {
         const rootKey = `${project.id}:${command.workspaceId ?? "base"}`;
         const quarantined = command.workspaceId ? snapshot.blockedWorkspaces.includes(command.workspaceId) : snapshot.blockedProjects.includes(project.id);
         const active = snapshot.sessions.some((session) => session.projectId === project.id && session.workspaceId === (command.workspaceId ?? null) && session.turnId);
-        if (this.busyRoots.has(rootKey) || command.type === "cache.install" && (active || quarantined)) throw new MoguriError("cache_busy", "This workspace is busy or unconfirmed. Inspect and finish owned work first.", 409);
+        if (this.busyRoots.has(rootKey) || this.host.publicationBusy(project.id, command.workspaceId) || command.type === "cache.install" && (active || quarantined)) throw new MoguriError("cache_busy", "This workspace is busy or unconfirmed. Inspect and finish owned work first.", 409);
         if (command.type === "cache.install") this.busyRoots.add(rootKey);
         const id = this.host.job(command.type, project.id, async (signal, progress) => {
           const receipt = { ...await (command.type === "cache.install" ? this.cache.install(project, command.manager, command.expectedDigest, signal, progress) : this.cache.prepare(project, command.manager, command.expectedDigest, signal, progress)), workspaceId: command.workspaceId ?? null };

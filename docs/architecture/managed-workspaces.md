@@ -113,9 +113,9 @@ versus human provenance, stale revisions/source digests, source-session deletion
 project retain/export/delete, transaction rollback and restart. Standalone
 documents need no conversation or filesystem root. Native exports create a new
 0600 file, verify exact bytes/digest and fsync without overwriting a destination.
-Repository materialization/commit and work-item/folder document organization
-are still required first-release work. The structured-question slice below
-adds actual-user answers, not a delegated decision-provider implementation.
+The protocol-12 repository slice below adds materialization/local commits and
+work-item/folder associations. Structured questions add actual-user answers,
+not a delegated decision-provider implementation.
 
 ## Implemented structured questions and actual-user answers
 
@@ -153,3 +153,44 @@ recovery. Actual CLI/native-TUI and hidden Electron flows exercise the same
 SDK. The complete local suite passes 185 checks; all 15 hidden desktop flows
 and a fresh audited external SDK install pass. No delegated-answer or native
 Sandbox readiness is inferred from these results.
+
+## Implemented repository artifact materialization
+
+Reuse Node's maintained filesystem/crypto primitives (MIT) and system Git's
+existing independent-index publication path (GPL-2.0-only executable), without
+new dependencies. Profile navigation folders and same-project local work items
+are artifact associations, not filesystem authority or session ownership.
+Migration 12 preserves old revisions and defaults missing associations to
+null; retaining a removed project's documents clears their work-item binding.
+
+An explicit project/workspace preview binds the exact artifact set/history,
+export digest, canonical directory identity, policy revision and optional new
+local branch/base. Write only a new private immutable JSON history bundle under
+that root's `artifacts/`. Never overwrite other files, follow a destination
+symlink, silently choose a session/base root or bypass denied/read-only policy.
+This is explicit Local repository publication, not a qualified Remote/Sandbox
+filesystem transport.
+
+Optional commit means an explicitly selected new non-protected **local**
+branch with the reviewed HEAD as parent. Use a temporary index, no signing,
+hooks, filters, checkout or push, preserving the real index and unrelated
+edits. A concurrent branch creation/base change rejects publication.
+
+The durable owned job and its receipt precede filesystem/Git effects. Serialize
+root writers; cancellation/failure after any possible effect is partial.
+Restart never repeats publication. Project removal with `materialize` must
+revalidate a completed job, current exact source set, actual persisted bytes
+and any requested local commit before forgetting artifact grants. A wait
+timeout, successful CLI exit, old digest or partial commit is not that proof.
+Repository copies survive retention and remain user-owned, not automatically
+loaded instructions; external edits after removal remain outside Moguri's
+retention guarantee.
+
+Eight generated publication cases pass: folder/work-item scope/history;
+exact persisted bytes before deletion; durable receipt and writer exclusion;
+cancel-after-copy without false success; racing branch/partial Git failure;
+schema-11/restart without replay; unchanged real index/checkout/unrelated edits
+and missing-commit deletion rejection; stale/denied/symlink destinations; and
+actual managed-root identity separation. Cases combine related assertions.
+The focused 26-check CLI/native-TUI/service run and all three hidden artifact
+desktop flows pass. No paid calls or personal credentials are used.
