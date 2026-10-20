@@ -10,6 +10,7 @@ import { validateSettings } from "./permissions.ts";
 import { assertFolderAccess, assertFolderName, folderPolicy, validateProjectPath, readOptionalProjectFile, repositoryContext, type FolderPolicy } from "./project-policy.ts";
 import { runProgram } from "./program.ts";
 import { digest } from "./store.ts";
+import { readWorkspaceGit } from "./project-git.ts";
 
 export class ProjectService {
   constructor(private readonly snapshot: () => Snapshot, private readonly stateDir: string) {}
@@ -57,34 +58,7 @@ export class ProjectService {
   }
   async gitView(project: Project, includeDiff: boolean, signal: AbortSignal, checkoutFilters?: string[]): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
     const settings = this.configuration(project.id).values;
-    const git = (args: string[]) => this.git(project, args, signal, checkoutFilters ? { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_LFS_SKIP_SMUDGE: "1" } : undefined, checkoutFilters);
-    const branch = (await git(["branch", "--show-current"])).trim() || "(detached)";
-    const raw = await git(["status", "--porcelain=v1", "-z", "--untracked-files=normal"]);
-    const entries = raw.split("\0").filter(Boolean);
-    const allowed: { name: string; code: string }[] = [];
-    for (let index = 0; index < entries.length; index++) {
-      const entry = entries[index]!;
-      const code = entry.slice(0, 2);
-      const name = entry.slice(3);
-      if (code.includes("R") || code.includes("C")) index++;
-      try {
-        validateProjectPath(name);
-        if (isProtectedProjectPath(name)) continue;
-        assertFolderName(name, false, folderPolicy(settings));
-        allowed.push({ name, code });
-      }
-      catch (error) { if (!(error instanceof MoguriError && ["path_denied", "folder_denied"].includes(error.code) || error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
-    }
-    let repository: string | null = null;
-    const remotes = (await git(["remote", "-v"])).split("\n");
-    const origin = remotes.find((line) => line.startsWith(`${settings.repo.upstream}\t`))?.split(/\s+/)[1];
-    if (origin) {
-      const match = origin.match(/^(?:git@github\.com:|https:\/\/github\.com\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/);
-      if (match) repository = `https://github.com/${match[1]}`;
-    }
-    const tracked = allowed.filter((entry) => entry.code !== "??").map((entry) => entry.name);
-    const diff = includeDiff && tracked.length ? await git(["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--", ...tracked]) : "";
-    return { type: "project.git", branch, repository, status: allowed.map((entry) => `${entry.code} ${entry.name}`).join("\n"), diff };
+    return readWorkspaceGit(project.path, { upstream: settings.repo.upstream, deniedFolders: settings.deniedFolders }, includeDiff, signal, checkoutFilters);
   }
   async porto(project: Project, signal: AbortSignal): Promise<string> {
     const config = this.configuration(project.id).values.porto;

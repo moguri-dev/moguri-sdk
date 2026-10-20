@@ -31,7 +31,7 @@ import { reportedModelUsage, modelOutputExceeded } from "./budgets.ts";
 import { McpKeychain } from "./gateway.ts";
 import { localWorker, type WorkerConnection, type WorkerFrame } from "./worker-connection.ts";
 import { frameDigest } from "./worker-wire.ts";
-import type { BridgeStatus } from "./remote-protocol.ts";
+import type { BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 
 interface Run {
   sessionId: string;
@@ -153,6 +153,7 @@ export class ControlPlane extends EventEmitter {
       remoteStatus: () => this.remote.readiness,
       remoteCommand: (command, finish) => this.remoteCommand(command, finish),
       repositoryContext: (session) => this.repositoryContext(session),
+      remoteRead: (session, query) => this.remoteRead(session, query),
       globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
       foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
       sharedGlobals: Boolean(this.profileHooks),
@@ -298,6 +299,20 @@ export class ControlPlane extends EventEmitter {
     if (!session.projectId) return "";
     const project = this.platform.managed.project(session);
     return session.controls.env === "Remote" ? this.remote.context(this.remoteWorkspace(session)!, this.platform.sessions.projects.configuration(project.id).values) : this.platform.sessions.projects.context(project);
+  }
+  private async remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult> {
+    const binding = () => {
+      const current = this.session(session.id);
+      if (current.controls.env !== "Remote" || !current.projectId || current.workspaceId) throw new MoguriError("remote_workspace_read", "This session no longer has an explicitly mapped Remote project. No Local or previous root was reused.", 409);
+      const settings = this.platform.sessions.projects.configuration(current.projectId).values;
+      return { projectId: current.projectId, root: this.remoteWorkspace(current)!, settings, target: this.remote.assertReady() };
+    };
+    const captured = binding(), signature = frameDigest(captured);
+    const result = await this.remote.readWorkspace(captured.root, { query, policy: {
+      deniedFolders: captured.settings.deniedFolders, planPath: captured.settings.planPath, upstream: captured.settings.repo.upstream,
+    } }, AbortSignal.timeout(15_000));
+    if (frameDigest(binding()) !== signature) throw new MoguriError("remote_workspace_changed", "The Remote session, workspace or read policy changed. Reload the current mapping; no stale result was relabeled.", 409);
+    return result;
   }
   private executionStatus(id: string, status: BridgeStatus): void {
     const execution = this.projection.executions.find((value) => value.id === id);

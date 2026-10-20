@@ -25,8 +25,9 @@ Electron drives actual setup, explicit project mapping, model-preserving env
 selection and execution through the compiled transport.
 
 This qualifies the macOS core agent path, not Linux release readiness or live
-Copilot entitlement. Embedded Remote consoles, executable MCP transport,
-repository-memory retrieval and diff/plan panels remain blocked. Explicit
+Copilot entitlement. Protocol 17 separately qualifies read-only SSH files,
+Git changes and plan views below. Embedded Remote consoles, executable MCP
+transport, repository-memory retrieval and direct plan saves remain blocked. Explicit
 client-side browser URLs do not create an implicit remote-port tunnel.
 
 ## Authority and identities
@@ -77,7 +78,7 @@ Generated coverage exercises actual SSH models, aliases, same-profile
 refusal, independent roots, delayed mode acknowledgement and unloaded-profile
 restart quarantine. It does not infer that distinct/rekeyed host keys identify
 the same OS filesystem, discover Local/Remote aliasing or establish SSH
-process isolation. Unqualified remote side panels remain blocked.
+process isolation. Unqualified console, MCP and memory transports remain blocked.
 
 The corrected source gate passes **262** full local checks in **176,325.91
 ms**. Seven focused peer/root cases cover the reproduced cross-profile race,
@@ -122,6 +123,52 @@ execution, host-key/auth failure, exact workspace and attachment transfer,
 configuration races, duplicate frames, reconnect, disconnect cancellation,
 late usage, restart and no Local fallback. A capability becomes ready only
 after the installed worker/runtime and target pass those checks.
+
+## Read-only Remote workspace views
+
+Protocol/database **17** reuses OpenSSH (BSD), Node filesystem/process/crypto
+primitives (MIT), existing TypeBox contracts (MIT) and the current SDK/panels.
+There is no new dependency, model call, command side effect or parallel state
+store. Its transactional compatibility marker preserves schema-16 event
+ciphertexts, command receipts, retention keys and blob grants across profiles;
+an injected marker failure leaves the old state unchanged and reopenable.
+
+Files, Git changes and plan reads use one bounded typed SSH request carrying
+the captured canonical remote root and only the relevant read policy.
+The execution host applies existing protected/denied path and UTF-8/file
+bounds; directory results retain the existing 1,000-entry bound. Shared Git
+helpers suppress hooks, fsmonitor, external diffs, text conversion and configured
+filters, including required filters. No file, Git process or plan lookup runs
+against the attached Local checkout as a fallback.
+
+The controller rechecks profile-owned session/env, target, root and settings
+after the await. Changed mappings, denied paths, deleted sessions, cancelled
+queries, transport failures and mismatched build/root/operation replies are
+errors, not relabeled or empty successful views. Runtime shutdown cancels its
+owned one-shot queries. Nonblocking regular-file opens reject FIFOs rather than
+leaving a filesystem thread waiting for a writer.
+
+Desktop Files/Changes views remount on binding changes; dirty Plan edits remain
+preserved and cannot save into a new root. Remote plans are read-only and
+viewing never retains an independent artifact implicitly. `/files`, `/file`,
+`/diff` and `/plan` share the SDK in both clients; Remote CLI/TUI plans return
+text, never a path handed to a Local opener. Direct Remote plan saves, consoles,
+executable MCP and repository-memory transport remain unavailable.
+
+The updated inspector verifies authenticated protocol-16 saved metadata and
+existing receipts without attaching or resuming that worker. New queries and
+turns require the exact protocol-17 worker build at the approved SSH command.
+Neither inspection nor upgrade replays model/tool effects or refunds unknown
+usage. No SendBox work is part of this slice; it remains paused by user request.
+
+Generated acceptance uses actual rootless loopback SSH and distinct Local/
+Remote fixture trees, not a fake SSH executable. It covers exact byte limits,
+protected/denied/symlink/FIFO data, Git filters, immutable arguments, all five
+target/root/policy/env/deletion races, mismatch replies, abort/shutdown and
+schema migration/restart. Hidden Electron drives the actual Files, Changes
+and read-only Plan controls. The external installed SDK exercises its shipped
+worker and the same queries; these checks establish mechanical macOS behavior,
+not Linux release readiness, paid provider access or process containment.
 
 ## Linux payload preparation
 

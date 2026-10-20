@@ -108,7 +108,13 @@ bounded private query/provider paths, never public event frames.
 Managed-workspace commands add explicit Local creation, clean idle unbound
 removal and identity-based reconciliation. Their job/intents/command receipts
 commit before effects. Session-bound Git/files queries use the actual root;
-discovery reads registrations without adopting arbitrary paths.
+discovery reads registrations without adopting arbitrary paths. Protocol 17
+routes read-only Remote session files/Git/plan queries through the exact pinned
+SSH worker and explicit remote root. Replies carry bounded typed data, not
+durable model context or filesystem permission. Post-await peer/root/env/policy
+changes reject the reply; Remote plan text never becomes a Local opener path.
+No mutating Remote workspace API is enabled by those reads. Migration 17 adds
+only a compatibility marker and preserves prior encrypted history/receipts.
 Artifact commands add standalone or session-scoped typed documents, exact
 canonical source promotion and optimistic edits/archive/delete. Queries expose
 bounded revision reads/history/exports and reviewed project artifact impact.
@@ -138,7 +144,7 @@ estimated admission; missing historical pricing is not free usage.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":16,"profileId":"default","token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":17,"profileId":"default","token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

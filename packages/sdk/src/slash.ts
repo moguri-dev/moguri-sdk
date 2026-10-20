@@ -319,8 +319,8 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "panel", panel: "Browser", ...(url ? { url } : {}) };
     }
     case "diff": {
-      if (session.controls.env !== "Local") throw new ClientError("diff_env", "Diff transport is not qualified for this env yet. No local checkout was read as a fallback.");
-      if (!session.projectId) throw new ClientError("project_required", "Select a project to inspect its local changes.");
+      if (session.controls.env === "Sandbox") throw new ClientError("diff_env", "Diff transport is not qualified for this env yet. No local checkout was read as a fallback.");
+      if (!session.projectId) throw new ClientError("project_required", "Select a project to inspect its bound changes.");
       if (client === "desktop") return { kind: "panel", panel: "Changes" };
       const result = await sdk.workspaces.git(session.id);
       return { kind: "text", text: `${result.branch}\n${result.status}\n\n${result.diff || "No tracked diff. Untracked files are listed above."}` };
@@ -329,6 +329,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!session.projectId) throw new ClientError("project_required", "Select a project to open its plan.");
       if (client === "desktop") return { kind: "panel", panel: "Plan" };
       const result = await sdk.plans.read(session.id);
+      if (session.controls.env === "Remote") return { kind: "text", text: result.exists ? result.text : `No plan file at ${result.path}. Remote plan viewing is read-only.` };
       const project = sdk.getState().snapshot!.projects.find((project) => project.id === session.projectId)!;
       const workspace = session.workspaceId ? sdk.getState().snapshot!.managedWorkspaces.find((value) => value.id === session.workspaceId) : undefined;
       if (session.workspaceId && !workspace) throw new ClientError("workspace_missing", "The bound worktree is unavailable. No base plan path was substituted.");

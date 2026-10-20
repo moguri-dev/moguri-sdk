@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const temporary = await mkdtemp(join(tmpdir(), "moguri-sdk-consumer-"));
+let ssh;
 try {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const archive = process.argv[2] ? resolve(process.argv[2]) :
@@ -19,6 +20,13 @@ try {
   execFileSync("npm", ["install-scripts", "approve", manifest.name, "--no-allow-scripts-pin"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["rebuild", manifest.name, "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["audit", "--audit-level=moderate"], { cwd: consumer, stdio: "inherit" });
+  if (process.platform === "darwin") {
+    const { createSshTarget } = await import("../tests/fixtures/ssh-target.ts");
+    const directory = join(temporary, "generated-ssh"); await mkdir(directory, { mode: 0o700 });
+    ssh = await createSshTarget(directory);
+    ssh.target.command = [process.execPath, join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "worker", "--stdio"];
+    ssh.target.allowCopilot = false;
+  }
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
@@ -93,7 +101,7 @@ try {
   ], { cwd: consumer, stdio: "inherit" });
   await writeFile(join(consumer, "smoke.mjs"), `
     import assert from "node:assert/strict";
-    import {mkdir,writeFile,readFile} from "node:fs/promises";
+    import {mkdir,writeFile,readFile,realpath} from "node:fs/promises";
     import {spawn,execFile,execFileSync} from "node:child_process";
     import {promisify} from "node:util";
     import {createHash} from "node:crypto";
@@ -101,11 +109,11 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
-    const git=args=>execFileSync("git",["--no-pager","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",...args],{cwd:project,encoding:"utf8"});
+    const git=(args,cwd=project)=>execFileSync("git",["--no-pager","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",...args],{cwd,encoding:"utf8"});
     git(["init","--initial-branch=main"]);git(["add","--","generated.ts"]);
     git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated external SDK base"]);
     git(["config","user.name","Generated fixture"]);git(["config","user.email","fixture@example.invalid"]);
@@ -122,7 +130,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,16);
+      assert.equal(sdk.getState().snapshot.protocolVersion,PROTOCOL_VERSION);
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);
@@ -157,6 +165,26 @@ try {
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
       assert.equal((await sdk.remote.status()).remote.ready,false);
+      if(PROTOCOL_VERSION>=17&&process.env.MOGURI_GENERATED_REMOTE){
+        const target=JSON.parse(process.env.MOGURI_GENERATED_REMOTE),remoteDirectory=join(root,"generated-remote-workspace");
+        await mkdir(remoteDirectory);const remoteRoot=await realpath(remoteDirectory);await mkdir(join(remoteRoot,"docs"));
+        await writeFile(join(remoteRoot,"generated.ts"),"Generated installed SSH baseline.\\n");
+        git(["init","--initial-branch=generated-remote"],remoteRoot);git(["add","--","generated.ts"],remoteRoot);
+        git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated remote SDK base"],remoteRoot);
+        await writeFile(join(remoteRoot,"generated.ts"),"Generated installed SSH-only change.\\n");
+        await writeFile(join(remoteRoot,"docs/plan.md"),"Generated installed SSH-only plan.\\n");
+        const settings=structuredClone(sdk.settings.get());settings.values.remote=target;
+        await sdk.settings.update(settings.values,settings.revision);await sdk.remote.probe();
+        const configuration=(await sdk.projects.configuration(p.id)).configuration;
+        await sdk.projects.configure(p.id,{...configuration.values,remotePath:remoteRoot},configuration.revision);
+        const viewer=await sdk.sessions.create(p.id,"Generated installed SSH views",{env:"Remote",modelId:null});
+        assert.equal((await sdk.workspaces.file(viewer.id,"generated.ts")).text,"Generated installed SSH-only change.\\n");
+        assert.ok((await sdk.workspaces.files(viewer.id)).entries.includes("docs/"));
+        assert.match((await sdk.workspaces.git(viewer.id)).diff,/Generated installed SSH-only change/);
+        assert.equal((await sdk.plans.read(viewer.id)).text,"Generated installed SSH-only plan.\\n");
+        assert.deepEqual(await sdk.slash(viewer.id,"/plan","cli"),{kind:"text",text:"Generated installed SSH-only plan.\\n"});
+        assert.match((await sdk.workspaces.file(s.id,"generated.ts")).text,/portableSdkMemory/);
+      }
       const workerPath=fileURLToPath(new URL("../worker.mjs",import.meta.resolve("moguri/node")));
       const workerHash=createHash("sha256").update(await readFile(workerPath)).digest("hex");
       const role=spawn(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"worker","--stdio"],{stdio:["pipe","pipe","pipe"]});
@@ -166,7 +194,7 @@ try {
           let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
           role.once("error",reject);
           role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
-          role.stdin.write(JSON.stringify({action:"probe",protocol:16,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+          role.stdin.write(JSON.stringify({action:"probe",protocol:PROTOCOL_VERSION,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
         });
         assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
         role.stdin.end();assert.equal(await roleExit,0);
@@ -353,7 +381,7 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed worker handshake, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed worker handshake, macOS SSH workspace files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
   `);
-  execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
-} finally { await rm(temporary, { recursive: true, force: true }); }
+  execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "" } });
+} finally { try { await ssh?.close(); } finally { await rm(temporary, { recursive: true, force: true }); } }

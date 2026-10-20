@@ -283,6 +283,15 @@ Autopilot Max or automated steering.
 
 **Composer/default contract.** Follow the implementation specification's Env/Model/Autonomy level/Budget controls, typed attachment triggers, and global/profile/repo/project/session precedence. Factory values are Local, model unset until a generative provider login or local-model configuration, Manual, and Unlimited. Default changes do not rewrite a running turn or override policy.
 
+**Executable read boundary.** Protocol 17 adds shared read-only Files, Changes
+and Plan views through the pinned SSH worker, never the attached Local folder.
+Root/env/peer/policy are rechecked after awaiting the bounded read. Git hooks,
+filters and protected/denied paths stay suppressed; cancellation/close stops
+owned queries. CLI/TUI return Remote plan text, not a Local file action. The
+updated inspector can verify authenticated protocol-16 receipts but cannot
+attach or resume that legacy worker. This does not qualify Remote consoles,
+MCP/memory execution, direct plan saves or native Sandbox.
+
 ## Phase 0 validation spikes
 
 Each spike records a pass or fail result and its measurements under `docs/`.

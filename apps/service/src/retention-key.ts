@@ -1,13 +1,14 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { AsyncEntry } from "@napi-rs/keyring";
+import { PROTOCOL_VERSION } from "../../../packages/protocol/src/index.ts";
 
 export async function retentionKey(path: string, injected?: Buffer): Promise<{ key: Buffer; id: string }> {
   const db = new DatabaseSync(path);
   let id: string;
   try {
     const version = Number(db.prepare("PRAGMA user_version").get()?.user_version);
-    if (version > 16) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+    if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
     id = version >= 4 ? String(db.prepare("SELECT value FROM retention_metadata WHERE id='key_id'").get()?.value ?? "") : randomUUID();
     if (!id || id.length > 128) throw new Error("Retention key metadata is invalid. Preserve state and restore its original key metadata.");
   } finally { db.close(); }

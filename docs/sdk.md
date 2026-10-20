@@ -5,8 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 16 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-15 history, sessions, drafts,
+This is an alpha API. Protocol 17 deliberately rejects incompatible running
+services and requires an updated SSH worker for new workspace queries. State
+migrations preserve schema-1 through schema-16 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -20,7 +21,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.10.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.11.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -51,9 +52,11 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.10.0-alpha.1.tgz`.
-The current verification suite expects protocol 16; historical 0.7/0.8/0.9/0.9.1
-archives retain their separately recorded protocol-13/14/15 qualification.
+repacking: `npm run verify:sdk -- release/moguri-0.11.0-alpha.1.tgz`.
+Protocol-17 verification also exercises actual installed-worker SSH files,
+Git and plan reads on macOS. Historical archives retain their separately
+recorded qualification; protocol-16 SSH receipts remain inspectable without
+reattaching or continuing an old worker.
 
 ## Connect to the shared service
 
@@ -243,6 +246,16 @@ user inspection, not proof of cleanup. Remote endpoint keys use
 `moguri worker --stdio` entrypoint exposes the versioned SSH bridge; it never
 starts a second local service. See the [transport contract](architecture/execution-transports.md)
 for still-unqualified side-panel/extension capabilities.
+
+`workspaces.files(sessionId, path)`, `workspaces.file(sessionId, path)`,
+`workspaces.git(sessionId)` and `plans.read(sessionId)` resolve Remote sessions
+through that pinned SSH worker and the project's explicit `remotePath`, not
+through any Local path. Protected/denied paths, file bounds and Git filter/hook
+suppression apply on the execution host. Target, root, env or policy changes
+invalidate pending results; disconnects are errors, not empty views or fallback.
+These are explicit user views, not implicit attachments or model context.
+Remote `/plan` returns text in CLI/TUI, never a Local file-opener action.
+Remote plan viewing is read-only; `plans.save` remains unavailable there.
 
 `attachments.file`/`image` capture selected content. `folderPreview`,
 `githubPreview` and `sessionPreview` return exact source/size/exclusion/digest

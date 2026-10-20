@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import * as vec from "sqlite-vec";
-import { eventTypes, isRecord, MoguriError, PROFILE_ID, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { eventTypes, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
@@ -63,7 +63,7 @@ export class EventStore {
     this.db = new DatabaseSync(path, { allowExtension: true });
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
-      if (version > 16) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -125,6 +125,9 @@ export class EventStore {
       if (version < 16) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('single_routing_schema','1');
         PRAGMA user_version=16; COMMIT;`);
+      if (version < 17) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('remote_workspace_read_schema','1');
+        PRAGMA user_version=17; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

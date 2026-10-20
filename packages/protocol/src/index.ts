@@ -21,7 +21,7 @@ import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.
 import type { RoutingTurn, SingleRoutingPlan } from "./routing.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });

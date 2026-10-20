@@ -1,11 +1,34 @@
 import { Type, type Static } from "typebox";
-import { PROTOCOL_VERSION, ProjectSettingsSchema } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, PROTOCOL_VERSION, ProjectSettingsSchema } from "../../../packages/protocol/src/index.ts";
 import { WorkerRequestSchema } from "./worker-protocol.ts";
 
 const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const sequence = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const nullableText = Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]);
+const path = Type.String({ minLength: 1, maxLength: 4096 });
+export const WorkspaceReadQuerySchema = Type.Union([
+  Type.Object({ type: Type.Literal("session.files"), path }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("session.file"), path }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("session.git"), diff: Type.Boolean() }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("plan.read") }, { additionalProperties: false }),
+]);
+export const WorkspaceReadRequestSchema = Type.Object({
+  query: WorkspaceReadQuerySchema,
+  policy: Type.Object({
+    deniedFolders: Type.Array(path, { maxItems: 100 }), planPath: path,
+    upstream: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$" }),
+  }, { additionalProperties: false }),
+}, { additionalProperties: false });
+export const WorkspaceReadResultSchema = Type.Union([
+  Type.Object({ type: Type.Literal("session.files"), path, entries: Type.Array(path, { maxItems: 1000 }) }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("session.file"), path, text: Type.String({ maxLength: MAX_TEXT }), digest: hash, bytes: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("session.git"), branch: Type.String({ maxLength: 4096 }), repository: nullableText, status: Type.String({ maxLength: 512 * 1024 }), diff: Type.String({ maxLength: 512 * 1024 }) }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("plan.read"), path, text: Type.String({ maxLength: MAX_TEXT }), digest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }), exists: Type.Boolean() }, { additionalProperties: false }),
+]);
+export type WorkspaceReadQuery = Static<typeof WorkspaceReadQuerySchema>;
+export type WorkspaceReadRequest = Static<typeof WorkspaceReadRequestSchema>;
+export type WorkspaceReadResult = Static<typeof WorkspaceReadResultSchema>;
 const catalog = Type.Object({
   url: Type.String({ maxLength: 4096 }), key: Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]),
   headers: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]), { maxProperties: 32 })),
@@ -19,14 +42,18 @@ export const ForegroundQuerySchema = Type.Object({
 }, { additionalProperties: false });
 export type ForegroundQuery = Static<typeof ForegroundQuerySchema>;
 export const BridgeInitSchema = Type.Object({
-  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
+  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
   protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
   stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
   runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
   catalog: Type.Optional(catalog),
   context: Type.Optional(ProjectSettingsSchema),
+  workspace: Type.Optional(WorkspaceReadRequestSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText }, { additionalProperties: false });
+const SavedBridgeInfoSchema = Type.Object({
+  ...BridgeInfoSchema.properties, protocol: Type.Union([Type.Literal(16), Type.Literal(PROTOCOL_VERSION)]),
+}, { additionalProperties: false });
 const BridgeStatusSchema = Type.Object({
   runId, workerPid: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
   port: Type.Integer({ minimum: 0, maximum: 65535 }), acknowledged: sequence, sequence,
@@ -35,7 +62,7 @@ const BridgeStatusSchema = Type.Object({
   cleanup: Type.Union([Type.Literal("pending"), Type.Literal("owned-worker-stopped"), Type.Literal("unconfirmed")]), diagnostic: nullableText,
 }, { additionalProperties: false });
 const BridgeFrameSchema = Type.Object({ kind: Type.Literal("frame"), sequence, digest: hash, request: WorkerRequestSchema }, { additionalProperties: false });
-export const SavedStatusSchema = Type.Object({ status: BridgeStatusSchema, info: BridgeInfoSchema, proof: hash }, { additionalProperties: false });
+export const SavedStatusSchema = Type.Object({ status: BridgeStatusSchema, info: SavedBridgeInfoSchema, proof: hash }, { additionalProperties: false });
 export const BridgeEnvelopeSchema = Type.Union([
   Type.Object({ kind: Type.Literal("query-result"), runId, requestId: Type.String({ minLength: 1, maxLength: 128 }), result: Type.Union([
     Type.Object({ type: Type.Literal("catalog"), status: Type.Integer({ minimum: 100, maximum: 599 }), body: Type.String({ maxLength: 512 * 1024 }) }, { additionalProperties: false }),
@@ -48,6 +75,7 @@ export const BridgeEnvelopeSchema = Type.Union([
   Type.Object({ kind: Type.Literal("status"), status: BridgeStatusSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("catalog"), status: Type.Integer({ minimum: 100, maximum: 599 }), body: Type.String({ maxLength: 512 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("context"), text: Type.String({ maxLength: 256 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("workspace"), result: WorkspaceReadResultSchema, info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("inspection"), ...SavedStatusSchema.properties, frames: Type.Array(BridgeFrameSchema, { maxItems: 128 }), nextSequence: sequence }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("error"), message: Type.String({ maxLength: 4096 }), code: Type.Optional(Type.String({ maxLength: 128 })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("stderr"), text: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }),

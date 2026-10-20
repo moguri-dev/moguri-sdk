@@ -12,6 +12,7 @@ import { BridgeInitSchema, SavedStatusSchema, BridgeEnvelopeSchema, type BridgeI
 import { repositoryContext } from "./project-policy.ts";
 import { foregroundWorker } from "./foreground-bridge.ts";
 import { workerCatalog } from "./worker-queries.ts";
+import { readWorkspace } from "./workspace-reads.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -245,6 +246,11 @@ async function frontend(): Promise<void> {
         const result = await workerCatalog(init.catalog, abort.signal);
         outer.send({ kind: "catalog", status: result.status, body: result.body, info }, () => outer.end()); return;
       }
+      if (init.action === "workspace") {
+        if (!init.workspace || !info.root) throw new MoguriError("remote_workspace_read", "Remote workspace reads need the exact approved root and read policy.");
+        const result = await readWorkspace(info.root, init.workspace, abort.signal);
+        outer.send({ kind: "workspace", info, result }, () => outer.end()); return;
+      }
       if (process.argv.includes("--foreground")) {
         if (init.action !== "start") throw new MoguriError("foreground_ephemeral", "Foreground native runs cannot inspect/reattach another execution. No replay or second worker was started.");
         foreground = foregroundWorker(workerPath, init, info, outer); return;
@@ -266,6 +272,7 @@ async function frontend(): Promise<void> {
         child.unref();
       }
       const saved = await loadStatus(directory, credentials.key);
+      if (saved.info.protocol !== PROTOCOL_VERSION && init.action !== "inspect") throw new MoguriError("remote_legacy_inspection", "A legacy run permits receipt inspection only. No old worker was reattached or resumed.");
       if (init.action === "inspect" || !["launching", "running", "stopping"].includes(saved.status.status)) {
         const replay = await frames(directory, credentials.key, init.after ?? 0);
         outer.send({ kind: "inspection", ...saved, frames: replay, nextSequence: replay.at(-1)?.sequence ?? init.after ?? 0 }, () => outer.end()); return;

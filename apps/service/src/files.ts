@@ -41,7 +41,7 @@ export async function readProjectFile(root: string, input: string, maxBytes = MA
   return { text, digest: digest(text), bytes: content.length, path: relative(await realpath(root), path) };
 }
 export async function readRegularFile(path: string, maxBytes: number): Promise<Buffer> {
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const metadata = await file.stat();
     if (!metadata.isFile() || metadata.size > maxBytes) throw new MoguriError("file_limit", `Only regular files up to ${Math.ceil(maxBytes / 1024)} KiB are supported.`);

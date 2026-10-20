@@ -1,9 +1,15 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 16; immutable event
+Protocol version and database migration version are 17; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
+
+Migration 17 records the read-only Remote workspace/worker compatibility
+boundary without rewriting event ciphertexts, receipts, keys or retained grants.
+Queries remain ephemeral user views, not a second workflow store or model
+context. The updated inspector accepts authenticated protocol-16 receipt
+metadata without attaching or continuing a legacy worker.
 
 ## Implemented entities
 

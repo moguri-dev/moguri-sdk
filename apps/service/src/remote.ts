@@ -8,7 +8,7 @@ import { Value } from "typebox/value";
 import { isRecord, MoguriError, PROTOCOL_VERSION, type ProjectSettings, type RemoteTarget, type RemoteIdentity, type RemoteReadiness, type RemoteExecution, type Snapshot } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
-import { BridgeEnvelopeSchema, type BridgeEnvelope, type BridgeInit, type BridgeStatus } from "./remote-protocol.ts";
+import { BridgeEnvelopeSchema, type BridgeEnvelope, type BridgeInit, type BridgeStatus, type WorkspaceReadRequest, type WorkspaceReadResult } from "./remote-protocol.ts";
 import { frameDigest, JsonLineChannel } from "./worker-wire.ts";
 import type { ParentMessage } from "./worker-protocol.ts";
 import type { WorkerConnection, WorkerConnectionEvents } from "./worker-connection.ts";
@@ -39,6 +39,7 @@ export class RemoteRuntime {
   private signature: string;
   private probeAbort?: AbortController;
   private probes = new Set<Promise<unknown>>();
+  private queries = new Map<AbortController, Promise<BridgeEnvelope>>();
   private active = new Set<RemoteWorker>();
   private closed = false;
   constructor(private readonly stateDir: string, private readonly target: () => RemoteTarget | null, private readonly workerPath: string, private readonly options: RemoteOptions = {}) {
@@ -93,6 +94,12 @@ export class RemoteRuntime {
       "SSH connection or remote worker ended without a confirmed outcome. Inspect the target; no operation was retried or run locally." };
   }
   async query(target: RemoteIdentity, init: BridgeInit, signal: AbortSignal): Promise<BridgeEnvelope> {
+    if (this.closed) throw new MoguriError("remote_closed", "The Remote runtime is closing. No connection or fallback was started.", 409);
+    const abort = new AbortController(), task = this.queryOnce(structuredClone(target), structuredClone(init), AbortSignal.any([signal, abort.signal]));
+    this.queries.set(abort, task);
+    try { return await task; } finally { this.queries.delete(abort); }
+  }
+  private async queryOnce(target: RemoteIdentity, init: BridgeInit, signal: AbortSignal): Promise<BridgeEnvelope> {
     const connection = await this.connect(target, signal);
     try {
       return await new Promise<BridgeEnvelope>((resolve, reject) => {
@@ -104,7 +111,7 @@ export class RemoteRuntime {
         connection.wire.on("message", (raw) => {
           if (!Value.Check(BridgeEnvelopeSchema, raw)) { settle(undefined, new MoguriError("remote_protocol", "Remote worker protocol/build is incompatible.", 409)); return; }
           if (raw.kind === "error") settle(undefined, new MoguriError(raw.code ?? "remote_bootstrap", raw.message, 409));
-          else if (["probe", "catalog", "context", "inspection"].includes(raw.kind)) settle(raw);
+          else if (["probe", "catalog", "context", "workspace", "inspection"].includes(raw.kind)) settle(raw);
         });
         signal.throwIfAborted();
         connection.wire.send(init);
@@ -159,6 +166,14 @@ export class RemoteRuntime {
     if (result.kind !== "context" || result.info.root !== root) throw new MoguriError("remote_context", "Remote repository context did not match its approved workspace.", 409);
     return result.text;
   }
+  async readWorkspace(root: string, requested: WorkspaceReadRequest, signal: AbortSignal): Promise<WorkspaceReadResult> {
+    const target = this.assertReady(), request = structuredClone(requested), workerDigest = this.readiness.workerDigest!;
+    const result = await this.query(target, { action: "workspace", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir, root, workspace: request }, signal);
+    signal.throwIfAborted();
+    if (this.closed || frameDigest(this.target()) !== frameDigest(target) || !this.readiness.ready) throw new MoguriError("remote_changed", "Remote configuration/readiness changed during the workspace read. No stale response or Local fallback was used.", 409);
+    if (result.kind !== "workspace" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.result.type !== request.query.type) throw new MoguriError("remote_workspace_read", "Remote workspace response did not match its approved root, build or requested operation.", 409);
+    return result.result;
+  }
   async forget(execution: RemoteExecution): Promise<void> {
     try { await this.vault.remove(execution.id, AbortSignal.timeout(15_000)); }
     catch { throw new MoguriError("remote_key_cleanup", "Remote transport-key cleanup was not confirmed. Local session records were preserved; unlock its secret backend and retry.", 503); }
@@ -179,9 +194,12 @@ export class RemoteRuntime {
   }
   async close(): Promise<void> {
     this.closed = true; this.probeAbort?.abort(); this.readiness = absentReadiness();
+    const queries = [...this.queries.entries()];
+    for (const [abort] of queries) abort.abort();
     const workers = [...this.active];
     for (const worker of workers) worker.kill("SIGTERM");
     await Promise.all(workers.map((worker) => worker.closed));
+    await Promise.allSettled(queries.map(([, task]) => task));
     await Promise.allSettled(this.probes);
   }
 }

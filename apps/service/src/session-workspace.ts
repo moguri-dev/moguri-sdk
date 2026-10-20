@@ -11,6 +11,7 @@ import { readProjectFile, writeProjectFile } from "./files.ts";
 import { ProjectService } from "./project-service.ts";
 import { assertFolderAccess, assertFolderName, folderPolicy } from "./project-policy.ts";
 import { TerminalManager, type TerminalOptions } from "./terminals.ts";
+import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 
 export type WorkspaceFinish = (events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => CommandResult;
 export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number }
@@ -31,6 +32,7 @@ export interface SessionWorkspaceHost {
   startup(projectId: string | null): ResolvedControls;
   project(session: Pick<Session, "projectId" | "workspaceId">): Project;
   rootBusy(projectId: string, workspaceId: string | null): boolean;
+  remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
 }
 export class SessionWorkspace {
   readonly projects: ProjectService;
@@ -98,8 +100,14 @@ export class SessionWorkspace {
       case "project.git": return this.projects.gitView(this.project(query.projectId), query.diff, AbortSignal.timeout(30_000));
       case "project.porto": return { type: query.type, output: await this.projects.porto(this.project(query.projectId), AbortSignal.timeout(15_000)) };
       case "plan.read": {
-        const session = this.session(query.sessionId); const project = this.host.project(session);
+        const session = this.session(query.sessionId);
+        if (session.controls.env === "Remote") {
+          const result = await this.host.remoteRead(session, { type: "plan.read" });
+          if (result.type !== "plan.read") throw new MoguriError("remote_workspace_type", "Remote plan response did not match its request.", 409);
+          return result;
+        }
         if (session.controls.env !== "Local") throw new MoguriError("plan_env", "Plan workspace transport is not qualified for this environment. No local project was read as a fallback.", 409);
+        const project = this.host.project(session);
         const settings = this.projects.configuration(project.id).values;
         const text = await this.projects.optional(project.path, settings.planPath, folderPolicy(settings));
         if (text === null) return { type: query.type, path: settings.planPath, text: "", digest: "absent", exists: false };

@@ -13,12 +13,15 @@ import { assertFolderAccess, folderPolicy, matchesFolder } from "./project-polic
 import type { ProjectService } from "./project-service.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { pullRequestLink } from "./project-integrations.ts";
+import { gitReadFilters } from "./project-git.ts";
+import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 
 interface Host {
   snapshot(): Snapshot;
   project(id: string): Project;
   commit(events: EventInput[]): void;
   wake(): void;
+  remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (text: string) => void) => Promise<unknown>, start: (job: CapabilityJob) => void, settled: () => void, workspaceId: string): string;
 }
 export class ManagedWorkspaces {
@@ -53,15 +56,7 @@ export class ManagedWorkspaces {
     });
   }
   private async filters(project: Project, signal: AbortSignal): Promise<string[]> {
-    const config = await this.git(project, ["config", "--null", "--list"], signal), drivers = new Set<string>();
-    for (const entry of config.split("\0")) {
-      const key = entry.split("\n", 1)[0]!;
-      if (!key.startsWith("filter.")) continue;
-      const match = key.match(/^filter\.([A-Za-z0-9_.-]+)\.(?:smudge|clean|process|required)$/);
-      if (!match) throw new MoguriError("workspace_filter", "This repository has a filter name Moguri cannot safely suppress. Create its checkout manually; no hook/filter was executed.");
-      drivers.add(match[1]!);
-    }
-    return [...drivers].flatMap((driver) => ["-c", `filter.${driver}.smudge=`, "-c", `filter.${driver}.clean=`, "-c", `filter.${driver}.process=`, "-c", `filter.${driver}.required=false`]);
+    return gitReadFilters(project.path, signal);
   }
   private async registrations(project: Project, signal: AbortSignal): Promise<GitWorkspaceRegistration[]> {
     const text = await this.git(project, ["worktree", "list", "--porcelain", "-z"], signal), registrations: GitWorkspaceRegistration[] = [];
@@ -143,6 +138,12 @@ export class ManagedWorkspaces {
     }
     if (query.type === "workspace.inspect") return { type: query.type, inspection: await this.inspect(query.workspaceId) };
     const session = this.session(query.sessionId);
+    if (session.controls.env === "Remote") {
+      const request: WorkspaceReadQuery = query.type === "session.git" ? { type: query.type, diff: query.diff } : { type: query.type, path: query.path };
+      const result = await this.host.remoteRead(session, request);
+      if (result.type === "plan.read") throw new MoguriError("remote_workspace_type", "Remote file/Git response did not match its request.", 409);
+      return result;
+    }
     if (session.controls.env !== "Local") throw new MoguriError("workspace_env", "This file/Git surface has no qualified transport for the selected environment. No Local fallback.", 409);
     const project = this.project(session), settings = this.settings().values(project.id);
     if (query.type === "session.git") {

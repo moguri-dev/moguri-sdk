@@ -128,7 +128,7 @@ test("schema-11 artifact history and interrupted materialization recover without
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     const peer = await new MoguriSdk(restarted.connection).ready();
     try {
-      assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 16);
+      assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
       assert.deepEqual(restarted.store.events().slice(0, identities.length).map(({ id, seq }) => ({ id, seq })), identities);
       assert.equal((await peer.artifacts.read(current.id!, 1)).artifact.folderId, null);
       assert.equal((await peer.artifacts.read(current.id!)).text, "Generated historical content.");

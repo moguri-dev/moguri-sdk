@@ -57,6 +57,7 @@ export interface PlatformHost {
   remoteStatus(): RemoteReadiness;
   remoteCommand(command: ExecutionCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   repositoryContext(session: Session): Promise<string>;
+  remoteRead: SessionWorkspaceHost["remoteRead"];
   globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
   foreignRootBusy(root: string): boolean;
   sharedGlobals: boolean;
@@ -92,6 +93,7 @@ export class PlatformRuntime {
     });
     this.managed = new ManagedWorkspaces(stateDir, {
       snapshot: () => this.snapshot(), project: (id) => this.project(id), commit: (events) => this.host.commit(events), wake: host.wake,
+      remoteRead: host.remoteRead,
       job: (kind, projectId, execute, start, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, start, workspaceId),
     }, () => this.sessions.projects);
     this.workspace = new WorkspaceRuntime({
@@ -106,6 +108,7 @@ export class PlatformRuntime {
       mode: host.mode, spawn: host.spawnUser, deleteSession: host.deleteSession, removeProject: host.removeProject, validateAdmission: host.validateAdmission,
       contextPreview: host.contextPreview,
       startup: host.startup,
+      remoteRead: host.remoteRead,
       retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session) => this.managed.project(session),
       rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),

@@ -31,7 +31,7 @@ test("schema 15 preserves both profiles' ciphertexts, receipts and retained gran
     restarted = await startService(fixture.options);
     const current = await new MoguriSdk(restarted.connection).ready(), scoped = await current.profiles.open(profile.id);
     try {
-      assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 16);
+      assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
       assert.deepEqual(restarted.store.db.prepare("SELECT seq,id,data,payload FROM events WHERE seq<=? ORDER BY seq").all(Number(rows.at(-1)!.seq)), rows);
       assert.deepEqual(restarted.store.db.prepare("SELECT * FROM receipts ORDER BY profile_id,id").all(), receipts);
       assert.deepEqual(restarted.store.db.prepare("SELECT * FROM blob_payloads ORDER BY digest,scope").all(), blobs);
@@ -68,7 +68,7 @@ test("failed schema-16 routing migration reopens unchanged schema-15 history and
       preserved.exec("DROP TRIGGER generated_routing_migration_failure");
     } finally { preserved.close(); }
     upgraded = await startService(options);
-    assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 16);
+    assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
     assert.equal(upgraded.controller.snapshot().sessions[0]?.id, fixture.sessionId); assert.equal(fixture.requests.length, 0);
   } finally { await upgraded?.close(); await fixture.close(); }
 });
