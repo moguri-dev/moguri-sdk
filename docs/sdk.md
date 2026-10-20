@@ -23,8 +23,9 @@ npm pack
 ```
 
 Install the resulting `moguri-<package-version>.tgz` in a Node 26 consumer with
-npm. The latest qualified delivery is `moguri-0.16.0-alpha.1.tgz`; a newer
-development manifest is not another qualified archive until explicitly checked.
+npm. Exact delivered filenames/checksums and qualification records live in
+[setup](setup.md). A newer development manifest is not another qualified
+archive until its exact bytes are independently checked.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -55,7 +56,7 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.16.0-alpha.1.tgz`.
+repacking: `npm run verify:sdk -- release/moguri-0.17.0-alpha.1.tgz`.
 Current verification also exercises actual installed-worker SSH files,
 Git/plan reads, dated/per-call telemetry and actual metered compaction with the
 installed CLI/worker. Historical archives retain their separately
