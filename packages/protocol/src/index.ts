@@ -17,9 +17,10 @@ import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import type { UserQuestion, QuestionAnswer } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
+import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -32,7 +33,7 @@ const sessionId = { sessionId: id };
 
 export const CommandSchema = object({
   id,
-  profileId: Type.Literal("default"),
+  profileId: id,
   command: Type.Union([
     object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }) }),
     object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
@@ -166,7 +167,9 @@ export interface Policy { revision: number; allowedEnvs: Controls["env"][] }
 export interface Snapshot extends PlatformSnapshot {
   protocolVersion: number;
   seq: number;
-  profileId: "default";
+  profileId: string;
+  profile?: Profile;
+  profileCatalogRevision?: number;
   projects: Project[];
   sessions: Session[];
   provider: ProviderState;
@@ -256,6 +259,10 @@ export interface EventPayloads {
   "budget.recorded": { entry: BudgetEntry };
   "budget.policy_changed": { limit: BudgetLimit | null; revision: number };
   "budget.blocked": { sessionId: string; ownerSessionId: string; stepId: string; diagnostic: string; remainingTokens: number | null; remainingUsd: number | null };
+  "profile.saved": { profile: Profile };
+  "global.controls_changed": GlobalPreferences;
+  "global.policy_changed": { policy: Policy };
+  "global.budget_changed": GlobalBudgetPolicy;
   "terminal.changed": { terminal: TerminalState };
   "turn.prompt_bound": { promptDigest: string };
   "queue.released": { messageId: string };
@@ -294,9 +301,10 @@ export const eventTypes: readonly EventType[] = [
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
   "budget.recorded", "budget.policy_changed", "budget.blocked",
+  "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
 ];
 
-export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
+export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
   const projects = new Map<string, Project>();
   const sessions = new Map<string, Session>();
   let policy: Policy = { revision: 0, allowedEnvs: ["Local", "Sandbox", "Remote"] };
@@ -325,7 +333,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
   const managedWorkspaces = new Map<string, ManagedWorkspace>();
   const changeSets = new Map<string, ChangeSet>();
   for (const event of events) {
-    if (event.profile_id !== PROFILE_ID) continue;
+    if (event.profile_id !== profileId) continue;
     if (event.event_type === "budget.recorded") budgetEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
     if (event.event_type === "budget.policy_changed") budgetPolicy = structuredClone(event.payload);
     if (event.event_type === "session.deleted") {

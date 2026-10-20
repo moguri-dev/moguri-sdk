@@ -1,7 +1,7 @@
 import {
-  BUDGET_WARNING, isModelRole, MoguriError, PROFILE_ID, type BudgetEntry, type BudgetLimit, type BudgetQuery, type BudgetRate,
+  BUDGET_WARNING, isModelRole, MoguriError, type BudgetEntry, type BudgetLimit, type BudgetQuery, type BudgetRate,
   type BudgetResponse, type BudgetStatus, type BudgetTotals, type Controls, type EventInput, type ModelRole, type Session,
-  type Snapshot, type StoredEvent, type Usage, type UserSettings,
+  type Snapshot, type StoredEvent, type Usage, type UserSettings, type GlobalBudgetCapacity,
 } from "../../../packages/protocol/src/index.ts";
 
 const integer = (value: number | null | undefined): value is number => value !== null && value !== undefined && Number.isSafeInteger(value) && value >= 0;
@@ -10,7 +10,7 @@ const price = (rate: BudgetRate, input: number, output: number): number | null =
   const value = Math.ceil(input * rate.inputUsdPerMillion + output * rate.outputUsdPerMillion);
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 };
-const recorded = (entry: BudgetEntry): EventInput => ({ event_type: "budget.recorded", profile_id: PROFILE_ID, payload: { entry } });
+const recorded = (entry: BudgetEntry, profileId: string): EventInput => ({ event_type: "budget.recorded", profile_id: profileId, payload: { entry } });
 const chargedTokens = (entry: BudgetEntry): number | null => entry.reportedTokens ?? entry.reservedTokens;
 const chargedUsd = (entry: BudgetEntry): number | null => entry.status === "settled" ? entry.estimatedUsdMicros : entry.reservedUsdMicros;
 const sum = (entries: BudgetEntry[], read: (entry: BudgetEntry) => number | null): number | null => {
@@ -34,9 +34,10 @@ export function budgetTotals(entries: BudgetEntry[]): BudgetTotals {
     requestMs: entries.reduce((total, entry) => total + entry.requestMs, 0),
   };
 }
+export const budgetCharges = (entries: BudgetEntry[]) => ({ tokens: sum(entries, chargedTokens), usdMicros: sum(entries, chargedUsd) });
 
 export class BudgetRuntime {
-  constructor(private readonly host: { snapshot(): Snapshot; events(): StoredEvent[] }) {}
+  constructor(private readonly host: { snapshot(): Snapshot; events(): StoredEvent[]; global?: () => GlobalBudgetCapacity }) {}
   validateLimit(limit: { tokens?: number; usd?: number; basis?: "estimate" } | null): void {
     if (limit === null) return;
     if (limit.basis !== "estimate" || limit.tokens === undefined && limit.usd === undefined) throw new MoguriError("budget_policy", "Choose a token/USD limit and explicitly accept estimate-based accounting. No exact provider-billing cap is claimed.", 409);
@@ -69,17 +70,20 @@ export class BudgetRuntime {
     return rate && Date.now() - Date.parse(rate.effectiveAt) <= settings.maxPriceAgeDays * 86_400_000 ? structuredClone(rate) : null;
   }
     private owned(entries: BudgetEntry[], ownerId: string): BudgetEntry[] { return entries.filter((entry) => entry.ownerSessionId === ownerId || entry.ownerSessionId === null && ["subagent", "unknown"].includes(entry.role)); }
-  private limits(owner: Session): Array<{ scope: "session" | "profile"; limit: BudgetLimit }> {
-    const limits: Array<{ scope: "session" | "profile"; limit: BudgetLimit }> = [], profile = this.host.snapshot().budgetPolicy.limit;
+  private limits(owner: Session): Array<{ scope: "session" | "profile" | "global"; limit: BudgetLimit }> {
+    const limits: Array<{ scope: "session" | "profile" | "global"; limit: BudgetLimit }> = [], profile = this.host.snapshot().budgetPolicy.limit;
     if (owner.controls.budget.kind === "limited") { this.validateLimit(owner.controls.budget); limits.push({ scope: "session", limit: { ...owner.controls.budget, basis: "estimate" } }); }
     if (profile) { this.validateLimit(profile); limits.push({ scope: "profile", limit: profile }); }
+    const global = this.host.global?.().limit;
+    if (global) { this.validateLimit(global); limits.push({ scope: "global", limit: global }); }
     return limits;
   }
   status(sessionId: string): BudgetStatus {
     const session = this.session(sessionId), owner = this.owner(session), entries = this.host.snapshot().budgetEntries, owned = this.owned(entries, owner.id), limits = this.limits(owner);
     const diagnostics: string[] = [], remainingTokens: number[] = [], remainingUsd: number[] = [];
     for (const { scope, limit } of limits) {
-      const scoped = scope === "session" ? owned : entries, tokens = sum(scoped, chargedTokens), usd = sum(scoped, chargedUsd);
+      const scoped = scope === "session" ? owned : entries, global = scope === "global" ? this.host.global?.() : undefined;
+      const tokens = global ? global.chargedTokens : sum(scoped, chargedTokens), usd = global ? global.chargedUsdMicros : sum(scoped, chargedUsd);
       if (limit.tokens !== undefined) { if (tokens === null) diagnostics.push(`${scope} has unbounded historical token usage; finite admission is blocked.`); else remainingTokens.push(Math.max(0, limit.tokens - tokens)); }
       if (limit.usd !== undefined) { if (usd === null) diagnostics.push(`${scope} has unpriced historical/held calls; cumulative USD admission is blocked.`); else remainingUsd.push(Math.max(0, micros(limit.usd) - usd) / 1_000_000); }
     }
@@ -98,8 +102,8 @@ export class BudgetRuntime {
     const rate = this.rate(session.controls.modelId), status = this.status(session.id);
     if (status.diagnostics.length) throw new MoguriError("budget_unavailable", status.diagnostics.join(" "), 409);
     const availability = limits.map(({ scope, limit }) => {
-      const scoped = scope === "session" ? this.owned(entries, owner.id) : entries;
-      return { limit, tokens: limit.tokens === undefined ? null : limit.tokens - sum(scoped, chargedTokens)!, usd: limit.usd === undefined ? null : micros(limit.usd) - sum(scoped, chargedUsd)! };
+      const scoped = scope === "session" ? this.owned(entries, owner.id) : entries, global = scope === "global" ? this.host.global?.() : undefined;
+      return { limit, tokens: limit.tokens === undefined ? null : limit.tokens - (global ? global.chargedTokens! : sum(scoped, chargedTokens)!), usd: limit.usd === undefined ? null : micros(limit.usd) - (global ? global.chargedUsdMicros! : sum(scoped, chargedUsd)!) };
     });
     const fits = (output: number) => {
       const cost = rate ? price(rate, input.inputEstimate, output) : null;
@@ -115,7 +119,7 @@ export class BudgetRuntime {
       reservedTokens: input.inputEstimate + low, reportedTokens: null, reservedUsdMicros: rate ? price(rate, input.inputEstimate, low) : null,
       estimatedUsdMicros: null, rate, requestMs: 0, outcome: "running", diagnostic: null,
     };
-    return { event: recorded(entry), maxTokens: low };
+    return { event: recorded(entry, snapshot.profileId), maxTokens: low };
   }
   estimated(usage: Usage): Usage {
     const entry = this.host.snapshot().budgetEntries.find((entry) => entry.id === usage.stepId);
@@ -141,7 +145,7 @@ export class BudgetRuntime {
         if (!updates.has(entry.id)) updates.set(entry.id, { ...entry, status: "unknown", outcome: event.payload.outcome, diagnostic: "The turn ended without confirmed provider usage. Its reservation remains held; no replay or refund was inferred." });
       }
     }
-    return [...updates.values()].map(recorded);
+    return [...updates.values()].map((entry) => recorded(entry, snapshot.profileId));
   }
   legacyEvents(): EventInput[] {
     const snapshot = this.host.snapshot(), existing = new Set(snapshot.budgetEntries.map((entry) => entry.id));
@@ -162,7 +166,7 @@ export class BudgetRuntime {
         inputEstimate: usage.contextEstimate ?? null, outputLimit: null, reservedTokens: valid ? usage.totalTokens : integer(usage.contextWindow) ? usage.contextWindow : null,
         reportedTokens: valid ? usage.totalTokens : null, reservedUsdMicros: null, estimatedUsdMicros: null, rate: null, requestMs: usage.requestMs, outcome: usage.outcome,
         diagnostic: "Imported historical metering; start time/price or unknown bounds were not invented. Legacy USD remains unpriced.",
-      });
+      }, snapshot.profileId);
     });
   }
   query(query: BudgetQuery): BudgetResponse {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PROFILE_ID, type Attention, type EventInput, type Snapshot, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { type Attention, type EventInput, type Snapshot, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export function likelyQuestion(text: string): boolean {
   const visible = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
@@ -13,7 +13,7 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): Even
     if (!session || session.kind === "subagent") continue;
     const clear = () => {
       const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active).map((entry) => entry.id);
-      if (ids.length) derived.push({ event_type: "attention.cleared", profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, payload: { attentionIds: ids } });
+      if (ids.length) derived.push({ event_type: "attention.cleared", profile_id: snapshot.profileId, project_id: session.projectId, session_id: session.id, payload: { attentionIds: ids } });
     };
     if (event.event_type === "turn.started" || event.event_type === "tool.decided" || event.event_type === "question.answered" || event.event_type === "question.cancelled") { clear(); continue; }
     let kind: Attention["kind"] | undefined;
@@ -33,7 +33,7 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): Even
     if (!kind) continue;
     clear();
     const attention: Attention = { id: randomUUID(), sessionId: session.id, projectId: session.projectId, kind, reason, source, messageId, acknowledged: false, active: true, createdAt: event.timestamp };
-    derived.push({ event_type: "attention.raised", profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, payload: { attention } });
+    derived.push({ event_type: "attention.raised", profile_id: snapshot.profileId, project_id: session.projectId, session_id: session.id, payload: { attention } });
   }
   return derived;
 }

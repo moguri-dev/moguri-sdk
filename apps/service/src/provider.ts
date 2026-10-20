@@ -1,7 +1,7 @@
 import { AsyncEntry } from "@napi-rs/keyring";
 import { createModels, type AuthOperationOptions, type Credential, type CredentialStore, type Model, type Api, type ModelAuth } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { isRecord, MoguriError, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, PROFILE_ID, type ProviderState } from "../../../packages/protocol/src/index.ts";
 import { supportedThinking } from "./model-controls.ts";
 
 export interface PreparedModel { model: Model<Api>; auth: ModelAuth }
@@ -15,10 +15,11 @@ export interface ProviderAdapter {
   prepare(modelId: string, signal: AbortSignal): Promise<PreparedModel>;
 }
 export class KeyringCredentials implements CredentialStore {
+  constructor(private readonly profileId: string = PROFILE_ID) {}
   private chain: Promise<unknown> = Promise.resolve();
   private entry(providerId: string): AsyncEntry {
     if (providerId !== "github-copilot") throw new Error("Unsupported secret namespace.");
-    return new AsyncEntry("dev.moguri.profile.default", providerId, { linux: { store: "secret-service" } });
+    return new AsyncEntry(`dev.moguri.profile.${this.profileId}`, providerId, { linux: { store: "secret-service" } });
   }
   private async load(providerId: string, signal?: AbortSignal): Promise<Credential | undefined> {
     const secret = await this.entry(providerId).getPassword(signal);

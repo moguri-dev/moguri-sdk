@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  defaultBoard, MoguriError, PROFILE_ID, type BoardConfig, type CommandResult, type EventInput,
+  defaultBoard, MoguriError, type BoardConfig, type CommandResult, type EventInput,
   type IssueBoard, type LocalIssue, type Project, type Snapshot, type WorkspaceCommand, type WorkspaceQuery, type WorkspaceResponse,
 } from "../../../packages/protocol/src/index.ts";
 import { DependencyCache, type DependencyCacheOptions } from "./dependency-cache.ts";
@@ -28,7 +28,7 @@ export class WorkspaceRuntime {
   private linear = new Map<string, AbortController>();
   constructor(private readonly host: WorkspaceHost, store: EventStore, stateDir: string, private readonly options: WorkspaceOptions = {}) {
     this.cache = new DependencyCache(store, stateDir, options.cache);
-    this.integrations = new ProjectIntegrations(options.integrations?.vault ?? new McpKeychain("dev.moguri.profile.default.integrations"), options.integrations);
+    this.integrations = new ProjectIntegrations(options.integrations?.vault ?? new McpKeychain(`dev.moguri.profile.${this.host.snapshot().profileId}.integrations`), options.integrations);
   }
   start(): void {
     if (this.timer) return;
@@ -56,10 +56,10 @@ export class WorkspaceRuntime {
     if (!board.columns.some((column) => column.id === id)) throw new MoguriError("issue_phase", "Choose an existing phase from this project's board.");
   }
   private saved(issue: LocalIssue, actor: "user" | "github" | "linear" = "user"): EventInput {
-    return { event_type: "issue.saved", profile_id: PROFILE_ID, project_id: issue.projectId, payload: { issue, actor } };
+    return { event_type: "issue.saved", profile_id: this.host.snapshot().profileId, project_id: issue.projectId, payload: { issue, actor } };
   }
   private initialBoard(board: IssueBoard): EventInput[] {
-    return this.host.snapshot().boards.some((entry) => entry.projectId === board.projectId) ? [] : [{ event_type: "board.saved", profile_id: PROFILE_ID, project_id: board.projectId, payload: { board } }];
+    return this.host.snapshot().boards.some((entry) => entry.projectId === board.projectId) ? [] : [{ event_type: "board.saved", profile_id: this.host.snapshot().profileId, project_id: board.projectId, payload: { board } }];
   }
   private due(issue: LocalIssue): boolean {
     return !issue.archived && !!issue.pullRequest && issue.pullRequest.state !== "merged" && (!issue.pullRequest.checkedAt || Date.now() - Date.parse(issue.pullRequest.checkedAt) >= 120_000);
@@ -126,7 +126,7 @@ export class WorkspaceRuntime {
         if (config.linear.enabled && !/^[A-Za-z0-9-]{1,128}$/.test(config.linear.teamId)) throw new MoguriError("linear_team", "Choose the exact Linear team UUID before enabling import.");
         this.linear.get(board.projectId)?.abort();
         this.prAborts.get(board.projectId)?.abort();
-        return finish([{ event_type: "board.saved", profile_id: PROFILE_ID, project_id: board.projectId, payload: { board: { ...config, projectId: board.projectId, revision: board.revision + 1 } } }], { revision: board.revision + 1 });
+        return finish([{ event_type: "board.saved", profile_id: this.host.snapshot().profileId, project_id: board.projectId, payload: { board: { ...config, projectId: board.projectId, revision: board.revision + 1 } } }], { revision: board.revision + 1 });
       }
       case "issue.create": {
         const board = this.board(command.projectId); this.phase(board, command.phaseId);
@@ -174,7 +174,7 @@ export class WorkspaceRuntime {
         const id = this.host.job(command.type, project.id, async (signal, progress) => {
           const receipt = { ...await (command.type === "cache.install" ? this.cache.install(project, command.manager, command.expectedDigest, signal, progress) : this.cache.prepare(project, command.manager, command.expectedDigest, signal, progress)), workspaceId: command.workspaceId ?? null };
           signal.throwIfAborted();
-          this.host.commit([{ event_type: "cache.prepared", profile_id: PROFILE_ID, project_id: project.id, payload: { receipt } }]);
+          this.host.commit([{ event_type: "cache.prepared", profile_id: this.host.snapshot().profileId, project_id: project.id, payload: { receipt } }]);
           return receipt;
         }, () => { if (command.type === "cache.install") { this.busyRoots.delete(rootKey); this.host.wake(); } }, command.workspaceId);
         return finish([], { id });

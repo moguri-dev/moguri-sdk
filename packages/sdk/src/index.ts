@@ -1,6 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, Profile } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -66,6 +66,32 @@ export class MoguriSdk extends TransportClient {
     refresh: () => this.command({ type: "provider.refresh" }),
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
     clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
+  };
+  readonly profiles = {
+    list: () => this.query({ type: "profile.list" }),
+    create: (name: string, color: string | null = null) => this.command({ type: "profile.create", name, color, confirm: true }),
+    update: (targetProfileId: string, changes: Pick<Partial<Profile>, "name" | "color">, expectedRevision: number) => this.command({ type: "profile.update", targetProfileId, expectedRevision, changes }),
+    retry: (targetProfileId: string, expectedRevision: number, confirm: true) => this.command({ type: "profile.retry", targetProfileId, expectedRevision, confirm }),
+    stop: (targetProfileId: string) => this.command({ type: "profile.cancel", targetProfileId }),
+    defaults: (values: ControlDefaults, expectedRevision: number) => this.command({ type: "profile.global.defaults", values, expectedRevision }),
+    globalBudget: (limit: BudgetLimit | null, expectedRevision: number, confirmRisk: true) => this.command({ type: "profile.global.budget", limit, expectedRevision, confirmRisk }),
+    wait: async (profileId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Profile> => {
+      const deadline = Date.now() + (options.timeoutMs ?? 10_000);
+      while (Date.now() < deadline) {
+        options.signal?.throwIfAborted();
+        const profile = (await this.query({ type: "profile.list" })).catalog.profiles.find((profile) => profile.id === profileId);
+        if (!profile) throw new ClientError("profile_missing", "Profile was not registered. No Default fallback was used.");
+        if (profile.status === "ready") return profile;
+        if (profile.status === "partial") throw new ClientError("profile_partial", profile.diagnostic ?? "Inspect incomplete profile setup before explicitly retrying.");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      throw new ClientError("profile_timeout", "Profile wait timed out. Setup was not cancelled or retried automatically; inspect its actual status.");
+    },
+    open: async (profileId: string): Promise<MoguriSdk> => {
+      const profile = (await this.query({ type: "profile.list" })).catalog.profiles.find((profile) => profile.id === profileId);
+      if (!profile || profile.status !== "ready") throw new ClientError("profile_unready", profile?.diagnostic ?? "Choose a ready registered profile. No Default fallback was used.");
+      return new MoguriSdk(this.connection, this.resolveConnection, profileId).ready();
+    },
   };
   readonly budgets = {
     status: (sessionId: string) => this.query({ type: "budget.status", sessionId }),

@@ -1,8 +1,9 @@
-import { isRecord, PROFILE_ID, PROTOCOL_VERSION, type Command, type CommandEnvelope, type CommandResult, type Connection, type Snapshot, type StoredEvent } from "../../protocol/src/index.ts";
+import { GLOBAL_PROFILE_ID, isRecord, PROFILE_ID, PROTOCOL_VERSION, type Command, type CommandEnvelope, type CommandResult, type Connection, type Snapshot, type StoredEvent } from "../../protocol/src/index.ts";
 
 export interface ClientState { snapshot: Snapshot | null; status: "connecting" | "connected" | "disconnected"; error: string | null; events: StoredEvent[] }
-function isSnapshot(value: unknown): value is Snapshot {
+function isSnapshot(value: unknown, profileId: string): value is Snapshot {
   return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && typeof value.seq === "number" &&
+    value.profileId === profileId &&
     Array.isArray(value.projects) && Array.isArray(value.sessions) && isRecord(value.provider) && isRecord(value.policy);
 }
 function isEvent(value: unknown): value is StoredEvent {
@@ -19,7 +20,9 @@ export class MoguriClient {
   private refreshAgain = false;
   private after = 0;
   private backoff = 300;
-  constructor(public connection: Connection, private readonly resolveConnection?: () => Promise<Connection>) {}
+  constructor(public connection: Connection, protected readonly resolveConnection?: () => Promise<Connection>, readonly profileId: string = PROFILE_ID) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(profileId) || profileId === GLOBAL_PROFILE_ID) throw new ClientError("profile_scope", "Choose one explicit user profile. No Default fallback was used.");
+  }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   getState = () => this.state;
   private update(change: Partial<ClientState>): void { this.state = { ...this.state, ...change }; for (const listener of this.listeners) listener(); }
@@ -30,7 +33,7 @@ export class MoguriClient {
   }
   protected async request(path: string, body?: unknown): Promise<unknown> {
     const response = await fetch(`${this.connection.baseUrl}${path}`, {
-      method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${this.connection.token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+      method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${this.connection.token}`, "X-Moguri-Profile": this.profileId, ...(body ? { "Content-Type": "application/json" } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20_000),
     });
     const result: unknown = await response.json();
@@ -43,7 +46,7 @@ export class MoguriClient {
   async command(command: Command, id: string = crypto.randomUUID()): Promise<CommandResult> {
     if (this.state.status !== "connected") throw new ClientError("disconnected", "Reconnect to Moguri before changing state. Your local edit has not been sent.");
     try {
-      const envelope: CommandEnvelope = { id, profileId: PROFILE_ID, command };
+      const envelope: CommandEnvelope = { id, profileId: this.profileId, command };
       const result = await this.request("/v1/commands", envelope);
       await this.refresh();
       if (!isRecord(result)) throw new Error("Invalid command response.");
@@ -63,7 +66,7 @@ export class MoguriClient {
       do {
         this.refreshAgain = false;
         const snapshot = await this.request("/v1/snapshot");
-        if (!isSnapshot(snapshot)) {
+        if (!isSnapshot(snapshot, this.profileId)) {
           throw new Error("The service protocol is incompatible. Update both clients.");
         }
         const projects = new Set(snapshot.projects.map((project) => project.id));
@@ -83,18 +86,19 @@ export class MoguriClient {
     this.update({ status: "connecting" });
     const socket = new WebSocket(this.connection.wsUrl);
     this.socket = socket;
-    socket.onopen = () => socket.send(JSON.stringify({ type: "authenticate", protocolVersion: PROTOCOL_VERSION, token: this.connection.token, after: this.after }));
+    socket.onopen = () => socket.send(JSON.stringify({ type: "authenticate", protocolVersion: PROTOCOL_VERSION, token: this.connection.token, after: this.after, profileId: this.profileId }));
     socket.onmessage = (frame) => {
       try {
         const message: unknown = JSON.parse(String(frame.data));
         if (!isRecord(message)) throw new Error("Invalid event frame.");
         if (message.type === "ready") {
           const snapshot = message.snapshot;
-          if (!isSnapshot(snapshot)) throw new Error("Unsupported event protocol.");
+          if (!isSnapshot(snapshot, this.profileId)) throw new Error("Unsupported event protocol or profile scope.");
           this.after = snapshot.seq;
           this.backoff = 300;
           this.update({ status: "connected", error: null, snapshot });
         } else if (message.type === "event" && isEvent(message.event)) {
+          if (message.event.profile_id !== this.profileId) throw new Error("A foreign-profile event was rejected.");
           this.after = Math.max(this.after, message.event.seq);
           const deletedSession = message.event.event_type === "session.deleted" ? message.event.payload.deletedSessionId : null;
           const deletedProject = message.event.event_type === "project.removed" ? message.event.payload.deletedProjectId : null;

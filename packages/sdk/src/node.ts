@@ -22,12 +22,12 @@ export function createRuntime(options: ServiceOptions) {
     },
   });
 }
-export async function connectMoguri(options: { stateDir?: string; runtime?: string; autoStart?: boolean } = {}): Promise<MoguriSdk> {
+export async function connectMoguri(options: { stateDir?: string; runtime?: string; autoStart?: boolean; profileId?: string } = {}): Promise<MoguriSdk> {
   const stateDir = options.stateDir ?? stateDirectory();
   const connection = options.autoStart === false ? await readConnection(stateDir) : await ensureConnection({
     stateDir, runtime: options.runtime, servicePath: fileURLToPath(new URL(source ? "../../../apps/service/src/main.ts" : "../service.mjs", import.meta.url)),
   });
-  return new MoguriSdk(connection, () => readConnection(stateDir)).ready();
+  return new MoguriSdk(connection, () => readConnection(stateDir), options.profileId).ready();
 }
 export async function stopMoguriService(stateDir = stateDirectory()): Promise<void> {
   const path = join(stateDir, "connection.json");

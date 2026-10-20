@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ConfigurationSpecSchema, EngagementCommandSchema, EngagementQuerySchema, SettingsSchema, ProjectSettingsSchema,
-  isRecord, MoguriError, parse, PROFILE_ID, SYSTEM_PROMPT_WARNING,
+  isRecord, MoguriError, parse, SYSTEM_PROMPT_WARNING,
   type CapabilityEntry, type CommandResult, type ConfigurationProposal, type ConfigurationSpec, type Controls,
   type EngagementCommand, type EngagementQuery, type EngagementResponse, type EventInput, type Session, type Snapshot, type SuggestionPreview, type SuggestionSource, type UserSettings, type ResolvedControls, type Project,
 } from "../../../packages/protocol/src/index.ts";
@@ -119,7 +119,7 @@ export class Engagement {
       baseRevision: target.revision, status: "pending", createdAt: new Date().toISOString(), evidence,
       workspaceId: spec.target === "repo-instructions" ? session.workspaceId : null,
     };
-    const events: EventInput[] = [{ event_type: "configuration.proposed", profile_id: PROFILE_ID, project_id: proposal.projectId, payload: { proposal } }];
+    const events: EventInput[] = [{ event_type: "configuration.proposed", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { proposal } }];
     if (finish) return finish(events, { id: proposal.id });
     this.host.commit(events); return { id: proposal.id };
   }
@@ -138,14 +138,14 @@ export class Engagement {
     const controls = { ...(parent?.controls ?? startup!.controls), autonomy: "Manual" as const };
     if (run) this.host.admit(controls);
     const id = randomUUID();
-    const events: EventInput[] = [{ event_type: "session.created", profile_id: PROFILE_ID, project_id: scope, session_id: id, payload: {
+    const events: EventInput[] = [{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: scope, session_id: id, payload: {
       title: context ? "Moguri suggestions" : "Moguri settings", kind: "metachat", controls, ...(startup ? { defaults: startup.defaults } : {}), ...(parent ? { parentSessionId: parent.id } : {}),
       ...(sources ? { suggestionSources: sources } : {}),
       workspaceId: parent?.workspaceId ?? null,
       ...(context ? { contextDigest: this.store.putBlob(JSON.stringify([{ role: "user", content: context, timestamp: Date.now() }])) } : {}),
     } }];
-    if (run) events.push({ event_type: "queue.enqueued", profile_id: PROFILE_ID, project_id: scope, session_id: id, payload: { item: { id: randomUUID(), text: prompt, attachments: [], delivery: "queue" } } });
-    else if (prompt) events.push({ event_type: "draft.saved", profile_id: PROFILE_ID, project_id: scope, session_id: id, payload: { text: prompt, attachments: [] } });
+    if (run) events.push({ event_type: "queue.enqueued", profile_id: this.snapshot().profileId, project_id: scope, session_id: id, payload: { item: { id: randomUUID(), text: prompt, attachments: [], delivery: "queue" } } });
+    else if (prompt) events.push({ event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: scope, session_id: id, payload: { text: prompt, attachments: [] } });
     const result = finish(events, { id }); if (run) this.host.wake(); return result;
   }
   async query(query: EngagementQuery): Promise<EngagementResponse> {
@@ -167,7 +167,7 @@ export class Engagement {
     if (command.type === "attention.acknowledge") {
       const entries = command.attentionIds.map((id) => this.snapshot().attention.find((entry) => entry.id === id));
       if (entries.some((entry) => !entry)) throw new MoguriError("attention_missing", "An attention item was removed or is outside the profile.");
-      return finish([{ event_type: "attention.acknowledged", profile_id: PROFILE_ID, payload: { attentionIds: command.attentionIds } }]);
+      return finish([{ event_type: "attention.acknowledged", profile_id: this.snapshot().profileId, payload: { attentionIds: command.attentionIds } }]);
     }
     const proposal = this.snapshot().configurationProposals.find((proposal) => proposal.id === command.proposalId);
     if (!proposal || proposal.status !== "pending" || proposal.contentDigest !== command.expectedDigest) throw new MoguriError("configuration_stale", "Review the current pending proposal before deciding.", 409);
@@ -187,17 +187,17 @@ export class Engagement {
       if (spec.target === "global") events.push(this.host.settingsEvent(parse(SettingsSchema, { ...this.snapshot().settings.values, [spec.section]: spec.value }), proposal.baseRevision!, true));
       else if (spec.target === "project") {
         const project = this.project(contextSession); const configuration = this.projects.configuration(project.id);
-        events.push({ event_type: "project.configured", profile_id: PROFILE_ID, project_id: project.id, payload: { configuration: { ...configuration, revision: configuration.revision + 1, values: parse(ProjectSettingsSchema, { ...configuration.values, [spec.section]: spec.value }) } } });
+        events.push({ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: project.id, payload: { configuration: { ...configuration, revision: configuration.revision + 1, values: parse(ProjectSettingsSchema, { ...configuration.values, [spec.section]: spec.value }) } } });
       } else if (spec.target === "policy") {
         const allowedEnvs = this.snapshot().policy.allowedEnvs.filter((env) => Array.isArray(spec.value) && spec.value.includes(env));
         const values = spec.value;
         if (!Array.isArray(values)) throw new MoguriError("configuration_policy", "Invalid environment policy.");
         for (const env of ["Local", "Sandbox", "Remote"] as const) if (values.includes(env) && !allowedEnvs.includes(env)) allowedEnvs.push(env);
-        events.push({ event_type: "policy.updated", profile_id: PROFILE_ID, payload: { policy: { revision: this.snapshot().policy.revision + 1, allowedEnvs }, finishingTurnIds: this.snapshot().sessions.filter((session) => session.turnId && session.controls.env === "Local").map((session) => session.turnId!) } });
+        events.push({ event_type: "policy.updated", profile_id: this.snapshot().profileId, payload: { policy: { revision: this.snapshot().policy.revision + 1, allowedEnvs }, finishingTurnIds: this.snapshot().sessions.filter((session) => session.turnId && session.controls.env === "Local").map((session) => session.turnId!) } });
       } else if (spec.target === "skill") {
         const metadata = this.host.skill(String(spec.value)); const existing = this.snapshot().registry.find((entry) => entry.projectId === proposal.projectId && entry.kind === "skill" && entry.name === spec.section);
         const entry: CapabilityEntry = { id: existing?.id ?? randomUUID(), projectId: proposal.projectId, kind: "skill", name: metadata.name, description: metadata.description, contentDigest: this.store.putBlob(String(spec.value)), enabled: false, revision: existing ? existing.revision + 1 : 0, source: "approved-proposal", createdAt: new Date().toISOString() };
-        events.push({ event_type: "capability.saved", profile_id: PROFILE_ID, project_id: proposal.projectId, payload: { entry } });
+        events.push({ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { entry } });
       } else {
         const project = this.project(contextSession); const before = current.before;
         if (!isRecord(before) || typeof before.path !== "string" || typeof before.digest !== "string") throw new MoguriError("configuration_base", "Instruction base is invalid.");
@@ -209,7 +209,7 @@ export class Engagement {
         writtenInstructions = before.path;
       }
     }
-    events.push({ event_type: "configuration.decided", profile_id: PROFILE_ID, project_id: proposal.projectId, payload: { proposalId: proposal.id, approve: command.approve, actor: "user" } });
+    events.push({ event_type: "configuration.decided", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { proposalId: proposal.id, approve: command.approve, actor: "user" } });
     let result: CommandResult;
     try { result = finish(events); }
     catch (error) {

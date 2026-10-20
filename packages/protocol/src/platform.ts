@@ -13,6 +13,8 @@ import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type Manage
 import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type ArtifactMaterializationPreview } from "./artifacts.ts";
 import { QuestionCommandSchema, type UserQuestion } from "./questions.ts";
 import { BudgetCommandSchema, BudgetQuerySchema, BudgetSettingsSchema, type BudgetResponse, type BudgetEntry, type BudgetLimit } from "./budgets.ts";
+import { ProfileCommandSchema, ProfileQuerySchema, type ProfileResponse } from "./profiles.ts";
+export * from "./profiles.ts";
 export * from "./budgets.ts";
 export * from "./questions.ts";
 export * from "./artifacts.ts";
@@ -95,6 +97,7 @@ export const PlatformCommandSchema = Type.Union([
   ArtifactCommandSchema,
   QuestionCommandSchema,
   BudgetCommandSchema,
+  ProfileCommandSchema,
   object({ type: Type.Literal("settings.update"), expectedRevision: revision, settings: SettingsSchema, acknowledgePromptRisk: Type.Boolean() }),
   object({ type: Type.Literal("settings.reset"), expectedRevision: revision, section }),
   object({ type: Type.Literal("models.token.set"), endpointId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
@@ -128,6 +131,7 @@ export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
   BudgetQuerySchema,
+  ProfileQuerySchema,
   object({ type: Type.Literal("prompt.preview"), sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("memory.search"), projectId: id, workspaceId: Type.Optional(id), text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
   object({ type: Type.Literal("memory.graph"), projectId: id, workspaceId: Type.Optional(id), path: Type.String({ maxLength: 4096 }) }),
@@ -191,6 +195,7 @@ export interface VoiceStatus {
 }
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
+  | ProfileResponse
   | BudgetResponse
   | WorkspaceResponse
   | SessionWorkspaceResponse

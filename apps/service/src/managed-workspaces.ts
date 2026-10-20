@@ -3,10 +3,11 @@ import { mkdir, lstat, realpath } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 import {
-  MoguriError, PROFILE_ID, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
+  MoguriError, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
   type ManagedWorkspaceCommand, type ManagedWorkspaceQuery, type ManagedWorkspaceResponse, type EventInput, type CommandResult, type CapabilityJob, type GitWorkspaceRegistration,
 } from "../../../packages/protocol/src/index.ts";
 import { runProgram } from "./program.ts";
+import { profileIndexId } from "./store.ts";
 import { listProjectFiles, readProjectFile } from "./files.ts";
 import { assertFolderAccess, folderPolicy, matchesFolder } from "./project-policy.ts";
 import type { ProjectService } from "./project-service.ts";
@@ -34,7 +35,7 @@ export class ManagedWorkspaces {
     return session;
   }
   private event(workspace: ManagedWorkspace): EventInput {
-    return { event_type: "workspace.saved", profile_id: PROFILE_ID, project_id: workspace.projectId, payload: { workspace } };
+    return { event_type: "workspace.saved", profile_id: this.host.snapshot().profileId, project_id: workspace.projectId, payload: { workspace } };
   }
   private saved(id: string, changes: Partial<ManagedWorkspace>): ManagedWorkspace {
     const current = this.workspace(id), value = { ...current, ...changes, revision: current.revision + 1 };
@@ -104,7 +105,7 @@ export class ManagedWorkspaces {
   }
   indexScope(session: Pick<Session, "projectId" | "workspaceId">) {
     const project = this.project(session);
-    return { id: session.workspaceId ?? project.id, path: project.path };
+    return { id: profileIndexId(this.host.snapshot().profileId, session.workspaceId ?? project.id), path: project.path };
   }
   leaseKey(session: Session): string | null { return session.projectId ? `${session.projectId}:${session.workspaceId ?? "base"}` : null; }
   async assert(session: Pick<Session, "projectId" | "workspaceId">): Promise<void> {
@@ -159,7 +160,7 @@ export class ManagedWorkspaces {
       if (session.turnId || session.messages.length || session.queue.length || session.status === "archived") throw new MoguriError("workspace_session", "Bind only a fresh idle session. Existing conversation/queued intent is not silently moved to another branch.", 409);
       if (command.workspaceId && session.controls.env !== "Local") throw new MoguriError("workspace_env", "Managed worktree location is currently qualified for Local only. No remote mapping is inferred.", 409);
       this.project({ projectId: session.projectId, workspaceId: command.workspaceId });
-      return finish([{ event_type: "session.workspace_bound", profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, payload: { workspaceId: command.workspaceId } }], { revision: session.revision + 1 });
+      return finish([{ event_type: "session.workspace_bound", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { workspaceId: command.workspaceId } }], { revision: session.revision + 1 });
     }
     if (!this.host.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("workspace_env", "Local Git workspace maintenance is excluded by allowed-env policy. No protected-environment fallback.", 403);
     if (command.type === "workspace.create") {
@@ -195,8 +196,8 @@ export class ManagedWorkspaces {
         }
       }, (job) => {
         workspace = { ...workspace, jobId: job.id };
-        finish([this.event(workspace), { event_type: "change_set.saved", profile_id: PROFILE_ID, project_id: project.id, payload: { changeSet: { id: changeSetId, projectId: project.id, workspaceId: id, branch: workspace.branch, baseCommit, issueId: command.issueId ?? null, prUrl, createdAt: workspace.createdAt } } },
-          { event_type: "job.started", profile_id: PROFILE_ID, project_id: project.id, payload: { job } }], { id });
+        finish([this.event(workspace), { event_type: "change_set.saved", profile_id: this.host.snapshot().profileId, project_id: project.id, payload: { changeSet: { id: changeSetId, projectId: project.id, workspaceId: id, branch: workspace.branch, baseCommit, issueId: command.issueId ?? null, prUrl, createdAt: workspace.createdAt } } },
+          { event_type: "job.started", profile_id: this.host.snapshot().profileId, project_id: project.id, payload: { job } }], { id });
       });
       return { id };
     }
@@ -226,7 +227,7 @@ export class ManagedWorkspaces {
         this.saved(workspace.id, { status: "partial", diagnostic: "Removal or cancellation was partial. Root/branch were not force-deleted; inspect and reconcile." });
         throw new MoguriError("workspace_partial", error instanceof Error ? error.message : "Worktree removal partial.", 409);
       }
-    }, (job) => finish([this.event({ ...workspace, status: "removing", revision: workspace.revision + 1, jobId: job.id }), { event_type: "job.started", profile_id: PROFILE_ID, project_id: project.id, payload: { job } }], { id: workspace.id }));
+    }, (job) => finish([this.event({ ...workspace, status: "removing", revision: workspace.revision + 1, jobId: job.id }), { event_type: "job.started", profile_id: this.host.snapshot().profileId, project_id: project.id, payload: { job } }], { id: workspace.id }));
     return { id: workspace.id };
   }
   ownedRoot(path: string): ManagedWorkspace | undefined {

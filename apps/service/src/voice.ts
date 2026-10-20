@@ -25,6 +25,7 @@ export interface SpeechOptions {
   prefixArgs?: string[];
   model?: typeof NEMOTRON_MODEL;
   fetch?: typeof globalThis.fetch;
+  modelDirectory?: string;
 }
 export class LocalDictation {
   private readonly executable: string;
@@ -32,10 +33,10 @@ export class LocalDictation {
   private readonly modelPath: string;
   private verified = "";
   private active = new Map<string, { child: ChildProcess | null; stopping: boolean; terminate?: (signal: NodeJS.Signals) => void }>();
-  constructor(private readonly stateDir: string, private readonly options: SpeechOptions = {}) {
+  constructor(stateDir: string, private readonly options: SpeechOptions = {}) {
     this.executable = options.executable ?? fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../../../.native/speech/bin/nemo-speech" : "./native/speech/bin/nemo-speech", import.meta.url));
     this.model = options.model ?? NEMOTRON_MODEL;
-    this.modelPath = join(stateDir, "speech-models", this.model.filename);
+    this.modelPath = join(options.modelDirectory ?? join(stateDir, "speech-models"), this.model.filename);
   }
   async status(): Promise<VoiceStatus> {
     let runtimeReady = false;
@@ -52,7 +53,7 @@ export class LocalDictation {
   }
   async download(signal: AbortSignal, progress: (message: string) => void): Promise<{ installed: boolean; modelId: string }> {
     await mkdir(dirname(this.modelPath), { recursive: true, mode: 0o700 });
-    const info = await statfs(this.stateDir);
+    const info = await statfs(dirname(this.modelPath));
     if (info.bavail * info.bsize < this.model.bytes * 2) throw new MoguriError("speech_disk", "Free at least twice the model download size before installing it.");
     if ((await this.status()).modelReady) {
       await this.verify(signal);

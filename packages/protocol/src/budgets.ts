@@ -40,10 +40,11 @@ export interface BudgetTotals {
 }
 export interface BudgetStatus {
   sessionId: string; ownerSessionId: string; totals: BudgetTotals; profileTotals: BudgetTotals;
-  limits: Array<{ scope: "session" | "profile"; tokens: number | null; usd: number | null }>;
+  limits: Array<{ scope: "session" | "profile" | "global"; tokens: number | null; usd: number | null }>;
   remainingTokens: number | null; remainingUsd: number | null;
   basis: "estimate"; warning: string; diagnostics: string[]; rate: BudgetRate | null;
 }
+export interface GlobalBudgetCapacity { limit: BudgetLimit | null; chargedTokens: number | null; chargedUsdMicros: number | null }
 export const BudgetCommandSchema = object({
   type: Type.Literal("budget.policy"), expectedRevision: revision, limit: Type.Union([BudgetLimitSchema, Type.Null()]), confirmRisk: Type.Literal(true),
 });

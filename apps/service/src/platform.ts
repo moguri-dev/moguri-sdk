@@ -3,7 +3,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import {
-  defaultSettings, isRecord, MoguriError, PROFILE_ID, SYSTEM_PROMPT_WARNING,
+  defaultSettings, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
   defaultBoard,
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
@@ -11,11 +11,12 @@ import {
   isManagedWorkspaceCommand, isManagedWorkspaceQuery,
   isArtifactCommand, isArtifactQuery, isQuestionCommand,
   isBudgetCommand, isBudgetQuery,
+  isProfileCommand, isProfileQuery,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
 import { RepositoryMemory } from "./memory.ts";
-import { McpGateway, type SecretVault } from "./gateway.ts";
+import { McpGateway, McpKeychain, type SecretVault } from "./gateway.ts";
 import { LocalDictation, type SpeechOptions } from "./voice.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
 import { validateSettings } from "./permissions.ts";
@@ -56,6 +57,9 @@ export interface PlatformHost {
   remoteStatus(): RemoteReadiness;
   remoteCommand(command: ExecutionCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   repositoryContext(session: Session): Promise<string>;
+  globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
+  foreignRootBusy(root: string): boolean;
+  sharedGlobals: boolean;
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault } }
 export class PlatformRuntime {
@@ -71,11 +75,11 @@ export class PlatformRuntime {
   readonly budgets: BudgetRuntime;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
-    this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events });
+    this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
     this.memory = new RepositoryMemory(store);
-    this.gateway = new McpGateway(options.vault, options.mcpWorkerPath, { oauth: options.oauth,
+    this.gateway = new McpGateway(options.vault ?? new McpKeychain(`dev.moguri.profile.${store.profileId}.mcp`), options.mcpWorkerPath, { oauth: options.oauth,
       authorized: (id) => this.snapshot().oauthAuthorizations.some((authorization) => authorization.id === id && authorization.state === "connected"),
-      changed: (authorization) => this.host.commit([{ event_type: "mcp.oauth_changed", profile_id: PROFILE_ID, project_id: authorization.projectId, payload: { authorization } }]),
+      changed: (authorization) => this.host.commit([{ event_type: "mcp.oauth_changed", profile_id: this.snapshot().profileId, project_id: authorization.projectId, payload: { authorization } }]),
     });
     this.voice = new LocalDictation(stateDir, options.speech);
     this.artifacts = new ArtifactRuntime(store, {
@@ -84,6 +88,7 @@ export class PlatformRuntime {
       assertRoot: (projectId, workspaceId) => this.managed.assert({ projectId, workspaceId }),
       projects: () => this.sessions.projects,
       job: (projectId, workspaceId, execute, start, settled) => this.job("project.artifacts.materialize", projectId, null, execute, settled, start, workspaceId ?? undefined),
+      foreignRootBusy: host.foreignRootBusy,
     });
     this.managed = new ManagedWorkspaces(stateDir, {
       snapshot: () => this.snapshot(), project: (id) => this.project(id), commit: (events) => this.host.commit(events), wake: host.wake,
@@ -93,7 +98,7 @@ export class PlatformRuntime {
       snapshot: () => this.snapshot(), project: (id, workspaceId) => this.managed.project({ projectId: id, workspaceId: workspaceId ?? null }), commit: (events) => this.host.commit(events),
       job: (kind, projectId, execute, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, undefined, workspaceId), wake: () => this.host.wake(),
       closing: host.closingProject,
-      publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId),
+      publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path),
     }, store, stateDir, options);
     this.sessions = new SessionWorkspace({
       snapshot: () => this.snapshot(), commit: (events, forget) => this.host.commit(events, forget),
@@ -103,7 +108,7 @@ export class PlatformRuntime {
       startup: host.startup,
       retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session) => this.managed.project(session),
-      rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId),
+      rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
@@ -133,10 +138,10 @@ export class PlatformRuntime {
   recover(): void {
     this.managed.recover();
     const oauth = this.snapshot().oauthAuthorizations.filter((value) => ["waiting", "exchanging"].includes(value.state));
-    if (oauth.length) this.host.commit(oauth.map((authorization) => ({ event_type: "mcp.oauth_changed", profile_id: PROFILE_ID, project_id: authorization.projectId, payload: { authorization: { ...authorization, state: "failed", authorizationUrlReady: false, diagnostic: "Service restarted. OAuth callbacks/verifiers were not replayed; reconnect explicitly." } } })));
+    if (oauth.length) this.host.commit(oauth.map((authorization) => ({ event_type: "mcp.oauth_changed", profile_id: this.snapshot().profileId, project_id: authorization.projectId, payload: { authorization: { ...authorization, state: "failed", authorizationUrlReady: false, diagnostic: "Service restarted. OAuth callbacks/verifiers were not replayed; reconnect explicitly." } } })));
     const interrupted = this.snapshot().jobs.filter((job) => job.status === "running" || job.status === "waiting_input");
     if (interrupted.length) this.host.commit(interrupted.map((job) => ({
-      event_type: "job.finished", profile_id: PROFILE_ID, project_id: job.projectId, session_id: job.sessionId,
+      event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
       payload: { jobId: job.id, status: "partial", resultDigest: null, error: "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed." },
     })));
     this.workspace.start();
@@ -185,6 +190,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isProfileQuery(query)) throw new MoguriError("profile_authority", "Profile registry queries require the root service authority, not a profile fallback.", 409);
     if (isBudgetQuery(query)) return this.budgets.query(query);
     if (isArtifactQuery(query)) return this.artifacts.query(query);
     if (isManagedWorkspaceQuery(query)) return this.managed.query(query);
@@ -285,7 +291,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     this.budgets.validateSettings(settings);
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
     const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote]);
-    return { event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
+    return { event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
   }
   private skill(content: string) {
     const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
@@ -303,17 +309,17 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (projectId && this.host.closingProject(projectId)) throw new MoguriError("project_removing", "No new job can start while this project is being removed.", 409);
     const id = randomUUID();
     const job: CapabilityJob = { id, kind, projectId, sessionId, workspaceId: workspaceId ?? (sessionId ? this.session(sessionId).workspaceId : null), parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
-    if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: { job } }]);
+    if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job } }]);
     const abort = new AbortController();
-    const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300) } }]);
+    const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300) } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
       abort.signal.throwIfAborted();
-      this.host.commit([{ event_type: "job.finished", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null } }]);
+      this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null } }]);
     }).catch((error: unknown) => {
       const partial = error instanceof MoguriError && ["install_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted;
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
       console.error(`Moguri capability ${kind} (${id}) ${partial ? "partial" : cancelled ? "cancelled" : "failed"}:`, error instanceof Error ? error.message : "Unknown capability error");
-      this.host.commit([{ event_type: "job.finished", profile_id: PROFILE_ID, project_id: projectId, session_id: sessionId, payload: {
+      this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: {
         jobId: id, status: partial ? "partial" : cancelled ? "cancelled" : "failed", resultDigest: null,
         error: error instanceof MoguriError ? error.message : error instanceof Error && error.name === "AbortError" ? "Capability cancelled; no automatic retry." : "Capability failed. Check the configured runtime, file permissions and connection; no success was recorded.",
       } }]);
@@ -322,11 +328,12 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isProfileCommand(command)) throw new MoguriError("profile_authority", "Profile registry actions require the root service authority.", 409);
     if (isBudgetCommand(command)) {
       const policy = this.snapshot().budgetPolicy;
       if (policy.revision !== command.expectedRevision) throw new MoguriError("budget_policy_changed", "Profile budget policy changed. Review the current limits before editing.", 409);
       this.budgets.validateLimit(command.limit);
-      const result = finish([{ event_type: "budget.policy_changed", profile_id: PROFILE_ID, payload: { revision: policy.revision + 1, limit: command.limit } }], { revision: policy.revision + 1 });
+      const result = finish([{ event_type: "budget.policy_changed", profile_id: this.snapshot().profileId, payload: { revision: policy.revision + 1, limit: command.limit } }], { revision: policy.revision + 1 });
       this.host.wake(); return result;
     }
     if (isQuestionCommand(command)) throw new MoguriError("question_authority", "Question answers must pass the authoritative owning-turn controller.", 409);
@@ -345,9 +352,11 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "settings.reset": {
         const settings = command.type === "settings.update" ? command.settings : structuredClone(snapshot.settings.values);
         if (command.type === "settings.reset") {
+          const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
           if (command.section === "all") Object.assign(settings, defaults);
           else Object.assign(settings, { [command.section]: defaults[command.section] });
+          if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }
         const event = this.settingsEvent(settings, command.expectedRevision, command.type === "settings.reset" || command.acknowledgePromptRisk);
         const result = finish([event], { revision: event.payload.revision });
@@ -363,7 +372,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "memory.remember": {
         this.project(command.projectId);
         const entry = this.entry(command.projectId, "memory", "Coding style", "User-authored project knowledge", command.text, "user", true);
-        return finish([{ event_type: "capability.saved", profile_id: PROFILE_ID, project_id: entry.projectId, payload: { entry } }], { id: entry.id });
+        return finish([{ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry } }], { id: entry.id });
       }
       case "skill.import": {
         this.project(command.projectId);
@@ -371,7 +380,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         const content = await this.content(command.path);
         const metadata = this.skill(content);
         const entry = this.entry(command.projectId, "skill", metadata.name, metadata.description, content, "user");
-        return finish([{ event_type: "capability.saved", profile_id: PROFILE_ID, project_id: entry.projectId, payload: { entry } }], { id: entry.id });
+        return finish([{ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry } }], { id: entry.id });
       }
       case "plugin.import": {
         this.project(command.projectId);
@@ -387,31 +396,31 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
           const metadata = this.skill(value);
           entries.push({ ...this.entry(command.projectId, "skill", `${manifest.name}/${metadata.name}`, metadata.description, value, "user"), ownerPluginId: entry.id });
         }
-        return finish([entry, ...entries].map((entry) => ({ event_type: "capability.saved", profile_id: PROFILE_ID, project_id: entry.projectId, payload: { entry } })), { id: entry.id });
+        return finish([entry, ...entries].map((entry) => ({ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry } })), { id: entry.id });
       }
       case "capability.toggle": {
         const entry = snapshot.registry.find((entry) => entry.id === command.capabilityId);
         if (!entry || entry.revision !== command.expectedRevision) throw new MoguriError("capability_conflict", "Capability is missing or changed. Reload before enabling it.", 409);
         if (command.enabled && entry.ownerPluginId && !snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled)) throw new MoguriError("plugin_disabled", "Enable the owning plugin before activating its capability.", 409);
-        return finish([{ event_type: "capability.saved", profile_id: PROFILE_ID, project_id: entry.projectId, payload: { entry: { ...entry, enabled: command.enabled, revision: entry.revision + 1 } } }]);
+        return finish([{ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry: { ...entry, enabled: command.enabled, revision: entry.revision + 1 } } }]);
       }
       case "proposal.create": {
         this.project(command.projectId);
         const existing = snapshot.registry.find((entry) => entry.projectId === command.projectId && entry.kind === command.kind && entry.name === command.name);
         const proposal: Proposal = { id: randomUUID(), projectId: command.projectId, kind: command.kind, name: command.name, contentDigest: this.store.putBlob(command.content), actor: "user", status: "pending", baseDigest: existing?.contentDigest };
-        return finish([{ event_type: "capability.proposed", profile_id: PROFILE_ID, project_id: proposal.projectId, payload: { proposal } }], { id: proposal.id });
+        return finish([{ event_type: "capability.proposed", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { proposal } }], { id: proposal.id });
       }
       case "proposal.decide": {
         const proposal = snapshot.proposals.find((proposal) => proposal.id === command.proposalId);
         if (!proposal || proposal.status !== "pending" || proposal.contentDigest !== command.expectedDigest) throw new MoguriError("proposal_stale", "Proposal changed or was already decided. Review the current content before approving.", 409);
-        const events: EventInput[] = [{ event_type: "proposal.decided", profile_id: PROFILE_ID, project_id: proposal.projectId, payload: { proposalId: proposal.id, approve: command.approve, actor: "user" } }];
+        const events: EventInput[] = [{ event_type: "proposal.decided", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { proposalId: proposal.id, approve: command.approve, actor: "user" } }];
         if (command.approve) {
           const content = this.store.blob(proposal.contentDigest);
           const existing = snapshot.registry.find((entry) => entry.projectId === proposal.projectId && entry.kind === proposal.kind && entry.name === proposal.name);
           if (existing?.contentDigest !== proposal.baseDigest) throw new MoguriError("proposal_stale", "The approved base changed. Generate and review a new proposal.", 409);
           const metadata = proposal.kind === "skill" ? this.skill(content) : { name: proposal.name, description: "Human-approved evolution proposal; execution remains separately permissioned." };
           const entry = this.entry(proposal.projectId, proposal.kind, metadata.name, metadata.description, content, "approved-proposal");
-          events.push({ event_type: "capability.saved", profile_id: PROFILE_ID, project_id: entry.projectId, payload: { entry: existing ? { ...entry, id: existing.id, revision: existing.revision + 1 } : entry } });
+          events.push({ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry: existing ? { ...entry, id: existing.id, revision: existing.revision + 1 } : entry } });
         }
         return finish(events);
       }
@@ -427,11 +436,11 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         if (command.type === "mcp.oauth.begin") id = await this.gateway.oauth.begin(server, { projectId: this.snapshot().settings.values.mcpServers.some((entry) => entry.id === server.id) ? null : session?.projectId ?? null, sessionId: session?.id ?? null });
         else if (command.type === "mcp.oauth.clear") {
           await this.gateway.oauth.clear(server);
-          this.host.commit(this.snapshot().oauthAuthorizations.filter((authorization) => authorization.serverId === server.id && authorization.state !== "cleared").map((authorization) => ({ event_type: "mcp.oauth_changed", profile_id: PROFILE_ID, project_id: authorization.projectId, payload: { authorization: { ...authorization, state: "cleared", authorizationUrlReady: false, diagnostic: "OAuth credentials were removed from this profile's secret backend." } } })));
+          this.host.commit(this.snapshot().oauthAuthorizations.filter((authorization) => authorization.serverId === server.id && authorization.state !== "cleared").map((authorization) => ({ event_type: "mcp.oauth_changed", profile_id: this.snapshot().profileId, project_id: authorization.projectId, payload: { authorization: { ...authorization, state: "cleared", authorizationUrlReady: false, diagnostic: "OAuth credentials were removed from this profile's secret backend." } } })));
         }
         else await this.gateway.oauth.setClient(server, command.clientId, command.issuer, command.clientSecret, command.redirectUri);
         const current = this.snapshot().settings;
-        return finish([{ event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings: current.values, revision: current.revision + 1, permissionRevision: current.permissionRevision + 1 } }], id ? { id } : {});
+        return finish([{ event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings: current.values, revision: current.revision + 1, permissionRevision: current.permissionRevision + 1 } }], id ? { id } : {});
       }
       case "mcp.oauth.cancel":
         await this.gateway.oauth.cancel(command.authorizationId);
@@ -447,7 +456,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         catch { throw new MoguriError("secret_store", "MCP credential storage failed. Unlock the OS keychain; no plaintext credential was saved.", 503); }
         {
           const current = this.snapshot().settings;
-          const result = finish([{ event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings: current.values, revision: current.revision + 1, permissionRevision: current.permissionRevision + 1 } }]);
+          const result = finish([{ event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings: current.values, revision: current.revision + 1, permissionRevision: current.permissionRevision + 1 } }]);
           this.host.invalidateApprovals();
           return result;
         }
@@ -484,7 +493,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         if (!isRecord(value) || typeof value.text !== "string" || value.source !== "local") throw new MoguriError("speech_result", "This job is not a completed local transcript.");
         const text = `${session.draft.text}${session.draft.text ? "\n" : ""}${value.text}`;
         if (text.length > 128 * 1024) throw new MoguriError("draft_limit", "The transcript does not fit the bounded draft. Copy a smaller selection.");
-        return finish([{ event_type: "draft.saved", profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, payload: { text, attachments: session.draft.attachments } }], { revision: session.draft.revision + 1 });
+        return finish([{ event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { text, attachments: session.draft.attachments } }], { revision: session.draft.revision + 1 });
       }
       case "job.cancel":
         if (this.host.cancelExternalJob(command.jobId)) return finish([]);
@@ -539,7 +548,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       const content = String(call.arguments.content);
       const existing = this.snapshot().registry.find((entry) => entry.projectId === session.projectId && entry.kind === kind && entry.name === name);
       const proposal: Proposal = { id: randomUUID(), projectId: project.id, kind, name, contentDigest: this.store.putBlob(content), actor: "model", status: "pending", baseDigest: existing?.contentDigest };
-      this.host.commit([{ event_type: "capability.proposed", profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, payload: { proposal } }]);
+      this.host.commit([{ event_type: "capability.proposed", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { proposal } }]);
       return { text: `Proposal ${proposal.id} is pending human review. Nothing was installed, enabled or executed.`, isError: false, outcome: "completed" };
     }
     if (call.name === "mcp_gateway") {
@@ -555,7 +564,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         const result = await this.callMcp(session, call.arguments, signal);
         const id = randomUUID();
         const job: CapabilityJob = { id, kind: "mcp.result", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: session.turnId, status: "completed", progress: "Result retained", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null };
-        this.host.commit([{ event_type: "job.started", profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, payload: { job } }]);
+        this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { job } }]);
         const text = JSON.stringify(result);
         return { text: JSON.stringify({ resultId: id, content: text.slice(0, 12000), truncated: text.length > 12000, readWith: "mcp_gateway read_result" }), isError: isRecord(result) && result.isError === true, outcome: isRecord(result) && result.isError === true ? "failed" : "completed" };
       }

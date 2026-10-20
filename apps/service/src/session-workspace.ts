@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import {
-  MoguriError, PROFILE_ID, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
+  MoguriError, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice,
 } from "../../../packages/protocol/src/index.ts";
@@ -41,7 +41,7 @@ export class SessionWorkspace {
     this.projects = new ProjectService(() => host.snapshot(), stateDir);
     this.terminals = new TerminalManager((terminal) => {
       if (!this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) return;
-      this.host.commit([{ event_type: "terminal.changed", profile_id: PROFILE_ID, project_id: terminal.projectId, session_id: terminal.sessionId, payload: { terminal } }]);
+      this.host.commit([{ event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId, payload: { terminal } }]);
     }, options.terminal);
   }
   private snapshot() { return this.host.snapshot(); }
@@ -59,10 +59,10 @@ export class SessionWorkspace {
   private revision(actual: number, expected: number) {
     if (actual !== expected) throw new MoguriError("revision_conflict", "Another client changed this value. Your edit is preserved; reload before applying it.", 409);
   }
-  private event(session: Session, event: EventInput): EventInput { return { ...event, profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id }; }
+  private event(session: Session, event: EventInput): EventInput { return { ...event, profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id }; }
   recover(): void {
     const events: EventInput[] = this.snapshot().terminals.filter((terminal) => ["running", "stopping"].includes(terminal.status)).map((terminal) => ({
-      event_type: "terminal.changed", profile_id: PROFILE_ID, project_id: terminal.projectId, session_id: terminal.sessionId,
+      event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId,
       payload: { terminal: { ...terminal, status: "unconfirmed", diagnostic: "Service restarted. This shell was not relaunched, input was not replayed and output was not persisted. Inspect any unconfirmed processes." } },
     }));
     if (events.length) this.host.commit(events);
@@ -136,7 +136,7 @@ export class SessionWorkspace {
           const { pullRequestLink } = await import("./project-integrations.ts");
           pullRequestLink(command.changes.prUrl);
         }
-        return finish([this.event(session, { event_type: "session.organized", profile_id: PROFILE_ID, payload: { changes: command.changes } })], { revision: session.revision + 1 });
+        return finish([this.event(session, { event_type: "session.organized", profile_id: this.snapshot().profileId, payload: { changes: command.changes } })], { revision: session.revision + 1 });
       }
       case "session.mode": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
@@ -161,15 +161,15 @@ export class SessionWorkspace {
           if (startup.controls.env !== "Local") throw new MoguriError("workspace_env", "This worktree has a Local location only. No default remote root was inferred.", 409);
         }
         const id = randomUUID();
-        return finish([{ event_type: "session.created", profile_id: PROFILE_ID, project_id: project.id, session_id: id,
+        return finish([{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
           payload: { title: issue?.title ?? `PR ${prUrl}`, ...startup, workspaceId: command.workspaceId ?? null, prUrl, workItemId: issue?.id ?? null } },
-          { event_type: "draft.saved", profile_id: PROFILE_ID, project_id: project.id, session_id: id, payload: { text: issue ? `${issue.title}\n\n${issue.body}` : `Work on ${prUrl}. The folder checkout has not been changed.`, attachments: [] } }], { id });
+          { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text: issue ? `${issue.title}\n\n${issue.body}` : `Work on ${prUrl}. The folder checkout has not been changed.`, attachments: [] } }], { id });
       }
       case "queue.release": {
         const session = this.session(command.sessionId); this.revision(session.queueRevision, command.expectedRevision);
         if (!session.queue.some((item) => item.id === command.messageId && item.held)) throw new MoguriError("queue_claimed", "This held message was removed, released or already claimed.", 409);
         this.host.validateAdmission(session, session.queue.find((item) => item.id === command.messageId)!.attachments);
-        const result = finish([this.event(session, { event_type: "queue.released", profile_id: PROFILE_ID, payload: { messageId: command.messageId } })]);
+        const result = finish([this.event(session, { event_type: "queue.released", profile_id: this.snapshot().profileId, payload: { messageId: command.messageId } })]);
         this.host.wake(); return result;
       }
       case "project.reorder": {
@@ -179,7 +179,7 @@ export class SessionWorkspace {
         const events = command.projects.map((item, order): EventInput => {
           const configuration = current.find((project) => project.projectId === item.projectId)!;
           this.revision(configuration.revision, item.revision);
-          return { event_type: "project.configured", profile_id: PROFILE_ID, project_id: item.projectId, payload: { configuration: { ...configuration, order, revision: configuration.revision + 1 } } };
+          return { event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: item.projectId, payload: { configuration: { ...configuration, order, revision: configuration.revision + 1 } } };
         });
         return finish(events);
       }
@@ -199,8 +199,8 @@ export class SessionWorkspace {
           if (!isAbsolute(command.path)) throw new MoguriError("project_path", "Choose an absolute, existing folder.");
           const path = await realpath(command.path);
           if (!(await stat(path)).isDirectory() || this.snapshot().projects.some((other) => other.id !== project.id && other.path === path)) throw new MoguriError("project_path", "The folder is not a distinct project directory.");
-          return finish([{ event_type: "project.relocated", profile_id: PROFILE_ID, project_id: project.id, payload: { path, name: basename(path) } },
-            { event_type: "project.configured", profile_id: PROFILE_ID, project_id: project.id, payload: { configuration: { ...current, revision: current.revision + 1 } } }], { revision: current.revision + 1 });
+          return finish([{ event_type: "project.relocated", profile_id: this.snapshot().profileId, project_id: project.id, payload: { path, name: basename(path) } },
+            { event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: project.id, payload: { configuration: { ...current, revision: current.revision + 1 } } }], { revision: current.revision + 1 });
         }
         const updated = structuredClone(current); updated.revision++;
         if (command.type === "project.organize") {
@@ -211,7 +211,7 @@ export class SessionWorkspace {
           this.projects.validate(updated.values, project.id);
         }
         const latest = this.projects.configuration(project.id); this.revision(latest.revision, command.expectedRevision);
-        const result = finish([{ event_type: "project.configured", profile_id: PROFILE_ID, project_id: project.id, payload: { configuration: updated } }], { revision: updated.revision });
+        const result = finish([{ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: project.id, payload: { configuration: updated } }], { revision: updated.revision });
         for (const session of this.snapshot().sessions.filter((session) => session.projectId === project.id)) this.host.invalidate(session.id);
         return result;
       }
@@ -222,17 +222,17 @@ export class SessionWorkspace {
         this.revision(existing?.revision ?? 0, command.expectedRevision);
         if (!command.name.trim()) throw new MoguriError("group_name", "Give this group a non-empty name.");
         const group = { id: existing?.id ?? randomUUID(), name: command.name.trim(), order: command.order, revision: existing ? existing.revision + 1 : 0 };
-        if (command.type === "project.folder") return finish([{ event_type: "project.folder_saved", profile_id: PROFILE_ID, payload: { folder: group } }], { id: group.id, revision: group.revision });
+        if (command.type === "project.folder") return finish([{ event_type: "project.folder_saved", profile_id: this.snapshot().profileId, payload: { folder: group } }], { id: group.id, revision: group.revision });
         this.project(command.projectId);
         if (existing && "projectId" in existing && existing.projectId !== command.projectId) throw new MoguriError("session_group", "Session groups cannot cross projects.");
-        return finish([{ event_type: "session.group_saved", profile_id: PROFILE_ID, project_id: command.projectId, payload: { group: { ...group, projectId: command.projectId } } }], { id: group.id, revision: group.revision });
+        return finish([{ event_type: "session.group_saved", profile_id: this.snapshot().profileId, project_id: command.projectId, payload: { group: { ...group, projectId: command.projectId } } }], { id: group.id, revision: group.revision });
       }
       case "session.browser": {
         const session = this.session(command.sessionId);
         let url: URL;
         try { url = new URL(command.url); } catch { throw new MoguriError("browser_url", "Use an explicit HTTP(S) preview URL."); }
         if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.protocol === "http:" && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) throw new MoguriError("browser_url", "Only HTTPS or explicit loopback HTTP previews are supported; no credentials or file URLs.");
-        return finish([this.event(session, { event_type: "session.browser_changed", profile_id: PROFILE_ID, payload: { url: url.href } })], { revision: session.revision + 1 });
+        return finish([this.event(session, { event_type: "session.browser_changed", profile_id: this.snapshot().profileId, payload: { url: url.href } })], { revision: session.revision + 1 });
       }
       case "plan.save":
       case "artifact.capture": {
@@ -251,7 +251,7 @@ export class SessionWorkspace {
         try {
           const file = await readProjectFile(project.path, path); this.session(session.id);
           const artifact = this.host.retainArtifact(session, path, file.text);
-          return finish([{ event_type: "artifact.revised", profile_id: PROFILE_ID, project_id: project.id, payload: { artifact } }], { id: artifact.id });
+          return finish([{ event_type: "artifact.revised", profile_id: this.snapshot().profileId, project_id: project.id, payload: { artifact } }], { id: artifact.id });
         }
         catch (error) {
           if (command.type !== "plan.save") throw error;
@@ -280,7 +280,7 @@ export class SessionWorkspace {
         const terminal = this.snapshot().terminals.find((terminal) => terminal.id === command.terminalId);
         if (!terminal || terminal.status !== "unconfirmed") throw new MoguriError("terminal_state", "Only an unconfirmed terminal needs explicit inspection acknowledgement.");
         this.terminals.acknowledge(terminal.id);
-        return finish([{ event_type: "terminal.changed", profile_id: PROFILE_ID, project_id: terminal.projectId, session_id: terminal.sessionId,
+        return finish([{ event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId,
           payload: { terminal: { ...terminal, status: "acknowledged", diagnostic: "The user acknowledged process inspection. This does not retrospectively prove cleanup." } } }]);
       }
       case "retention.run": {

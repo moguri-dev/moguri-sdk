@@ -7,13 +7,16 @@ import { Type } from "typebox";
 import { ControlPlane } from "./controller.ts";
 import { EventStore } from "./store.ts";
 import type { ProviderAdapter } from "./provider.ts";
-import { MoguriError, parse, PROTOCOL_VERSION, QuerySchema, TerminalInputSchema, type Connection, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { CommandSchema, GLOBAL_PROFILE_ID, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, TerminalInputSchema, type Connection, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 import type { PlatformOptions } from "./platform.ts";
 import { retentionKey } from "./retention-key.ts";
+import { ProfileRuntime } from "./profiles.ts";
+import { NEMOTRON_MODEL } from "./voice.ts";
 
 const authenticateSchema = Type.Object({
   type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
   token: Type.String({ minLength: 1, maxLength: 256 }), after: Type.Integer({ minimum: 0 }),
+  profileId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 }, { additionalProperties: false });
 function tokenMatches(value: string | undefined, expected: string): boolean {
   if (!value) return false;
@@ -38,7 +41,10 @@ async function claimLock(path: string): Promise<Awaited<ReturnType<typeof open>>
     throw new Error("Another Moguri service owns this state directory. Connect to it instead.");
   }
 }
-export interface ServiceOptions { stateDir: string; provider?: ProviderAdapter; workerPath?: string; platform?: PlatformOptions; retentionKey?: Buffer }
+export interface ServiceOptions {
+  stateDir: string; provider?: ProviderAdapter; workerPath?: string; platform?: PlatformOptions; retentionKey?: Buffer;
+  profiles?: { provider?: (profileId: string) => ProviderAdapter | undefined; platform?: (profileId: string) => PlatformOptions };
+}
 export async function startService(options: ServiceOptions) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const directory = await lstat(options.stateDir);
@@ -50,6 +56,7 @@ export async function startService(options: ServiceOptions) {
   await lock.writeFile(JSON.stringify({ pid: process.pid }));
   let store: EventStore | undefined;
   let controller: ControlPlane | undefined;
+  let profiles: ProfileRuntime | undefined;
   const connectionPath = join(options.stateDir, "connection.json");
   try {
     const dbPath = join(options.stateDir, "state.sqlite");
@@ -58,9 +65,41 @@ export async function startService(options: ServiceOptions) {
     await chmod(dbPath, 0o600);
     const retention = await retentionKey(dbPath, options.retentionKey);
     store = new EventStore(dbPath, retention.key, retention.id);
-    controller = new ControlPlane(store, options.provider, options.workerPath, { ...options.platform, stateDir: options.stateDir });
-    await controller.initialize();
+    const authenticated = new Map<WebSocket, string>();
+    const authenticating = new Set<WebSocket>();
+    const send = (socket: WebSocket, value: unknown) => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      if (socket.bufferedAmount > 4 * 1024 * 1024) { socket.close(1013, "Reconnect to replay missed events."); return; }
+      socket.send(JSON.stringify(value));
+    };
+    const changed = (profileId: string, events: StoredEvent[]) => {
+      for (const [socket, scope] of authenticated) {
+        if (profileId === GLOBAL_PROFILE_ID) { send(socket, { type: "invalidate" }); continue; }
+        if (profileId !== scope) continue;
+        if (events.length) { for (const event of events) if (event.profile_id === scope) send(socket, { type: "event", event }); }
+        else send(socket, { type: "invalidate" });
+      }
+    };
+    profiles = new ProfileRuntime(store, options.stateDir, {
+      controller: (view, stateDir, profileHooks) => {
+        const platform = options.profiles?.platform?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.platform : {
+          mcpWorkerPath: options.platform?.mcpWorkerPath,
+          speech: { executable: options.platform?.speech?.executable },
+        });
+        const provider = options.profiles?.provider?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.provider : undefined);
+        const model = platform?.speech?.model;
+        const officialSpeech = !model || model.id === NEMOTRON_MODEL.id && model.revision === NEMOTRON_MODEL.revision && model.sha256 === NEMOTRON_MODEL.sha256;
+        return new ControlPlane(view, provider, options.workerPath, {
+          ...platform, stateDir, profileHooks,
+          cache: { ...platform?.cache, cacheDirectory: platform?.cache?.cacheDirectory ?? join(options.stateDir, "dependency-cache") },
+          speech: { ...platform?.speech, modelDirectory: platform?.speech?.modelDirectory ?? (officialSpeech ? join(options.stateDir, "speech-models") : undefined) },
+        });
+      },
+      changed,
+    });
+    controller = await profiles.initialize();
     const control = controller;
+    const rootProfiles = profiles;
     const token = randomBytes(32).toString("hex");
     let expectedHost = "";
     const acceptable = (request: IncomingMessage) => request.headers.host === expectedHost &&
@@ -73,7 +112,10 @@ export async function startService(options: ServiceOptions) {
         if (!acceptable(request)) throw new MoguriError("origin_denied", "Host or Origin is not an authorized Moguri client.", 403);
         if (!tokenMatches(request.headers.authorization, `Bearer ${token}`)) throw new MoguriError("unauthorized", "A valid local connection token is required.", 401);
         if (request.url === "/v1/health" && request.method === "GET") { response.end(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, pid: process.pid })); return; }
-        if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(control.snapshot())); return; }
+        const suppliedProfile = request.headers["x-moguri-profile"];
+        const profileId = suppliedProfile === undefined ? PROFILE_ID : typeof suppliedProfile === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(suppliedProfile) ? suppliedProfile : null;
+        if (!profileId || profileId === GLOBAL_PROFILE_ID) throw new MoguriError("profile_scope", "Choose one explicit user profile. No Default fallback was used.", 403);
+        if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(await rootProfiles.snapshot(profileId))); return; }
         if (!["/v1/commands", "/v1/query", "/v1/terminal"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
@@ -87,10 +129,20 @@ export async function startService(options: ServiceOptions) {
         let body: unknown;
         try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new MoguriError("invalid_json", "Command body is not valid JSON."); }
         if (request.url === "/v1/terminal") {
-          control.platform.sessions.input(parse(TerminalInputSchema, body));
+          (await rootProfiles.control(profileId)).platform.sessions.input(parse(TerminalInputSchema, body));
           response.end(JSON.stringify({ accepted: true })); return;
         }
-        response.end(JSON.stringify(request.url === "/v1/query" ? await control.platform.query(parse(QuerySchema, body)) : await control.dispatch(body)));
+        if (request.url === "/v1/query") {
+          const query = parse(QuerySchema, body);
+          if (isProfileQuery(query)) {
+            if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "This profile is missing/unready. No registry fallback was used.", 404);
+            response.end(JSON.stringify({ type: query.type, catalog: rootProfiles.catalog() })); return;
+          }
+          response.end(JSON.stringify(await (await rootProfiles.control(profileId)).platform.query(query))); return;
+        }
+        const command = parse(CommandSchema, body);
+        if (command.profileId !== profileId) throw new MoguriError("profile_scope", "Request scope and command profile differ. No foreign receipt or effect was used.", 403);
+        response.end(JSON.stringify(isProfileCommand(command.command) ? await rootProfiles.dispatch(command, command.command) : await (await rootProfiles.control(profileId)).dispatch(command)));
       };
       void handle().catch((error: unknown) => {
         const known = error instanceof MoguriError;
@@ -100,12 +152,6 @@ export async function startService(options: ServiceOptions) {
       });
     });
     const websockets = new WebSocketServer({ noServer: true, maxPayload: 4096 });
-    const authenticated = new Set<WebSocket>();
-    const send = (socket: WebSocket, value: unknown) => {
-      if (socket.readyState !== WebSocket.OPEN) return;
-      if (socket.bufferedAmount > 4 * 1024 * 1024) { socket.close(1013, "Reconnect to replay missed events."); return; }
-      socket.send(JSON.stringify(value));
-    };
     server.on("upgrade", (request, socket, head) => {
       if (!acceptable(request) || request.url !== "/v1/events") { socket.destroy(); return; }
       websockets.handleUpgrade(request, socket, head, (ws) => websockets.emit("connection", ws));
@@ -114,25 +160,25 @@ export async function startService(options: ServiceOptions) {
       const timer = setTimeout(() => socket.close(1008, "Authentication required."), 5000);
       socket.on("error", () => { console.error("Moguri event connection failed."); });
       socket.on("message", (data) => {
-        try {
-          if (authenticated.has(socket)) throw new Error("Unexpected client event.");
-          const auth = parse(authenticateSchema, JSON.parse(data.toString()));
-          if (!tokenMatches(auth.token, token)) throw new Error("Authentication failed.");
-          clearTimeout(timer);
-          for (const event of control.events(auth.after)) send(socket, { type: "event", event });
-          authenticated.add(socket);
-          send(socket, { type: "ready", snapshot: control.snapshot() });
-        } catch { socket.close(1008, "Authentication or protocol negotiation failed."); }
+        if (authenticated.has(socket) || authenticating.has(socket)) { socket.close(1008, "Unexpected client event."); return; }
+        authenticating.add(socket);
+        void (async () => {
+          try {
+            const auth = parse(authenticateSchema, JSON.parse(data.toString()));
+            if (!tokenMatches(auth.token, token)) throw new Error("Authentication failed.");
+            const profileId = auth.profileId ?? PROFILE_ID;
+            const scoped = await rootProfiles.control(profileId);
+            if (socket.readyState !== WebSocket.OPEN) return;
+            clearTimeout(timer);
+            for (const event of scoped.events(auth.after)) send(socket, { type: "event", event });
+            authenticated.set(socket, profileId);
+            send(socket, { type: "ready", snapshot: await rootProfiles.snapshot(profileId) });
+          } catch { socket.close(1008, "Authentication, profile or protocol negotiation failed."); }
+          finally { authenticating.delete(socket); }
+        })();
       });
       socket.on("close", () => { clearTimeout(timer); authenticated.delete(socket); });
     });
-    const changed = (events: StoredEvent[]) => {
-      for (const socket of authenticated) {
-        if (events.length) for (const event of events) send(socket, { type: "event", event });
-        else send(socket, { type: "invalidate" });
-      }
-    };
-    control.on("change", changed);
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Loopback binding failed.");
@@ -143,12 +189,11 @@ export async function startService(options: ServiceOptions) {
     await rename(pendingConnection, connectionPath);
     let closed = false;
     return {
-      connection, controller: control, store,
+      connection, controller: control, store, profiles: rootProfiles,
       close: async () => {
         if (closed) return;
         closed = true;
-        await control.close();
-        control.off("change", changed);
+        await rootProfiles.close();
         for (const socket of websockets.clients) socket.terminate();
         await new Promise<void>((resolve) => websockets.close(() => resolve()));
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -159,7 +204,7 @@ export async function startService(options: ServiceOptions) {
       },
     };
   } catch (error) {
-    await controller?.close();
+    if (profiles) await profiles.close(); else await controller?.close();
     store?.close();
     await lock.close();
     await unlink(lockPath);

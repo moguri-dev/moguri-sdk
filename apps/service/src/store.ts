@@ -1,9 +1,10 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import * as vec from "sqlite-vec";
-import { eventTypes, isRecord, MoguriError, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { eventTypes, isRecord, MoguriError, PROFILE_ID, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
 export interface ForgetRequest { sessions?: string[]; projects?: string[]; artifacts?: string[] }
@@ -56,12 +57,13 @@ export class EventStore {
   readonly db: DatabaseSync;
   private keys = new Map<string, Buffer>();
   private pending = new Map<string, string>();
-  constructor(readonly path: string, private readonly masterKey = initialKey(path), keyId: string = randomUUID()) {
+  constructor(readonly path: string, private readonly masterKey = initialKey(path), keyId: string = randomUUID(), readonly profileId: string = PROFILE_ID) {
     if (masterKey.byteLength !== 32) throw new Error("A retention master key must contain exactly 32 bytes.");
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(profileId)) throw new Error("A store view needs an explicit safe profile identity. No Default fallback was used.");
     this.db = new DatabaseSync(path, { allowExtension: true });
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
-      if (version > 13) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version > 14) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -111,6 +113,12 @@ export class EventStore {
       if (version < 11) this.db.exec(`BEGIN IMMEDIATE; INSERT INTO retention_metadata(id,value) VALUES ('structured_question_schema','1'); PRAGMA user_version=11; COMMIT;`);
       if (version < 12) this.db.exec(`BEGIN IMMEDIATE; INSERT INTO retention_metadata(id,value) VALUES ('artifact_repository_schema','1'); PRAGMA user_version=12; COMMIT;`);
       if (version < 13) this.db.exec(`BEGIN IMMEDIATE; INSERT INTO retention_metadata(id,value) VALUES ('budget_ledger_schema','1'); PRAGMA user_version=13; COMMIT;`);
+      if (version < 14) this.db.exec(`BEGIN IMMEDIATE;
+        CREATE TABLE receipts_v14(profile_id TEXT NOT NULL,id TEXT NOT NULL,digest TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(profile_id,id));
+        INSERT INTO receipts_v14 SELECT 'default',id,digest,result FROM receipts;
+        DROP TABLE receipts; ALTER TABLE receipts_v14 RENAME TO receipts;
+        INSERT INTO retention_metadata(id,value) VALUES ('profile_scope_schema','1');
+        PRAGMA user_version=14; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {
@@ -202,10 +210,15 @@ export class EventStore {
     } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); this.keys.clear(); throw error; }
   }
   receipt(id: string, expectedDigest: string): CommandResult | undefined {
-    const row = this.db.prepare("SELECT digest,result FROM receipts WHERE id=?").get(id);
+    const row = this.db.prepare("SELECT digest,result FROM receipts WHERE profile_id=? AND id=?").get(this.profileId, id);
     if (!row) return undefined;
     if (row.digest !== expectedDigest) throw new MoguriError("idempotency_conflict", "A command ID was reused with different arguments.", 409);
     return JSON.parse(String(row.result)) as CommandResult;
+  }
+  view(profileId: string): EventStore {
+    const id = this.db.prepare("SELECT value FROM retention_metadata WHERE id='key_id'").get()?.value;
+    if (typeof id !== "string") throw new Error("The root retention identity is missing. Preserve state; no replacement profile key was invented.");
+    return new EventStore(this.path, this.masterKey, id, profileId);
   }
   commit(inputs: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest, derive?: (events: StoredEvent[]) => EventInput[]): StoredEvent[] {
     const events: StoredEvent[] = [];
@@ -225,7 +238,7 @@ export class EventStore {
       for (const input of inputs) append(input);
       const derived = derive?.(events) ?? [];
       for (const input of derived) append(input);
-      if (receipt) this.db.prepare("INSERT INTO receipts VALUES (?,?,?)").run(receipt.id, receipt.digest, JSON.stringify(receipt.result));
+      if (receipt) this.db.prepare("INSERT INTO receipts VALUES (?,?,?,?)").run(this.profileId, receipt.id, receipt.digest, JSON.stringify(receipt.result));
       for (const input of inputs) if (input.event_type === "project.relocated" && input.project_id) this.clearProjectIndex(input.project_id);
       for (const input of inputs) if (input.event_type === "workspace.saved" && input.payload.workspace.status === "removed") this.clearProjectIndex(input.payload.workspace.id);
       if (forget) this.forget(forget);
@@ -247,6 +260,7 @@ export class EventStore {
     return this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after).flatMap((row) => {
       const event: unknown = JSON.parse(String(row.data));
       const data = this.validEvent(event, Number(row.seq));
+      if (data.profile_id !== this.profileId) return [];
       const scope = scopeFor(data, data.artifact_id ?? null);
       const key = this.key(scope, false);
       if (!key) return [];
@@ -264,7 +278,7 @@ export class EventStore {
   blob(hash: string): string {
     const pending = this.pending.get(hash);
     if (pending !== undefined) return pending;
-    for (const row of this.db.prepare("SELECT scope,payload FROM blob_payloads WHERE digest=?").all(hash)) {
+    for (const row of this.db.prepare("SELECT scope,payload FROM blob_payloads WHERE digest=? AND (scope=? OR scope GLOB ?)").all(hash, `profile/${this.profileId}`, `profile/${this.profileId}/*`)) {
       const key = this.key({ scope: String(row.scope), projectId: null, sessionId: null }, false);
       if (!key) continue;
       const text = unseal(JSON.parse(String(row.payload)), key, `blob:${hash}:${row.scope}`);
@@ -275,12 +289,12 @@ export class EventStore {
   }
   private forget(request: ForgetRequest): void {
     const scopes = new Set<string>();
-    for (const id of request.sessions ?? []) for (const row of this.db.prepare("SELECT scope FROM retention_keys WHERE session_id=? AND scope LIKE 'profile/default/%'").all(id)) scopes.add(String(row.scope));
+    for (const id of request.sessions ?? []) for (const row of this.db.prepare("SELECT scope FROM retention_keys WHERE session_id=? AND scope GLOB ?").all(id, `profile/${this.profileId}/*`)) scopes.add(String(row.scope));
     for (const id of request.projects ?? []) {
-      for (const row of this.db.prepare("SELECT scope FROM retention_keys WHERE project_id=? AND scope LIKE 'profile/default/%'").all(id)) scopes.add(String(row.scope));
+      for (const row of this.db.prepare("SELECT scope FROM retention_keys WHERE project_id=? AND scope GLOB ?").all(id, `profile/${this.profileId}/*`)) scopes.add(String(row.scope));
       this.clearProjectIndex(id);
     }
-    for (const id of request.artifacts ?? []) scopes.add(artifactScope("default", id).scope);
+    for (const id of request.artifacts ?? []) scopes.add(artifactScope(this.profileId, id).scope);
     for (const scope of scopes) {
       this.db.prepare("INSERT OR REPLACE INTO retention_forgotten VALUES (?,?)").run(scope, new Date().toISOString());
       this.db.prepare("DELETE FROM blob_payloads WHERE scope=?").run(scope);
@@ -288,6 +302,7 @@ export class EventStore {
     }
   }
   private clearProjectIndex(id: string): void {
+    id = profileIndexId(this.profileId, id);
     if (this.db.prepare("SELECT name FROM sqlite_master WHERE name='memory_vectors'").get()) { vec.load(this.db); this.db.prepare("DELETE FROM memory_vectors WHERE project_id=?").run(id); }
     for (const table of ["memory_files", "memory_chunks", "memory_graph_nodes", "memory_graph_edges"]) this.db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(id);
   }

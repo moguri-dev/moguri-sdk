@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import {
-  legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, PROFILE_ID, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
+  legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
   type ArtifactResponse, type ArtifactSource, type ArtifactSourcePreview, type CommandResult, type EventInput, type ProjectArtifactChoice,
   type ProjectArtifactPreview, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type ArtifactMaterializationPreview, type ArtifactMaterialization,
   type ArtifactMaterializeOptions, type CapabilityJob, type Project,
@@ -19,6 +19,7 @@ interface Host {
   root(projectId: string, workspaceId: string | null): Project;
   assertRoot(projectId: string, workspaceId: string | null): Promise<void>;
   projects(): ProjectService;
+  foreignRootBusy(root: string): boolean;
   job(projectId: string, workspaceId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, id: string) => Promise<unknown>, start: (job: CapabilityJob) => void, settled: () => void): string;
 }
 export class ArtifactRuntime {
@@ -87,7 +88,7 @@ export class ArtifactRuntime {
       return [this.event(this.create(session, "report", "Budget checkpoint", text, "checkpoint", [{ eventId: event.id, sessionId: event.payload.sessionId, messageId: null, actor: "tool", modelId: null, outcome: "blocked", contentDigest: digest(text) }]))];
     });
   }
-  private event(artifact: RetainedArtifact): EventInput { return { event_type: "artifact.revised", profile_id: PROFILE_ID, project_id: artifact.projectId, payload: { artifact } }; }
+  private event(artifact: RetainedArtifact): EventInput { return { event_type: "artifact.revised", profile_id: this.host.snapshot().profileId, project_id: artifact.projectId, payload: { artifact } }; }
   private revisions(id: string): RetainedArtifact[] {
     this.artifact(id);
     return this.host.events().flatMap((event) => event.event_type === "artifact.saved" && event.payload.artifact.id === id ? [legacyArtifact(event.payload.artifact, event.id)] :
@@ -144,7 +145,7 @@ export class ArtifactRuntime {
       if (this.preview(projectId).digest !== preview.digest) throw new MoguriError("artifact_conflict", "The artifact set changed during copy verification. Stored copies were preserved.", 409);
     }
     if (choice?.action === "retain") return { events: preview.artifacts.map(({ id }) => { const artifact = this.artifact(id); return this.event({ ...artifact, projectId: null, workItemId: null, revision: artifact.revision + 1, updatedAt: new Date().toISOString() }); }), forget: [] };
-    return { events: preview.artifacts.map(({ id }): EventInput => ({ event_type: "artifact.deleted", profile_id: PROFILE_ID, payload: { artifactId: id } })), forget: preview.artifacts.map(({ id }) => id) };
+    return { events: preview.artifacts.map(({ id }): EventInput => ({ event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: id } })), forget: preview.artifacts.map(({ id }) => id) };
   }
   private async destination(projectId: string, workspaceId: string | null): Promise<{ project: Project; rootIdentity: string }> {
     const project = this.host.root(projectId, workspaceId), settings = this.host.projects().configuration(projectId).values;
@@ -200,7 +201,7 @@ export class ArtifactRuntime {
   }
   private assertIdle(projectId: string, workspaceId: string | null): void {
     const snapshot = this.host.snapshot();
-    if (this.isBusy(projectId, workspaceId) || (workspaceId ? snapshot.blockedWorkspaces.includes(workspaceId) : snapshot.blockedProjects.includes(projectId)) ||
+    if (this.isBusy(projectId, workspaceId) || this.host.foreignRootBusy(this.host.root(projectId, workspaceId).path) || (workspaceId ? snapshot.blockedWorkspaces.includes(workspaceId) : snapshot.blockedProjects.includes(projectId)) ||
       snapshot.sessions.some((session) => session.projectId === projectId && session.workspaceId === workspaceId && session.turnId) ||
       snapshot.terminals.some((terminal) => terminal.projectId === projectId && terminal.workspaceId === workspaceId && ["running", "stopping", "unconfirmed"].includes(terminal.status)) ||
       snapshot.jobs.some((job) => job.projectId === projectId && (job.workspaceId ?? null) === workspaceId && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("workspace_busy", "Finish owned work in this exact root before materializing artifacts.", 409);
@@ -257,7 +258,7 @@ export class ArtifactRuntime {
             if (!attempted) throw error;
             throw new MoguriError("artifact_materialize_partial", `Artifact materialization is partial. Inspect ${preview.path} and any requested local branch before retrying; stored documents were preserved. ${error instanceof Error ? error.message : "Filesystem/Git outcome unconfirmed."}`, 409);
           }
-        }, (job) => { response = finish([{ event_type: "job.started", profile_id: PROFILE_ID, project_id: preview.projectId, payload: { job: { ...job, materialization: preview } } }], { id: job.id }); },
+        }, (job) => { response = finish([{ event_type: "job.started", profile_id: this.host.snapshot().profileId, project_id: preview.projectId, payload: { job: { ...job, materialization: preview } } }], { id: job.id }); },
         () => { this.busy.delete(key); this.host.wake(); });
         if (!response) throw new Error("Materialization job intent was not durably acknowledged.");
         return response;
@@ -278,7 +279,7 @@ export class ArtifactRuntime {
     const artifact = this.artifact(command.artifactId);
     this.writable(artifact.projectId);
     if (artifact.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "Artifact changed. Reload before editing, archiving or deleting it.", 409);
-    if (command.type === "artifact.delete") return finish([{ event_type: "artifact.deleted", profile_id: PROFILE_ID, payload: { artifactId: artifact.id } }], { id: artifact.id }, { artifacts: [artifact.id] });
+    if (command.type === "artifact.delete") return finish([{ event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: artifact.id } }], { id: artifact.id }, { artifacts: [artifact.id] });
     if (!Object.keys(command.changes).length) throw new MoguriError("artifact_changes", "Choose an actual title, text or archive change.");
     const updated: RetainedArtifact = { ...artifact, revision: artifact.revision + 1, updatedAt: new Date().toISOString(),
       ...this.associations(artifact.projectId, { folderId: command.changes.folderId === undefined ? artifact.folderId : command.changes.folderId, workItemId: command.changes.workItemId === undefined ? artifact.workItemId : command.changes.workItemId }),

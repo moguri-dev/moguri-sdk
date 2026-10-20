@@ -12,7 +12,7 @@ import { boundedBody, fetchJson } from "./network.ts";
 import { runProgram } from "./program.ts";
 import { digest, EventStore } from "./store.ts";
 
-export interface DependencyCacheOptions { fetch?: typeof fetch }
+export interface DependencyCacheOptions { fetch?: typeof fetch; cacheDirectory?: string }
 const require = createRequire(import.meta.url);
 const packageName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const versionPattern = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$/;
@@ -45,8 +45,9 @@ export class DependencyCache {
   private readonly content: string;
   private readonly pending = new Map<string, Promise<{ data: Buffer; downloaded: number }>>();
   constructor(private readonly store: EventStore, private readonly stateDir: string, private readonly options: DependencyCacheOptions = {}) {
-    this.npmCache = join(stateDir, "dependency-cache", "npm");
-    this.pnpmStore = join(stateDir, "dependency-cache", "pnpm");
+    const cache = options.cacheDirectory ?? join(stateDir, "dependency-cache");
+    this.npmCache = join(cache, "npm");
+    this.pnpmStore = join(cache, "pnpm");
     this.content = join(this.npmCache, "_cacache");
   }
   private entry(name: unknown, version: unknown, integrity: unknown, resolved?: unknown, hasInstallScript = false): DependencyPackage {
@@ -239,6 +240,7 @@ export class DependencyCache {
     const env = {
       PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? "/usr/bin:/bin"}`,
       npm_config_userconfig: emptyConfig, npm_config_globalconfig: globalConfig, npm_config_ignore_scripts: "true",
+      npm_config_logs_dir: join(runtime, "logs"),
       XDG_CACHE_HOME: join(runtime, "cache"), XDG_DATA_HOME: join(runtime, "data"), CI: "true",
     };
     progress("Installing only verified artifacts; lifecycle scripts/hooks are disabled. Existing node_modules may be replaced.");

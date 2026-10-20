@@ -10,10 +10,11 @@ import {
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
+  type GlobalBudgetCapacity,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
-import { CopilotAdapter, type ProviderAdapter } from "./provider.ts";
+import { CopilotAdapter, KeyringCredentials, type ProviderAdapter } from "./provider.ts";
 import { validateTool } from "./tools.ts";
 import { effectiveTools } from "./tools.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
@@ -47,6 +48,13 @@ interface Run {
   stderr: string;
   declaredTools: Set<string>;
   repositoryContext?: string;
+  root: string | null;
+}
+export interface ProfileHooks {
+  extendCommit(profileId: string, events: EventInput[]): EventInput[];
+  committed(profileId: string, events: StoredEvent[]): void;
+  globalBudget(): GlobalBudgetCapacity;
+  foreignRootBusy(profileId: string, root: string): boolean;
 }
 interface ExternalRun {
   sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
@@ -54,6 +62,7 @@ interface ExternalRun {
   execute: (signal: AbortSignal) => Promise<unknown>;
 }
 export class ControlPlane extends EventEmitter {
+  get profileId(): string { return this.store.profileId; }
   private history: StoredEvent[];
   private projection;
   private readonly runs = new Map<string, Run>();
@@ -71,12 +80,15 @@ export class ControlPlane extends EventEmitter {
   readonly remote: RemoteRuntime;
   private readonly remoteModels: ModelRegistry;
   private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
-  constructor(readonly store: EventStore, provider: ProviderAdapter = new CopilotAdapter(), private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string } = {}) {
+  private readonly profileHooks?: ProfileHooks;
+  constructor(readonly store: EventStore, provider: ProviderAdapter | undefined = undefined, private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string; profileHooks?: ProfileHooks } = {}) {
     super();
+    this.profileHooks = platformOptions.profileHooks;
     this.history = store.events();
-    this.projection = projectEvents(this.history);
+    this.projection = projectEvents(this.history, this.profileId);
     this.remote = new RemoteRuntime(platformOptions.stateDir ?? dirname(store.path), () => this.projection.settings.values.remote, workerPath, {
-      ...platformOptions.remote, changed: () => { this.provider?.synchronize(); platformOptions.remote?.changed?.(); this.emit("change", []); },
+      ...platformOptions.remote, vault: platformOptions.remote?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.remote-runs`),
+      changed: () => { this.provider?.synchronize(); platformOptions.remote?.changed?.(); this.emit("change", []); },
     });
     this.remoteModels = new ModelRegistry({
       state: { status: "disconnected", models: [], login: null, diagnostic: null }, onChange: () => {},
@@ -84,7 +96,7 @@ export class ControlPlane extends EventEmitter {
       login: () => { throw new MoguriError("remote_account", "Configure the remote endpoint's explicit account, not a second Copilot login."); },
       prepare: async () => { throw new MoguriError("remote_model", "This remote model is no longer configured. No provider was substituted.", 409); },
     }, () => this.remote.readiness.ready ? this.projection.settings.values.remote?.models ?? [] : [], {
-      includeCopilot: false, environments: ["Remote"], vault: platformOptions.remote?.modelsVault ?? new McpKeychain("dev.moguri.profile.default.remote-models"),
+      includeCopilot: false, environments: ["Remote"], vault: platformOptions.remote?.modelsVault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.remote-models`),
       idPrefix: () => {
         const target = this.projection.settings.values.remote;
         return `remote.${frameDigest(target ? [target.id, target.host, target.port, target.user, target.hostKey] : null).slice(0, 16)}.local`;
@@ -97,8 +109,9 @@ export class ControlPlane extends EventEmitter {
         return this.remote.catalog(endpoint.baseUrl, header?.startsWith("Bearer ") ? header.slice(7) : null, init?.signal ?? AbortSignal.timeout(5000));
       },
     });
-    this.provider = new ModelRegistry(provider, () => this.projection.settings.values.localModels, {
+    this.provider = new ModelRegistry(provider ?? new CopilotAdapter(new KeyringCredentials(this.profileId)), () => this.projection.settings.values.localModels, {
       ...platformOptions.models, additional: this.remoteModels,
+      vault: platformOptions.models?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.models`),
       copilotEnvironments: () => this.remote.readiness.ready && this.projection.settings.values.remote?.allowCopilot ? ["Local", "Remote"] : ["Local"],
     });
     this.platform = new PlatformRuntime(store, platformOptions.stateDir ?? dirname(store.path), {
@@ -132,19 +145,22 @@ export class ControlPlane extends EventEmitter {
         if (this.runs.size) throw new MoguriError("provider_busy", "Stop active model work before changing a local endpoint account.", 409);
         await this.provider.token(id, token);
         const settings = this.projection.settings;
-        const result = finish([{ event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
+        const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
         this.invalidateApprovals(); return result;
       },
       remoteStatus: () => this.remote.readiness,
       remoteCommand: (command, finish) => this.remoteCommand(command, finish),
       repositoryContext: (session) => this.repositoryContext(session),
+      globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
+      foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
+      sharedGlobals: Boolean(this.profileHooks),
     }, platformOptions);
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
       const signature = JSON.stringify(metadata);
       if (signature !== this.providerMetadata) {
         this.providerMetadata = signature;
-        this.commit([{ event_type: "provider.changed", profile_id: PROFILE_ID, payload: metadata }]);
+        this.commit([{ event_type: "provider.changed", profile_id: this.profileId, payload: metadata }]);
       } else this.emit("change", []);
     };
   }
@@ -154,7 +170,7 @@ export class ControlPlane extends EventEmitter {
     this.platform.recover();
     const interruptedExecutions = this.projection.executions.filter((execution) => ["launching", "running", "stopping"].includes(execution.status));
     if (interruptedExecutions.length) this.commit(interruptedExecutions.map((execution) => ({
-      event_type: "execution.changed", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
+      event_type: "execution.changed", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
       payload: { executionId: execution.id, status: "unconfirmed", cancellation: "unconfirmed", cleanup: "unconfirmed", diagnostic: "Control plane restarted. Reconcile the existing remote run; no replacement or effect was replayed." },
     })));
     for (const session of [...this.projection.sessions]) {
@@ -180,7 +196,7 @@ export class ControlPlane extends EventEmitter {
   }
   snapshot(): Snapshot {
     return {
-      protocolVersion: PROTOCOL_VERSION, seq: this.history.at(-1)?.seq ?? 0, profileId: PROFILE_ID,
+      protocolVersion: PROTOCOL_VERSION, seq: this.history.at(-1)?.seq ?? 0, profileId: this.profileId,
       ...this.projection, provider: this.provider.state,
       capabilities: [
         { env: "Local", ready: process.platform === "darwin", reason: process.platform === "darwin" ? "Runs directly on this Mac. Shell commands are not sandboxed." : "Local supervision is validated on macOS only in this checkpoint." },
@@ -189,27 +205,51 @@ export class ControlPlane extends EventEmitter {
       ],
     };
   }
-  events(after: number): StoredEvent[] { return this.history.filter((event) => event.seq > after && event.profile_id === PROFILE_ID); }
+  events(after: number): StoredEvent[] { return this.history.filter((event) => event.seq > after && event.profile_id === this.profileId); }
   private commit(events: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest): void {
+    if (events.some((event) => event.profile_id !== this.profileId)) throw new MoguriError("profile_event_scope", "An effect attempted to leave its owning profile. No cross-profile event was committed.", 409);
     const context = this.workerFrame.getStore();
     if (context && !context.recorded) {
       const execution = this.projection.executions.find((value) => value.id === context.frame.executionId);
       if (!execution) throw new MoguriError("remote_frame", "The owned remote frame has no execution identity.", 409);
-      events = [...events, { event_type: "execution.frame_recorded", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId, payload: context.frame }];
+      events = [...events, { event_type: "execution.frame_recorded", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId, payload: context.frame }];
     }
+    events = this.profileHooks?.extendCommit(this.profileId, events) ?? events;
     const appended = this.store.commit(events, receipt, forget, (primary) => {
-      const next = { ...this.snapshot(), ...projectEvents([...this.history, ...primary]) };
+      const next = { ...this.snapshot(), ...projectEvents([...this.history, ...primary], this.profileId) };
       const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
       const accounting = this.platform.budgets.derived(next, primary);
       const checkpoints = primary.some((event) => event.event_type === "budget.blocked") ? this.platform.artifacts.checkpointEvents(next, primary) : [];
       return [...answers, ...accounting, ...checkpoints, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
-    if (forget) this.history = this.store.events(); else this.history.push(...appended);
-    this.projection = projectEvents(this.history);
+    if (forget) this.history = this.store.events(); else this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
+    this.projection = projectEvents(this.history, this.profileId);
+    this.profileHooks?.committed(this.profileId, appended);
     this.emit("change", appended);
     this.remote.synchronize();
     this.provider.synchronize();
+  }
+  refreshProfile(policyChanged = false): void {
+    this.history = this.store.events(); this.projection = projectEvents(this.history, this.profileId);
+    if (policyChanged) this.invalidateApprovals();
+    this.remote.synchronize(); this.provider.synchronize(); this.emit("change", []);
+    queueMicrotask(() => this.pumpAll());
+  }
+  wake(): void { queueMicrotask(() => this.pumpAll()); }
+  ownedLocalRoots(): string[] {
+    const roots = [...this.runs.values()].filter((run) => {
+      const session = this.projection.sessions.find((session) => session.id === run.sessionId);
+      return session?.controls.env === "Local" && session.kind === "agent" && (session.pendingMode ?? session.mode) === "agent";
+    }).flatMap((run) => run.root ? [run.root] : []);
+    for (const run of this.externalRuns.values()) {
+      const session = this.projection.sessions.find((session) => session.id === run.sessionId);
+      if (session?.controls.env === "Local" && session.projectId) roots.push(this.platform.managed.project(session).path);
+    }
+    for (const job of this.projection.jobs.filter((job) => ["cache.install", "project.artifacts.materialize", "project.defaults"].includes(job.kind) && ["running", "waiting_input"].includes(job.status))) {
+      if (job.projectId) roots.push(this.platform.managed.project({ projectId: job.projectId, workspaceId: job.workspaceId ?? null }).path);
+    }
+    return roots;
   }
   private remoteWorkspace(session: Session): string | null {
     if (session.projectId === null) return null;
@@ -225,7 +265,7 @@ export class ControlPlane extends EventEmitter {
   private executionStatus(id: string, status: BridgeStatus): void {
     const execution = this.projection.executions.find((value) => value.id === id);
     if (!execution || status.runId !== id) return;
-    this.commit([{ event_type: "execution.changed", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
+    this.commit([{ event_type: "execution.changed", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
       payload: { executionId: id, status: status.status, cancellation: status.cancellation, cleanup: status.cleanup, diagnostic: status.diagnostic, ...(status.workerPid ? { workerPid: status.workerPid } : {}) } }]);
     queueMicrotask(() => this.pumpAll());
   }
@@ -248,13 +288,13 @@ export class ControlPlane extends EventEmitter {
       this.remote.assertReady();
       await this.remoteModels.token(command.endpointId, command.type === "remote.model-token.set" ? command.token : undefined);
       const settings = this.projection.settings;
-      const result = finish([{ event_type: "settings.updated", profile_id: PROFILE_ID, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
+      const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
       this.invalidateApprovals(); return result;
     }
     const execution = this.projection.executions.find((value) => value.id === command.executionId);
     if (!execution) throw new MoguriError("remote_execution", "This remote execution is outside the profile.", 404);
     if (this.runs.get(execution.sessionId)?.executionId === execution.id) throw new MoguriError("remote_active", "Stop/wait for this live execution before offline reconciliation or inspection acknowledgement.", 409);
-    if (command.type === "remote.acknowledge") return finish([{ event_type: "execution.changed", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
+    if (command.type === "remote.acknowledge") return finish([{ event_type: "execution.changed", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
       payload: { executionId: execution.id, status: execution.status, cancellation: execution.cancellation, cleanup: "acknowledged", diagnostic: "The user acknowledged remote process inspection. This does not retrospectively prove containment or successful cleanup." } }]);
     const inspection = await this.remote.inspect(execution);
     if (inspection.status.runId !== execution.id || inspection.info.workerDigest !== execution.workerDigest) throw new MoguriError("remote_identity", "Remote inspection changed its owned run/build identity. No result was applied.", 409);
@@ -264,7 +304,7 @@ export class ControlPlane extends EventEmitter {
     for (const frame of inspection.frames) {
       if (frame.sequence !== cursor + 1 || frameDigest(frame.request) !== frame.digest) throw new MoguriError("remote_frame", "Late remote frame identity/digest/sequence is invalid.", 409);
       cursor = frame.sequence;
-      const scope = { profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId, ...("stepId" in frame.request ? { step_id: frame.request.stepId } : {}) };
+      const scope = { profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId, ...("stepId" in frame.request ? { step_id: frame.request.stepId } : {}) };
       if (frame.request.kind === "model.complete") {
         const stepId = frame.request.stepId;
         const prior = session.usage.find((usage) => usage.stepId === stepId);
@@ -277,7 +317,7 @@ export class ControlPlane extends EventEmitter {
       }
       events.push({ ...scope, event_type: "execution.frame_recorded", payload: { executionId: execution.id, sequence: frame.sequence, digest: frame.digest } });
     }
-    events.push({ event_type: "execution.changed", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
+    events.push({ event_type: "execution.changed", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
       payload: { executionId: execution.id, status: inspection.status.status, cancellation: inspection.status.cancellation, cleanup: inspection.status.cleanup,
         diagnostic: `${inspection.status.diagnostic ?? "Owned remote status inspected."} Late receipts do not replay tools or rewrite the original partial turn as successful.`, ...(inspection.status.workerPid ? { workerPid: inspection.status.workerPid } : {}) } });
     return finish(events);
@@ -304,7 +344,7 @@ export class ControlPlane extends EventEmitter {
     return project;
   }
   private event<K extends EventInput["event_type"]>(session: Session, type: K, payload: Extract<EventInput, { event_type: K }>["payload"], stepId?: string): EventInput {
-    return { event_type: type, payload, profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, turn_id: session.turnId, step_id: stepId } as EventInput;
+    return { event_type: type, payload, profile_id: this.profileId, project_id: session.projectId, session_id: session.id, turn_id: session.turnId, step_id: stepId } as EventInput;
   }
   private invalidateApprovals(sessionId?: string): void {
     for (const run of this.runs.values()) if (run.approval) {
@@ -334,7 +374,7 @@ export class ControlPlane extends EventEmitter {
     let depth = 0;
     while (ancestor) { if (++depth >= 8) throw new MoguriError("session_depth", "Nested sessions are bounded to eight levels."); ancestor = ancestor.parentSessionId ? this.session(ancestor.parentSessionId) : undefined; }
     const id = randomUUID();
-    return finish([{ event_type: "session.created", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: {
+    return finish([{ event_type: "session.created", profile_id: this.profileId, project_id: parent.projectId, session_id: id, payload: {
       title: title?.trim() || (kind === "side" ? "Side chat" : "Subsession"), controls: { ...parent.controls, autonomy: "Manual" },
       parentSessionId: parent.id, kind, mode: kind === "side" ? "read-only" : "agent", contextDigest: this.store.putBlob(JSON.stringify(this.context(parent.id))),
       inheritedImages: contextHasImages(this.context(parent.id)),
@@ -380,7 +420,7 @@ export class ControlPlane extends EventEmitter {
       const current = this.session(session.id);
       for (const execution of this.projection.executions.filter((value) => value.sessionId === session.id)) await this.remote.forget(execution);
       const detach = this.projection.sessions.filter((child) => child.parentSessionId === session.id).map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } }));
-      const result = finish([...detach, { event_type: "session.deleted", profile_id: PROFILE_ID, project_id: session.projectId, payload: { deletedSessionId: session.id, usage: current.usage } }], { id: session.id }, { sessions: [session.id] });
+      const result = finish([...detach, { event_type: "session.deleted", profile_id: this.profileId, project_id: session.projectId, payload: { deletedSessionId: session.id, usage: current.usage } }], { id: session.id }, { sessions: [session.id] });
       this.paused.delete(session.id); return result;
     } finally { for (const id of owned) this.deletingSessions.delete(id); }
   }
@@ -416,7 +456,7 @@ export class ControlPlane extends EventEmitter {
         throw new MoguriError("project_secrets", "Project credential cleanup is unconfirmed. Unlock the configured secret backend and retry; project records were preserved.", 503);
       }
       const artifacts = await this.platform.artifacts.removal(id, choice);
-      return finish([...artifacts.events, { event_type: "project.removed", profile_id: PROFILE_ID, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }], { id }, { projects: [id], artifacts: artifacts.forget });
+      return finish([...artifacts.events, { event_type: "project.removed", profile_id: this.profileId, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }], { id }, { projects: [id], artifacts: artifacts.forget });
     } finally { this.deletingProjects.delete(id); }
   }
   private subagent(parent: Session, prompt: string): string {
@@ -426,8 +466,8 @@ export class ControlPlane extends EventEmitter {
     const id = randomUUID();
     const item = { id: randomUUID(), text: prompt, attachments: [], delivery: "queue" as const };
     this.commit([
-      { event_type: "session.created", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: { title: `Read-only: ${prompt.slice(0, 60)}`, controls: { ...parent.controls, autonomy: "Manual" }, parentSessionId: parent.id, readOnly: true, workspaceId: parent.workspaceId, inheritedImages: contextHasImages(this.context(parent.id)), contextDigest: this.store.putBlob(JSON.stringify(this.context(parent.id))) } },
-      { event_type: "queue.enqueued", profile_id: PROFILE_ID, project_id: parent.projectId, session_id: id, payload: { item } },
+      { event_type: "session.created", profile_id: this.profileId, project_id: parent.projectId, session_id: id, payload: { title: `Read-only: ${prompt.slice(0, 60)}`, controls: { ...parent.controls, autonomy: "Manual" }, parentSessionId: parent.id, readOnly: true, workspaceId: parent.workspaceId, inheritedImages: contextHasImages(this.context(parent.id)), contextDigest: this.store.putBlob(JSON.stringify(this.context(parent.id))) } },
+      { event_type: "queue.enqueued", profile_id: this.profileId, project_id: parent.projectId, session_id: id, payload: { item } },
     ]);
     queueMicrotask(() => this.pumpAll());
     return id;
@@ -446,7 +486,7 @@ export class ControlPlane extends EventEmitter {
     const stepId = randomUUID();
     const jobId = randomUUID();
     const approvalId = randomUUID();
-    const scope = { profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, turn_id: turnId, step_id: stepId };
+    const scope = { profile_id: this.profileId, project_id: session.projectId, session_id: session.id, turn_id: turnId, step_id: stepId };
     const external: ExternalRun = { sessionId: session.id, turnId, stepId, jobId, call, approvalId, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision, abort: new AbortController(), execute, started: false };
     this.externalRuns.set(session.id, external);
     this.commit([
@@ -521,7 +561,7 @@ export class ControlPlane extends EventEmitter {
   private attachments(session: Session, attachments: Session["draft"]["attachments"]): void {
     if (!session.projectId && attachments.some((attachment) => attachment.kind === "project_file")) throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
     for (const attachment of attachments) {
-      const known = this.history.some((event) => event.profile_id === PROFILE_ID && event.session_id === session.id && event.event_type === "draft.saved" &&
+      const known = this.history.some((event) => event.profile_id === this.profileId && event.session_id === session.id && event.event_type === "draft.saved" &&
         event.payload.attachments.some((item) => JSON.stringify(item) === JSON.stringify(attachment)));
       if (!known || digest(this.store.blob(attachment.digest)) !== attachment.digest) throw new MoguriError("attachment_denied", "Attachment snapshot is not authorized for this session.", 403);
     }
@@ -534,6 +574,7 @@ export class ControlPlane extends EventEmitter {
   }
   dispatch(raw: unknown): Promise<CommandResult> {
     const envelope = parse(CommandSchema, raw);
+    if (envelope.profileId !== this.store.profileId) return Promise.reject(new MoguriError("profile_scope", "This command belongs to another profile. No Default fallback or cross-profile receipt was used.", 403));
     const hash = digest(JSON.stringify(envelope.command));
     const pending = this.dispatching.get(envelope.id);
     if (pending) {
@@ -547,6 +588,7 @@ export class ControlPlane extends EventEmitter {
   private async perform(raw: unknown): Promise<CommandResult> {
     if (this.shuttingDown) throw new MoguriError("shutting_down", "Moguri is shutting down. The draft was not sent.", 503);
     const envelope = parse(CommandSchema, raw);
+    if (envelope.profileId !== this.store.profileId) throw new MoguriError("profile_scope", "Choose the command's actual profile; no fallback is allowed.", 403);
     const commandDigest = digest(JSON.stringify(envelope.command));
     const existing = this.store.receipt(envelope.id, commandDigest);
     if (existing) return existing;
@@ -569,7 +611,7 @@ export class ControlPlane extends EventEmitter {
         const existing = this.projection.projects.find((project) => project.path === path);
         if (existing) return finish([], { id: existing.id });
         const project = { id: randomUUID(), name: basename(path), path };
-        return finish([{ event_type: "project.added", profile_id: PROFILE_ID, project_id: project.id, payload: { project } }], { id: project.id });
+        return finish([{ event_type: "project.added", profile_id: this.profileId, project_id: project.id, payload: { project } }], { id: project.id });
       }
       case "session.create": {
         const projectId = command.projectId ?? null;
@@ -581,7 +623,7 @@ export class ControlPlane extends EventEmitter {
         }
         const id = randomUUID();
         const changeSet = command.workspaceId ? this.projection.changeSets.find((value) => value.workspaceId === command.workspaceId) : undefined;
-        return finish([{ event_type: "session.created", profile_id: PROFILE_ID, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...startup, workspaceId: command.workspaceId ?? null, workItemId: changeSet?.issueId ?? null, prUrl: changeSet?.prUrl ?? null } }], { id });
+        return finish([{ event_type: "session.created", profile_id: this.profileId, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...startup, workspaceId: command.workspaceId ?? null, workItemId: changeSet?.issueId ?? null, prUrl: changeSet?.prUrl ?? null } }], { id });
       }
       case "provider.login": {
         if (this.runs.size) throw new MoguriError("provider_busy", "Stop active turns before changing the provider account.", 409);
@@ -597,7 +639,7 @@ export class ControlPlane extends EventEmitter {
       case "policy.set": {
         const policy = { revision: this.projection.policy.revision + 1, allowedEnvs: command.allowedEnvs };
         const finishingTurnIds = command.allowedEnvs.includes("Local") ? [] : this.projection.sessions.filter((session) => session.turnId && session.controls.env === "Local").map((session) => session.turnId!);
-        const result = finish([{ event_type: "policy.updated", profile_id: PROFILE_ID, payload: { policy, finishingTurnIds } }]);
+        const result = finish([{ event_type: "policy.updated", profile_id: this.profileId, payload: { policy, finishingTurnIds } }]);
         this.invalidateApprovals();
         return result;
       }
@@ -730,7 +772,7 @@ export class ControlPlane extends EventEmitter {
   }
   private context(sessionId: string): Message[] {
     const messages: Message[] = [];
-    for (const event of this.history) if (event.profile_id === PROFILE_ID && event.session_id === sessionId) {
+    for (const event of this.history) if (event.profile_id === this.profileId && event.session_id === sessionId) {
       if (event.event_type === "session.created" && event.payload.contextDigest) {
         const context: unknown = JSON.parse(this.store.blob(event.payload.contextDigest));
         if (Array.isArray(context)) messages.push(...context as Message[]);
@@ -775,7 +817,7 @@ export class ControlPlane extends EventEmitter {
           this.commit([{ ...this.event(current, "execution.started", { execution }), turn_id: turnId }]);
         }
         const child = execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
-        const run: Run = { sessionId: current.id, turnId, child, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set() };
+        const run: Run = { sessionId: current.id, turnId, child, root: current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set() };
         this.runs.set(current.id, run);
         child.events.on("stderr", (data) => { run.stderr = (run.stderr + data).slice(-4096); });
         child.events.on("message", (message: unknown, frame) => {
@@ -816,6 +858,7 @@ export class ControlPlane extends EventEmitter {
   }
   private otherWriter(session: Session): boolean {
     if (session.projectId === null) return false;
+    if (session.controls.env === "Local" && this.profileHooks?.foreignRootBusy(this.profileId, this.platform.managed.project(session).path)) return true;
     if (this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) return true;
     const key = this.platform.managed.leaseKey(session)!;
     return this.projection.sessions.some((other) => other.id !== session.id && this.platform.managed.leaseKey(other) === key && other.turnId && other.kind === "agent" && other.mode === "agent") ||
@@ -947,7 +990,7 @@ export class ControlPlane extends EventEmitter {
         const budget = error instanceof MoguriError && error.code.startsWith("budget_");
         if (budget) {
           const current = this.session(run.sessionId), status = this.platform.budgets.status(current.id);
-          this.commit([{ event_type: "budget.blocked", profile_id: PROFILE_ID, payload: { sessionId: current.id, ownerSessionId: status.ownerSessionId, stepId: request.stepId, diagnostic: error.message, remainingTokens: status.remainingTokens, remainingUsd: status.remainingUsd } }]);
+          this.commit([{ event_type: "budget.blocked", profile_id: this.profileId, payload: { sessionId: current.id, ownerSessionId: status.ownerSessionId, stepId: request.stepId, diagnostic: error.message, remainingTokens: status.remainingTokens, remainingUsd: status.remainingUsd } }]);
         }
         this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       } finally { const key = this.platform.managed.leaseKey(session); if (key && this.writerReservations.get(key) === session.id) this.writerReservations.delete(key); }
@@ -1112,4 +1155,4 @@ export class ControlPlane extends EventEmitter {
     this.removeAllListeners();
   }
 }
-export const envelope = (command: CommandEnvelope["command"]): CommandEnvelope => ({ id: randomUUID(), profileId: PROFILE_ID, command });
+export const envelope = (command: CommandEnvelope["command"], profileId: string = PROFILE_ID): CommandEnvelope => ({ id: randomUUID(), profileId, command });

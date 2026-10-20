@@ -4,8 +4,7 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import sharp from "sharp";
 import { Value } from "typebox/value";
 import {
-  InputCommandSchema, InputQuerySchema, isRecord, MoguriError, PROFILE_ID,
-  type Attachment, type ContextPreview, type InputCommand, type InputQuery, type InputResponse, type Session, type Snapshot, type StoredEvent,
+  InputCommandSchema, InputQuerySchema, isRecord, MoguriError, type Attachment, type ContextPreview, type InputCommand, type InputQuery, type InputResponse, type Session, type Snapshot, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
 import { isProtectedProjectPath, readProjectFile, readRegularFile } from "./files.ts";
 import { digest, type EventStore } from "./store.ts";
@@ -166,6 +165,6 @@ export class ContextInputs {
     if (current.draft.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "The draft changed during capture. No attachment was silently substituted.", 409);
     const attachments = [...current.draft.attachments, attachment];
     if (attachments.length > 16 || attachments.reduce((total, attachment) => total + attachment.bytes, 0) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 attachments and 12 MiB of captured content.");
-    return finish([{ event_type: "draft.saved", profile_id: PROFILE_ID, project_id: current.projectId, session_id: current.id, payload: { text: current.draft.text, attachments } }], { id: attachment.id, revision: current.draft.revision + 1 });
+    return finish([{ event_type: "draft.saved", profile_id: this.host.snapshot().profileId, project_id: current.projectId, session_id: current.id, payload: { text: current.draft.text, attachments } }], { id: attachment.id, revision: current.draft.revision + 1 });
   }
 }
