@@ -11,6 +11,8 @@ export type SlashResult =
   | { kind: "text"; text: string }
   | { kind: "copy"; text: string }
   | { kind: "artifact-editor"; artifact: ArtifactEditorRequest }
+  | { kind: "profiles" }
+  | { kind: "profile"; profileId: string }
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
   { name: "attach-file", description: "Capture an explicitly selected local UTF-8 file", argument: "ABSOLUTE_PATH" },
@@ -34,8 +36,10 @@ export const slashCommands = [
   { name: "artifacts", description: "View independent retained documents" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
-  { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile TOKENS|- USD|- REV confirm-estimates|clear-profile REV confirm-policy]" },
+  { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
   { name: "dashboard", description: "Inspect profile-wide actual model accounting", argument: "[FILTERS_JSON]" },
+  { name: "profiles", description: "Choose or manage isolated profiles" },
+  { name: "profile", description: "Explicit profile navigation and metadata", argument: "[use ID|create NAME|rename ID REV NAME|retry ID REV confirm-review|stop ID]" },
   { name: "project-removal", description: "Review artifact retention, repository copies and explicit project removal", argument: "[preview|export PATH|materialize-preview [WORKSPACE|-] [NEW_BRANCH]|materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write|materialization JOB|materialize-delete SET_SHA JOB confirm-remove|retain/delete SET_SHA confirm-remove|export-delete SET_SHA EXPORT_SHA confirm-remove]" },
   { name: "insights", description: "Inspect session metadata and usage" },
   { name: "pr", description: "Open the connected pull request" },
@@ -70,6 +74,29 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "profiles": return client === "cli" ? { kind: "text", text: JSON.stringify(await sdk.profiles.list(), null, 2) } : { kind: "profiles" };
+    case "profile": {
+      const [action, id, revision, ...name] = command.argument.split(/\s+/);
+      if (!action) return { kind: "text", text: JSON.stringify({ currentProfileId: sdk.profileId, ...(await sdk.profiles.list()) }, null, 2) };
+      if (action === "use" && id && !revision) {
+        const profile = (await sdk.profiles.list()).catalog.profiles.find((profile) => profile.id === id);
+        if (!profile || profile.status !== "ready") throw new ClientError("profile_unready", "Choose a ready registered profile. No Default fallback was used.");
+        return { kind: "profile", profileId: id };
+      }
+      if (action === "create" && id) {
+        const created = await sdk.profiles.create([id, revision, ...name].filter(Boolean).join(" "));
+        return { kind: "text", text: JSON.stringify({ profile: await sdk.profiles.wait(created.id!), warning: "Created without copying accounts, projects or model context. Choose it explicitly." }, null, 2) };
+      }
+      if (action === "rename" && id && revision && /^\d+$/.test(revision) && name.length) {
+        await sdk.profiles.update(id, { name: name.join(" ") }, Number(revision));
+        return { kind: "ok", message: "Profile display name changed; immutable identity, data and credentials were preserved." };
+      }
+      if (action === "retry" && id && revision && /^\d+$/.test(revision) && name.length === 1 && name[0] === "confirm-review") {
+        await sdk.profiles.retry(id, Number(revision), true); return { kind: "text", text: JSON.stringify(await sdk.profiles.wait(id), null, 2) };
+      }
+      if (action === "stop" && id && !revision) { await sdk.profiles.stop(id); return { kind: "ok", message: "Owned profile setup stop requested. Inspect actual metadata; partial resources were preserved." }; }
+      throw new ClientError("profile_command", "Use /profiles, /profile use ID, create NAME, rename ID REV NAME, retry ID REV confirm-review, or stop ID. CLI navigation returns an action; --profile ID selects its immutable scope.");
+    }
     case "dashboard": {
       if (!command.argument && client === "desktop") return { kind: "panel", panel: "Dashboard" };
       const filters: unknown = command.argument ? JSON.parse(command.argument) : {};
@@ -83,21 +110,23 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!action || action === "status") return { kind: "text", text: JSON.stringify(await sdk.budgets.status(session.id), null, 2) };
       if ((action === "Unlimited" || action === "unlimited") && !args.length) {
         await sdk.sessions.configure(session.id, { ...session.controls, budget: { kind: "unlimited" } }, session.revision);
-        return { kind: "ok", message: "Session preference is Unlimited. Profile hard policy and cumulative accounting were preserved." };
+        return { kind: "ok", message: "Session preference is Unlimited. Profile/global hard policy and cumulative accounting were preserved." };
       }
-      if (action === "clear-profile" && args.length === 2 && /^\d+$/.test(args[0]!) && args[1] === "confirm-policy") {
-        await sdk.budgets.policy(null, Number(args[0]), true);
-        return { kind: "ok", message: "Profile cap explicitly removed. Accounting was not reset." };
+      if ((action === "clear-profile" || action === "clear-global") && args.length === 2 && /^\d+$/.test(args[0]!) && args[1] === "confirm-policy") {
+        if (action === "clear-global") await sdk.profiles.globalBudget(null, Number(args[0]), true);
+        else await sdk.budgets.policy(null, Number(args[0]), true);
+        return { kind: "ok", message: `${action === "clear-global" ? "Global" : "Profile"} cap explicitly removed. Accounting was not reset.` };
       }
-      const profile = action === "profile", expected = profile ? 4 : 3;
-      if ((action !== "set" && !profile) || args.length !== expected || args.at(-1) !== "confirm-estimates" ||
-        args[0] !== "-" && !/^\d+$/.test(args[0]!) || args[1] !== "-" && !Number.isFinite(Number(args[1]))) throw new ClientError("budget_command", `Use /budget set TOKENS|- USD|- confirm-estimates, or profile TOKENS|- USD|- REV confirm-estimates. ${BUDGET_WARNING}`);
+      const policy = action === "profile" || action === "global", expected = policy ? 4 : 3;
+      if ((action !== "set" && !policy) || args.length !== expected || args.at(-1) !== "confirm-estimates" ||
+        args[0] !== "-" && !/^\d+$/.test(args[0]!) || args[1] !== "-" && !Number.isFinite(Number(args[1]))) throw new ClientError("budget_command", `Use /budget set TOKENS|- USD|- confirm-estimates, or profile/global TOKENS|- USD|- REV confirm-estimates. ${BUDGET_WARNING}`);
       const limit = { basis: "estimate" as const, ...(args[0] === "-" ? {} : { tokens: Number(args[0]) }), ...(args[1] === "-" ? {} : { usd: Number(args[1]) }) };
-      if (profile) {
-        if (!/^\d+$/.test(args[2]!)) throw new ClientError("budget_revision", "Use the observed profile-policy revision from /dashboard.");
-        await sdk.budgets.policy(limit, Number(args[2]), true);
+      if (policy) {
+        if (!/^\d+$/.test(args[2]!)) throw new ClientError("budget_revision", "Use the observed policy revision from /dashboard or /profile.");
+        if (action === "global") await sdk.profiles.globalBudget(limit, Number(args[2]), true);
+        else await sdk.budgets.policy(limit, Number(args[2]), true);
       } else await sdk.sessions.configure(session.id, { ...session.controls, budget: { kind: "limited", ...limit } }, session.revision);
-      return { kind: "ok", message: `${profile ? "Profile" : "Session"} estimate-based cap saved. Existing charges/reservations were preserved. ${BUDGET_WARNING}` };
+      return { kind: "ok", message: `${action === "global" ? "Global" : policy ? "Profile" : "Session"} estimate-based cap saved. Existing charges/reservations were preserved. ${BUDGET_WARNING}` };
     }
     case "question": {
       const [action, id, revision, ...text] = command.argument.split(/\s+/);

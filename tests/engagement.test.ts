@@ -123,7 +123,7 @@ test("schema-5 encrypted history migrates without changing identities, receipts 
     const history = fixture.service.controller.events(0).map((event) => [event.seq, event.id]);
     sdk.disconnect(); await writeLegacyState(fixture.service, 5);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 13);
+    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 14);
     assert.deepEqual(restarted.controller.events(0).slice(0, history.length).map((event) => [event.seq, event.id]), history);
     assert.equal(restarted.controller.snapshot().sessions[0]?.draft.text, "Generated retained schema-five draft.");
     assert.equal(restarted.controller.snapshot().sessions[0]?.controls.modelId, fixture.modelId);

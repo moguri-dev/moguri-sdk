@@ -87,7 +87,7 @@ test("schema-4 state upgrades without changing events, receipts or encrypted con
     const before = fixture.service.controller.events(0).map(({ id, seq }) => ({ id, seq }));
     sdk.disconnect(); await writeLegacyState(fixture.service, 4);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 13);
+    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 14);
     assert.deepEqual(restarted.controller.events(0).slice(0, before.length).map(({ id, seq }) => ({ id, seq })), before);
     sdk = await new MoguriSdk(restarted.connection).ready();
     if (process.platform === "darwin") {

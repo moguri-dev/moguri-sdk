@@ -170,6 +170,8 @@ export interface Snapshot extends PlatformSnapshot {
   profileId: string;
   profile?: Profile;
   profileCatalogRevision?: number;
+  globalBudgetPolicy?: GlobalBudgetPolicy;
+  globalBudgetSequence?: number;
   projects: Project[];
   sessions: Session[];
   provider: ProviderState;

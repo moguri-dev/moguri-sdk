@@ -41,6 +41,15 @@ try {
       const budget=await sdk.budgets.status("generated-id");void budget.status.totals.heldTokens;
       await sdk.budgets.policy({basis:"estimate",tokens:100000},0,true);
       const dashboard=await sdk.budgets.dashboard({role:"solver",limit:50});void dashboard.nextOffset;
+      const catalog=(await sdk.profiles.list()).catalog;
+      const createdProfile=await sdk.profiles.create("Generated typed profile","#557799");
+      const profile=await sdk.profiles.wait(createdProfile.id!);
+      const scoped=await sdk.profiles.open(profile.id);void scoped.profileId;
+      await sdk.profiles.update(profile.id,{name:"Generated typed renamed profile"},profile.revision);
+      await sdk.profiles.defaults({autonomy:"Guided"},catalog.globalDefaults.revision);
+      await sdk.profiles.globalBudget({basis:"estimate",tokens:200000},catalog.globalBudget.revision,true);
+      await sdk.profiles.retry(profile.id,profile.revision,true);await sdk.profiles.stop(profile.id);
+      const selected=await connectMoguri({autoStart:false,profileId:profile.id});selected.disconnect();scoped.disconnect();
       const general=await sdk.sessions.create(null);
       const document=await sdk.artifacts.create(null,{kind:"decision",name:"Generated independent note",text:"Generated retained text"});
       await sdk.artifacts.update(document.id!,{text:"Generated edited note"},0);
@@ -82,7 +91,8 @@ try {
   await writeFile(join(consumer, "smoke.mjs"), `
     import assert from "node:assert/strict";
     import {mkdir,writeFile,readFile} from "node:fs/promises";
-    import {spawn,execFileSync} from "node:child_process";
+    import {spawn,execFile,execFileSync} from "node:child_process";
+    import {promisify} from "node:util";
     import {createHash} from "node:crypto";
     import {createServer} from "node:http";
     import {fileURLToPath} from "node:url";
@@ -96,15 +106,37 @@ try {
     git(["init","--initial-branch=main"]);git(["add","--","generated.ts"]);
     git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated external SDK base"]);
     git(["config","user.name","Generated fixture"]);git(["config","user.email","fixture@example.invalid"]);
-    const provider={state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>provider.onChange(),login:()=>{throw Error("No real authorization in SDK verification")},cancel:async()=>{},logout:async()=>{},prepare:async()=>{throw Error("No paid calls in SDK verification")}};
-    const runtime=await createRuntime({stateDir:join(root,"state"),provider,retentionKey:Buffer.alloc(32,0x67),platform:{terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]}}});
+    const makeProvider=()=>{const value={state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>value.onChange(),login:()=>{throw Error("No real authorization in SDK verification")},cancel:async()=>{},logout:async()=>{},prepare:async()=>{throw Error("No paid calls in SDK verification")}};return value;};
+    const provider=makeProvider(),providers=new Map([["default",provider]]),vaults=new Map();
+    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]}};
+    const runtime=await createRuntime({stateDir:join(root,"state"),retentionKey:Buffer.alloc(32,0x67),platform,profiles:{
+      provider:id=>{if(!providers.has(id))providers.set(id,makeProvider());return providers.get(id);},
+      platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
+    }});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
-    let budgetServer=null;
+    let budgetServer=null,beta=null;
     try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,13);
+      assert.equal(sdk.getState().snapshot.protocolVersion,14);
+      const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
+      const profile=await sdk.profiles.wait(profileCreation.id);
+      beta=await sdk.profiles.open(profile.id);
+      assert.equal(Reflect.set(sdk,"profileId",profile.id),false);
+      assert.equal(sdk.profileId,"default");assert.equal(beta.profileId,profile.id);
+      assert.equal(beta.getState().snapshot.projects.length,0);assert.equal(beta.getState().snapshot.sessions.length,0);
+      assert.equal(beta.getState().snapshot.provider.status,"disconnected");
+      const betaSession=await beta.sessions.create(null,"Generated installed Beta chat");
+      assert.equal(beta.getState().snapshot.sessions[0].controls.modelId,null);
+      const betaDocument=await beta.artifacts.create(betaSession.id,{kind:"decision",name:"Generated Beta private note",text:"Generated Beta-only installed bytes."});
+      await assert.rejects(()=>sdk.artifacts.read(betaDocument.id),/outside this profile/);
+      const scopedCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"status","--profile",profile.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+      assert.equal(JSON.parse(scopedCli.stdout).profileId,profile.id);
+      assert.equal((await beta.voice.status()).voice.runtimeReady,true);
+      assert.deepEqual((await beta.mcp.tools("builtin","",0,betaSession.id)).tools.map(tool=>tool.name),["fetch_page"]);
+      await sdk.profiles.update(profile.id,{name:"Generated installed profile renamed"},profile.revision);
+      assert.equal(beta.profileId,profile.id);
       const isolated=await sdk.workspaces.create(p.id,"moguri/generated-external");
       const owned=await sdk.workspaces.wait(isolated.id);
       assert.ok((await sdk.workspaces.discover(p.id)).registrations.some(entry=>entry.managedId===owned.id&&entry.locked));
@@ -127,7 +159,7 @@ try {
           let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
           role.once("error",reject);
           role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
-          role.stdin.write(JSON.stringify({action:"probe",protocol:13,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+          role.stdin.write(JSON.stringify({action:"probe",protocol:14,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
         });
         assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
         role.stdin.end();assert.equal(await roleExit,0);
@@ -249,8 +281,28 @@ try {
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===metered.id).status,"partial");
       assert.equal(generatedRequests.length,1);assert.equal((await sdk.budgets.dashboard({role:"solver"})).totals.calls,1);
       assert.ok(sdk.getState().snapshot.artifacts.some(v=>v.origin==="checkpoint"));
-    } finally {sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    console.log("External SDK imports/types, approved/audited install, installed worker handshake, typed context/worktrees/PTY, independent artifacts/repository copies/local commits, real generated finite-model admission/profile policy/dashboard/checkpoints, metachat, vectors, MCP and script-free cache passed.");
+      const betaProvider=providers.get(beta.profileId);betaProvider.state=structuredClone(provider.state);betaProvider.prepare=provider.prepare;
+      betaProvider.onChange();await beta.models.refresh();
+      const betaMetered=await beta.sessions.create(null,"Generated installed Beta model",{modelId:generatedModel.id});
+      await beta.command({type:"draft.save",sessionId:betaMetered.id,expectedRevision:0,text:"Generated isolated installed worker.",attachments:[]});
+      const betaEstimate=(await beta.sessions.context(betaMetered.id)).context.estimatedTokens;
+      const betaCurrent=beta.getState().snapshot.sessions.find(value=>value.id===betaMetered.id);
+      await beta.sessions.configure(betaMetered.id,{...betaCurrent.controls,budget:{kind:"limited",basis:"estimate",tokens:Math.ceil(betaEstimate)+16}});
+      await beta.command({type:"message.send",sessionId:betaMetered.id,expectedRevision:1,delivery:"queue"});
+      for(let n=0;n<400&&!["completed","partial","failed","stopped"].includes(beta.getState().snapshot.sessions.find(v=>v.id===betaMetered.id).status);n++)await new Promise(resolve=>setTimeout(resolve,20));
+      assert.equal(beta.getState().snapshot.sessions.find(v=>v.id===betaMetered.id).status,"completed");assert.equal(generatedRequests.length,2);
+      assert.equal((await beta.budgets.dashboard()).totals.reportedTokens,42);
+      assert.equal((await sdk.budgets.dashboard()).totals.reportedTokens,42);
+      await sdk.profiles.globalBudget({basis:"estimate",tokens:84},0,true);
+      assert.equal((await beta.budgets.status(betaMetered.id)).status.remainingTokens,0);
+      const globals=(await beta.profiles.list()).catalog.globalDefaults;
+      await beta.profiles.defaults({autonomy:"Guided"},globals.revision);
+      const inherited=await sdk.sessions.create(null,"Generated installed shared preference");
+      assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===inherited.id).controls.autonomy,"Guided");
+      assert.ok(beta.getState().events.every(event=>event.profile_id===beta.profileId));
+      assert.ok(sdk.getState().events.every(event=>event.profile_id==="default"));
+    } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
+    console.log("External SDK imports/types, approved/audited install, immutable profile/CLI/model/credential scopes and shared policies, installed worker handshake, context/worktrees/PTY, independent artifacts/repository copies/local commits, finite budgets/dashboard/checkpoints, metachat, vectors, MCP and script-free cache passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }

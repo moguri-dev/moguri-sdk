@@ -82,10 +82,12 @@ export async function startService(options: ServiceOptions) {
     };
     profiles = new ProfileRuntime(store, options.stateDir, {
       controller: (view, stateDir, profileHooks) => {
-        const platform = options.profiles?.platform?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.platform : {
+        const scopedPlatform = options.profiles?.platform?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.platform : {
           mcpWorkerPath: options.platform?.mcpWorkerPath,
           speech: { executable: options.platform?.speech?.executable },
         });
+        const platform = { ...scopedPlatform, mcpWorkerPath: scopedPlatform?.mcpWorkerPath ?? options.platform?.mcpWorkerPath,
+          speech: { ...scopedPlatform?.speech, executable: scopedPlatform?.speech?.executable ?? options.platform?.speech?.executable } };
         const provider = options.profiles?.provider?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.provider : undefined);
         const model = platform?.speech?.model;
         const officialSpeech = !model || model.id === NEMOTRON_MODEL.id && model.revision === NEMOTRON_MODEL.revision && model.sha256 === NEMOTRON_MODEL.sha256;

@@ -1,50 +1,112 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, readdir, symlink, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { DraftEditor, GLOBAL_PROFILE_ID, isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { fixtureProvider, waitFor } from "./fixture.ts";
-import type { PlatformOptions } from "../apps/service/src/platform.ts";
+import { waitFor } from "./fixture.ts";
+import { profileFixture } from "./fixtures/profiles.ts";
 import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
 import { dependencyArchive, dependencyProject } from "./fixtures/dependencies.ts";
 
-async function profileFixture(extra?: (profileId: string, directory: string) => PlatformOptions) {
-  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-profiles-")), stateDir = join(directory, "state"), key = Buffer.alloc(32, 0x6a);
-  const providers = await Promise.all([fixtureProvider({ maxOutputTokens: 128 }), fixtureProvider({ maxOutputTokens: 128 }), fixtureProvider({ maxOutputTokens: 128 })]);
-  const assigned = new Map<string, typeof providers[number]>([["default", providers[0]!]]), vaults = new Map<string, Map<string, string>>();
-  const options = { stateDir, retentionKey: key, profiles: {
-    provider: (id: string) => {
-      let provider = assigned.get(id);
-      if (!provider) { provider = providers[assigned.size]; if (!provider) throw new Error("Generated provider pool exhausted"); assigned.set(id, provider); }
-      return provider.provider;
-    },
-    platform: (id: string) => {
-      let values = vaults.get(id); if (!values) { values = new Map(); vaults.set(id, values); }
-      const scoped = values;
-      return { ...extra?.(id, directory), vault: { read: async (key: string) => scoped.get(key) ?? null, write: async (key: string, value: string) => { scoped.set(key, value); }, remove: async (key: string) => { scoped.delete(key); } } };
-    },
-  } };
-  const service = await startService(options), sdk = await new MoguriSdk(service.connection).ready(), clients: MoguriSdk[] = [sdk];
-  const create = async (name: string) => {
-    const command = await sdk.profiles.create(name, "#557799");
-    const profile = await sdk.profiles.wait(command.id!), client = await sdk.profiles.open(profile.id); clients.push(client);
-    return { profile, client };
-  };
-  const session = (client: MoguriSdk, id: string) => {
-    const value = client.getState().snapshot!.sessions.find((session) => session.id === id);
-    if (!value) throw new Error("Generated scoped session is missing."); return value;
-  };
-  const send = async (client: MoguriSdk, id: string, text: string) => {
-    await client.refresh(); const current = session(client, id);
-    await client.command({ type: "draft.save", sessionId: id, expectedRevision: current.draft.revision, text, attachments: [] });
-    await client.command({ type: "message.send", sessionId: id, expectedRevision: current.draft.revision + 1, delivery: "queue" });
-  };
-  return { directory, stateDir, key, options, providers, assigned, vaults, service, sdk, clients, create, session, send,
-    close: async () => { for (const client of clients) client.disconnect(); await service.close(); for (const provider of providers) await provider.close(); await rm(directory, { recursive: true, force: true }); } };
-}
+test("concurrent revision-bound global preferences and caps admit exactly one durable edit each", async () => {
+  const fixture = await profileFixture();
+  try {
+    for (const kind of ["budget", "defaults"] as const) {
+      const results = await Promise.allSettled([1000, 2000].map((tokens) => {
+        const command = kind === "budget" ? { type: "profile.global.budget" as const, expectedRevision: 0, limit: { basis: "estimate" as const, tokens }, confirmRisk: true as const } :
+          { type: "profile.global.defaults" as const, expectedRevision: 0, values: { budget: { kind: "limited" as const, basis: "estimate" as const, tokens } } };
+        return fixture.service.profiles.dispatch({ id: `generated-${kind}-${tokens}`, profileId: "default", command }, command);
+      }));
+      assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+      const failed = results.find((result) => result.status === "rejected");
+      assert.ok(failed?.status === "rejected"); assert.match(String(failed.reason), /changed.*Reload/);
+      const catalog = (await fixture.sdk.profiles.list()).catalog;
+      assert.equal((kind === "budget" ? catalog.globalBudget : catalog.globalDefaults).revision, 1);
+      assert.equal(fixture.service.store.db.prepare("SELECT count(*) AS count FROM receipts WHERE id LIKE ?").get(`generated-${kind}-%`)?.count, 1);
+    }
+  } finally { await fixture.close(); }
+});
+
+test("profile setup cannot overwrite a concurrent rename, and explicit setup stop preserves partial state", async () => {
+  const fixture = await profileFixture();
+  try {
+    const create = { type: "profile.create" as const, name: "Generated creating metadata", color: null, confirm: true as const };
+    const created = await fixture.service.profiles.dispatch({ id: randomUUID(), profileId: "default", command: create }, create);
+    const update = { type: "profile.update" as const, targetProfileId: created.id!, expectedRevision: 0, changes: { name: "Generated forbidden stale rename" } };
+    await assert.rejects(() => fixture.service.profiles.dispatch({ id: randomUUID(), profileId: "default", command: update }, update), /Finish or stop.*setup|metadata changed/);
+    const cancel = { type: "profile.cancel" as const, targetProfileId: created.id! };
+    await fixture.service.profiles.dispatch({ id: randomUUID(), profileId: "default", command: cancel }, cancel);
+    await assert.rejects(() => fixture.sdk.profiles.wait(created.id!), /stopped|partial/);
+    const profile = (await fixture.sdk.profiles.list()).catalog.profiles.find((profile) => profile.id === created.id)!;
+    assert.equal(profile.name, create.name); assert.equal(profile.status, "partial");
+    await fixture.sdk.profiles.retry(profile.id, profile.revision, true);
+    assert.equal((await fixture.sdk.profiles.wait(profile.id)).name, create.name);
+  } finally { await fixture.close(); }
+});
+
+test("global capacity changes refresh another live profile through content-free metadata, never foreign model events", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await profileFixture();
+  try {
+    const { client: beta } = await fixture.create("Generated capacity Beta");
+    const own = await fixture.sdk.sessions.create(null, "Generated own empty accounting");
+    const other = await beta.sessions.create(null, "Generated Beta private accounting", { modelId: fixture.providers[1]!.modelId });
+    await fixture.sdk.profiles.globalBudget({ basis: "estimate", tokens: 100_000 }, 0, true); await fixture.sdk.refresh();
+    const before = fixture.sdk.getState().snapshot!.globalBudgetSequence!;
+    await fixture.send(beta, other.id!, "Generated Beta-only opaque-capacity input.");
+    await waitFor(() => fixture.session(beta, other.id!).status === "completed");
+    await waitFor(() => fixture.sdk.getState().snapshot!.globalBudgetSequence! > before);
+    assert.equal((await fixture.sdk.budgets.status(own.id!)).status.remainingTokens, 100_000 - 42);
+    assert.equal(fixture.sdk.getState().snapshot!.budgetEntries.length, 0);
+    assert.ok(fixture.sdk.getState().events.every((event) => event.profile_id === "default"));
+    assert.equal(JSON.stringify(fixture.sdk.getState()).includes("Generated Beta-only opaque-capacity input."), false);
+  } finally { await fixture.close(); }
+});
+
+test("style registry and vector/graph data stay private even when both profiles explicitly open the same physical repository", async () => {
+  const fixture = await profileFixture();
+  try {
+    const root = join(fixture.directory, "generated-style-root"); await mkdir(root);
+    await writeFile(join(root, "generated.ts"), "export function generatedProfileVectorMarker() { return 'generated'; }\n");
+    const { client: beta } = await fixture.create("Generated memory Beta");
+    const first = await fixture.sdk.command({ type: "project.add", path: root }), second = await beta.command({ type: "project.add", path: root });
+    await fixture.sdk.memory.remember(first.id!, "Generated Default-only coding convention.");
+    assert.equal(beta.getState().snapshot!.registry.length, 0);
+    for (const [client, id] of [[fixture.sdk, first.id!], [beta, second.id!]] as const) {
+      const settings = structuredClone(client.settings.get()!.values); settings.memory.enabled = true;
+      await client.settings.update(settings, client.settings.get()!.revision);
+      const job = await client.memory.index(id);
+      assert.equal((await client.jobs.wait(job.id!)).status, "completed");
+      assert.ok((await client.memory.search(id, "generated profile vector marker")).items.some((item) => item.text.includes("generatedProfileVectorMarker")));
+    }
+    await assert.rejects(() => beta.memory.search(first.id!, "generated"), { code: "project_not_found" });
+    await fixture.sdk.settings.reset("all", fixture.sdk.settings.get()!.revision);
+    const preview = (await fixture.sdk.artifacts.projectPreview(first.id!)).preview;
+    await fixture.sdk.projects.remove(first.id!, true, 0, { action: "retain", expectedDigest: preview.digest });
+    assert.ok((await beta.memory.search(second.id!, "generated profile vector marker")).items.some((item) => item.text.includes("generatedProfileVectorMarker")));
+    assert.ok((await beta.memory.graph(second.id!, "generated.ts")).nodes.some((node) => node.kind === "symbol"));
+    assert.equal(beta.getState().snapshot!.registry.length, 0);
+  } finally { await fixture.close(); }
+});
+
+test("a global policy edit invalidates an actual foreign-profile approval without treating the old user response as authority", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await profileFixture();
+  try {
+    const root = join(fixture.directory, "generated-approval-root"); await mkdir(root); await writeFile(join(root, "fixture.txt"), "Generated private approval fixture.\n");
+    const { client: beta } = await fixture.create("Generated approval Beta"), project = await beta.command({ type: "project.add", path: root });
+    const session = await beta.sessions.create(project.id!, "Generated pending approval", { modelId: fixture.providers[1]!.modelId });
+    await fixture.send(beta, session.id!, "generated tool approval across profiles");
+    const approval = await waitFor(() => fixture.session(beta, session.id!).pendingApproval);
+    await fixture.sdk.command({ type: "policy.set", allowedEnvs: ["Remote"] });
+    await waitFor(() => !fixture.session(beta, session.id!).pendingApproval);
+    await assert.rejects(() => beta.command({ type: "approval.respond", sessionId: session.id!, approvalId: approval.id, allow: true }), { code: "approval_stale" });
+    const control = await fixture.service.profiles.control(beta.profileId);
+    assert.ok(control.events(0).some((event) => event.event_type === "tool.decided" && event.payload.approvalId === approval.id && event.payload.actor === "policy" && !event.payload.allow));
+    assert.equal(control.events(0).some((event) => event.event_type === "tool.started"), false);
+    assert.ok(fixture.sdk.getState().events.every((event) => event.profile_id === "default"));
+  } finally { await fixture.close(); }
+});
 
 test("real immutable SDK scopes isolate snapshots, drafts, same-ID receipts, artifacts, MCP grants and event replay", async () => {
   const fixture = await profileFixture();
@@ -55,6 +117,8 @@ test("real immutable SDK scopes isolate snapshots, drafts, same-ID receipts, art
     const { profile, client: beta } = await fixture.create("Generated Beta");
     try {
       assert.equal(fixture.sdk.profileId, "default"); assert.equal(beta.profileId, profile.id);
+      assert.equal(Reflect.set(fixture.sdk, "profileId", profile.id), false);
+      assert.throws(() => Object.defineProperty(fixture.sdk, "profileId", { value: profile.id }), TypeError);
       assert.equal(beta.getState().snapshot!.sessions.length, 0);
       const b = await beta.sessions.create(null, "Generated private Beta");
       await editor.flush();

@@ -18,10 +18,12 @@ export class MoguriClient {
   private disposed = false;
   private refreshTask?: Promise<void>;
   private refreshAgain = false;
+  private refreshError: unknown;
   private after = 0;
   private backoff = 300;
   constructor(public connection: Connection, protected readonly resolveConnection?: () => Promise<Connection>, readonly profileId: string = PROFILE_ID) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(profileId) || profileId === GLOBAL_PROFILE_ID) throw new ClientError("profile_scope", "Choose one explicit user profile. No Default fallback was used.");
+    Object.defineProperty(this, "profileId", { writable: false, configurable: false });
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   getState = () => this.state;
@@ -29,6 +31,7 @@ export class MoguriClient {
   async connect(): Promise<void> {
     this.disposed = false;
     await this.refresh();
+    if (!this.state.snapshot && this.refreshError instanceof ClientError) throw this.refreshError;
     this.openSocket();
   }
   protected async request(path: string, body?: unknown): Promise<unknown> {
@@ -72,8 +75,10 @@ export class MoguriClient {
         const projects = new Set(snapshot.projects.map((project) => project.id));
         const sessions = new Set(snapshot.sessions.map((session) => session.id));
         this.update({ snapshot, error: null, events: this.state.events.filter((event) => (!event.project_id || projects.has(event.project_id)) && (!event.session_id || sessions.has(event.session_id))) });
+        this.refreshError = undefined;
       } while (this.refreshAgain && !this.disposed);
     } catch (error) {
+      this.refreshError = error;
       this.update({ status: "disconnected", error: error instanceof Error ? error.message : "Service connection failed." });
     }
   }

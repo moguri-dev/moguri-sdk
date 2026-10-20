@@ -27,6 +27,9 @@ uses another scoped SDK client; pending commands/draft editors cannot change
 their destination when a user navigates. Snapshot, replay, queries, terminal
 I/O, blobs, receipts and exports must reject cross-profile identities without
 fallback. Default data is not copied into a new profile.
+The public client property is non-writable/non-configurable at runtime, not
+only TypeScript-readonly. Unknown profile startup reports the actual scope
+error instead of retrying until a generic handshake timeout.
 
 ## Secrets and resources
 
@@ -60,6 +63,41 @@ check all profile reservations before dispatch without disclosing foreign
 profile content. Source deletion, restart, switching defaults or selecting a
 new profile cannot refund global accounting. Unknown telemetry/prices remain
 unknown.
+Live global capacity changes invalidate scoped snapshots using a content-free
+accounting sequence. Other profiles' model events, ledger rows, prompts and
+account credentials are never broadcast to the current client. Revision checks
+run after asynchronous authority initialization and immediately before commit,
+so concurrent global preference/cap edits cannot both claim the same revision.
+
+## Client and API surfaces
+
+`X-Moguri-Profile` and WebSocket authentication select immutable scope.
+`connectMoguri({profileId})` and `sdk.profiles.open(id)` return scoped clients;
+omission still means actual Default. CLI/TUI `--profile ID` overrides the
+explicit `MOGURI_PROFILE_ID` launch environment without persisting a global
+active-profile selection. Desktop launch accepts that environment through the
+CLI. New profile creation never chooses it automatically.
+
+The SDK provides list/create/update/wait/open/retry/stop, revisioned shared
+startup preferences and revisioned global hard budget policy. The CLI exposes
+`profile list|create|update|defaults|retry|stop`, `budget global`, and
+`--profile ID`. TUI F8 works without a session, edits name/color as validated
+JSON and inspects or explicitly retries/stops partial setup. Shared
+`/profiles` and `/profile` return typed navigation actions, not a mutable
+connection or model-controlled profile change.
+
+Desktop switching flushes the old draft editors before opening the next
+client. Dirty settings, artifact and profile forms, dialogs and owned dictation
+block switching. Input is inert during the handoff; old work continues under
+its original controller. Native notifications bind profile and session IDs;
+preview partitions bind both IDs and reject foreign sessions. A delayed
+old-profile preview close cannot destroy the new profile's view.
+
+Profile/global budget forms have independent dirty ownership. Saving one must
+not enable navigation while another still contains uncommitted edits.
+Profile settings reset preserves shared global startup values and all hard
+policies; restoring shared global preferences is a separate revision-bound
+user action.
 
 ## Required generated evidence
 
@@ -87,3 +125,13 @@ verified public dependency archive across profile caches, one generated shared
 speech-weight download with isolated preferences, and actual scoped SDK/WebSocket
 behavior. Default's published runtime is still the separately qualified 0.7
 alpha; profile UI/CLI, legacy migration and packed scope tests remain required.
+
+The expanded authority/migration gate now passes **19** generated checks in
+**5,364.74 ms**, including real schema-13 upgrade with byte-identical Default
+ciphertexts/keys/receipts, injected migration rollback/reopen, memory/style
+isolation on a shared physical repository, expired cross-profile approvals,
+actual opaque global-capacity refresh and concurrent revision races. The real
+TUI creates/renames/switches clients while preserving the old draft, and the
+CLI covers explicit/inherited scope without changing another client. Hidden
+desktop, full Default regression and exact packed-consumer qualification are
+still pending; these results do not enable native SendBox or routed decisions.

@@ -164,7 +164,7 @@ test("schema-12 accounting imports exact legacy usage without rewriting identiti
   let upgraded: Awaited<ReturnType<typeof startService>> | undefined, restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     await fixture.configure(); await fixture.send("Generated legacy accounting."); await fixture.terminal();
-    await fixture.service.close();
+    await writeLegacyState(fixture.service, 12);
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(fixture.service.store.path);
     try {
@@ -174,12 +174,12 @@ test("schema-12 accounting imports exact legacy usage without rewriting identiti
         const value: unknown = JSON.parse(String(row.data));
         if (typeof value === "object" && value !== null && "event_type" in value && value.event_type === "budget.recorded") db.prepare("DELETE FROM events WHERE seq=?").run(Number(row.seq));
       }
-      db.exec("CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END; DELETE FROM retention_metadata WHERE id='budget_ledger_schema'; PRAGMA user_version=12; COMMIT;");
+      db.exec("CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END; COMMIT;");
     } finally { db.close(); }
     upgraded = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     const peer = await new MoguriSdk(upgraded.connection).ready();
     try {
-      assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 13);
+      assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 14);
       const entry = upgraded.controller.snapshot().budgetEntries[0]!;
       assert.equal(entry.imported, true); assert.equal(entry.reportedTokens, 42); assert.equal(entry.rate, null);
       assert.equal((await peer.budgets.status(fixture.sessionId)).status.totals.estimatedUsd, null);

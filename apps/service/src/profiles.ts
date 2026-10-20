@@ -46,7 +46,8 @@ export class ProfileRuntime {
   }
   async snapshot(id: string) {
     const control = await this.control(id);
-    return { ...control.snapshot(), profile: this.profile(id), profileCatalogRevision: this.global.events().at(-1)?.seq ?? 0 };
+    const sequence = this.initial.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE json_extract(data,'$.event_type')='budget.recorded'").get();
+    return { ...control.snapshot(), profile: this.profile(id), profileCatalogRevision: this.global.events().at(-1)?.seq ?? 0, globalBudgetPolicy: this.catalog().globalBudget, globalBudgetSequence: Number(sequence?.seq ?? 0) };
   }
   async initialize(): Promise<ControlPlane> {
     if (!this.catalog().profiles.length) {
@@ -144,7 +145,7 @@ export class ProfileRuntime {
   private committed(id: string, events: StoredEvent[]): void {
     const globalChanged = events.some((event) => event.profile_id === GLOBAL_PROFILE_ID), policyChanged = events.some((event) => event.event_type === "global.policy_changed");
     if (globalChanged) for (const [other, control] of this.controllers) if (other !== id) control.refreshProfile(policyChanged);
-    if (globalChanged) this.options.changed(GLOBAL_PROFILE_ID, []);
+    if (globalChanged || this.catalog().globalBudget.limit && events.some((event) => event.event_type === "budget.recorded")) this.options.changed(GLOBAL_PROFILE_ID, []);
     if (events.some((event) => ["turn.finished", "job.finished", "session.resumed", "workspace.saved"].includes(event.event_type))) {
       for (const [other, control] of this.controllers) if (other !== id) control.wake();
     }
@@ -191,7 +192,7 @@ export class ProfileRuntime {
         abort.signal.throwIfAborted();
         this.global.commit([this.saved({ ...profile, status: "ready", revision: profile.revision + 1, diagnostic: null })]);
       } catch (error) {
-        console.error("Profile setup did not complete:", error instanceof MoguriError ? error.code : error instanceof Error && "code" in error ? error.code : "profile_setup");
+        console.error("Profile setup did not complete:", abort.signal.aborted ? "cancelled" : error instanceof MoguriError ? error.code : error instanceof Error && "code" in error ? error.code : "profile_setup");
         this.global.commit([this.saved({ ...profile, status: "partial", revision: profile.revision + 1, diagnostic: abort.signal.aborted ? "Profile setup was stopped. Resources were preserved, not adopted or replayed; inspect and explicitly retry." : error instanceof MoguriError ? error.message : "Profile resource setup failed. Inspect its owned directory before explicitly retrying; no account or data was copied." })]);
       } finally { this.active.delete(profile.id); this.options.changed(GLOBAL_PROFILE_ID, []); }
     })();
@@ -220,16 +221,18 @@ export class ProfileRuntime {
       const result = finish([this.saved(profile)], { id: profile.id, revision: 0 }); this.setup(profile, true); return result;
     }
     if (command.type === "profile.global.defaults") {
+      const budgets = (await this.control(PROFILE_ID)).platform.budgets;
       const current = this.catalog().globalDefaults;
       if (current.revision !== command.expectedRevision) throw new MoguriError("global_defaults_conflict", "Global startup preferences changed. Reload before saving.", 409);
-      if (command.values.budget?.kind === "limited") (await this.control(PROFILE_ID)).platform.budgets.validateLimit(command.values.budget);
+      if (command.values.budget?.kind === "limited") budgets.validateLimit(command.values.budget);
       return finish([{ event_type: "global.controls_changed", profile_id: GLOBAL_PROFILE_ID, payload: { revision: current.revision + 1, values: command.values } },
         ...this.catalog().profiles.map((profile) => this.settingsReplica(profile.id, command.values))], { revision: current.revision + 1 });
     }
     if (command.type === "profile.global.budget") {
+      const budgets = (await this.control(PROFILE_ID)).platform.budgets;
       const current = this.catalog().globalBudget;
       if (current.revision !== command.expectedRevision) throw new MoguriError("global_budget_conflict", "Global budget policy changed. Reload before saving.", 409);
-      (await this.control(PROFILE_ID)).platform.budgets.validateLimit(command.limit);
+      budgets.validateLimit(command.limit);
       return finish([{ event_type: "global.budget_changed", profile_id: GLOBAL_PROFILE_ID, payload: { revision: current.revision + 1, limit: command.limit } }], { revision: current.revision + 1 });
     }
     const profile = this.profile(command.targetProfileId, false);
@@ -245,6 +248,7 @@ export class ProfileRuntime {
       const result = finish([this.saved(creating)], { id: profile.id, revision: creating.revision }); this.setup(creating, false); return result;
     }
     if (!Object.keys(command.changes).length) throw new MoguriError("profile_changes", "Choose an actual profile name/color change.");
+    if (profile.status === "creating" || this.active.has(profile.id)) throw new MoguriError("profile_setup", "Finish or stop owned profile setup before editing its metadata. No stale setup snapshot was overwritten.", 409);
     const updated = { ...profile, ...command.changes, ...(command.changes.name !== undefined ? { name: this.named(command.changes.name, profile.id) } : {}), revision: profile.revision + 1 };
     return finish([this.saved(updated)], { id: profile.id, revision: updated.revision });
   }
