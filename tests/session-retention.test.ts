@@ -139,8 +139,8 @@ test("restart never replays a terminal and unconfirmed ownership needs explicit 
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     sdk = await new MoguriSdk(restarted.connection).ready();
     assert.equal((await sdk.terminal.read("generated-old-terminal")).terminal.status, "unconfirmed");
-    await assert.rejects(() => sdk!.terminal.input("generated-old-terminal", "never replayed"), /no longer|not reattached/);
-    await assert.rejects(() => sdk!.sessions.delete(fixture.sessionId, true), /terminal.*unconfirmed/);
+    await assert.rejects(() => sdk!.terminal.input("generated-old-terminal", "never replayed"), { code: "terminal_input_stopped" });
+    await assert.rejects(() => sdk!.sessions.delete(fixture.sessionId, true), { code: "terminal_legacy" });
     await sdk.terminal.acknowledge("generated-old-terminal", true);
     assert.equal((await sdk.terminal.read("generated-old-terminal")).terminal.status, "acknowledged");
     await assert.rejects(() => sdk!.sessions.delete(fixture.sessionId, true), /effects remain unconfirmed/);

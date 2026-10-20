@@ -145,8 +145,8 @@ cancellation passed the recorded macOS budgets. The development checkpoint uses
 a separate Node worker, `node-pty`, and explicit process-group escalation instead
 of claiming that unbuilt Rust helpers work. Workers stop owned commands on parent
 disconnect. A service restart marks interrupted work partial and does not replay
-effects or assume that cleanup succeeded. Interactive terminal reattachment,
-large-repository native search, Linux supervision and the Rust implementation
+effects or assume that cleanup succeeded. Large-repository native search,
+Linux supervision and the Rust implementation
 remain unvalidated. Revisit this exception before release.
 Because process groups do not contain arbitrarily detached descendants, shell
 cancellation/deadlines remain partial and pause admission even after the known
@@ -156,8 +156,11 @@ complete containment or enable background execution.
 The later [user-terminal reattachment prerequisite](terminal-reattachment-primitives.md)
 qualifies a separate generated Node/Node-PTY broker on macOS: a controller
 SIGKILL preserves one actual PTY, with authenticated scope-bound reconnect,
-bounded volatile output and no relaunch/input replay. Public terminal
-integration is still pending. This is a candidate for explicitly opened user
+bounded volatile output and no relaunch/input replay. Protocol 23 integrates
+[restart-reattachable user consoles](terminal-reattachment.md), with one
+authenticated owner per profile, durable intent and explicit private cleanup.
+Source/native, exact packed SDK and actual packaged memory/lifecycle acceptance
+remain separate gates recorded in setup. This is for explicitly opened user
 terminals and intentional service restart, not general model/agent background
 execution, Linux/Rust acceptance or complete descendant containment.
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   GLOBAL_PROFILE_ID, PROFILE_ID, MoguriError, projectEvents, type BudgetEntry, type CommandEnvelope, type CommandResult, type ControlDefaults,
   type EventInput, type GlobalBudgetCapacity, type Profile, type ProfileCatalog, type ProfileCommand, type StoredEvent,
+  type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
 import { ControlPlane, type ProfileHooks } from "./controller.ts";
 import { budgetCharges } from "./budgets.ts";
@@ -61,7 +62,12 @@ export class ProfileRuntime {
     }
     const interrupted = this.catalog().profiles.filter((profile) => profile.status === "creating");
     if (interrupted.length) this.global.commit(interrupted.map((profile) => this.saved({ ...profile, status: "partial", revision: profile.revision + 1, diagnostic: "Service restarted during profile setup. No directory initialization, account login or effect was replayed. Inspect and explicitly retry." })));
-    return this.control(PROFILE_ID);
+    const initial = await this.control(PROFILE_ID);
+    for (const profile of this.catalog().profiles.filter((profile) => profile.id !== PROFILE_ID && profile.status === "ready")) {
+      const snapshot = projectEvents(this.store(profile.id).events(), profile.id);
+      if (snapshot.terminalOwners.some((owner) => owner.status !== "acknowledged" && owner.cleanup !== "removed")) await this.control(profile.id);
+    }
+    return initial;
   }
   private saved(profile: Profile): EventInput { return { event_type: "profile.saved", profile_id: GLOBAL_PROFILE_ID, payload: { profile } }; }
   private profile(id: string, ready = true): Profile {
@@ -253,17 +259,20 @@ export class ProfileRuntime {
     const updated = { ...profile, ...command.changes, ...(command.changes.name !== undefined ? { name: this.named(command.changes.name, profile.id) } : {}), revision: profile.revision + 1 };
     return finish([this.saved(updated)], { id: profile.id, revision: updated.revision });
   }
-  close(): Promise<void> {
-    this.closeTask ??= this.shutdown();
+  close(options: RuntimeCloseOptions = {}): Promise<void> {
+    this.closeTask ??= this.shutdown(options).catch((error: unknown) => { this.closeTask = undefined; throw error; });
     return this.closeTask;
   }
-  private async shutdown(): Promise<void> {
+  private async shutdown(options: RuntimeCloseOptions): Promise<void> {
     this.closed = true;
     for (const active of this.active.values()) active.abort.abort();
     await Promise.all([...this.active.values()].map((active) => active.done));
     const loaded = await Promise.allSettled([...this.loading.values()]);
     for (const result of loaded) if (result.status === "rejected") console.error("Profile initialization ended during shutdown:", result.reason instanceof MoguriError ? result.reason.code : "profile_initialization");
-    await Promise.all([...this.controllers.values()].map((controller) => controller.close()));
+    const settled = await Promise.allSettled([...this.controllers.values()].map((controller) => controller.close(options)));
+    const failed = settled.find((result) => result.status === "rejected");
+    for (const result of settled) if (result.status === "rejected") console.error("Profile cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "profile_cleanup");
+    if (failed?.status === "rejected") throw failed.reason;
     for (const [id, store] of this.stores) if (id !== PROFILE_ID) store.close();
     this.global.close();
   }

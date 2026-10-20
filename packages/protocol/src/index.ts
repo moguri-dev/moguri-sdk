@@ -23,9 +23,10 @@ import type { ContextCompaction } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
+import { TerminalOwnerSchema, type TerminalOwner } from "./terminals.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 22;
+export const PROTOCOL_VERSION = 23;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -288,6 +289,7 @@ export interface EventPayloads {
   "global.policy_changed": { policy: Policy };
   "global.budget_changed": GlobalBudgetPolicy;
   "terminal.changed": { terminal: TerminalState };
+  "terminal.owner_changed": { owner: TerminalOwner };
   "turn.prompt_bound": { promptDigest: string };
   "queue.released": { messageId: string };
   "queue.held": { messageIds: string[] };
@@ -320,7 +322,7 @@ export const eventTypes: readonly EventType[] = [
   "settings.updated", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "cache.prepared",
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
-  "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "turn.prompt_bound", "queue.released", "queue.held",
+  "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
@@ -361,11 +363,16 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const repositoryObservations = new Map<string, RepositoryObservation>();
   let budgetPolicy: PlatformSnapshot["budgetPolicy"] = { revision: 0, limit: null };
   const terminals = new Map<string, TerminalState>();
+  const terminalOwners = new Map<string, TerminalOwner>();
   const executions = new Map<string, RemoteExecution>();
   const managedWorkspaces = new Map<string, ManagedWorkspace>();
   const changeSets = new Map<string, ChangeSet>();
   for (const event of events) {
     if (event.profile_id !== profileId) continue;
+    if (event.event_type === "terminal.owner_changed") {
+      if (event.project_id || event.session_id || !Value.Check(TerminalOwnerSchema, event.payload.owner) || event.payload.owner.profileId !== profileId) throw new MoguriError("terminal_owner_corrupt", "Terminal owner metadata is invalid or outside its independent profile. State was preserved.", 409);
+      terminalOwners.set(event.payload.owner.id, structuredClone(event.payload.owner));
+    }
     if (event.event_type === "repository.recorded") {
       if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(RepositoryObservationSchema, event.payload.observation) || event.payload.observation.profileId !== profileId) throw new MoguriError("repository_corrupt", "Repository observation is invalid or outside its independent owning profile. State was preserved.", 409);
       repositoryObservations.set(event.payload.observation.scopeKey, structuredClone(event.payload.observation));
@@ -660,5 +667,5 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

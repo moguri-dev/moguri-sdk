@@ -11,7 +11,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { isRecord, parse, type TerminalState } from "../../packages/protocol/src/index.ts";
 import { JsonLineChannel, frameDigest } from "../../apps/service/src/worker-wire.ts";
-import { TerminalManager } from "../../apps/service/src/terminals.ts";
+import { TerminalEngine as TerminalManager } from "../../apps/service/src/terminal-engine.ts";
 import { stopGroup } from "../../apps/service/src/supervisor.ts";
 
 const file = fileURLToPath(import.meta.url), loader = createRequire(import.meta.url).resolve("tsx");

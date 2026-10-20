@@ -205,7 +205,7 @@ export class ArtifactRuntime {
     const snapshot = this.host.snapshot();
     if (this.isBusy(projectId, workspaceId) || this.host.foreignRootBusy(this.host.root(projectId, workspaceId).path) || (workspaceId ? snapshot.blockedWorkspaces.includes(workspaceId) : snapshot.blockedProjects.includes(projectId)) ||
       snapshot.sessions.some((session) => session.projectId === projectId && session.workspaceId === workspaceId && session.turnId) ||
-      snapshot.terminals.some((terminal) => terminal.projectId === projectId && terminal.workspaceId === workspaceId && ["running", "stopping", "unconfirmed"].includes(terminal.status)) ||
+      snapshot.terminals.some((terminal) => terminal.projectId === projectId && terminal.workspaceId === workspaceId && !["closed", "failed", "acknowledged"].includes(terminal.status)) ||
       snapshot.jobs.some((job) => job.projectId === projectId && (job.workspaceId ?? null) === workspaceId && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("workspace_busy", "Finish owned work in this exact root before materializing artifacts.", 409);
   }
   async query(query: ArtifactQuery): Promise<ArtifactResponse> {

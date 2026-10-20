@@ -146,6 +146,9 @@ export class EventStore {
       if (version < 22) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('repository_attribution_schema','1');
         PRAGMA user_version=22; COMMIT;`);
+      if (version < 23) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('terminal_ownership_schema','1');
+        PRAGMA user_version=23; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

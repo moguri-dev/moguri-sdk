@@ -4,8 +4,9 @@ import { startService, type ServiceOptions } from "../../../apps/service/src/ser
 import { MoguriSdk } from "./index.ts";
 import { dirname, join } from "node:path";
 import { lstat, readFile } from "node:fs/promises";
-import { isRecord, PROTOCOL_VERSION, type ArtifactExport, type Connection } from "../../protocol/src/index.ts";
+import { isRecord, PROTOCOL_VERSION, type ArtifactExport, type Connection, type RuntimeCloseOptions } from "../../protocol/src/index.ts";
 import { writeArtifactExport } from "../../../apps/service/src/artifact-export.ts";
+import type { PlatformOptions } from "../../../apps/service/src/platform.ts";
 
 export { readConnection, stateDirectory };
 const source = import.meta.url.endsWith(".ts");
@@ -14,12 +15,16 @@ export function ensureConnection(options: Parameters<typeof ensureTransportConne
   return ensureTransportConnection({ ...options, servicePath: options?.servicePath ?? sdkServicePath() });
 }
 export function createRuntime(options: ServiceOptions) {
+  const profilePlatform = options.profiles?.platform;
+  const platform = (configured: PlatformOptions | undefined): PlatformOptions => ({
+    ...configured, mcpWorkerPath: configured?.mcpWorkerPath ?? worker("mcp-worker"),
+    terminal: { ...configured?.terminal, brokerPath: configured?.terminal?.brokerPath ?? worker("terminal-broker") },
+    speech: { ...configured?.speech, executable: configured?.speech?.executable ?? fileURLToPath(new URL(source ? "../../../.native/speech/bin/nemo-speech" : "../native/speech/bin/nemo-speech", import.meta.url)) },
+  });
   return startService({
     ...options, workerPath: options.workerPath ?? worker("worker"),
-    platform: {
-      ...options.platform, mcpWorkerPath: options.platform?.mcpWorkerPath ?? worker("mcp-worker"),
-      speech: { ...options.platform?.speech, executable: options.platform?.speech?.executable ?? fileURLToPath(new URL(source ? "../../../.native/speech/bin/nemo-speech" : "../native/speech/bin/nemo-speech", import.meta.url)) },
-    },
+    platform: platform(options.platform),
+    ...(profilePlatform ? { profiles: { ...options.profiles, platform: (id: string) => platform(profilePlatform(id) ?? options.platform) } } : {}),
   });
 }
 export async function connectMoguri(options: { stateDir?: string; runtime?: string; autoStart?: boolean; profileId?: string } = {}): Promise<MoguriSdk> {
@@ -29,7 +34,7 @@ export async function connectMoguri(options: { stateDir?: string; runtime?: stri
   });
   return new MoguriSdk(connection, () => readConnection(stateDir), options.profileId).ready();
 }
-export async function stopMoguriService(stateDir = stateDirectory()): Promise<void> {
+export async function stopMoguriService(stateDir = stateDirectory(), options: RuntimeCloseOptions = {}): Promise<void> {
   const path = join(stateDir, "connection.json");
   const metadata = await lstat(path);
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== process.getuid?.() || metadata.mode & 0o077) throw new Error("Refusing to use non-private service metadata.");
@@ -40,10 +45,28 @@ export async function stopMoguriService(stateDir = stateDirectory()): Promise<vo
   const response = await fetch(`${url.origin}/v1/health`, { headers: { Authorization: `Bearer ${value.token}` }, signal: AbortSignal.timeout(2000) });
   const health: unknown = await response.json();
   if (!response.ok || !isRecord(health) || health.pid !== value.pid) throw new Error("The process does not match the authenticated Moguri service. No signal was sent.");
-  process.kill(value.pid, "SIGTERM");
-  const deadline = Date.now() + 10_000;
+  if (typeof health.protocolVersion === "number" && health.protocolVersion >= 23) {
+    const closing = await fetch(`${url.origin}/v1/lifecycle`, { method: "POST", headers: { Authorization: `Bearer ${value.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: options.preserveTerminals ? "restart" : "stop" }), signal: AbortSignal.timeout(5000) });
+    const result: unknown = await closing.json();
+    if (!closing.ok || !isRecord(result) || result.accepted !== true || result.pid !== value.pid) throw new Error("The authenticated service did not accept its exact lifecycle request. No process was signalled.");
+  } else process.kill(value.pid, "SIGTERM");
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try { await lstat(path); } catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return; throw error; }
+    if (typeof health.protocolVersion === "number" && health.protocolVersion >= 23) {
+      let current: unknown;
+      try {
+        const status = await fetch(`${url.origin}/v1/health`, { headers: { Authorization: `Bearer ${value.token}` }, signal: AbortSignal.timeout(2000) });
+        if (status.ok) current = await status.json();
+      } catch (error) {
+        if (!(error instanceof TypeError && error.cause instanceof Error && "code" in error.cause && ["ECONNREFUSED", "ECONNRESET", "UND_ERR_SOCKET"].includes(String(error.cause.code))) &&
+          !(error instanceof Error && error.name === "TimeoutError")) throw error;
+      }
+      if (isRecord(current) && current.pid === value.pid && isRecord(current.lifecycle) && current.lifecycle.status === "unconfirmed") {
+        throw new Error("Service shutdown is unconfirmed; its registry and writer lock remain. Restore the explicit terminal backend or inspect its processes, then retry stop/restart. No second writer was launched.");
+      }
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Service shutdown is unconfirmed. Do not launch a second writer.");

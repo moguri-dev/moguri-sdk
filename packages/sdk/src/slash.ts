@@ -31,6 +31,7 @@ export const slashCommands = [
   { name: "side", description: "Open parallel, question-only context" },
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
   { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal", desktopOnly: true },
+  { name: "terminals", description: "Inspect existing user consoles and shared profile owners without replay", argument: "[list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
@@ -375,6 +376,32 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "terminal":
       if (client !== "desktop") throw new ClientError("terminal_context", "This client is already a terminal. /terminal and /termnial open Ghostty only in desktop.");
       return { kind: "panel", panel: "Terminal" };
+    case "terminals": {
+      const [action = "list", id, option, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (action === "list" && !id) {
+        const terminals = sdk.getState().snapshot!.terminals.filter((terminal) => terminal.sessionId === session.id);
+        return { kind: "text", text: JSON.stringify({ terminals, owners: sdk.getState().snapshot!.terminalOwners,
+          warning: "Local user consoles only. Bounded volatile output, no agent context, shell replacement or input replay. Service restart preserves; service stop closes known groups." }, null, 2) };
+      }
+      if (action === "owner-reconcile" && id && !option) {
+        await sdk.terminal.reconcileOwner(id);
+        return { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.terminalOwners.find((owner) => owner.id === id), null, 2) };
+      }
+      if (action === "owner-acknowledge" && id && option === "confirm-inspected" && !extra) {
+        await sdk.terminal.acknowledgeOwner(id, true); return { kind: "ok", message: "Your explicit shared-owner inspection was acknowledged. No cleanup proof, key removal or process replacement was inferred." };
+      }
+      if (!id || extra || !sdk.getState().snapshot!.terminals.some((terminal) => terminal.id === id && terminal.sessionId === session.id)) throw new ClientError("terminal_scope", "Choose an existing terminal ID from /terminals in this session.");
+      if (action === "read" && (!option || /^\d+$/.test(option) && Number.isSafeInteger(Number(option)))) return { kind: "text", text: JSON.stringify(await sdk.terminal.read(id, Number(option ?? 0)), null, 2) };
+      if (action === "reconcile" && !option) {
+        await sdk.terminal.reconcile(id);
+        return { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.terminals.find((terminal) => terminal.id === id), null, 2) };
+      }
+      if (action === "close" && !option) { await sdk.terminal.close(id); return { kind: "ok", message: "Exact owned terminal stop observed. Detached/reparented descendants are not proven contained." }; }
+      if (action === "acknowledge" && option === "confirm-inspected") {
+        await sdk.terminal.acknowledge(id, true); return { kind: "ok", message: "Your explicit process inspection was acknowledged, not proof of historical cleanup." };
+      }
+      throw new ClientError("terminal_command", "Use /terminals list, read ID [OFFSET], reconcile ID, close ID, or acknowledge ID confirm-inspected. No command launches a replacement or replays input.");
+    }
     case "browser": {
       let url = command.argument || session.browserUrl;
       if (!url && session.projectId && session.controls.env === "Local") {

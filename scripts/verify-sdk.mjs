@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const temporary = await mkdtemp(join(tmpdir(), "moguri-sdk-consumer-"));
 let ssh;
@@ -29,9 +30,10 @@ try {
   }
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
+  const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   await writeFile(join(consumer, "consumer.ts"), `
     import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings} from "moguri";
-    import {connectMoguri, createRuntime, saveArtifactExport} from "moguri/node";
+    import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
     async function typedConsumer() {
@@ -46,6 +48,14 @@ try {
       await sdk.sessions.mode("generated-id","read-only");
       await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
       const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
+      ${installedProtocol >= 23 ? `
+      const terminal=await sdk.terminal.open("generated-id");
+      const consolePage=await sdk.terminal.read(terminal.id!);void consolePage.terminal.binding?.inode;void consolePage.terminal.attachmentId;
+      void sdk.getState().snapshot?.terminalOwners[0]?.cleanup;
+      await sdk.terminal.input(terminal.id!,"Generated typed input.",new AbortController().signal);
+      await sdk.terminal.reconcile(terminal.id!);await sdk.terminal.reconcileOwner("generated-owner");
+      await sdk.terminal.acknowledgeOwner("generated-owner",true);
+      await stopMoguriService("/generated/private-state",{preserveTerminals:true});` : ""}
       const compactionState=await sdk.compactions.state("generated-id");void compactionState.originalEstimatedTokens;
       const compactionPreview=(await sdk.compactions.preview("generated-id",{modelId:"generated-model",keepRecentTurns:1})).preview;
       const compaction=await sdk.compactions.generate("generated-id",compactionPreview,true);
@@ -127,14 +137,14 @@ try {
   ], { cwd: consumer, stdio: "inherit" });
   await writeFile(join(consumer, "smoke.mjs"), `
     import assert from "node:assert/strict";
-    import {mkdir,writeFile,readFile,realpath} from "node:fs/promises";
+    import {mkdir,writeFile,readFile,realpath,lstat} from "node:fs/promises";
     import {spawn,execFile,execFileSync} from "node:child_process";
     import {promisify} from "node:util";
     import {createHash} from "node:crypto";
     import {createServer} from "node:http";
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
-    import {createRuntime,connectMoguri,saveArtifactExport} from "moguri/node";
+    import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
     import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
@@ -527,7 +537,37 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and CLI/TUI/private-profile/deletion-safe MCP attribution, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials and script-free cache passed.");
+    if(PROTOCOL_VERSION>=23&&process.platform==="darwin"){
+      const consoleRoot=join(root,"generated-console-project"),consoleState=join(root,"generated-console-state"),keys=new Map();
+      await mkdir(consoleRoot);
+      const vault={read:async id=>keys.get(id)??null,write:async(id,value)=>{keys.set(id,value);},remove:async id=>{keys.delete(id);}};
+      const options={stateDir:consoleState,retentionKey:Buffer.alloc(32,0x71),provider:makeProvider(),platform:{terminal:{vault,executable:"/bin/sh",args:["-c","printf 'GENERATED_INSTALLED_CONSOLE_READY\\\\n'; exec cat"]}}};
+      let consoleRuntime=await createRuntime(options),consoleSdk=await connectMoguri({stateDir:consoleState,autoStart:false});
+      try{
+        const project=await consoleSdk.command({type:"project.add",path:consoleRoot}),session=await consoleSdk.sessions.create(project.id);
+        const opened=await consoleSdk.terminal.open(session.id),before=await consoleSdk.terminal.read(opened.id),owner=consoleSdk.getState().snapshot.terminalOwners[0];
+        const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
+        const invoke=args=>promisify(execFile)(process.execPath,[cli,...args],{env:{...process.env,MOGURI_STATE_DIR:consoleState}});
+        const input=spawn(process.execPath,[cli,"terminal","input",opened.id],{env:{...process.env,MOGURI_STATE_DIR:consoleState},stdio:["pipe","pipe","pipe"]});
+        let stdout="",stderr="";input.stdout.on("data",data=>{stdout+=data;});input.stderr.on("data",data=>{stderr+=data;});
+        const completed=new Promise((resolve,reject)=>{input.once("error",reject);input.once("exit",resolve);});
+        input.stdin.end("GENERATED_INSTALLED_CONSOLE_INPUT\\n");assert.equal(await completed,0,stderr);assert.equal(JSON.parse(stdout).acknowledged,true);
+        const list=JSON.parse((await invoke(["terminal","list"])).stdout);assert.equal(list.owners.length,1);assert.equal(list.terminals.length,1);
+        await invoke(["terminal","owner-reconcile",owner.id]);await invoke(["terminal","reconcile",opened.id]);
+        consoleSdk.disconnect();await stopMoguriService(consoleState,{preserveTerminals:true});
+        consoleRuntime=await createRuntime(options);consoleSdk=await connectMoguri({stateDir:consoleState,autoStart:false});
+        const after=await consoleSdk.terminal.read(opened.id);
+        assert.equal(after.terminal.pid,before.terminal.pid);assert.equal(consoleSdk.getState().snapshot.terminalOwners[0].pid,owner.pid);
+        assert.notEqual(after.terminal.attachmentId,before.terminal.attachmentId);assert.equal(after.terminal.status,"running");
+        assert.match(after.data,/GENERATED_INSTALLED_CONSOLE_INPUT/);
+        assert.equal(after.data.split("GENERATED_INSTALLED_CONSOLE_READY").length-1,1);
+        const read=JSON.parse((await invoke(["terminal","read",opened.id])).stdout);assert.equal(read.terminal.pid,before.terminal.pid);
+        const tui=await consoleSdk.slash(session.id,"/terminals read "+opened.id,"tui");assert.equal(tui.kind,"text");assert.equal(JSON.parse(tui.text).terminal.pid,before.terminal.pid);
+        await consoleSdk.terminal.close(opened.id);consoleSdk.disconnect();await stopMoguriService(consoleState);
+        assert.equal(keys.size,0);await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
+      }finally{consoleSdk.disconnect();await consoleRuntime.close();}
+    }
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and CLI/TUI/private-profile/deletion-safe MCP attribution, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "" } });
 } finally { try { await ssh?.close(); } finally { await rm(temporary, { recursive: true, force: true }); } }

@@ -85,6 +85,11 @@ Stop owned work before deleting its session; preserve requested, acknowledged,
 partial and failed cleanup. Closing a UI panel does not stop its PTY. Terminal
 input/output are ephemeral, never durable conversation/event payloads or model
 context. Restart does not relaunch a shell or replay terminal input.
+Protocol 23's [user-console ownership](terminal-reattachment.md) preserves an
+authenticated per-profile broker across explicit service restart or controller
+loss. Ordinary service stop still closes known groups. Exact root/policy,
+private cleanup and input-generation guards apply to every client; legacy
+ownerless metadata is unconfirmed, never adopted from a saved PID.
 
 Archived-session cleanup is off by default and requires an explicit user
 retention policy. It preserves independently retained artifacts and never

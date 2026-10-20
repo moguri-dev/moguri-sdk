@@ -2,7 +2,7 @@
 
 ## Audited boundary
 
-The protocol-22 public service still owns `node-pty` directly. Graceful close
+At the protocol-22 prerequisite checkpoint, the public service owned `node-pty` directly. Graceful close
 stops known groups; restart records unconfirmed terminal metadata, cannot
 reattach a prior PTY, never launches a replacement and never replays input.
 Local Ghostty is interactive, but that is not restart reattachment.
@@ -23,7 +23,9 @@ Node process. An owning controller communicates through a private Unix socket.
 Fresh per-connection HMAC possession proofs bind both peers to one scope
 digest; the key is delivered through owned bootstrap IPC, not argv, a file,
 terminal output or a model. The runtime directory/socket are owner-only.
-This tests a generated in-memory key, **not production secret-backend storage**.
+This tested a generated in-memory key, **not production secret-backend storage**.
+The later [protocol-23 integration](terminal-reattachment.md) is documented
+separately; this record is not backdated application/package qualification.
 
 The existing JSON framer gains an optional validated lower byte ceiling;
 the default worker ceiling/behavior stays unchanged. The prototype uses
@@ -73,9 +75,9 @@ paused and did not consume its challenge/EOF, so its close assertion timed out.
 The corrected test drains only challenge bytes and proves rejection precedes
 the idle timeout. Neither failure justified a replacement PTY or input replay.
 
-## Application integration still required
+## Application obligations established by this spike
 
-Before exposing restart reattachment:
+The later application integration must satisfy these requirements:
 
 - Retain typed exact terminal intent **before** spawning a broker/PTY, and
   preserve original-command idempotency across receipt loss/restart.

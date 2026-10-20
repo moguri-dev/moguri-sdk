@@ -14,7 +14,7 @@ import {
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   type RemotePlanSave, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse, type PlanFileResult, type SessionWorkspaceCommand,
-  PlanFileResultSchema, type RetainedArtifact, type RepositoryScope,
+  PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -203,7 +203,7 @@ export class ControlPlane extends EventEmitter {
     if (legacyAccounting.length) this.commit(legacyAccounting);
     const legacyOperations = this.platform.telemetry.legacyEvents();
     if (legacyOperations.length) this.commit(legacyOperations);
-    this.platform.recover();
+    await this.platform.recover();
     const interruptedExecutions = this.projection.executions.filter((execution) => ["launching", "running", "stopping"].includes(execution.status));
     if (interruptedExecutions.length) this.commit(interruptedExecutions.map((execution) => ({
       event_type: "execution.changed", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
@@ -938,6 +938,7 @@ export class ControlPlane extends EventEmitter {
       this.commit(events, { id: envelope.id, digest: commandDigest, result }, forget);
       return result;
     };
+    finish.intent = { id: envelope.id, digest: commandDigest };
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
@@ -1773,15 +1774,17 @@ export class ControlPlane extends EventEmitter {
     }
     queueMicrotask(() => this.pumpAll());
   }
-  async close(): Promise<void> {
+  async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
-    await this.provider.close();
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
-    await this.platform.close();
+    const local = await Promise.allSettled([this.provider.close(), this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while (this.runs.size && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-    await this.remote.close();
+    const stopped = await Promise.allSettled([this.remote.close()]);
+    const settled = [...local, ...stopped], failed = settled.find((result) => result.status === "rejected");
+    for (const result of settled) if (result.status === "rejected") console.error("Controller cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "controller_cleanup");
+    if (failed?.status === "rejected") throw failed.reason;
     this.removeAllListeners();
   }
 }

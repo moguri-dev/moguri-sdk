@@ -4,7 +4,7 @@ import { basename, isAbsolute } from "node:path";
 import {
   MoguriError, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
-  type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding,
+  type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
 import type { ForgetRequest } from "./store.ts";
 import { readProjectFile, writeProjectFile } from "./files.ts";
@@ -12,8 +12,10 @@ import { ProjectService } from "./project-service.ts";
 import { assertFolderAccess, assertFolderName, folderPolicy } from "./project-policy.ts";
 import { TerminalManager, type TerminalOptions } from "./terminals.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
+import { terminalBinding } from "./terminal-identity.ts";
+import { frameDigest } from "./worker-wire.ts";
 
-export type WorkspaceFinish = (events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => CommandResult;
+export type WorkspaceFinish = ((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => CommandResult) & { intent?: { id: string; digest: string } };
 export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number }
 export interface SessionWorkspaceHost {
   snapshot(): Snapshot;
@@ -42,9 +44,14 @@ export class SessionWorkspace {
   private cleaning = false;
   constructor(private readonly host: SessionWorkspaceHost, stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
     this.projects = new ProjectService(() => host.snapshot(), stateDir);
-    this.terminals = new TerminalManager((terminal) => {
-      if (!this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) return;
-      this.host.commit([{ event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId, payload: { terminal } }]);
+    this.terminals = new TerminalManager({
+      snapshot: () => this.snapshot(),
+      changed: (terminal) => {
+        if (!this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) throw new MoguriError("terminal_session_removed", "Terminal state cannot resurrect a removed session.", 409);
+        this.host.commit([{ event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId, payload: { terminal } }]);
+      },
+      ownerChanged: (owner) => this.host.commit([{ event_type: "terminal.owner_changed", profile_id: this.snapshot().profileId, payload: { owner } }]),
+      inputAllowed: (terminal) => this.terminalInputAllowed(terminal),
     }, options.terminal);
   }
   private snapshot() { return this.host.snapshot(); }
@@ -63,12 +70,8 @@ export class SessionWorkspace {
     if (actual !== expected) throw new MoguriError("revision_conflict", "Another client changed this value. Your edit is preserved; reload before applying it.", 409);
   }
   private event(session: Session, event: EventInput): EventInput { return { ...event, profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id }; }
-  recover(): void {
-    const events: EventInput[] = this.snapshot().terminals.filter((terminal) => ["running", "stopping"].includes(terminal.status)).map((terminal) => ({
-      event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId,
-      payload: { terminal: { ...terminal, status: "unconfirmed", diagnostic: "Service restarted. This shell was not relaunched, input was not replayed and output was not persisted. Inspect any unconfirmed processes." } },
-    }));
-    if (events.length) this.host.commit(events);
+  async recover(): Promise<void> {
+    await this.terminals.recover();
     this.timer = setInterval(() => { void this.retention().catch((error: unknown) => console.error("Archived-session retention failed:", error instanceof Error ? error.message : "Unknown retention failure")); }, 60_000);
     this.timer.unref();
   }
@@ -87,11 +90,25 @@ export class SessionWorkspace {
       return { deleted };
     } finally { this.cleaning = false; }
   }
-  async close(): Promise<void> { clearInterval(this.timer); await this.terminals.closeAll(); }
-  input(request: TerminalInput): void {
+  async close(options: RuntimeCloseOptions = {}): Promise<void> { clearInterval(this.timer); await this.terminals.closeAll(options); }
+  async input(request: TerminalInput): Promise<void> {
     const terminal = this.snapshot().terminals.find((terminal) => terminal.id === request.terminalId);
     if (!terminal) throw new MoguriError("terminal_missing", "Terminal is outside this profile.", 404);
-    this.session(terminal.sessionId); this.terminals.input(request);
+    this.session(terminal.sessionId); await this.terminals.input(request);
+  }
+  private terminalAdmission(sessionId: string, scriptId?: string) {
+    const session = this.session(sessionId), project = this.host.project(session);
+    if (this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
+    if (session.status === "archived") throw new MoguriError("archived", "Restore this session before opening or typing into its terminal.", 409);
+    if (session.controls.env !== "Local" || !this.snapshot().policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.find((capability) => capability.env === "Local")?.ready) throw new MoguriError("terminal_env", "No qualified terminal transport exists for this environment/policy; no Local fallback.", 409);
+    const configuration = this.projects.configuration(project.id), script = scriptId ? configuration.values.scripts.find((script) => script.id === scriptId) : undefined;
+    if (scriptId && !script) throw new MoguriError("project_script", "Choose an existing explicitly configured project script.", 404);
+    const binding = terminalBinding({ profileId: this.snapshot().profileId, sessionId: session.id, projectId: project.id, workspaceId: session.workspaceId, root: project.path });
+    return { session, project, script, binding, signature: frameDigest([binding.digest, configuration.revision, this.snapshot().policy.revision, script ?? null]) };
+  }
+  private terminalInputAllowed(terminal: TerminalState): void {
+    const current = this.terminalAdmission(terminal.sessionId);
+    if (!terminal.binding || terminal.env !== "Local" || terminal.binding.digest !== current.binding.digest) throw new MoguriError("terminal_root_changed", "This is the retained Local terminal's original root, not the session's new mapping. No input or resize was sent; inspect or close it.", 409);
   }
   async query(query: SessionWorkspaceQuery): Promise<SessionWorkspaceResponse> {
     switch (query.type) {
@@ -119,8 +136,8 @@ export class SessionWorkspace {
       case "terminal.read": {
         const terminal = this.snapshot().terminals.find((terminal) => terminal.id === query.terminalId);
         if (!terminal) throw new MoguriError("terminal_missing", "Terminal is outside this profile.", 404);
-        if (["unconfirmed", "acknowledged"].includes(terminal.status)) return { type: query.type, terminal, data: "", baseOffset: 0, nextOffset: 0 };
-        return { type: query.type, ...this.terminals.read(query.terminalId, query.offset, query.limit) };
+        if (["starting", "reattaching", "unconfirmed", "acknowledged"].includes(terminal.status)) return { type: query.type, terminal, data: "", baseOffset: 0, nextOffset: 0 };
+        return { type: query.type, ...await this.terminals.read(query.terminalId, query.offset, query.limit) };
       }
     }
   }
@@ -204,7 +221,7 @@ export class SessionWorkspace {
         if (command.type === "project.defaults") return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });
         if (command.type === "project.relocate") {
           if (this.snapshot().managedWorkspaces.some((workspace) => workspace.projectId === project.id && workspace.status !== "removed")) throw new MoguriError("managed_workspaces", "Remove managed worktrees explicitly before relocating their repository/common Git directory.", 409);
-          if (this.snapshot().sessions.some((session) => session.projectId === project.id && session.turnId) || this.snapshot().terminals.some((terminal) => terminal.projectId === project.id && ["running", "stopping", "unconfirmed"].includes(terminal.status)) || this.snapshot().jobs.some((job) => job.projectId === project.id && ["running", "waiting_input"].includes(job.status)) || this.snapshot().blockedProjects.includes(project.id)) throw new MoguriError("project_busy", "Finish owned work and inspect unconfirmed effects before changing the attached folder.");
+          if (this.snapshot().sessions.some((session) => session.projectId === project.id && session.turnId) || this.snapshot().terminals.some((terminal) => terminal.projectId === project.id && !["closed", "failed", "acknowledged"].includes(terminal.status)) || this.snapshot().jobs.some((job) => job.projectId === project.id && ["running", "waiting_input"].includes(job.status)) || this.snapshot().blockedProjects.includes(project.id)) throw new MoguriError("project_busy", "Finish owned work and inspect unconfirmed effects before changing the attached folder.");
           if (!isAbsolute(command.path)) throw new MoguriError("project_path", "Choose an absolute, existing folder.");
           const path = await realpath(command.path);
           if (!(await stat(path)).isDirectory() || this.snapshot().projects.some((other) => other.id !== project.id && other.path === path)) throw new MoguriError("project_path", "The folder is not a distinct project directory.");
@@ -269,14 +286,22 @@ export class SessionWorkspace {
         }
       }
       case "terminal.open": {
-        const session = this.session(command.sessionId); const project = this.host.project(session);
-        if (this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
-        if (session.status === "archived") throw new MoguriError("archived", "Unarchive this session before opening new owned terminals.");
-        if (session.controls.env !== "Local" || !this.snapshot().policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.find((capability) => capability.env === "Local")?.ready) throw new MoguriError("terminal_env", "No qualified terminal transport exists for this environment; there is no Local fallback.");
-        const script = command.scriptId ? this.projects.configuration(project.id).values.scripts.find((script) => script.id === command.scriptId) : undefined;
-        if (command.scriptId && !script) throw new MoguriError("script_missing", "Choose a configured user script.");
-        const terminal = this.terminals.open({ sessionId: session.id, projectId: project.id, workspaceId: session.workspaceId, root: project.path }, command.cols, command.rows, script);
+        const captured = this.terminalAdmission(command.sessionId, command.scriptId);
+        if (!finish.intent) throw new MoguriError("terminal_intent", "Terminal launch needs its canonical user command identity. No shell was started.", 409);
+        const terminal = await this.terminals.open(captured.binding, command.cols, command.rows, finish.intent, () => {
+          if (this.terminalAdmission(command.sessionId, command.scriptId).signature !== captured.signature) throw new MoguriError("terminal_scope_changed", "Terminal root, script or authority changed during admission. Inspect actual retained effects; no launch was replayed.", 409);
+        }, captured.script);
         return finish([], { id: terminal.id });
+      }
+      case "terminal.reconcile": {
+        await this.terminals.reconcile(command.terminalId); return finish([]);
+      }
+      case "terminal.owner.reconcile": {
+        await this.terminals.reconcileOwner(command.ownerId); return finish([]);
+      }
+      case "terminal.owner.acknowledge": {
+        const owner = this.terminals.acknowledgeOwner(command.ownerId);
+        return finish([{ event_type: "terminal.owner_changed", profile_id: this.snapshot().profileId, payload: { owner } }]);
       }
       case "terminal.close": {
         const terminal = this.snapshot().terminals.find((terminal) => terminal.id === command.terminalId);

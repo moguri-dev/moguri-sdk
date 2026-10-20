@@ -19,7 +19,9 @@ process.once("message", (raw: unknown) => {
       prepare: async (id, signal) => { signal.throwIfAborted(); if (id !== model.id) throw new Error("Generated model mismatch."); return { model, auth: { apiKey: "generated-test-only", baseUrl: model.baseUrl } }; },
     };
     const vault = new GeneratedFileVault(raw.vaultPath);
-    const service = await startService({ stateDir: raw.stateDir, provider, retentionKey: GENERATED_RETENTION_KEY, platform: { remote: { vault, modelsVault: vault } } });
+    const service = await startService({ stateDir: raw.stateDir, provider, retentionKey: GENERATED_RETENTION_KEY, platform: {
+      remote: { vault, modelsVault: vault }, terminal: { vault, executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CHILD_TERMINAL_READY\\n'; exec cat"] },
+    } });
     if (raw.holdUserPlan === "approval" || raw.holdUserPlan === "result") {
       const gate = createRemoteFrameGate(raw.holdUserPlan === "approval" ? "approval" : "user-plan.complete",
         (frame) => process.send?.({ kind: "held-user-plan", executionId: frame?.executionId }));

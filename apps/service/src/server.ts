@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { ControlPlane } from "./controller.ts";
 import { EventStore } from "./store.ts";
 import type { ProviderAdapter } from "./provider.ts";
-import { CommandSchema, GLOBAL_PROFILE_ID, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, TerminalInputSchema, type Connection, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { CommandSchema, GLOBAL_PROFILE_ID, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
 import type { PlatformOptions } from "./platform.ts";
 import { retentionKey } from "./retention-key.ts";
 import { ProfileRuntime } from "./profiles.ts";
@@ -103,6 +103,8 @@ export async function startService(options: ServiceOptions) {
     const control = controller;
     const rootProfiles = profiles;
     const token = randomBytes(32).toString("hex");
+    let closeRuntime!: (options?: RuntimeCloseOptions) => Promise<void>;
+    let lifecycle: { action: "stop" | "restart"; status: "stopping" | "unconfirmed"; diagnostic: string | null } | null = null;
     let expectedHost = "";
     const acceptable = (request: IncomingMessage) => request.headers.host === expectedHost &&
       (request.headers.origin === undefined || request.headers.origin === "moguri://app");
@@ -113,12 +115,12 @@ export async function startService(options: ServiceOptions) {
         response.setHeader("X-Content-Type-Options", "nosniff");
         if (!acceptable(request)) throw new MoguriError("origin_denied", "Host or Origin is not an authorized Moguri client.", 403);
         if (!tokenMatches(request.headers.authorization, `Bearer ${token}`)) throw new MoguriError("unauthorized", "A valid local connection token is required.", 401);
-        if (request.url === "/v1/health" && request.method === "GET") { response.end(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, pid: process.pid })); return; }
+        if (request.url === "/v1/health" && request.method === "GET") { response.end(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, pid: process.pid, lifecycle })); return; }
         const suppliedProfile = request.headers["x-moguri-profile"];
         const profileId = suppliedProfile === undefined ? PROFILE_ID : typeof suppliedProfile === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(suppliedProfile) ? suppliedProfile : null;
         if (!profileId || profileId === GLOBAL_PROFILE_ID) throw new MoguriError("profile_scope", "Choose one explicit user profile. No Default fallback was used.", 403);
         if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(await rootProfiles.snapshot(profileId))); return; }
-        if (!["/v1/commands", "/v1/query", "/v1/terminal"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
+        if (!["/v1/commands", "/v1/query", "/v1/terminal", "/v1/lifecycle"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
         let bytes = 0;
@@ -130,8 +132,19 @@ export async function startService(options: ServiceOptions) {
         }
         let body: unknown;
         try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new MoguriError("invalid_json", "Command body is not valid JSON."); }
+        if (request.url === "/v1/lifecycle") {
+          const requested = parse(Type.Object({ action: Type.Union([Type.Literal("stop"), Type.Literal("restart")]) }, { additionalProperties: false }), body);
+          if (lifecycle?.status === "stopping" && lifecycle.action !== requested.action) throw new MoguriError("lifecycle_conflict", "A different explicit lifecycle operation is already stopping this controller. No opposite terminal action was accepted.", 409);
+          lifecycle = { action: requested.action, status: "stopping", diagnostic: null };
+          response.once("finish", () => {
+            void closeRuntime({ preserveTerminals: requested.action === "restart" }).catch((error: unknown) => {
+              console.error("Moguri lifecycle shutdown is unconfirmed:", error instanceof MoguriError ? error.code : "service_shutdown");
+            });
+          });
+          response.end(JSON.stringify({ accepted: true, pid: process.pid, protocolVersion: PROTOCOL_VERSION })); return;
+        }
         if (request.url === "/v1/terminal") {
-          (await rootProfiles.control(profileId)).platform.sessions.input(parse(TerminalInputSchema, body));
+          await (await rootProfiles.control(profileId)).platform.sessions.input(parse(TerminalInputSchema, body));
           response.end(JSON.stringify({ accepted: true })); return;
         }
         if (request.url === "/v1/query") {
@@ -189,13 +202,11 @@ export async function startService(options: ServiceOptions) {
     const pendingConnection = join(options.stateDir, `connection-${process.pid}.tmp`);
     await writePrivate(pendingConnection, JSON.stringify(connection));
     await rename(pendingConnection, connectionPath);
-    let closed = false;
-    return {
-      connection, controller: control, store, profiles: rootProfiles,
-      close: async () => {
-        if (closed) return;
-        closed = true;
-        await rootProfiles.close();
+    let closeTask: Promise<void> | undefined;
+    closeRuntime = (options: RuntimeCloseOptions = {}) => {
+      if (!closeTask) lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "stopping", diagnostic: null };
+      closeTask ??= (async () => {
+        await rootProfiles.close(options);
         for (const socket of websockets.clients) socket.terminate();
         await new Promise<void>((resolve) => websockets.close(() => resolve()));
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -203,7 +214,16 @@ export async function startService(options: ServiceOptions) {
         await unlink(connectionPath);
         await lock.close();
         await unlink(lockPath);
-      },
+      })().catch((error: unknown) => {
+        lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "unconfirmed",
+          diagnostic: "Shutdown did not complete. The registry and writer lock remain; restore the explicit terminal backend or inspect its processes, then retry lifecycle cleanup." };
+        closeTask = undefined; throw error;
+      });
+      return closeTask;
+    };
+    return {
+      connection, controller: control, store, profiles: rootProfiles,
+      close: closeRuntime,
     };
   } catch (error) {
     if (profiles) await profiles.close(); else await controller?.close();

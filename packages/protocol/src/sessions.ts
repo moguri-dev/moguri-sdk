@@ -5,6 +5,8 @@ import type { ModelContextPreview } from "./model.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
 import { ProjectArtifactChoiceSchema, type RetainedArtifact } from "./artifacts.ts";
 import type { PlanBinding } from "./plan-saves.ts";
+import type { TerminalState } from "./terminals.ts";
+export * from "./terminals.ts";
 export type { RetainedArtifact } from "./artifacts.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -46,11 +48,6 @@ export const defaultProjectConfiguration = (projectId: string): ProjectConfigura
 });
 export interface NavigationFolder { id: string; name: string; order: number; revision: number }
 export interface SessionGroup extends NavigationFolder { projectId: string }
-export interface TerminalState {
-  id: string; sessionId: string; projectId: string; title: string; pid: number | null; cols: number; rows: number;
-  workspaceId?: string | null;
-  status: "running" | "stopping" | "closed" | "failed" | "unconfirmed" | "acknowledged"; diagnostic: string | null;
-}
 export interface SessionWorkspaceSnapshot {
   projectConfigurations: ProjectConfiguration[]; projectFolders: NavigationFolder[]; sessionGroups: SessionGroup[];
   artifacts: RetainedArtifact[]; terminals: TerminalState[];
@@ -81,7 +78,10 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("plan.save"), sessionId: id, text: Type.String({ maxLength: 128 * 1024 }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }), expectedBinding: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })) }),
   object({ type: Type.Literal("terminal.open"), sessionId: id, scriptId: Type.Optional(id), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
   object({ type: Type.Literal("terminal.close"), terminalId: id }),
+  object({ type: Type.Literal("terminal.reconcile"), terminalId: id }),
   object({ type: Type.Literal("terminal.acknowledge"), terminalId: id, confirmInspection: Type.Literal(true) }),
+  object({ type: Type.Literal("terminal.owner.reconcile"), ownerId: id }),
+  object({ type: Type.Literal("terminal.owner.acknowledge"), ownerId: id, confirmInspection: Type.Literal(true) }),
   object({ type: Type.Literal("retention.run") }),
 ]);
 export type SessionWorkspaceCommand = Static<typeof SessionWorkspaceCommandSchema>;

@@ -19,6 +19,7 @@ import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse
 import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type RemotePlanSave } from "./plan-saves.ts";
 import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
+import type { TerminalOwner } from "./terminals.ts";
 export * from "./repositories.ts";
 export * from "./telemetry.ts";
 export * from "./plan-saves.ts";
@@ -195,6 +196,7 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
+  terminalOwners: TerminalOwner[];
   repositoryObservations: RepositoryObservation[];
   operationEntries: OperationEntry[];
   operationCoverage: OperationCoverage | null;

@@ -5,10 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 22 deliberately rejects incompatible running
+This is an alpha API. Protocol 23 deliberately rejects incompatible running
 services and requires the matching SSH worker for exact user plan operations,
 reviewed compaction and model telemetry. State migrations preserve schema-1
-through schema-21 history, sessions, drafts,
+through schema-22 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -132,7 +132,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single policy/configure with an observed settings revision and session-owned plan history. Actual router/solver roles use the existing worker/ledger; finite caps, images and model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
-| `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
+| `terminal` | Exact Local PTY open/read/resize/input/close, terminal/owner reconciliation and explicit process-inspection acknowledgements. Authenticated per-profile ownership survives explicit restart. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
@@ -140,6 +140,41 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `models` | Explicit Copilot/local catalog refresh, synthetic Single availability and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download or automatic model substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
+
+### Local user consoles
+
+`terminal.open(sessionId)` is an explicit user action, not an agent tool.
+`terminal.read(id, offset, limit)` returns the exact Local binding, actual
+attachment generation, bounded volatile data and base/next offsets. A missing
+prefix or expired buffer is not reconstructed as a transcript.
+
+```ts
+const opened = await sdk.terminal.open(sessionId);
+if (!opened.id) throw new Error("No terminal was admitted.");
+const page = await sdk.terminal.read(opened.id);
+console.log(page.terminal.status, page.terminal.binding?.root);
+await sdk.terminal.reconcile(opened.id); // Inspect, never launch or resend.
+```
+
+`terminal.input(id, text, signal?)` splits bounded input without splitting a
+surrogate pair, and checks cancellation/current `attachmentId` between chunks.
+An error can mean some bytes arrived: inspect before typing again, never retry
+the same input automatically. Neither input nor resize uses durable command
+receipts. Reconciliation and input require the original profile/root identity;
+policy can block new Local input without preventing inspection or close.
+
+`terminal.reconcileOwner(ownerId)` also inspects an empty pending owner.
+`acknowledge(id, true)` and `acknowledgeOwner(ownerId, true)` require actual user
+process inspection and do not prove historical cleanup or delete an unverified
+capability. Owner acknowledgement cannot hide unconfirmed terminals.
+
+`stopMoguriService(stateDir, { preserveTerminals: true })` requests an
+authenticated **service-wide** restart detach; ordinary stop/default embedded
+`runtime.close()` closes known groups across its loaded/recovered profiles.
+An explicit embedded `runtime.close({ preserveTerminals: true })` also preserves
+them. Failed private cleanup keeps the registry and writer lock, blocks new
+work and permits an explicit cleanup retry. No saved PID is blindly signalled.
+See [ownership, secret backend and cancellation](architecture/terminal-reattachment.md).
 
 ### Reviewed context compaction
 

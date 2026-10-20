@@ -241,18 +241,28 @@ export class MoguriSdk extends TransportClient {
   }
   readonly terminal = {
     open: (sessionId: string, cols = 80, rows = 24, scriptId?: string) => this.command({ type: "terminal.open", sessionId, cols, rows, ...(scriptId ? { scriptId } : {}) }),
-    input: async (terminalId: string, data: string) => {
+    input: async (terminalId: string, data: string, signal?: AbortSignal) => {
       if (!data.length) throw new ClientError("terminal_input", "Terminal input must contain at least one character.");
+      const original = this.getState().snapshot?.terminals.find((terminal) => terminal.id === terminalId);
+      if (!original || original.status !== "running" || this.getState().status !== "connected") throw new ClientError("terminal_input_stopped", "This terminal is not running under an attached owner. Nothing was replayed.");
+      const attachmentId = original.attachmentId, connectionToken = this.connection.token;
       for (let offset = 0; offset < data.length;) {
+        signal?.throwIfAborted();
+        const current = this.getState().snapshot?.terminals.find((terminal) => terminal.id === terminalId);
+        if (this.getState().status !== "connected" || this.connection.token !== connectionToken || current?.status !== "running" || current.attachmentId !== attachmentId) throw new ClientError("terminal_input_stopped", "The terminal controller changed during input. Some bytes may have arrived; remaining queued input was discarded, never replayed.");
         let end = Math.min(offset + 16384, data.length);
         if (end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1]!)) end--;
         await this.terminalInput({ action: "input", terminalId, data: data.slice(offset, end) }); offset = end;
+        signal?.throwIfAborted();
       }
     },
     resize: (terminalId: string, cols: number, rows: number) => this.terminalInput({ action: "resize", terminalId, cols, rows }),
     read: (terminalId: string, offset = 0, limit = 65536) => this.query({ type: "terminal.read", terminalId, offset, limit }),
     close: (terminalId: string) => this.command({ type: "terminal.close", terminalId }),
+    reconcile: (terminalId: string) => this.command({ type: "terminal.reconcile", terminalId }),
+    reconcileOwner: (ownerId: string) => this.command({ type: "terminal.owner.reconcile", ownerId }),
     acknowledge: (terminalId: string, confirmInspection: true) => this.command({ type: "terminal.acknowledge", terminalId, confirmInspection }),
+    acknowledgeOwner: (ownerId: string, confirmInspection: true) => this.command({ type: "terminal.owner.acknowledge", ownerId, confirmInspection }),
   };
   slash(sessionId: string, text: string, client: "desktop" | "tui" | "cli" = "desktop"): Promise<SlashResult> { return executeSlash(this, sessionId, text, client); }
   async query<Q extends PlatformQuery>(query: Q): Promise<Extract<PlatformResponse, { type: Q["type"] }>> {

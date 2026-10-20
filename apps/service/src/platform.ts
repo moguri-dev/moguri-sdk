@@ -15,6 +15,7 @@ import {
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   isPlanSaveCommand, isPlanSaveQuery, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
+  type RuntimeCloseOptions,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
 import { RepositoryMemory } from "./memory.ts";
@@ -130,7 +131,7 @@ export class PlatformRuntime {
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
-    }, stateDir, options);
+    }, stateDir, { ...options, terminal: { ...options.terminal, vault: options.terminal?.vault ?? options.vault } });
     this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);
     this.repositories = new RepositoryTelemetry({
       snapshot: () => this.snapshot(), scope: host.repositoryScope, git: host.repositoryGit,
@@ -159,7 +160,7 @@ export class PlatformRuntime {
     if (!session) throw new MoguriError("session_not_found", "Session is outside this profile.", 404);
     return session;
   }
-  recover(): void {
+  async recover(): Promise<void> {
     this.managed.recover();
     const oauth = this.snapshot().oauthAuthorizations.filter((value) => ["waiting", "exchanging"].includes(value.state));
     if (oauth.length) this.host.commit(oauth.map((authorization) => ({ event_type: "mcp.oauth_changed", profile_id: this.snapshot().profileId, project_id: authorization.projectId, payload: { authorization: { ...authorization, state: "failed", authorizationUrlReady: false, diagnostic: "Service restarted. OAuth callbacks/verifiers were not replayed; reconnect explicitly." } } })));
@@ -169,7 +170,7 @@ export class PlatformRuntime {
       payload: { jobId: job.id, status: "partial", resultDigest: null, error: "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed." },
     })));
     this.workspace.start();
-    this.sessions.recover();
+    await this.sessions.recover();
   }
   prompt(session?: Session): string {
     const snapshot = this.snapshot();
@@ -615,5 +616,13 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     for (const workspace of this.snapshot().managedWorkspaces.filter((workspace) => workspace.projectId === id && workspace.status !== "removed")) await this.gateway.cancelRoot(workspace.path);
     await this.gateway.oauth.cancelScope(id);
   }
-  async close(): Promise<void> { this.workspace.close(); await this.sessions.close(); for (const job of this.active.values()) job.abort.abort(); await this.gateway.close(); await Promise.all([...this.active.values()].map((job) => job.done)); }
+  async close(options: RuntimeCloseOptions = {}): Promise<void> {
+    this.workspace.close();
+    const jobs = [...this.active.values()];
+    for (const job of jobs) job.abort.abort();
+    const settled = await Promise.allSettled([this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);
+    const failed = settled.find((result) => result.status === "rejected");
+    for (const result of settled) if (result.status === "rejected") console.error("Platform cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "platform_cleanup");
+    if (failed?.status === "rejected") throw failed.reason;
+  }
 }
