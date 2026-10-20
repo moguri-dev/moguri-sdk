@@ -1,9 +1,8 @@
 # Profile isolation contract
 
-Status: protocol-14 development sources implement isolated profiles over one
-local authority. CLI, native TUI and hidden desktop acceptance pass; the
-separately versioned 0.8 package is being qualified. This is not the completed
-first milestone or a native SendBox qualification.
+Status: qualified 0.8.0-alpha.1 / protocol-14 development checkpoint. Isolated
+profiles share one local authority across SDK, CLI, native TUI and desktop.
+This is not the completed first milestone or a native SendBox qualification.
 
 Reuse Node/SQLite/AES-GCM, TypeBox, maintained pi-ai and the explicit OS-keychain
 backend already qualified by this repository. No new dependency, forked agent
@@ -147,3 +146,15 @@ capacity/defaults. The initial asynchronous global-budget acknowledgement
 clear and an obsolete Default-only UI test label were corrected explicitly;
 neither failed run was counted as a pass. Versioned macOS package and exact
 delivered-archive qualification remain separate below.
+
+The actual **0.8.0-alpha.1** macOS arm64 app passes all **19** hidden Electron
+workflows in **44.0 s**, including its compiled workers, inert handoff and
+profile-bound native preview/notification paths. Strict ad-hoc signature,
+bundled runtime/assets and actual DMG integrity checks pass. A fresh
+approved/audited installation of the exact delivered SDK archive separately
+passes the two-profile worker/accounting/MCP-credential checks and a new
+profile's inherited global environment restriction, with zero audit findings.
+Only generated providers, credentials, roots and data were used. No real
+authorization, microphone, speech weights, native VM or production trust
+change was involved. [Setup](../setup.md#verification-and-packaging) records the exact artifact
+hashes; qualified 0.7 artifacts remain unchanged.
