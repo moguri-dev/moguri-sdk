@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 14 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-13 history, sessions, drafts,
+This is an alpha API. Protocol 15 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-14 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -20,7 +20,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.8.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.9.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -51,9 +51,9 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.8.0-alpha.1.tgz`.
-The current verification suite expects protocol 14; historical 0.7 archives
-retain their separately recorded protocol-13 qualification.
+repacking: `npm run verify:sdk -- release/moguri-0.9.0-alpha.1.tgz`.
+The current verification suite expects protocol 15; historical 0.7/0.8 archives
+retain their separately recorded protocol-13/14 qualification.
 
 ## Connect to the shared service
 
@@ -129,6 +129,16 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `models` | Explicit Copilot/local catalog refresh and user-only resource-bound local endpoint keys. No host scan, weight download or automatic model substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
+
+In Guided mode `ask_user` may include a bounded offered-choice recommendation.
+`UserQuestion.recommendation` contains the exact choice/reason and service-stamped
+`model` actor/model/provider/step/call provenance. It is not `question.answer`.
+Only an actual `questions.answer`/`answerDraft` user action resolves the wait,
+and the user can select a different choice. Approval recommendations similarly
+require exact-step `recommendationSource`; no old narration is substituted.
+Advice comes from the original metered solver response, not another model
+request. Retained documents label model advice separately from the user's
+answer. No public command can supply a forged answer actor.
 
 `sessions.create(projectId?, title?, overrides?)` resolves explicit controls
 over `project.values.defaults`, `settings.startup.profile`,

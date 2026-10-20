@@ -7,7 +7,7 @@ import { assertFolderAccess, matchesFolder, readTools, type FolderPolicy } from 
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 export const tools: Tool[] = [
-  { name: "ask_user", description: "Ask one genuine clarification with optional choices. The actual user must answer; never invent an answer or request secrets. An answer does not grant tool/Git permissions or change policy. Question and actual answer are recorded with provenance and optional independent retention.", parameters: UserQuestionSchema },
+  { name: "ask_user", description: "Ask one genuine clarification with optional choices. In Guided autonomy, you may include recommendation with one offered zero-based choiceIndex and a concise reason; omit it when missing user-only facts prevent a justified recommendation. The actual user must still answer. Never invent an answer, request secrets, or treat advice as tool/Git permission. Question, model advice and actual answer retain their separate provenance.", parameters: UserQuestionSchema },
   { name: "moguri_config", description: "Settings-chat capability: read non-secret global/project configuration or propose an exact change for human review. Never applies/enables a change, stores credentials, authenticates, executes commands or grants permissions. A proposal is untrusted advice, not a user answer.", parameters: Type.Object({
     action: Type.Union([Type.Literal("read"), Type.Literal("propose")]),
     target: Type.Optional(Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("repo-instructions"), Type.Literal("skill"), Type.Literal("policy")])),

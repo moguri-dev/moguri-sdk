@@ -24,7 +24,7 @@ Unused scope fields are null in checkpoint 1.
 | `model.late_usage` | Exact owned remote step/frame improves unknown accounting after disconnect; no new continuation, tool replay or rewrite of a partial turn. |
 | `execution.started`, `execution.changed` | Pinned target/build/root/run, actual worker and cancellation/cleanup status. SSH exit is not descendant-containment proof. |
 | `execution.frame_recorded` | Run, sequence and digest committed atomically with the primary events; a duplicate cannot authorize another side effect. |
-| `tool.requested` | Exact declared tool, approval UUID and policy revision. |
+| `tool.requested` | Exact declared tool, approval UUID and policy revision. Optional Guided text binds the actual solver model/step/call; it never authorizes execution. |
 | `tool.decided` | Allow/deny, exact request UUID and real `user`/`policy`/`delegation` actor, with rule ID for explicit grants. Model advice never becomes a human answer. |
 | `tool.started`, `tool.output`, `tool.completed` | Approved execution, bounded output, explicit actual/denied/stopped/failed/partial/unconfirmed result. |
 | `process.started` | Owned tool-call ID, PID and process group. |
@@ -55,9 +55,10 @@ Unused scope fields are null in checkpoint 1.
 | `mcp.oauth_changed` | Non-secret explicit OAuth lifecycle and transient-link readiness. Tokens, authorization URLs, state, PKCE verifiers and client secrets are not event payloads. |
 | `configuration.proposed`, `configuration.decided` | Exact scoped content/base digests and revision, verified source excerpts, actual user/model origin and a real user decision. No self-approval, authentication, automatic enablement or publication. |
 | `attention.raised`, `attention.cleared`, `attention.acknowledged` | Atomically derived question/approval/failure/done state; heuristic provenance is explicit and read acknowledgement never resolves or approves. |
-| `question.asked`, `question.answered`, `question.cancelled` | Exact model/step/call and owning-turn question, actual answer actor and cancellation. Actual-user answers cannot be forged by a model, heuristic or queue item. Optional retained answer artifacts are derived atomically. |
+| `question.asked`, `question.answered`, `question.cancelled` | Exact model/step/call and owning-turn question, optional offered-choice Guided model recommendation, actual answer actor and cancellation. Advice never resolves the wait; actual-user answers cannot be forged by a model, heuristic or queue item. Retained model advice/actual answer keep distinct source digests. |
 | `budget.recorded` | Immutable profile-owned reservation/settlement/import: actual model role/owner, held unknowns, explicit price basis and reported total. Source deletion/restart never refunds unconfirmed calls. |
 | `budget.policy_changed`, `budget.blocked` | Explicit revision-bound profile cap or actual admission rejection. A blocked request retains a diagnostic checkpoint without inventing an answer, extra paid call or Git success. |
+| `profile.saved`, `global.controls_changed`, `global.policy_changed`, `global.budget_changed` | Root-only profile lifecycle and shared preference/policy/cap revisions. Atomic scoped replicas preserve enforcement without exposing foreign payloads. These internal events never enter a user's scoped replay. |
 
 ## HTTP commands
 

@@ -29,7 +29,7 @@ test("schema 13 upgrades Default in place without changing encrypted history, re
     upgraded = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     const peer = await new MoguriSdk(upgraded.connection).ready();
     try {
-      assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 14);
+      assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 15);
       assert.equal(upgraded.store.db.prepare("SELECT value FROM retention_metadata WHERE id='key_id'").get()?.value, identity);
       assert.deepEqual(upgraded.store.db.prepare("SELECT seq,id,data,payload FROM events WHERE seq<=? ORDER BY seq").all(Number(rows.at(-1)!.seq)), rows);
       assert.deepEqual(upgraded.store.db.prepare("SELECT * FROM retention_keys WHERE scope NOT GLOB 'profile/_global*' ORDER BY scope").all(), keys);
@@ -65,7 +65,7 @@ test("an interrupted schema-14 receipt migration rolls back and reopens the unch
       preserved.exec("DROP TRIGGER generated_profile_migration_failure");
     } finally { preserved.close(); }
     upgraded = await startService(options);
-    assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 14);
+    assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 15);
     assert.equal(upgraded.controller.snapshot().sessions[0]?.id, fixture.sessionId);
     assert.equal(fixture.requests.length, 0);
   } finally { await upgraded?.close(); await fixture.close(); }

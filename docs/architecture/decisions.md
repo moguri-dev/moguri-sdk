@@ -243,6 +243,14 @@ is unreported, invalid advice preserves valid cost units and transport abort
 never proves provider-side cancellation. Owned-call/ledger, calibrated
 delegation and live/remote integration remain unqualified.
 
+**Guided slice.** The existing solver may attach an offered-choice
+recommendation to `ask_user`; the service stamps actual step/model provenance.
+The same call pays for that output. Desktop/TUI expose advice without answering
+or approving. Exact-step tool narration may guide the human, never replace the
+deterministic authorizer. Migration 15 preserves old questions/keys/receipts
+and defaults legacy advice to null. This does not enable a decision provider,
+Autopilot Max or automated steering.
+
 ## D13. Remote SSH execution
 
 **Decision.** Include a user-configured **Remote** env in the first release. It runs the agent task, tools, and all router/solver/critic/decision model calls on the SSH machine. The user's local Moguri service still owns durable state and the client API; the remote worker reports through a versioned, run-scoped protocol inside SSH.

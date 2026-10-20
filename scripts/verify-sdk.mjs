@@ -59,7 +59,7 @@ try {
       const publication=await sdk.artifacts.materialize("generated-project",repositoryCopy.digest,{commitBranch:"docs/generated-copy"});
       const materialized=await sdk.artifacts.materialization(publication.id!);void materialized.result?.commit?.commit;
       const question=sdk.getState().snapshot?.questions[0];
-      if(question){await sdk.questions.answer(question.id,"Generated actual user answer",question.revision);await sdk.questions.answerDraft(question.id,question.revision);}
+      if(question){if(question.recommendation){const actor:"model"=question.recommendation.actor;void actor;}await sdk.questions.answer(question.id,"Generated actual user answer",question.revision);await sdk.questions.answerDraft(question.id,question.revision);}
       const exported=(await sdk.artifacts.export(document.id!)).export;
       await saveArtifactExport("/generated/explicit-export.json",exported);
       await sdk.sessions.env(general.id!,"Local");
@@ -119,7 +119,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,14);
+      assert.equal(sdk.getState().snapshot.protocolVersion,15);
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);
@@ -163,7 +163,7 @@ try {
           let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
           role.once("error",reject);
           role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
-          role.stdin.write(JSON.stringify({action:"probe",protocol:14,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+          role.stdin.write(JSON.stringify({action:"probe",protocol:15,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
         });
         assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
         role.stdin.end();assert.equal(await roleExit,0);
@@ -257,10 +257,13 @@ try {
       const generatedRequests=[];
       budgetServer=createServer(async(request,response)=>{
         const chunks=[];for await(const chunk of request)chunks.push(Buffer.from(chunk));
-        generatedRequests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        const body=JSON.parse(Buffer.concat(chunks).toString("utf8"));generatedRequests.push(body);
         response.writeHead(200,{"Content-Type":"text/event-stream"});
         const frame=(delta,finish_reason=null)=>response.write("data: "+JSON.stringify({id:"generated-external-response",object:"chat.completion.chunk",model:"generated-external-budget",choices:[{index:0,delta,finish_reason}]})+"\\n\\n");
-        frame({role:"assistant",content:"Generated external budget response."});frame({},"stop");
+        const user=body.messages.findLastIndex(value=>value.role==="user");
+        if(String(body.messages[user]?.content).includes("Generated installed Guided question")&&!body.messages.slice(user+1).some(value=>value.role==="tool")){
+          frame({role:"assistant",tool_calls:[{index:0,id:"generated-installed-guided-call",type:"function",function:{name:"ask_user",arguments:JSON.stringify({question:"Choose a generated installed approach?",choices:["Generated installed first","Generated installed second"],allowFreeform:false,recommendation:{choiceIndex:1,reason:"Generated installed solver recommendation."}})}}]});frame({},"tool_calls");
+        }else{frame({role:"assistant",content:"Generated external budget response."});frame({},"stop");}
         response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
       });
       await new Promise(resolve=>budgetServer.listen(0,"127.0.0.1",resolve));
@@ -297,7 +300,20 @@ try {
       assert.equal(beta.getState().snapshot.sessions.find(v=>v.id===betaMetered.id).status,"completed");assert.equal(generatedRequests.length,2);
       assert.equal((await beta.budgets.dashboard()).totals.reportedTokens,42);
       assert.equal((await sdk.budgets.dashboard()).totals.reportedTokens,42);
-      await sdk.profiles.globalBudget({basis:"estimate",tokens:84},0,true);
+      const guided=await beta.sessions.create(null,"Generated installed Guided advice",{modelId:generatedModel.id,autonomy:"Guided"});
+      await beta.command({type:"draft.save",sessionId:guided.id,expectedRevision:0,text:"Generated installed Guided question.",attachments:[]});
+      await beta.command({type:"message.send",sessionId:guided.id,expectedRevision:1,delivery:"queue"});
+      for(let n=0;n<400&&!beta.getState().snapshot.questions.some(value=>value.sessionId===guided.id&&value.status==="open");n++)await new Promise(resolve=>setTimeout(resolve,20));
+      const pending=beta.getState().snapshot.questions.find(value=>value.sessionId===guided.id&&value.status==="open");
+      assert.ok(pending);assert.equal(pending.answer,null);assert.equal(pending.recommendation.actor,"model");assert.equal(pending.recommendation.choice,pending.choices[1]);assert.equal(generatedRequests.length,3);
+      await beta.questions.answer(pending.id,pending.choices[0],pending.revision);
+      for(let n=0;n<400&&beta.getState().snapshot.sessions.find(value=>value.id===guided.id).status!=="completed";n++)await new Promise(resolve=>setTimeout(resolve,20));
+      assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===guided.id).status,"completed");
+      assert.equal(beta.getState().snapshot.questions.find(value=>value.id===pending.id).answer.actor,"user");
+      assert.equal(beta.getState().snapshot.questions.find(value=>value.id===pending.id).answer.text,pending.choices[0]);assert.equal(generatedRequests.length,4);
+      const guidedArtifact=beta.getState().snapshot.artifacts.find(value=>value.questionId===pending.id);
+      assert.match((await beta.artifacts.read(guidedArtifact.id)).text,/Model recommendation \\(not a user answer\\)/);
+      await sdk.profiles.globalBudget({basis:"estimate",tokens:168},0,true);
       assert.equal((await beta.budgets.status(betaMetered.id)).status.remainingTokens,0);
       const globals=(await beta.profiles.list()).catalog.globalDefaults;
       await beta.profiles.defaults({autonomy:"Guided"},globals.revision);
@@ -312,7 +328,7 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    console.log("External SDK imports/types, approved/audited install, immutable profile/CLI/model/credential scopes and shared policies, installed worker handshake, context/worktrees/PTY, independent artifacts/repository copies/local commits, finite budgets/dashboard/checkpoints, metachat, vectors, MCP and script-free cache passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual solver-sourced Guided advice/human answer/artifact without an extra call, installed worker handshake, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }

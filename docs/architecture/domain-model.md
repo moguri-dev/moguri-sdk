@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 14; immutable event
+Protocol version and database migration version are 15; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -201,3 +201,11 @@ Opaque global accounting invalidation updates capacity without broadcasting
 another profile's calls. Profile resources have owned private markers; setup
 interruption is partial and does not replay on restart. See
 [the profile contract](profiles.md).
+
+Migration 15 adds optional Guided offered-choice recommendations, stamped from
+the actual solver step with separate model actor/provenance. Old questions
+project null advice. Receipt/key/ciphertext identity is unchanged and an
+injected marker failure rolls back to schema 14. Advice remains part of the
+existing accounted solver call, not an extra hidden request, user answer or
+permission. Retained answer documents preserve its model digest separately
+from the actual user's answer.

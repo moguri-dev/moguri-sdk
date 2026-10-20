@@ -10,7 +10,7 @@ import {
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
-  type GlobalBudgetCapacity,
+  type GlobalBudgetCapacity, type ModelAdviceSource,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -894,13 +894,23 @@ export class ControlPlane extends EventEmitter {
     }
   }
   private askQuestion(run: Run, request: Extract<WorkerRequest, { kind: "delegate" }>): void {
-    const session = this.session(run.sessionId), input = parse(UserQuestionSchema, request.call.arguments);
+    const session = this.session(run.sessionId), { recommendation, ...input } = parse(UserQuestionSchema, request.call.arguments);
     if (session.pendingQuestionId || !session.controls.modelId || run.abort.signal.aborted) throw new MoguriError("question_state", "Only one current model question may wait for the actual user.", 409);
     if (!input.question.trim() || Buffer.byteLength(input.question) > 16 * 1024 || !input.allowFreeform && !input.choices.length || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.question) || input.choices.some((choice) => /[\r\n\u0000-\u001f\u007f]/.test(choice))) throw new MoguriError("question_input", "Use a bounded, readable clarification with at least one actual answer path. No question or answer was invented.");
-    const question: UserQuestion = { ...input, id: randomUUID(), sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, turnId: run.turnId, stepId: request.stepId, callId: request.call.id, modelId: session.controls.modelId,
-      sourceEventId: null, revision: 0, createdAt: new Date().toISOString(), status: "open", answer: null, diagnostic: null };
+    const recommendedChoice = recommendation ? input.choices[recommendation.choiceIndex] : undefined;
+    if (recommendation && (session.controls.autonomy !== "Guided" || recommendedChoice === undefined || !recommendation.reason.trim() ||
+      Buffer.byteLength(recommendation.reason) > 1200 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(recommendation.reason))) throw new MoguriError("question_recommendation", "Guided recommendations must choose one actual offered alternative and include a bounded explanation. No answer or question was invented.");
+    const source = this.modelAdviceSource(session, request);
+    const question: UserQuestion = { ...input, id: randomUUID(), sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, turnId: run.turnId, stepId: request.stepId, callId: request.call.id, modelId: source.modelId,
+      sourceEventId: null, revision: 0, createdAt: new Date().toISOString(), status: "open", answer: null, diagnostic: null,
+      recommendation: recommendation && recommendedChoice !== undefined ? { ...source, choice: recommendedChoice, reason: recommendation.reason } : null };
     this.commit([this.event(session, "question.asked", { question }, request.stepId)]);
     this.questionWaits.set(question.id, { run, requestId: request.requestId });
+  }
+  private modelAdviceSource(session: Session, request: { stepId: string; call: ToolCall }): ModelAdviceSource {
+    const usage = session.usage.findLast((usage) => usage.stepId === request.stepId);
+    if (!usage) throw new MoguriError("advice_source", "The current solver step has no durable model provenance. No recommendation or answer was attributed.", 409);
+    return { actor: "model", modelId: usage.modelId, providerId: usage.providerId ?? null, stepId: request.stepId, callId: request.call.id };
   }
   private answerQuestion(command: QuestionCommand, finish: WorkspaceFinish): CommandResult {
     const question = this.projection.questions.find((question) => question.id === command.questionId);
@@ -1063,8 +1073,9 @@ export class ControlPlane extends EventEmitter {
         await this.assertCurrentTool(session, request.call);
         const authorization = authorizeTool(this.projection.settings.values, request.call, session.controls.env === "Remote" ? this.remoteWorkspace(session) : project?.path ?? null);
         if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
+        const recommendation = session.controls.autonomy === "Guided" ? session.messages.findLast((message) => message.role === "assistant" && message.id === request.stepId)?.text.trim().slice(0, 1200) : undefined;
         const approval = { id: randomUUID(), stepId: request.stepId, call: request.call, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision,
-          recommendation: session.controls.autonomy === "Guided" ? session.messages.filter((message) => message.role === "assistant").at(-1)?.text.slice(0, 1200) || "The model supplied no recommendation. A human must decide." : undefined };
+          ...(recommendation ? { recommendation, recommendationSource: this.modelAdviceSource(session, request) } : {}) };
         if (authorization.decision === "allow" || request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config") {
           run.granted.add(request.call.id);
           this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);

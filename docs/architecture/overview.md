@@ -31,7 +31,7 @@ migration and recovery tests, not deletion of user state.
 Migration 2 adds project-scoped derived repository caches and graph tables.
 Migration 3 adds derived dependency-cache object metadata, local board/ticket
 and cache-receipt events. Event envelopes remain schema version 1; the client
-protocol is version 14. The [workspace contract](workspace-platform.md) records
+protocol is version 15. The [workspace contract](workspace-platform.md) records
 cache/advisory, read-only integration and recovery boundaries.
 Migration 4 adds encrypted retention compartments while preserving prior event
 identity/sequence. The [session workspace contract](session-workspace.md)
@@ -72,6 +72,10 @@ store/controller/SDK views, composite receipts preserving Default identities,
 owned setup/retry/stop, isolated secrets/data and global policy/preferences/
 budget authority. Switching preserves old editors' destinations and running
 work; native preview/notification identities include the profile.
+Migration 15 adds [Guided offered-choice advice](engagement.md#guided-advice-and-actual-answers)
+from the actual existing solver call. Model recommendations and exact-step
+approval guidance remain separate from real user answers/permissions; no
+auxiliary inference, automatic decision or ciphertext rewrite is implied.
 
 Both clients share the SDK and subscribe to the same sequenced stream. The
 service owns projects, sessions, transcripts, drafts, queue, pending approvals,

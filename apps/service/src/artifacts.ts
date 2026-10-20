@@ -69,9 +69,11 @@ export class ArtifactRuntime {
       if (event.event_type !== "question.answered") return [];
       const question = snapshot.questions.find((question) => question.id === event.payload.questionId);
       if (!question) throw new MoguriError("question_missing", "The exact answered question is not retained; no artifact was invented.", 409);
-      const answer = event.payload.answer, text = `# Question\n\n${question.question}\n\n# Answer\n\n${answer.text}\n`;
+      const recommendation = question.recommendation;
+      const guidance = recommendation ? `\n\n# Model recommendation (not a user answer)\n\n${recommendation.choice}\n\n${recommendation.reason}\n\nModel: ${recommendation.modelId}\nStep: ${recommendation.stepId}\n` : "";
+      const modelText = `${question.question}${guidance}`, answer = event.payload.answer, text = `# Question\n\n${modelText}\n\n# Answer\n\n${answer.text}\n`;
       const artifact = this.create({ id: question.sessionId, projectId: question.projectId, workspaceId: question.workspaceId }, "answer", `Answer: ${question.question.replace(/\s+/g, " ").slice(0, 140)}`, text, "question", [
-        { eventId: question.sourceEventId, sessionId: question.sessionId, messageId: question.callId, actor: "model", modelId: question.modelId, outcome: null, contentDigest: digest(question.question) },
+        { eventId: question.sourceEventId, sessionId: question.sessionId, messageId: question.callId, actor: "model", modelId: question.modelId, outcome: null, contentDigest: digest(modelText) },
         { eventId: event.id, sessionId: question.sessionId, messageId: null, actor: answer.actor, modelId: answer.modelId, outcome: null, contentDigest: digest(answer.text) },
       ]);
       return [this.event({ ...artifact, questionId: question.id })];

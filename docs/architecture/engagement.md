@@ -4,6 +4,36 @@ This user-requested slice extends the same SDK, service and append-only event
 authority. It does not activate unattended self-modification, grant model
 authority over settings or replace the existing execution boundaries.
 
+## Guided advice and actual answers
+
+Protocol/migration 15 adds optional offered-choice recommendations to the
+existing `ask_user` call. The current solver can supply one zero-based
+`recommendation.choiceIndex` and a bounded `reason` in Guided mode. The service
+validates actual option membership and stamps actor/model/provider/step/call
+from the already committed solver result, never from model-supplied identity.
+An open-ended question cannot manufacture a recommended user-only fact.
+
+There is no auxiliary model call or second agent loop. The same solver call
+already reserves/reconciles its budget. Advice never answers the question:
+the user may choose another option, queue text without answering, or stop.
+Guided approval text must belong to that exact model step and tool call;
+historical narration is not a current recommendation.
+
+SDK/CLI preserve typed advice. Desktop and native TUI label it untrusted model
+advice, without preselecting or automatically accepting the recommended
+answer. The normal actual-user endpoint remains authoritative and records the
+real user actor. Model advice cannot lift hard denial or Git policy.
+Retained answer artifacts separately label recommendation and actual answer;
+their model/user source digests remain distinct.
+
+Migration 15 adds a transactional schema marker without rewriting ciphertext,
+scoped receipts, wrapped keys or existing profile identities. Old questions
+project null advice; restart cancels interrupted waits without an invented
+answer or replay. Generated tests cover two-profile legacy recovery, injected
+migration failure, cancellation, source attribution, actual native TUI choices
+and no additional paid request. This is a Guided slice, not Jev, Autopilot Max
+or automated question/approval/steering delegation.
+
 ## Reuse and Phase 0
 
 Use the installed official MCP SDK (MIT) for protected-resource/issuer

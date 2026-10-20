@@ -15,12 +15,12 @@ import type { McpAuthorization } from "./oauth.ts";
 import type { ConfigurationProposal, Attention, SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
-import type { UserQuestion, QuestionAnswer } from "./questions.ts";
+import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -114,7 +114,7 @@ export interface QueueItem {
   held?: boolean;
   mode?: SessionMode;
 }
-export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string }
+export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; outcome: string; env?: Controls["env"] }
 export type SessionStatus = "idle" | "queued" | "running" | "waiting_input" | "stopping" | "completed" | "stopped" | "failed" | "partial" | "archived";
 export interface Session {
@@ -364,7 +364,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "artifact.saved") artifacts.set(event.payload.artifact.id, legacyArtifact(event.payload.artifact, event.id));
     if (event.event_type === "artifact.revised") artifacts.set(event.payload.artifact.id, normalizeArtifact(structuredClone(event.payload.artifact)));
     if (event.event_type === "artifact.deleted") artifacts.delete(event.payload.artifactId);
-    if (event.event_type === "question.asked") questions.set(event.payload.question.id, { ...structuredClone(event.payload.question), sourceEventId: event.id });
+    if (event.event_type === "question.asked") questions.set(event.payload.question.id, { ...structuredClone(event.payload.question), recommendation: structuredClone(event.payload.question.recommendation ?? null), sourceEventId: event.id });
     if (event.event_type === "question.answered") {
       const question = questions.get(event.payload.questionId);
       if (question) Object.assign(question, { answer: structuredClone(event.payload.answer), status: "answered", revision: question.revision + 1 });

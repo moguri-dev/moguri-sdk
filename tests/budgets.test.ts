@@ -179,7 +179,7 @@ test("schema-12 accounting imports exact legacy usage without rewriting identiti
     upgraded = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     const peer = await new MoguriSdk(upgraded.connection).ready();
     try {
-      assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 14);
+      assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 15);
       const entry = upgraded.controller.snapshot().budgetEntries[0]!;
       assert.equal(entry.imported, true); assert.equal(entry.reportedTokens, 42); assert.equal(entry.rate, null);
       assert.equal((await peer.budgets.status(fixture.sessionId)).status.totals.estimatedUsd, null);
