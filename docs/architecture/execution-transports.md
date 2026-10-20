@@ -79,6 +79,13 @@ restart quarantine. It does not infer that distinct/rekeyed host keys identify
 the same OS filesystem, discover Local/Remote aliasing or establish SSH
 process isolation. Unqualified remote side panels remain blocked.
 
+The corrected source gate passes **262** full local checks in **176,325.91
+ms**. Seven focused peer/root cases cover the reproduced cross-profile race,
+existing same-profile refusal, independent roots, unloaded-owner restart
+quarantine and both sides of actual read-only acknowledgement. The temporary
+lifecycle-only handle probe was removed; no native VM, personal credential,
+system SSH daemon change or new containment claim was involved.
+
 ## Failure and recovery
 
 Run IDs are unique and start is create-only. Reattachment never creates another
