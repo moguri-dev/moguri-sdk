@@ -11,6 +11,11 @@ to release-ready.
 The [0.6 engagement slice](engagement.md#local-qualification) records later
 OAuth, project-free scope, reviewed metachat, attention and actual-bundle checks
 without replacing these historical baseline measurements.
+The later [profile checkpoint](profiles.md) records the qualified protocol-14
+scope/upgrade/client/package behavior. The separate
+[decision-provider prerequisite](decision-primitives.md) records generated
+wire/failure measurements and the missing output-limit constraint; it does not
+promote routing or automated decisions to operational.
 
 Initial budgets were set before the run: SQLite append p95 below 20 ms; bounded
 2,000-file listing below 500 ms and Git status below 1 s; Electron shell ready

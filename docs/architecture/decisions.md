@@ -235,6 +235,14 @@ complete containment or enable background execution.
 
 **Schema impact.** Phase 1 defines autonomy-level settings and default sources, bounded delegation, decision requests and results, recommendation versus human/automated approval actors, policy revisions, invalidation, and requested/applied steering events. Recovery must preserve pending questions and accounting without re-executing effects; durable changes require migrations.
 
+**Measured prerequisite.** The [generated System One wire/schema probe](decision-primitives.md)
+passes eight checks without a real account or automatic authority. The
+documented request has no output-token-limit field; finite-token contexts
+cannot admit this adapter until a qualified bound exists. Missing telemetry
+is unreported, invalid advice preserves valid cost units and transport abort
+never proves provider-side cancellation. Owned-call/ledger, calibrated
+delegation and live/remote integration remain unqualified.
+
 ## D13. Remote SSH execution
 
 **Decision.** Include a user-configured **Remote** env in the first release. It runs the agent task, tools, and all router/solver/critic/decision model calls on the SSH machine. The user's local Moguri service still owns durable state and the client API; the remote worker reports through a versioned, run-scoped protocol inside SSH.
