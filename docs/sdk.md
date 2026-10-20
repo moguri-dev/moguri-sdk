@@ -57,7 +57,7 @@ repacking: `npm run verify:sdk -- release/moguri-0.15.0-alpha.1.tgz`.
 Current verification also exercises actual installed-worker SSH files,
 Git/plan reads, dated/per-call telemetry and actual metered compaction with the
 installed CLI/worker. Historical archives retain their separately
-recorded qualification; protocol-16/17/18/19 SSH receipts remain inspectable without
+recorded qualification; protocol-16/17/18/19/20 SSH receipts remain inspectable without
 reattaching or continuing an old worker.
 
 ## Connect to the shared service
