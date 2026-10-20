@@ -10,7 +10,7 @@ import {
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
-  type GlobalBudgetCapacity, type ModelAdviceSource,
+  type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -26,6 +26,8 @@ import { contextHasImages, estimateModelContext, modelRequest, validateModelOpti
 import { attentionEvents } from "./attention.ts";
 import { ModelRegistry, localEndpointUrl } from "./model-registry.ts";
 import { RemoteRuntime, remoteRootLease, remoteRootQuarantined } from "./remote.ts";
+import { kupoAvailability, kupoPool, routingPlan, ROUTER_PROMPT } from "./routing.ts";
+import { reportedModelUsage, modelOutputExceeded } from "./budgets.ts";
 import { McpKeychain } from "./gateway.ts";
 import { localWorker, type WorkerConnection, type WorkerFrame } from "./worker-connection.ts";
 import { frameDigest } from "./worker-wire.ts";
@@ -180,6 +182,7 @@ export class ControlPlane extends EventEmitter {
           .flatMap((event) => event.event_type === "model.completed" ? event.payload.message.toolCalls ?? [] : []).filter((call) => !completed.has(call.id));
         this.commit([
           ...this.cancelledQuestions(session, "Service restarted. No answer or replacement question was invented."),
+          ...this.routingFinished(session, session.turnId, "partial", "Service restarted. Routing advice and owned work were not replayed."),
           ...unfinished.map((call) => this.event(session, "tool.completed", { call, text: "Service restarted before a durable tool result. Execution and cleanup are unconfirmed; this tool was not replayed.", isError: true, outcome: "unconfirmed" })),
           this.event(session, "turn.finished", {
             outcome: "partial",
@@ -192,18 +195,45 @@ export class ControlPlane extends EventEmitter {
         this.commit([this.event(this.session(session.id), "session.blocked", { diagnostic: "Saved queue recovered. Review it, then explicitly Resume queued work." })]);
       }
     }
+    const unfinishedRouting = this.projection.routings.filter((routing) => ["planning", "ready", "running"].includes(routing.status));
+    if (unfinishedRouting.length) this.commit(unfinishedRouting.map((routing) => ({
+      event_type: "routing.finished", profile_id: this.profileId, project_id: routing.projectId, session_id: routing.sessionId, turn_id: routing.turnId,
+      payload: { routingId: routing.id, status: "partial", diagnostic: "Service restarted with unsettled routing metadata. No classifier, solver or effect was replayed." },
+    })));
     await this.provider.refresh();
   }
   snapshot(): Snapshot {
+    const routing = this.routingAvailability();
     return {
       protocolVersion: PROTOCOL_VERSION, seq: this.history.at(-1)?.seq ?? 0, profileId: this.profileId,
-      ...this.projection, provider: this.provider.state,
+      ...this.projection, provider: { ...this.provider.state, models: [...this.provider.state.models, ...(routing.model ? [routing.model] : [])] }, routingDiagnostics: routing.diagnostics,
       capabilities: [
         { env: "Local", ready: process.platform === "darwin", reason: process.platform === "darwin" ? "Runs directly on this Mac. Shell commands are not sandboxed." : "Local supervision is validated on macOS only in this checkpoint." },
         { env: "Sandbox", ready: false, reason: "SendBox worker transport and guest artifacts are not validated in this checkpoint. No Local fallback." },
         { env: "Remote", ready: this.remote.readiness.ready && this.remote.readiness.configDigest === frameDigest(this.projection.settings.values.remote), reason: this.remote.readiness.diagnostic },
       ],
     };
+  }
+  private routingAvailability() {
+    const enabled = this.projection.settings.values.kupo.enabled;
+    return kupoAvailability(this.projection.settings.values.kupo, this.provider.state.models,
+      enabled && Boolean(this.projection.budgetPolicy.limit || this.profileHooks?.globalBudget().limit));
+  }
+  private requireKupo(controls: Controls, session?: Session): void {
+    if (controls.budget.kind === "limited" || this.projection.budgetPolicy.limit || this.profileHooks?.globalBudget().limit ||
+      session && this.platform.budgets.status(session.id).limits.length) throw new MoguriError("routing_budget", "kupo finite budgets require qualified reserved wind-down and accepted-work checkpoint paths. This Single alpha cannot lift session/profile/global caps.", 409);
+    if (controls.modelOptions && Object.keys(controls.modelOptions).length) throw new MoguriError("routing_options", "Working-context/thinking overrides are not yet qualified across a kupo pool. Pin a fixed model for those options.", 409);
+    kupoPool(this.projection.settings.values.kupo, this.provider.state.models, controls.env);
+  }
+  private routingContextDigest(session: Session): string {
+    const steers = session.queue.filter((item) => item.delivery === "steer" && item.targetTurnId === session.turnId);
+    return digest(JSON.stringify([...this.context(session.id), ...steers.map((item) => this.contextItem(item))].map((message) => ({ ...message, timestamp: 0 }))));
+  }
+  private checkRoutingSnapshot(session: Session, routing: RoutingTurn): void {
+    if (routing.policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || routing.permissionRevision !== this.projection.settings.permissionRevision ||
+      routing.policyRevision !== this.projection.policy.revision || routing.env !== session.controls.env ||
+      (routing.status === "planning" || routing.status === "ready") && routing.contextDigest !== this.routingContextDigest(session)) throw new MoguriError("routing_stale", "The exact routing policy, permission, env or task changed. Classifier advice was discarded; no solver fallback or replay.", 409);
+    this.requireKupo(session.controls, session);
   }
   events(after: number): StoredEvent[] { return this.history.filter((event) => event.seq > after && event.profile_id === this.profileId); }
   private commit(events: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest): void {
@@ -280,7 +310,7 @@ export class ControlPlane extends EventEmitter {
     const message = assistantMessage(request.message), prior = session.usage.find((usage) => usage.stepId === request.stepId);
     return this.platform.budgets.estimated({
       stepId: request.stepId, modelId: prior?.modelId ?? message.model, providerId: prior?.providerId, apiModelId: prior?.apiModelId, source: prior?.source,
-      role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
+      role: prior?.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
       inputTokens: request.usageReported ? message.usage.input : null, outputTokens: request.usageReported ? message.usage.output : null,
       cacheReadTokens: request.usageReported ? message.usage.cacheRead : null, totalTokens: request.usageReported ? message.usage.totalTokens : null,
       estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: request.generationMs,
@@ -534,7 +564,7 @@ export class ControlPlane extends EventEmitter {
   }
   private async previewContext(session: Session) {
     const project = this.projection.projects.find((project) => project.id === session.projectId);
-    const model = this.provider.state.models.find((model) => model.id === session.controls.modelId);
+    const model = this.snapshot().provider.models.find((model) => model.id === session.controls.modelId);
     const messages = this.context(session.id);
     if (session.draft.text || session.draft.attachments.length) messages.push(this.contextItem({ text: session.draft.text, attachments: session.draft.attachments }));
     const settings = this.platform.sessions.projects.values(project?.id);
@@ -558,7 +588,8 @@ export class ControlPlane extends EventEmitter {
       this.remote.assertReady();
       if (session) this.remoteWorkspace(session);
     }
-    const model = this.provider.state.models.find((model) => model.id === controls.modelId);
+    if (controls.modelId === KUPO_MODEL_ID) this.requireKupo(controls, session);
+    const model = this.snapshot().provider.models.find((model) => model.id === controls.modelId);
     if (requireModel && !model || controls.modelId !== null && !model) {
       throw new MoguriError("model_unavailable", "Connect Copilot or configure a local endpoint, then explicitly select an available model. No provider was substituted.", 409);
     }
@@ -576,7 +607,7 @@ export class ControlPlane extends EventEmitter {
     if (attachments.reduce((bytes, attachment) => bytes + attachment.bytes, 0) > maximum) throw new MoguriError("attachment_limit", `Captured context exceeds its ${maximum / 1024} KiB limit.`);
   }
   private imageModel(session: Session, attachments: Session["draft"]["attachments"]): void {
-    const model = this.provider.state.models.find((model) => model.id === session.controls.modelId);
+    const model = this.snapshot().provider.models.find((model) => model.id === session.controls.modelId);
     if (!model?.imageInput && (attachments.some((attachment) => attachment.kind === "image") || contextHasImages(this.context(session.id)))) throw new MoguriError("model_images", "Select an image-capable model before admitting this complete context. The draft/queue was preserved; no image was dropped.", 409);
   }
   dispatch(raw: unknown): Promise<CommandResult> {
@@ -784,7 +815,7 @@ export class ControlPlane extends EventEmitter {
         const context: unknown = JSON.parse(this.store.blob(event.payload.contextDigest));
         if (Array.isArray(context)) messages.push(...context as Message[]);
       } else if (event.event_type === "turn.started" || event.event_type === "steer.applied") messages.push(this.contextItem(event.payload.item));
-      else if (event.event_type === "model.completed") messages.push(assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))));
+      else if (event.event_type === "model.completed" && event.payload.usage.role !== "router") messages.push(assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))));
       else if (event.event_type === "tool.completed") messages.push({
         role: "toolResult", toolCallId: event.payload.call.id, toolName: event.payload.call.name,
         content: [{ type: "text", text: event.payload.text }], isError: event.payload.isError, timestamp: Date.parse(event.timestamp),
@@ -876,6 +907,11 @@ export class ControlPlane extends EventEmitter {
   }
   private async assertCurrentTool(session: Session, call: ToolCall): Promise<void> {
     const current = this.session(session.id);
+    if (current.controls.modelId === KUPO_MODEL_ID) {
+      const routing = this.projection.routings.find((value) => value.turnId === current.turnId);
+      if (!routing?.plan || routing.status !== "running") throw new MoguriError("routing_authority", "No accepted owned solver plan authorizes this tool request.", 403);
+      this.checkRoutingSnapshot(current, routing);
+    }
     const configuration = current.projectId ? this.platform.sessions.projects.configuration(current.projectId) : null;
     const permission = this.projection.settings.permissionRevision;
     const policy = this.projection.policy.revision;
@@ -896,6 +932,10 @@ export class ControlPlane extends EventEmitter {
     return this.projection.questions.filter((question) => question.sessionId === session.id && question.status === "open").map((question) => ({
       ...this.event(session, "question.cancelled", { questionId: question.id, diagnostic }), turn_id: question.turnId, step_id: question.stepId,
     }));
+  }
+  private routingFinished(session: Session, turnId: string, status: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): EventInput[] {
+    return this.projection.routings.filter((routing) => routing.sessionId === session.id && routing.turnId === turnId && ["planning", "ready", "running"].includes(routing.status))
+      .map((routing) => ({ ...this.event(session, "routing.finished", { routingId: routing.id, status, diagnostic }), turn_id: turnId }));
   }
   private releaseQuestionWaits(sessionId: string): void {
     for (const [id, waiting] of this.questionWaits) if (waiting.run.sessionId === sessionId) {
@@ -959,7 +999,6 @@ export class ControlPlane extends EventEmitter {
         if (run.executionId) {
           const execution = this.projection.executions.find((value) => value.id === run.executionId);
           if (!execution || execution.workspace !== this.remoteWorkspace(session) || execution.configDigest !== frameDigest(this.projection.settings.values.remote)) throw new MoguriError("remote_changed", "The target/workspace changed during this turn. No new model access was sent to the old worker.", 409);
-          if (session.controls.modelId && !session.controls.modelId.startsWith("remote.") && !this.projection.settings.values.remote?.allowCopilot) throw new MoguriError("remote_credential", "Explicitly allow scoped Copilot access on this verified host before dispatching it.", 403);
         }
         let before = this.session(run.sessionId);
         if (before.controls.env === "Local" && before.projectId) await this.platform.managed.assert(before);
@@ -968,10 +1007,22 @@ export class ControlPlane extends EventEmitter {
           const key = this.platform.managed.leaseKey(before);
           if (key) this.writerReservations.set(key, before.id);
         }
-        const prepared = await this.provider.prepare(session.controls.modelId!, run.abort.signal);
-        if (run.executionId && !session.controls.modelId!.startsWith("remote.")) await this.remote.verifyCopilot(prepared, run.abort.signal);
+        const synthetic = session.controls.modelId === KUPO_MODEL_ID, policyDigest = digest(JSON.stringify(this.projection.settings.values.kupo));
+        const contextAtPrepare = synthetic ? this.routingContextDigest(session) : null;
+        const permissionRevision = this.projection.settings.permissionRevision, policyRevision = this.projection.policy.revision;
+        const route = this.projection.routings.find((value) => value.turnId === run.turnId);
+        if (synthetic) {
+          this.requireKupo(session.controls, session);
+          if (route) this.checkRoutingSnapshot(session, route);
+        }
+        const phase = synthetic && !route?.plan ? "router" : "solver";
+        const modelId = synthetic ? route?.plan?.modelId ?? kupoPool(this.projection.settings.values.kupo, this.provider.state.models, session.controls.env).classifier.id : session.controls.modelId!;
+        if (run.executionId && !modelId.startsWith("remote.") && !this.projection.settings.values.remote?.allowCopilot) throw new MoguriError("remote_credential", "Explicitly allow scoped Copilot access on this verified host before dispatching it.", 403);
+        const prepared = await this.provider.prepare(modelId, run.abort.signal);
+        if (run.executionId && !modelId.startsWith("remote.")) await this.remote.verifyCopilot(prepared, run.abort.signal);
         if (run.done || run.abort.signal.aborted) return;
         let current = this.session(run.sessionId);
+        if (synthetic && (policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || permissionRevision !== this.projection.settings.permissionRevision || policyRevision !== this.projection.policy.revision)) throw new MoguriError("routing_stale", "Routing authority changed during model preparation. No new model request was authorized.", 409);
         const steers = current.queue.filter((item) => item.delivery === "steer" && item.targetTurnId === run.turnId);
         if (current.pendingMode && steers.some((item) => item.mode)) {
           this.commit([this.event(current, "session.mode_changed", { mode: current.pendingMode }, request.stepId)]);
@@ -983,36 +1034,58 @@ export class ControlPlane extends EventEmitter {
         run.granted.clear();
         const project = this.projection.projects.find((project) => project.id === current.projectId);
         const projectSettings = this.platform.sessions.projects.values(project?.id);
-        const tools = effectiveTools(this.projection.settings.values, current.kind === "subagent", current.mode, folderPolicy(projectSettings), { project: Boolean(project), metachat: current.kind === "metachat", env: current.controls.env });
+        const solverTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", current.mode, folderPolicy(projectSettings), { project: Boolean(project), metachat: current.kind === "metachat", env: current.controls.env });
+        const tools = phase === "router" ? [] : solverTools;
         run.declaredTools = new Set(tools.map((tool) => tool.name));
         const started = this.history.find((event) => event.event_type === "turn.started" && event.turn_id === run.turnId);
         const prompt = started?.event_type === "turn.started" && started.payload.promptDigest ? this.store.blob(started.payload.promptDigest) : this.platform.prompt(current);
         run.repositoryContext ??= await this.repositoryContext(current);
-        const effectivePrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext);
+        const solverPrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext);
+        const effectivePrompt = phase === "router" ? ROUTER_PROMPT : solverPrompt;
         if (run.done || run.abort.signal.aborted) return;
-        const configured = modelRequest(prepared.model, current.controls.modelOptions, {
-          systemPrompt: effectivePrompt, messages: [...this.context(current.id), ...steers.map((item) => this.contextItem(item))], tools,
+        if (synthetic && (policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || permissionRevision !== this.projection.settings.permissionRevision ||
+          policyRevision !== this.projection.policy.revision || contextAtPrepare !== this.routingContextDigest(this.session(run.sessionId)))) throw new MoguriError("routing_stale", "Routing authority or task changed before dispatch. No stale classifier/solver input was sent.", 409);
+        const canonicalContext = [...this.context(current.id), ...steers.map((item) => this.contextItem(item))];
+        let routing: RoutingTurn | undefined, routedContext: Message[] | undefined;
+        if (synthetic) {
+          this.requireKupo(current.controls, current);
+          const pool = kupoPool(this.projection.settings.values.kupo, this.provider.state.models, current.controls.env,
+            estimateModelContext({ systemPrompt: solverPrompt, messages: canonicalContext, tools: solverTools }));
+          if (route) {
+            this.checkRoutingSnapshot(current, route);
+            if (route.plan && !pool.candidates.some((model) => model.id === route.plan!.modelId)) throw new MoguriError("routing_model", "The chosen solver is no longer eligible for the current context. No fallback or truncation.", 409);
+          } else {
+            routing = { id: run.turnId, sessionId: current.id, projectId: current.projectId, turnId: run.turnId, env: current.controls.env, createdAt: new Date().toISOString(),
+              settingsRevision: this.projection.settings.revision, permissionRevision: this.projection.settings.permissionRevision, policyRevision: this.projection.policy.revision,
+              policyDigest, contextDigest: this.routingContextDigest(current), classifierModelId: pool.classifier.id, candidateModelIds: pool.candidates.map((model) => model.id),
+              policy: structuredClone(this.projection.settings.values.kupo), status: "planning", classifierStepId: request.stepId, plan: null, diagnostic: null };
+          }
+          if (phase === "router") routedContext = [{ role: "user", content: JSON.stringify({ state: canonicalContext.map((message) => ({ ...message, timestamp: 0 })), candidates: pool.candidates.map((model) => ({ id: model.id, name: model.name, source: model.source, endpointBoundary: model.endpointBoundary ?? "network", contextWindow: model.contextWindow, maxTokens: model.maxTokens })) }), timestamp: Date.now() }];
+        }
+        const configured = modelRequest(phase === "router" ? { ...prepared.model, maxTokens: Math.min(128, prepared.model.maxTokens) } : prepared.model, synthetic ? undefined : current.controls.modelOptions, {
+          systemPrompt: effectivePrompt, messages: routedContext ?? canonicalContext, tools,
         });
+        const metadata = this.provider.state.models.find((model) => model.id === modelId), role = phase === "router" ? "router" : current.kind === "side" ? "side" : current.kind === "subagent" ? "subagent" : "solver";
         const reservation = this.platform.budgets.reserve(current, {
-          stepId: request.stepId, turnId: run.turnId, providerId: this.provider.state.models.find((model) => model.id === current.controls.modelId)?.providerId ?? prepared.model.provider,
-          apiModelId: prepared.model.id, role: current.kind === "side" ? "side" : current.kind === "subagent" ? "subagent" : "solver",
-          inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens,
+          stepId: request.stepId, turnId: run.turnId, providerId: metadata?.providerId ?? prepared.model.provider,
+          apiModelId: prepared.model.id, role, modelId, inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens,
         });
         run.inFlight = true;
         this.commit([
           reservation.event,
+          ...(routing ? [this.event(current, "routing.started", { routing }, request.stepId)] : []),
           ...steers.map((item) => this.event(current, "steer.applied", { item }, request.stepId)),
           this.event(current, "turn.prompt_bound", { promptDigest: this.store.putBlob(effectivePrompt) }, request.stepId),
-          this.event(current, "model.started", { modelId: current.controls.modelId!, providerId: this.provider.state.models.find((model) => model.id === current.controls.modelId)?.providerId ?? prepared.model.provider, apiModelId: prepared.model.id, source: this.provider.state.models.find((model) => model.id === current.controls.modelId)?.source ?? "copilot", contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens, ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId),
+          this.event(current, "model.started", { modelId, role, providerId: metadata?.providerId ?? prepared.model.provider, apiModelId: prepared.model.id, source: metadata?.source ?? "copilot", contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens, ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId),
         ]);
-        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: { ...configured.model, maxTokens: reservation.maxTokens }, maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, steers: steers.map((item) => this.contextItem(item)), systemPrompt: effectivePrompt, tools, mode: current.mode, folders: folderPolicy(projectSettings) } });
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: { ...configured.model, maxTokens: reservation.maxTokens }, maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, phase, ...(routedContext ? { context: routedContext } : {}), steers: steers.map((item) => this.contextItem(item)), systemPrompt: effectivePrompt, tools, mode: current.mode, folders: folderPolicy(projectSettings) } });
       } catch (error) {
         const budget = error instanceof MoguriError && error.code.startsWith("budget_");
         if (budget) {
           const current = this.session(run.sessionId), status = this.platform.budgets.status(current.id);
           this.commit([{ event_type: "budget.blocked", profile_id: this.profileId, payload: { sessionId: current.id, ownerSessionId: status.ownerSessionId, stepId: request.stepId, diagnostic: error.message, remainingTokens: status.remainingTokens, remainingUsd: status.remainingUsd } }]);
         }
-        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
+        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget || error instanceof MoguriError && error.code.startsWith("routing_") ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       } finally { const key = this.platform.managed.leaseKey(session); if (key && this.writerReservations.get(key) === session.id) this.writerReservations.delete(key); }
       return;
     }
@@ -1028,20 +1101,41 @@ export class ControlPlane extends EventEmitter {
       const message = assistantMessage(request.message);
       const safeMessage = { ...message, errorMessage: message.errorMessage ? "Provider request failed." : undefined, diagnostics: undefined };
       const calls = toolCalls(message);
-      for (const call of calls) run.calls.set(call.id, call);
+      const usage = this.modelUsage(session, request);
+      const router = session.usage.find((usage) => usage.stepId === request.stepId)?.role === "router";
+      const route = router ? this.projection.routings.find((value) => value.turnId === run.turnId) : undefined;
+      let plan: RoutingTurn["plan"] = null, routingError: string | null = null;
+      if (router) {
+        try {
+          if (run.abort.signal.aborted) throw new MoguriError("routing_cancelled", "The owning turn stopped the classifier. No solver was dispatched; unreported provider usage remains held.", 409);
+          if (!route || message.stopReason !== "stop" || calls.length) throw new MoguriError("routing_result", "The classifier did not return one complete tool-less plan. No solver or fallback was authorized.", 409);
+          if (!reportedModelUsage(usage)) throw new MoguriError("routing_usage", "Classifier metering is missing or invalid. Its reservation remains held; no solver or free usage was inferred.", 409);
+          const reservation = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
+          if (!reservation || modelOutputExceeded(reservation, usage)) throw new MoguriError("routing_output_limit", "Classifier output exceeded or lost its actual recorded bound. Reported usage was retained; no plan or solver was authorized.", 409);
+          this.checkRoutingSnapshot(session, route);
+          const text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+          if (Buffer.byteLength(text) > 16 * 1024) throw new MoguriError("routing_plan", "Classifier plan exceeded its bounded size. No solver was authorized.", 409);
+          let decoded: unknown;
+          try { decoded = JSON.parse(text); } catch { throw new MoguriError("routing_plan", "Classifier output was not exact JSON. No solver or fallback was authorized.", 409); }
+          plan = routingPlan(decoded, route.candidateModelIds, route.policy.minimumConfidence);
+        } catch (error) { routingError = error instanceof MoguriError ? error.message : "Routing validation failed. No solver or fallback was authorized."; }
+      } else for (const call of calls) run.calls.set(call.id, call);
       const contextDigest = this.store.putBlob(JSON.stringify(safeMessage));
       this.commit([this.event(session, "model.completed", {
         contextDigest,
         message: {
-          id: request.stepId, turnId: run.turnId, role: "assistant",
-          text: message.content.filter((block) => block.type === "text").map((block) => block.text).join(""),
-          reasoning: message.content.filter((block) => block.type === "thinking" && !block.redacted).map((block) => block.type === "thinking" ? block.thinking : "").join(""),
-          toolCalls: calls, timestamp: new Date(message.timestamp).toISOString(), outcome: message.stopReason,
+          id: request.stepId, turnId: run.turnId, role: router ? "notice" : "assistant",
+          text: router ? plan ? `kupo Single plan: ${this.provider.state.models.find((model) => model.id === plan.modelId)?.name ?? plan.modelId}.` : routingError ?? "The router returned no usable plan." : message.content.filter((block) => block.type === "text").map((block) => block.text).join(""),
+          reasoning: router ? undefined : message.content.filter((block) => block.type === "thinking" && !block.redacted).map((block) => block.type === "thinking" ? block.thinking : "").join(""),
+          toolCalls: router ? [] : calls, timestamp: new Date(message.timestamp).toISOString(), outcome: router ? plan ? "completed" : run.abort.signal.aborted ? "stopped" : "partial" : message.stopReason,
         },
-        usage: this.modelUsage(session, request),
-      }, request.stepId)]);
+        usage,
+      }, request.stepId), ...(router && route ? [plan ?
+        this.event(session, "routing.planned", { routingId: route.id, classifierStepId: request.stepId, plan }, request.stepId) :
+        this.event(session, "routing.finished", { routingId: route.id, status: run.abort.signal.aborted ? "stopped" : "partial", diagnostic: routingError }, request.stepId)] : [])]);
       const metering = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
-      this.reply(run, { kind: "reply", requestId: request.requestId, ...(metering?.outputLimitViolation ? { halt: true, error: "The provider exceeded its actual forwarded output limit. Reported usage was retained; finite admission for this model remains unqualified." } : { value: { accepted: true } }) });
+      this.reply(run, { kind: "reply", requestId: request.requestId, ...(metering?.outputLimitViolation ? { halt: true, error: "The provider exceeded its actual forwarded output limit. Reported usage was retained; finite admission for this model remains unqualified." } :
+        router ? plan ? { value: { accepted: true, continue: true } } : { halt: true, error: routingError ?? "The routing plan was not accepted." } : { value: { accepted: true } }) });
       return;
     }
     if (request.kind === "output") {
@@ -1146,6 +1240,7 @@ export class ControlPlane extends EventEmitter {
     if (run.granted.size) { outcome = "partial"; diagnostic = "A tool was approved but its execution result or cleanup was not confirmed. Inspect the workspace before continuing."; }
     this.commit([
       ...this.cancelledQuestions(session, "Owning turn ended. No pending answer was invented."),
+      ...this.routingFinished(session, run.turnId, outcome, diagnostic),
       ...(session.pendingMode ? [
         ...session.queue.filter((item) => item.mode && item.targetTurnId === run.turnId).map((item) => this.event(session, "queue.removed", { messageId: item.id })),
         this.event(session, "session.mode_changed", { mode: session.pendingMode }),

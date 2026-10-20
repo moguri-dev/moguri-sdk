@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 15 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-14 history, sessions, drafts,
+This is an alpha API. Protocol 16 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-15 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -20,7 +20,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.9.1-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.10.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -51,9 +51,9 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.9.1-alpha.1.tgz`.
-The current verification suite expects protocol 15; historical 0.7/0.8 archives
-retain their separately recorded protocol-13/14 qualification.
+repacking: `npm run verify:sdk -- release/moguri-0.10.0-alpha.1.tgz`.
+The current verification suite expects protocol 16; historical 0.7/0.8/0.9/0.9.1
+archives retain their separately recorded protocol-13/14/15 qualification.
 
 ## Connect to the shared service
 
@@ -106,7 +106,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `memory` | Opt-in index, lexical-vector search, import/symbol graph, explicit project-style facts. Context injection has a separate opt-in. |
 | `capabilities` | Import disabled standard skills/plugins, inspect source, toggle with revision, propose, review and decide against an exact SHA-256. |
 | `mcp` | Paged tool discovery, non-secret auth status, explicit OAuth begin/status/cancel/clear/registered-client setup, user-only keychain credentials, exact approval-bound call and retained result pages. |
-| `subagents` | Explicit opt-in, depth-one tool-less child using the same fixed model and approved parent context. |
+| `subagents` | Explicit opt-in, depth-one tool-less child using the inherited selected model policy and approved parent context. Every role charges its real owner. |
 | `voice` | Local status, explicit licensed download, record/transcribe, stop/finalize and revision-safe draft insertion. |
 | `jobs` | Wait or explicitly cancel. A wait timeout/disconnection does not cancel or retry the service's job. |
 | `sandbox` | Truthful readiness/configuration diagnostics. Configuration is not proof of a qualified SendBox transport. |
@@ -120,15 +120,46 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy and filtered/paged role/model/provider dashboard. Reservations precede dispatch; unknown usage is held, not free. |
+| `routing` | Opt-in scoped Single policy/configure with an observed settings revision and session-owned plan history. Actual router/solver roles use the existing worker/ledger; finite caps, images and model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
-| `models` | Explicit Copilot/local catalog refresh and user-only resource-bound local endpoint keys. No host scan, weight download or automatic model substitution. |
+| `models` | Explicit Copilot/local catalog refresh, synthetic Single availability and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download or automatic model substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
+
+### Opt-in Single routing
+
+`sdk.routing.policy()` starts disabled. Configure exact discovered model IDs
+with `sdk.routing.configure(policy, observedSettingsRevision)`; the policy has
+`workflow: "single"`, an actual `classifierModelId`, explicit
+`approvedModelIds`, separate `allowHosted` data consent and a
+`minimumConfidence` threshold. `ModelInfo.endpointBoundary` is derived from
+validated configured URLs; network/unknown destinations require consent even
+when their provider is named local. Loopback is the execution host's HTTP
+boundary, not proof against forwarding by a configured proxy. Configured-model
+inference rejects redirects. Copilot metadata retains the maintained model's
+actual output bound rather than a fixture-only or invented value.
+This is uncalibrated model advice, never an
+actual user answer or permission.
+
+Only after saving, explicitly select `modelId: KUPO_MODEL_ID` through normal
+session controls, the picker or `/model kupo`. `/kupo status`,
+`/kupo set POLICY_JSON` and `/kupo history` use the same shared dispatcher.
+The session stays labeled `kupo`; `snapshot.routings`, `session.usage` and
+`budgetEntries` retain actual roles/models, plans, outcomes and charges.
+Classifier output never enters solver context. Invalid, stale, unreported or
+over-limit classifier results pause without fallback or another paid attempt.
+
+This alpha uses the same Local/pinned-SSH worker and exact approvals, with an
+Unlimited preference only when no finite owning-session/profile/global cap
+applies. Images, per-model tuning, compound workflows and reserved wind-down
+remain unavailable. Restoring `settings.reset("kupo", revision)` disables
+future routing without deleting retained accounting or provenance. See the
+[durable routing contract](architecture/routing.md).
 
 In Guided mode `ask_user` may include a bounded offered-choice recommendation.
 `UserQuestion.recommendation` contains the exact choice/reason and service-stamped

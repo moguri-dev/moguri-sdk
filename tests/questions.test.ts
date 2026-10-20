@@ -137,7 +137,7 @@ test("schema-10 state upgrades and interrupted question recovery never replay a 
     ]);
     store.close();
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 15);
+    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 16);
     assert.equal(restarted.controller.snapshot().settings.values.artifacts.retainAnswers, true);
     assert.equal(restarted.controller.snapshot().questions[0]?.status, "cancelled");
     assert.equal(restarted.controller.snapshot().sessions[0]?.status, "partial"); assert.equal(fixture.requests.length, 0);

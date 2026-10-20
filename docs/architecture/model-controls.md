@@ -51,10 +51,22 @@ Popover dismissal, keyboard focus, disabled states and native browser occlusion
 must work at compact widths and with long model names.
 
 Environment icons are house/box/globe; autonomy is hand/traffic light/car/rocket.
-Unqualified Sandbox, Remote and Autopilot Max remain visibly unavailable.
+Unqualified Sandbox and Autopilot Max remain visibly unavailable. Core Remote
+now requires its separately qualified pinned SSH transport; missing readiness
+never maps to Local.
 Model window and thinking options live in the same model menu. Budget starts
 unlimited and uses infinity; its popover exposes input/output/cache/context and
-available monetary telemetry, not an invented finite-cap implementation.
+available monetary telemetry. Fixed models support explicitly estimate-based
+limits through the shared all-role ledger, not exact provider billing.
+
+[Experimental kupo Single](routing.md) is opt-in and labeled as Moguri's
+synthetic model, not GitHub Copilot. Its pool, classifier, hosted-data consent,
+threshold and availability live in shared settings. Model-specific tuning and
+finite session limits stay disabled for Single until those paths are qualified;
+hard profile/global caps still block it. Explicit `/model ID` and picker
+selection clear prior per-model overrides. Both clients expose actual metered
+roles/models and model-supplied plan provenance without promoting classifier
+text into solver instructions.
 
 The original face/bat-wing mascot gains a small red antenna pom-pom. Visual
 reference: <https://en.wikipedia.org/wiki/File:MoogleFFIXConcept.png>, linked by

@@ -1,6 +1,8 @@
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 
+export const localModelFetch: typeof fetch = (input, init) => fetch(input, { ...init, redirect: "error" });
+
 export function localProvider(): Provider<"openai-completions"> {
   return createProvider<"openai-completions">({
     id: "moguri-local",

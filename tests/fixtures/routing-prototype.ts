@@ -1,8 +1,7 @@
 import { createModels, normalizeContext, type AssistantMessage } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { MoguriError } from "../../packages/protocol/src/index.ts";
+import { MoguriError, SingleRoutingPlanSchema } from "../../packages/protocol/src/index.ts";
 import type { PreparedModel } from "../../apps/service/src/provider.ts";
 import { usagePresent } from "../../apps/service/src/worker-protocol.ts";
 
@@ -15,10 +14,6 @@ export interface RoutingPolicy {
 }
 export interface RoutingContext { env: "Local" | "Remote" | "Sandbox"; estimatedTokens: number; images: boolean; state: string }
 export interface RoutingCall { role: "router" | "solver"; modelId: string; outputLimit: number; reportedTokens: number | null; outcome: string }
-const plan = Type.Object({
-  pattern: Type.Literal("single"), modelId: Type.String({ minLength: 1, maxLength: 256 }),
-  confidence: Type.Number({ minimum: 0, maximum: 1 }), reason: Type.String({ minLength: 1, maxLength: 1200 }),
-}, { additionalProperties: false });
 function fail(code: string, message: string): never { throw new MoguriError(code, message); }
 function eligible(model: RoutingModel, policy: RoutingPolicy, context: RoutingContext): boolean {
   return model.available && model.environments.includes(context.env) && (model.source === "local" || policy.allowHosted) &&
@@ -37,7 +32,7 @@ export function routingSnapshot(catalog: RoutingModel[], policy: RoutingPolicy, 
   return structuredClone({ classifier, candidates, policy, context });
 }
 export function decodeSinglePlan(value: unknown, snapshot: ReturnType<typeof routingSnapshot>) {
-  if (!Value.Check(plan, value)) fail("routing_plan", "The classifier returned an invalid/unsupported plan. No fallback or solver dispatch occurred.");
+  if (!Value.Check(SingleRoutingPlanSchema, value)) fail("routing_plan", "The classifier returned an invalid/unsupported plan. No fallback or solver dispatch occurred.");
   if (!snapshot.candidates.some((model) => model.id === value.modelId)) fail("routing_model", "The classifier selected a model outside the approved eligible snapshot.");
   if (value.confidence < snapshot.policy.minimumConfidence) fail("routing_confidence", "Classifier advice did not meet the configured fixture threshold. Escalate rather than silently substitute.");
   return structuredClone(value);

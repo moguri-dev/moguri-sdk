@@ -8,14 +8,16 @@ export interface ModelRegistryOptions {
   vault?: SecretVault; fetch?: typeof fetch; idPrefix?: () => string; environments?: Controls["env"][];
   additional?: ModelRegistry; includeCopilot?: boolean; copilotEnvironments?: () => Controls["env"][];
 }
+const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export const localModelId = (endpointId: string, modelId: string, prefix = "local") => `${prefix}.${endpointId}.${createHash("sha256").update(modelId).digest("hex").slice(0, 24)}`;
 export function localEndpointUrl(value: string): URL {
   let url: URL;
   try { url = new URL(value.endsWith("/") ? value : `${value}/`); }
   catch { throw new MoguriError("local_model_url", "Use a valid local-model API base URL."); }
-  if (url.username || url.password || url.search || url.hash || url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) throw new MoguriError("local_model_url", "Local model endpoints require HTTPS or explicit loopback HTTP, without credentials, query or fragment.");
+  if (url.username || url.password || url.search || url.hash || url.protocol !== "https:" && !(url.protocol === "http:" && loopbackHosts.has(url.hostname))) throw new MoguriError("local_model_url", "Local model endpoints require HTTPS or explicit loopback HTTP, without credentials, query or fragment.");
   return url;
 }
+export const modelEndpointBoundary = (value: string): "loopback" | "network" => loopbackHosts.has(localEndpointUrl(value).hostname) ? "loopback" : "network";
 export function validateLocalEndpoints(endpoints: LocalEndpoint[]): void {
   if (new Set(endpoints.map((endpoint) => endpoint.id)).size !== endpoints.length) throw new MoguriError("local_model_id", "Local endpoint IDs must be unique.");
   for (const endpoint of endpoints) {
@@ -47,7 +49,7 @@ export class ModelRegistry implements ProviderAdapter {
   private publish(notify = true) {
     if (this.closed) return;
     const local = [...this.local.values()];
-    const models = [...this.copilot.state.models.map((model) => ({ ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id, environments: this.options.copilotEnvironments?.() ?? ["Local"] })), ...local.flatMap((entry) => entry.models), ...this.options.additional?.state.models ?? []];
+    const models = [...this.copilot.state.models.map((model) => ({ ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id, endpointBoundary: model.endpointBoundary ?? "network" as const, environments: this.options.copilotEnvironments?.() ?? ["Local"] })), ...local.flatMap((entry) => entry.models), ...this.options.additional?.state.models ?? []];
     const connections: ProviderConnection[] = [...(this.options.includeCopilot === false ? [] : [{ id: "github-copilot", name: "GitHub Copilot", source: "copilot" as const, status: this.copilot.state.status, diagnostic: this.copilot.state.diagnostic }]), ...local.map((entry) => entry.connection), ...this.options.additional?.state.connections ?? []];
     this.state = { ...this.copilot.state, status: models.length ? "connected" : this.copilot.state.status, models, connections };
     if (!models.length && local.some((entry) => entry.connection.status === "error")) this.state = { ...this.state, status: this.copilot.state.status === "connecting" ? "connecting" : "error", diagnostic: "No usable model is available. Inspect the configured endpoint and Copilot connection diagnostics." };
@@ -90,7 +92,7 @@ export class ModelRegistry implements ProviderAdapter {
     const ids = new Set(catalog.data.filter(isRecord).map((entry) => entry.id));
     const models = endpoint.models.filter((model) => ids.has(model.id)).map((model) => ({
       id: this.modelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput,
-      providerId: `${this.prefix}.${endpoint.id}`, source: "local" as const, apiModelId: model.id, thinkingLevels: [], environments: this.options.environments ?? ["Local"],
+      providerId: `${this.prefix}.${endpoint.id}`, source: "local" as const, apiModelId: model.id, endpointBoundary: modelEndpointBoundary(endpoint.baseUrl), thinkingLevels: [], environments: this.options.environments ?? ["Local"],
     }));
     if (!models.length) throw new MoguriError("local_model_catalog", "None of this endpoint's explicitly configured models is advertised. Check IDs and limits; no model was guessed.");
     return { models, key };

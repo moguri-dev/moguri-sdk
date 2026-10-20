@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 15; immutable event
+Protocol version and database migration version are 16; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -16,12 +16,13 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Change set | Stable project/workspace/branch/base association with optional local issue/PR context. It does not authorize publication or imply compound candidate orchestration. |
 | Turn | Admitted queue item, UUID, immutable controls/policy and prompt-digest snapshot, and worker ownership. Admission removes exactly one unclaimed queue item atomically. |
 | Step | One authorized provider request, normalized final context snapshot, usage quality, request wall time and declared tools. Worker completion requires durable acknowledgement before tools or the next step. |
+| Routing turn | Opt-in Single policy/task/revision snapshot, exact classifier/eligible solver IDs, untrusted typed plan and actual lifecycle. Uses the same owning turn, worker, approvals and ledger; classifier context is never solver history. |
 | Draft | Text, approved attachment snapshots and optimistic revision. Local unacknowledged edits are explicitly not authoritative. |
 | Queue item | UUID, text, snapshots, delivery mode, held state, optional steer target and mode-control intent. Held prompts never auto-admit. Only unclaimed items are mutable. |
 | Approval | UUID, exact tool ID/name/arguments, step, policy and permission revisions. Human answers are `user`, invalidations `policy`, explicit grants `delegation` with rule ID. |
 | Owned process | Tool-call ID, PID, process group, owning turn and actual outcome. Unknown cleanup remains unconfirmed. |
 | Attachment | Session-authorized project/client text, normalized image, exact folder/GitHub/session snapshot, SHA-256, bytes and source revision. Explicit selection grants captured content only, never arbitrary filesystem access. |
-| Usage | Solver/side/subagent model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
+| Usage | Actual router/solver/side/subagent model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
 | Budget entry | Independent profile-owned step/actual-role/owning-session record: estimated reservation, actual reported total, held unknowns, explicit dated rate and request outcome. Source deletion never refunds it. |
 | Budget policy | Separate revision-bound profile/global hard caps, independent of resettable preferences/rates. Global admission counts every profile without exposing foreign task content. No billing guarantee is inferred from input estimates. |
 | Settings | Profile-owned revisioned values and factory defaults, with intentionally shared root startup preferences. A separate permission revision invalidates stale approvals. Prompt text is not policy. |
@@ -37,6 +38,7 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Artifact repository job | Exact source/history/root/policy and optional new local branch/base intent, durable receipt and verified copy/commit result. Partial effects are quarantined, never replayed or proof authorizing source deletion. |
 | User terminal | Session/project ownership, PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Ghostty owns VT rendering; output and input are bounded ephemeral data. |
 | Model options | Optional working window and supported thinking effort in revisioned session controls; the provider maximum is not changed. Step usage records effective window/effort and labeled estimated context separately from actual token telemetry. |
+| Model catalogue | Scoped actual capability/output limits and validated endpoint boundary. A local provider label does not prove loopback; network/unknown routing needs explicit data consent. No endpoint credentials or provider payloads are exposed. |
 | MCP authorization | Non-secret owned OAuth lifecycle, server/scope/expiry and transient-link readiness. State/verifier/authorization URL are ephemeral; issuer/resource-bound clients and grants stay in the secret backend. A durable connected decision gates use. |
 | Configuration proposal | Actual user/model origin, exact target scope, source excerpts, content/base digests and revision, with pending/applied/rejected state. A model cannot decide it. Human approval never enables a skill or publishes instructions. |
 | Attention | Question/bell/done, real-state or heuristic provenance, session, active state and separate read acknowledgement. It never becomes a user answer or approval. |
@@ -209,3 +211,11 @@ injected marker failure rolls back to schema 14. Advice remains part of the
 existing accounted solver call, not an extra hidden request, user answer or
 permission. Retained answer documents preserve its model digest separately
 from the actual user's answer.
+
+Migration 16 adds opt-in Single routing policy snapshots, typed plans and
+actual per-call router/solver provenance in the existing worker and ledger.
+Missing old settings project the disabled defaults; all schema-15 profile
+ciphertexts, receipts, blob grants and keys remain unchanged. Interrupted
+routes become partial without replay and keep unknown reservations held.
+An injected marker failure reopens the unchanged schema-15 state. See the
+[routing contract](routing.md) for the alpha's deliberately blocked paths.

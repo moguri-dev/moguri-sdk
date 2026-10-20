@@ -1,6 +1,6 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, BudgetQuerySchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, BudgetQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind } from "../../protocol/src/index.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Side chat" | "Suggestions" | "Attention";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -40,6 +40,7 @@ export const slashCommands = [
   { name: "dashboard", description: "Inspect profile-wide actual model accounting", argument: "[FILTERS_JSON]" },
   { name: "profiles", description: "Choose or manage isolated profiles" },
   { name: "profile", description: "Explicit profile navigation and metadata", argument: "[use ID|create NAME|rename ID REV NAME|retry ID REV confirm-review|stop ID]" },
+  { name: "kupo", description: "Inspect or explicitly configure experimental Single routing", argument: "[status|history|set POLICY_JSON]" },
   { name: "project-removal", description: "Review artifact retention, repository copies and explicit project removal", argument: "[preview|export PATH|materialize-preview [WORKSPACE|-] [NEW_BRANCH]|materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write|materialization JOB|materialize-delete SET_SHA JOB confirm-remove|retain/delete SET_SHA confirm-remove|export-delete SET_SHA EXPORT_SHA confirm-remove]" },
   { name: "insights", description: "Inspect session metadata and usage" },
   { name: "pr", description: "Open the connected pull request" },
@@ -47,7 +48,8 @@ export const slashCommands = [
   { name: "queue", description: "Show queued prompts" },
   { name: "run", description: "Release a held prompt", argument: "ID" },
   { name: "settings", description: "Open shared settings" },
-  { name: "models", description: "Choose a Copilot model" },
+  { name: "models", description: "Choose an available model" },
+  { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
   { name: "workspace", description: "Manage an explicit isolated Local checkout", argument: "[list|discover|create BRANCH [BASE]|new ID|bind ID|inspect ID|remove ID|reconcile ID]" },
   { name: "files", description: "Read the session's actual bound directory", argument: "[PATH]" },
@@ -74,6 +76,24 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "models":
+    case "model": {
+      if (command.name === "models" || !command.argument) return client === "cli" ? { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.provider.models, null, 2) } : { kind: "panel", panel: "Models" };
+      const model = sdk.getState().snapshot!.provider.models.find((model) => model.id === command.argument && (!model.environments || model.environments.includes(session.controls.env)));
+      if (!model) throw new ClientError("model_unavailable", "Choose an exact available model ID for this env. Inspect /models and /kupo status; no provider or policy fallback was used.");
+      const { modelOptions: _, ...controls } = session.controls;
+      await sdk.sessions.configure(session.id, { ...controls, modelId: model.id }, session.revision);
+      return { kind: "ok", message: model.synthetic ? "kupo Single selected. Router and solver calls are metered separately; no inference started and no permission changed." : `${model.name} selected explicitly. Previous model-specific options were cleared; no inference started.` };
+    }
+    case "kupo": {
+      if (!command.argument || command.argument === "status") return { kind: "text", text: JSON.stringify({ policy: sdk.routing.policy(), models: sdk.getState().snapshot!.provider.models, diagnostics: sdk.getState().snapshot!.routingDiagnostics, warning: "Experimental Single only, explicit hosted-data consent, no automatic fallback. Finite budgets, images, cascade and critique/revision remain unavailable." }, null, 2) };
+      if (command.argument === "history") return { kind: "text", text: JSON.stringify(sdk.routing.history(session.id), null, 2) };
+      if (command.argument.startsWith("set ")) {
+        await sdk.routing.configure(parse(KupoSettingsSchema, JSON.parse(command.argument.slice(4))), sdk.settings.get()!.revision);
+        return { kind: "ok", message: "Explicit scoped routing policy saved. No model or inference was selected/started. Hosted data needs its separate flag; Single alpha cannot lift hard budgets." };
+      }
+      throw new ClientError("routing_command", "Use /kupo status, history or set POLICY_JSON. Configure the actual scoped pool before explicitly selecting /model kupo.");
+    }
     case "profiles": return client === "cli" ? { kind: "text", text: JSON.stringify(await sdk.profiles.list(), null, 2) } : { kind: "profiles" };
     case "profile": {
       const [action, id, revision, ...name] = command.argument.split(/\s+/);
@@ -328,7 +348,6 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       await sdk.prompts.release(sessionId, command.argument, session.queueRevision); return { kind: "ok", message: "Released for admission." };
     }
     case "settings": return { kind: "panel", panel: "Settings" };
-    case "models": return { kind: "panel", panel: "Models" };
     case "help": return { kind: "text", text: slashCommands.map((entry) => `/${entry.name}${"argument" in entry ? ` ${entry.argument}` : ""}  ${entry.description}`).join("\n") };
     default: throw new ClientError("unknown_slash", "Unknown shared slash command. Use /help.");
   }

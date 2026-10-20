@@ -102,7 +102,7 @@ test("startup preferences preserve precedence/provenance and existing sessions a
     assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === general.id)?.defaults?.sources.autonomy, "profile");
     sdk.disconnect(); await writeLegacyState(fixture.service, 6);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 15);
+    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 16);
     const recovered = restarted.controller.snapshot().sessions.find((value) => value.id === session.id)!;
     assert.deepEqual(recovered.controls, session.controls); assert.deepEqual(recovered.defaults, session.defaults);
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }

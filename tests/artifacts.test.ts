@@ -144,7 +144,7 @@ test("schema-9 artifact rekeying rolls back atomically, preserves identity/share
       assert.equal(Number(old.prepare("SELECT count(*) AS count FROM retention_keys WHERE scope LIKE 'profile/default/artifact/%'").get()?.count), 0);
     } finally { old.close(); }
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 15);
+    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 16);
     assert.deepEqual(restarted.store.events().slice(0, before.length).map(({ id, seq }) => ({ id, seq })), before);
     const sdk = await new MoguriSdk(restarted.connection).ready();
     try {

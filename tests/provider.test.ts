@@ -28,6 +28,8 @@ test("the real pi-ai Copilot device flow discovers only enabled account models a
     assert.equal(adapter.state.login?.code, "TEST-0000");
     await waitFor(() => adapter.state.status === "connected");
     assert.deepEqual(adapter.state.models.map((model) => model.id), [model.id]);
+    assert.equal(adapter.state.models[0]?.maxTokens, model.maxTokens);
+    assert.equal(adapter.state.models[0]?.endpointBoundary, "network");
     await credentials.modify("github-copilot", async (credential) => {
       if (credential?.type !== "oauth") throw new Error("Generated credential missing.");
       return { ...credential, expires: 0 };

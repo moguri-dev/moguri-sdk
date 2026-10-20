@@ -1,6 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery, Profile } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, KupoSettings, Profile } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -97,6 +97,19 @@ export class MoguriSdk extends TransportClient {
     status: (sessionId: string) => this.query({ type: "budget.status", sessionId }),
     dashboard: (filters: Omit<Extract<BudgetQuery, { type: "budget.dashboard" }>, "type"> = {}) => this.query({ type: "budget.dashboard", ...filters }),
     policy: (limit: BudgetLimit | null, expectedRevision: number, confirmRisk: true) => this.command({ type: "budget.policy", limit, expectedRevision, confirmRisk }),
+  };
+  readonly routing = {
+    policy: () => this.settings.get()?.values.kupo ?? null,
+    configure: (policy: KupoSettings, expectedSettingsRevision: number) => {
+      const settings = this.settings.get();
+      if (!settings) throw new ClientError("disconnected", "Connect to the actual profile before configuring routing.");
+      return this.settings.update({ ...settings.values, kupo: policy }, expectedSettingsRevision);
+    },
+    history: (sessionId: string) => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot?.sessions.some((session) => session.id === sessionId)) throw new ClientError("session_missing", "Choose an existing session in this profile for routing provenance.");
+      return snapshot.routings.filter((routing) => routing.sessionId === sessionId);
+    },
   };
   readonly artifacts = {
     create: (sessionId: string | null, artifact: { kind: ArtifactKind; name: string; text: string; projectId?: string | null; folderId?: string | null; workItemId?: string | null }) => this.command({ type: "artifact.create", sessionId, ...artifact }),

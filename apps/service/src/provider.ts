@@ -88,7 +88,7 @@ export class CopilotAdapter implements ProviderAdapter {
       signal.throwIfAborted();
       this.update({
         status: auth ? "connected" : "disconnected",
-        models: models.map((model) => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, imageInput: model.input.includes("image"), thinkingLevels: supportedThinking(model) })),
+        models: models.map((model) => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, endpointBoundary: "network" as const, imageInput: model.input.includes("image"), thinkingLevels: supportedThinking(model) })),
         login: null, diagnostic: auth && models.length === 0 ? "No enabled, compatible Copilot models. Enable a model in your GitHub Copilot account, then reconnect." : null,
       });
     } catch {

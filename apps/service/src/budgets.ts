@@ -5,6 +5,10 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 
 const integer = (value: number | null | undefined): value is number => value !== null && value !== undefined && Number.isSafeInteger(value) && value >= 0;
+export const reportedModelUsage = (usage: Usage): usage is Usage & { totalTokens: number; outputTokens: number } =>
+  usage.quality === "provider-reported" && integer(usage.totalTokens) && integer(usage.outputTokens) && usage.outputTokens <= usage.totalTokens;
+export const modelOutputExceeded = (entry: BudgetEntry, usage: Usage): boolean =>
+  reportedModelUsage(usage) && entry.outputLimit !== null && usage.outputTokens > entry.outputLimit;
 const micros = (usd: number): number => Math.floor(usd * 1_000_000);
 const price = (rate: BudgetRate, input: number, output: number): number | null => {
   const value = Math.ceil(input * rate.inputUsdPerMillion + output * rate.outputUsdPerMillion);
@@ -78,7 +82,7 @@ export class BudgetRuntime {
     if (global) { this.validateLimit(global); limits.push({ scope: "global", limit: global }); }
     return limits;
   }
-  status(sessionId: string): BudgetStatus {
+  status(sessionId: string, actualModelId?: string): BudgetStatus {
     const session = this.session(sessionId), owner = this.owner(session), entries = this.host.snapshot().budgetEntries, owned = this.owned(entries, owner.id), limits = this.limits(owner);
     const diagnostics: string[] = [], remainingTokens: number[] = [], remainingUsd: number[] = [];
     for (const { scope, limit } of limits) {
@@ -87,19 +91,20 @@ export class BudgetRuntime {
       if (limit.tokens !== undefined) { if (tokens === null) diagnostics.push(`${scope} has unbounded historical token usage; finite admission is blocked.`); else remainingTokens.push(Math.max(0, limit.tokens - tokens)); }
       if (limit.usd !== undefined) { if (usd === null) diagnostics.push(`${scope} has unpriced historical/held calls; cumulative USD admission is blocked.`); else remainingUsd.push(Math.max(0, micros(limit.usd) - usd) / 1_000_000); }
     }
-    const rate = this.rate(session.controls.modelId);
+    const selectedModelId = actualModelId ?? session.controls.modelId, rate = this.rate(selectedModelId);
     if (limits.some(({ limit }) => limit.usd !== undefined) && !rate) diagnostics.push("The selected model needs an explicit fresh dated USD estimate; unknown pricing is not zero.");
-    if (limits.length && entries.some((entry) => entry.modelId === session.controls.modelId && entry.outputLimitViolation)) diagnostics.push("This provider exceeded an actual forwarded output limit. Finite admission for this model is unqualified; verify the provider instead of retrying around it.");
+    if (limits.length && entries.some((entry) => entry.modelId === selectedModelId && entry.outputLimitViolation)) diagnostics.push("This provider exceeded an actual forwarded output limit. Finite admission for this model is unqualified; verify the provider instead of retrying around it.");
     return { sessionId, ownerSessionId: owner.id, totals: budgetTotals(owned), profileTotals: budgetTotals(entries),
       limits: limits.map(({ scope, limit }) => ({ scope, tokens: limit.tokens ?? null, usd: limit.usd ?? null })),
       remainingTokens: remainingTokens.length ? Math.min(...remainingTokens) : null, remainingUsd: remainingUsd.length ? Math.min(...remainingUsd) : null,
       basis: "estimate", warning: BUDGET_WARNING, diagnostics, rate };
   }
-  reserve(session: Session, input: { stepId: string; turnId: string; providerId: string | null; apiModelId: string; role: ModelRole; inputEstimate: number; maxOutputTokens: number }): { event: EventInput; maxTokens: number } {
+  reserve(session: Session, input: { stepId: string; turnId: string; providerId: string | null; apiModelId: string; role: ModelRole; inputEstimate: number; maxOutputTokens: number; modelId?: string }): { event: EventInput; maxTokens: number } {
     const snapshot = this.host.snapshot(), owner = this.owner(session), limits = this.limits(owner), entries = snapshot.budgetEntries;
     if (entries.some((entry) => entry.id === input.stepId)) throw new MoguriError("budget_duplicate", "This exact model step already has an accounting reservation. It was not charged/dispatched again.", 409);
-    if (!integer(input.inputEstimate) || !integer(input.maxOutputTokens) || !Number.isSafeInteger(input.inputEstimate + input.maxOutputTokens) || input.maxOutputTokens < 1 || input.role === "unknown" || !session.controls.modelId) throw new MoguriError("budget_request", "Model accounting needs an actual role, selected model, bounded input estimate and a positive actual output limit.");
-    const rate = this.rate(session.controls.modelId), status = this.status(session.id);
+    const selectedModelId = input.modelId ?? session.controls.modelId;
+    if (!integer(input.inputEstimate) || !integer(input.maxOutputTokens) || !Number.isSafeInteger(input.inputEstimate + input.maxOutputTokens) || input.maxOutputTokens < 1 || input.role === "unknown" || !selectedModelId) throw new MoguriError("budget_request", "Model accounting needs an actual role, selected model, bounded input estimate and a positive actual output limit.");
+    const rate = this.rate(selectedModelId), status = this.status(session.id, selectedModelId);
     if (status.diagnostics.length) throw new MoguriError("budget_unavailable", status.diagnostics.join(" "), 409);
     const availability = limits.map(({ scope, limit }) => {
       const scoped = scope === "session" ? this.owned(entries, owner.id) : entries, global = scope === "global" ? this.host.global?.() : undefined;
@@ -114,7 +119,7 @@ export class BudgetRuntime {
     while (low < high) { const middle = Math.ceil((low + high) / 2); if (fits(middle)) low = middle; else high = middle - 1; }
     const entry: BudgetEntry = {
       id: input.stepId, sessionId: session.id, ownerSessionId: owner.id, projectId: session.projectId, folderId: snapshot.projectConfigurations.find((configuration) => configuration.projectId === session.projectId)?.folderId ?? null,
-      turnId: input.turnId, modelId: session.controls.modelId, providerId: input.providerId, apiModelId: input.apiModelId, role: input.role,
+      turnId: input.turnId, modelId: selectedModelId, providerId: input.providerId, apiModelId: input.apiModelId, role: input.role,
       env: session.controls.env, createdAt: new Date().toISOString(), imported: false, status: "reserved", inputEstimate: input.inputEstimate, outputLimit: low,
       reservedTokens: input.inputEstimate + low, reportedTokens: null, reservedUsdMicros: rate ? price(rate, input.inputEstimate, low) : null,
       estimatedUsdMicros: null, rate, requestMs: 0, outcome: "running", diagnostic: null,
@@ -123,7 +128,7 @@ export class BudgetRuntime {
   }
   estimated(usage: Usage): Usage {
     const entry = this.host.snapshot().budgetEntries.find((entry) => entry.id === usage.stepId);
-    const cost = entry?.rate && usage.quality === "provider-reported" && integer(usage.totalTokens) && integer(usage.outputTokens) && usage.outputTokens <= usage.totalTokens ?
+    const cost = entry?.rate && reportedModelUsage(usage) ?
       price(entry.rate, usage.totalTokens - usage.outputTokens, usage.outputTokens) : null;
     return { ...usage, estimatedUsd: cost === null ? null : cost / 1_000_000 };
   }
@@ -133,9 +138,9 @@ export class BudgetRuntime {
       if (event.event_type === "model.completed" || event.event_type === "model.late_usage") {
         const usage = event.payload.usage, entry = snapshot.budgetEntries.find((entry) => entry.id === usage.stepId);
         if (!entry) throw new MoguriError("budget_receipt", "This model completion has no owning accounting reservation. No free/duplicate charge was invented.", 409);
-        const valid = usage.quality === "provider-reported" && integer(usage.totalTokens) && integer(usage.outputTokens) && usage.outputTokens <= usage.totalTokens;
+        const valid = reportedModelUsage(usage);
         const reportedTokens = valid ? usage.totalTokens : null, estimatedUsdMicros = valid && entry.rate ? price(entry.rate, usage.totalTokens! - usage.outputTokens!, usage.outputTokens!) : null;
-        const outputLimitViolation = valid && entry.outputLimit !== null && usage.outputTokens! > entry.outputLimit;
+        const outputLimitViolation = modelOutputExceeded(entry, usage);
         updates.set(entry.id, { ...entry, status: valid ? "settled" : "unknown", reportedTokens, estimatedUsdMicros, requestMs: usage.requestMs, outcome: usage.outcome, outputLimitViolation,
           diagnostic: valid ? entry.rate && estimatedUsdMicros === null ? "Reported tokens were retained, but their price exceeds safe numeric precision. USD accounting is unknown, never zero." :
             usage.totalTokens! > (entry.reservedTokens ?? 0) ? "Provider-reported usage exceeded the estimate-based reservation. Actual usage was retained; further admission rechecks the cap." : null :

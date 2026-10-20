@@ -14,6 +14,8 @@ import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type
 import { QuestionCommandSchema, type UserQuestion } from "./questions.ts";
 import { BudgetCommandSchema, BudgetQuerySchema, BudgetSettingsSchema, type BudgetResponse, type BudgetEntry, type BudgetLimit } from "./budgets.ts";
 import { ProfileCommandSchema, ProfileQuerySchema, type ProfileResponse } from "./profiles.ts";
+import { KupoSettingsSchema, defaultKupoSettings, type RoutingTurn } from "./routing.ts";
+export * from "./routing.ts";
 export * from "./profiles.ts";
 export * from "./budgets.ts";
 export * from "./questions.ts";
@@ -64,6 +66,7 @@ export const SettingsSchema = object({
   retention: object({ deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }) }),
   artifacts: object({ retainAnswers: Type.Boolean() }),
   budgets: BudgetSettingsSchema,
+  kupo: KupoSettingsSchema,
   notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
@@ -80,6 +83,7 @@ export const defaultSettings = (): UserSettings => ({
   retention: { deleteArchived: false, afterDays: 30 },
   artifacts: { retainAnswers: true },
   budgets: { rates: [], maxPriceAgeDays: 30 },
+  kupo: defaultKupoSettings(),
   notifications: { inApp: true, os: false, previewContent: false },
   localModels: [], startup: { global: {}, profile: {} },
   remote: null,
@@ -92,6 +96,7 @@ const section = Type.Union([
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("startup"),
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
+  Type.Literal("kupo"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   ArtifactCommandSchema,
@@ -175,6 +180,7 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
+  routings: RoutingTurn[];
   questions: UserQuestion[];
   budgetEntries: BudgetEntry[];
   budgetPolicy: { revision: number; limit: BudgetLimit | null };

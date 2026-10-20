@@ -18,9 +18,10 @@ import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type Le
 import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
+import type { RoutingTurn, SingleRoutingPlan } from "./routing.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -155,7 +156,7 @@ export interface Session {
   suggestionSources?: SuggestionSource[];
   inheritedImages?: boolean;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][] }
+export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];
@@ -172,6 +173,7 @@ export interface Snapshot extends PlatformSnapshot {
   profileCatalogRevision?: number;
   globalBudgetPolicy?: GlobalBudgetPolicy;
   globalBudgetSequence?: number;
+  routingDiagnostics?: string[];
   projects: Project[];
   sessions: Session[];
   provider: ProviderState;
@@ -211,7 +213,10 @@ export interface EventPayloads {
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
   "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string };
   "steer.applied": { item: QueueItem };
-  "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort };
+  "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole };
+  "routing.started": { routing: RoutingTurn };
+  "routing.planned": { routingId: string; classifierStepId: string; plan: SingleRoutingPlan };
+  "routing.finished": { routingId: string; status: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
   "assistant.delta": { text: string };
   "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage };
   "model.late_usage": { usage: Usage; executionId: string; sequence: number };
@@ -304,6 +309,7 @@ export const eventTypes: readonly EventType[] = [
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
   "budget.recorded", "budget.policy_changed", "budget.blocked",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
+  "routing.started", "routing.planned", "routing.finished",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -328,6 +334,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const sessionGroups = new Map<string, SessionGroup>();
   const artifacts = new Map<string, RetainedArtifact>();
   const questions = new Map<string, UserQuestion>();
+  const routings = new Map<string, RoutingTurn>();
   const budgetEntries = new Map<string, BudgetEntry>();
   let budgetPolicy: PlatformSnapshot["budgetPolicy"] = { revision: 0, limit: null };
   const terminals = new Map<string, TerminalState>();
@@ -338,6 +345,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.profile_id !== profileId) continue;
     if (event.event_type === "budget.recorded") budgetEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
     if (event.event_type === "budget.policy_changed") budgetPolicy = structuredClone(event.payload);
+    if (event.event_type === "routing.started") routings.set(event.payload.routing.id, structuredClone(event.payload.routing));
+    if (event.event_type === "routing.planned") {
+      const routing = routings.get(event.payload.routingId);
+      if (routing) Object.assign(routing, { status: "ready", classifierStepId: event.payload.classifierStepId, plan: structuredClone(event.payload.plan) });
+    }
+    if (event.event_type === "routing.finished") {
+      const routing = routings.get(event.payload.routingId);
+      if (routing) Object.assign(routing, { status: event.payload.status, diagnostic: event.payload.diagnostic });
+    }
     if (event.event_type === "session.deleted") {
       sessions.delete(event.payload.deletedSessionId);
       blockedSessions.delete(event.payload.deletedSessionId);
@@ -345,12 +361,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       for (const [id, entry] of attention) if (entry.sessionId === event.payload.deletedSessionId) attention.delete(id);
       for (const [id, execution] of executions) if (execution.sessionId === event.payload.deletedSessionId) executions.delete(id);
       for (const [id, question] of questions) if (question.sessionId === event.payload.deletedSessionId) questions.delete(id);
+      for (const [id, routing] of routings) if (routing.sessionId === event.payload.deletedSessionId) routings.delete(id);
     }
     if (event.event_type === "project.removed") {
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
-      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -531,9 +548,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         addUser(event.payload.item);
         break;
       case "model.started":
-        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: "assistant", text: "", timestamp: event.timestamp });
+        for (const routing of routings.values()) if (routing.turnId === event.turn_id && routing.status === "ready" && event.payload.role !== "router") routing.status = "running";
+        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: event.payload.role === "router" ? "notice" : "assistant", text: event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : "", timestamp: event.timestamp });
         session.usage.push({
-          stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver",
+          stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: event.payload.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
           estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: 0, quality: "unknown", outcome: "running",
           contextWindow: event.payload.contextWindow, contextEstimate: event.payload.contextEstimate, thinkingEffort: event.payload.thinkingEffort,
@@ -542,7 +560,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       case "assistant.delta": {
         const message = session.messages.find((message) => message.id === event.step_id);
-        if (message) message.text += event.payload.text;
+        if (message && message.role !== "notice") message.text += event.payload.text;
         break;
       }
       case "model.completed": {
@@ -597,5 +615,5 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], questions: [...questions.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

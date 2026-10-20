@@ -4,7 +4,7 @@ import { createModels, type Message } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { executeTool } from "./tools.ts";
 import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
-import { localProvider } from "./local-provider.ts";
+import { localProvider, localModelFetch } from "./local-provider.ts";
 import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 
 const abort = new AbortController();
@@ -34,7 +34,7 @@ async function run(start: WorkerStart): Promise<void> {
       abort.signal.throwIfAborted();
       const stepId = randomUUID();
       const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId });
-      if (reply.halt && reply.error) { await finish("partial", reply.error); return; }
+      if (reply.halt && reply.error) { await finish(abort.signal.aborted ? "stopped" : "partial", reply.error); return; }
       if (reply.error || !reply.value || !("model" in reply.value)) throw new Error(reply.error ?? "Missing model authorization.");
       const boundary: BoundaryReply = reply.value;
       const secrets = [...new Set([
@@ -52,10 +52,11 @@ async function run(start: WorkerStart): Promise<void> {
       try {
         const stream = models.streamSimple(model, {
           systemPrompt: boundary.systemPrompt,
-          messages: context, tools: start.readOnly ? [] : boundary.tools,
+          messages: boundary.context ?? context, tools: start.readOnly || boundary.phase === "router" ? [] : boundary.tools,
         }, {
           apiKey: boundary.auth.apiKey, headers: boundary.auth.headers, signal: abort.signal,
           maxTokens: boundary.maxTokens, maxRetries: 0, timeoutMs: 120_000,
+          ...(model.provider === "moguri-local" ? { fetch: localModelFetch } : {}),
           ...(boundary.thinkingEffort && boundary.thinkingEffort !== "off" ? { reasoning: boundary.thinkingEffort } : {}),
           sessionId: process.env.MOGURI_TURN_ID,
           onProviderStreamEvent: (event) => { usageReported ||= usagePresent(event); },
@@ -71,8 +72,12 @@ async function run(start: WorkerStart): Promise<void> {
           kind: "model.complete", requestId: randomUUID(), stepId, message,
           usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started,
         });
-        if (accepted.halt && accepted.error) { await finish("partial", accepted.error); return; }
+        if (accepted.halt && accepted.error) { await finish(abort.signal.aborted ? "stopped" : "partial", accepted.error); return; }
         if (accepted.error) throw new Error(accepted.error);
+        if (accepted.value && "accepted" in accepted.value && "continue" in accepted.value && accepted.value.continue === true) {
+          if (boundary.phase !== "router") throw new Error("Only an owned router stage may request a solver continuation.");
+          continue;
+        }
         context.push(message);
         abort.signal.throwIfAborted();
         if (message.stopReason === "aborted") throw new Error("Model request cancelled.");

@@ -224,6 +224,16 @@ receipt failure, unknown usage, changed eligibility and cancellation before
 solver dispatch. It does not qualify production routing, calibrated quality,
 durable all-role admission, compound candidates or budget wind-down.
 
+**Executable alpha boundary.** [Protocol 16 Single](routing.md) now adds an
+explicitly approved scoped pool/hosted-data flag, actual router/solver
+reservations and one acknowledged continuation in the existing owned worker.
+It is disabled by default and pauses on invalid/stale/unmetered advice, without
+a fallback. Local and qualified core SSH use the same approvals and accounting.
+Any finite inherited cap, images or per-model tuning block this alpha.
+Cascade, independent critique/revision, candidate acceptance/application,
+calibrated thresholds and reserved wind-down remain incomplete; this is not
+completion of D11 or its full Phase 0 quality evaluation.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.

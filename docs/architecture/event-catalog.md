@@ -18,8 +18,9 @@ Unused scope fields are null in checkpoint 1.
 | `queue.delivery_changed` | Explicit conversion of an unclaimed steer into a new queued turn. |
 | `turn.started` | Admitted item, controls, allowed-env revision and optional committed prompt digest; claims the item once. |
 | `steer.applied` | One item enters its owning turn at a safe model-step boundary. |
-| `model.started` | Step, canonical selected model, actual provider/API model, effective context window/effort and estimated context. Creates an unknown, in-progress accounting entry; estimates are not provider token telemetry. |
-| `assistant.delta` | Durable streamed text for that step, batched by the worker. |
+| `model.started` | Step, actual role/canonical model/provider/API model, effective context window/effort and estimated context. The session may retain the synthetic selection; actual role/model never become `kupo` charges. Creates an unknown, in-progress accounting entry; estimates are not provider token telemetry. |
+| `routing.started`, `routing.planned`, `routing.finished` | Single owning-turn policy/task/revision snapshot, exact classifier/eligible pool, untrusted plan and actual lifecycle/diagnostic. Completion/accounting and accepted-plan commitment precede any solver continuation. Restart never replays a routed effect. |
+| `assistant.delta` | Durable streamed text for that step, batched by the worker. Router deltas remain audit events and never append to a public assistant answer or solver context. |
 | `model.completed` | Public message, normalized-context blob digest and actual/unknown usage. Does not imply overall turn success. |
 | `model.late_usage` | Exact owned remote step/frame improves unknown accounting after disconnect; no new continuation, tool replay or rewrite of a partial turn. |
 | `execution.started`, `execution.changed` | Pinned target/build/root/run, actual worker and cancellation/cleanup status. SSH exit is not descendant-containment proof. |
@@ -137,7 +138,7 @@ estimated admission; missing historical pricing is not free usage.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":13,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":16,"profileId":"default","token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

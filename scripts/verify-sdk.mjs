@@ -22,7 +22,7 @@ try {
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
-    import {MoguriSdk, DraftEditor, slashCommands, type UserSettings} from "moguri";
+    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
@@ -41,6 +41,9 @@ try {
       const budget=await sdk.budgets.status("generated-id");void budget.status.totals.heldTokens;
       await sdk.budgets.policy({basis:"estimate",tokens:100000},0,true);
       const dashboard=await sdk.budgets.dashboard({role:"solver",limit:50});void dashboard.nextOffset;
+      const routingPolicy:KupoSettings=defaultKupoSettings();
+      await sdk.routing.configure(routingPolicy,snapshot.revision);void sdk.routing.policy();
+      const routing=sdk.routing.history("generated-id");void routing[0]?.plan?.modelId;void KUPO_MODEL_ID;
       const catalog=(await sdk.profiles.list()).catalog;
       const createdProfile=await sdk.profiles.create("Generated typed profile","#557799");
       const profile=await sdk.profiles.wait(createdProfile.id!);
@@ -98,7 +101,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport} from "moguri/node";
-    import {DraftEditor} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
@@ -119,7 +122,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,15);
+      assert.equal(sdk.getState().snapshot.protocolVersion,16);
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);
@@ -163,7 +166,7 @@ try {
           let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
           role.once("error",reject);
           role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
-          role.stdin.write(JSON.stringify({action:"probe",protocol:15,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+          role.stdin.write(JSON.stringify({action:"probe",protocol:16,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
         });
         assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
         role.stdin.end();assert.equal(await roleExit,0);
@@ -261,14 +264,16 @@ try {
         response.writeHead(200,{"Content-Type":"text/event-stream"});
         const frame=(delta,finish_reason=null)=>response.write("data: "+JSON.stringify({id:"generated-external-response",object:"chat.completion.chunk",model:"generated-external-budget",choices:[{index:0,delta,finish_reason}]})+"\\n\\n");
         const user=body.messages.findLastIndex(value=>value.role==="user");
-        if(String(body.messages[user]?.content).includes("Generated installed Guided question")&&!body.messages.slice(user+1).some(value=>value.role==="tool")){
+        if(body.messages.some(value=>["system","developer"].includes(value.role)&&String(value.content).includes("You classify a Moguri task"))){
+          frame({role:"assistant",content:JSON.stringify({pattern:"single",modelId:"generated-external-budget",confidence:0.95,reason:"Generated installed classifier-only advice."})});frame({},"stop");
+        }else if(String(body.messages[user]?.content).includes("Generated installed Guided question")&&!body.messages.slice(user+1).some(value=>value.role==="tool")){
           frame({role:"assistant",tool_calls:[{index:0,id:"generated-installed-guided-call",type:"function",function:{name:"ask_user",arguments:JSON.stringify({question:"Choose a generated installed approach?",choices:["Generated installed first","Generated installed second"],allowFreeform:false,recommendation:{choiceIndex:1,reason:"Generated installed solver recommendation."}})}}]});frame({},"tool_calls");
         }else{frame({role:"assistant",content:"Generated external budget response."});frame({},"stop");}
         response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
       });
       await new Promise(resolve=>budgetServer.listen(0,"127.0.0.1",resolve));
       const generatedModel={id:"generated-external-budget",name:"Generated external budget model",api:"openai-completions",provider:"github-copilot",baseUrl:"http://127.0.0.1:"+budgetServer.address().port,reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:8192,maxTokens:128};
-      provider.state={status:"connected",models:[{id:generatedModel.id,name:generatedModel.name,contextWindow:8192,imageInput:false}],login:null,diagnostic:null};
+      provider.state={status:"connected",models:[{id:generatedModel.id,name:generatedModel.name,contextWindow:8192,maxTokens:128,imageInput:false}],login:null,diagnostic:null};
       provider.prepare=async id=>{assert.equal(id,generatedModel.id);return{model:generatedModel,auth:{apiKey:"generated-external-only",baseUrl:generatedModel.baseUrl}};};
       provider.onChange();await sdk.models.refresh();
       const metered=await sdk.sessions.create(null,"Generated installed SDK budget",{modelId:generatedModel.id});
@@ -313,8 +318,28 @@ try {
       assert.equal(beta.getState().snapshot.questions.find(value=>value.id===pending.id).answer.text,pending.choices[0]);assert.equal(generatedRequests.length,4);
       const guidedArtifact=beta.getState().snapshot.artifacts.find(value=>value.questionId===pending.id);
       assert.match((await beta.artifacts.read(guidedArtifact.id)).text,/Model recommendation \\(not a user answer\\)/);
-      await sdk.profiles.globalBudget({basis:"estimate",tokens:168},0,true);
+      assert.deepEqual(beta.routing.policy(),defaultKupoSettings());
+      await beta.routing.configure({...defaultKupoSettings(),enabled:true,classifierModelId:generatedModel.id,approvedModelIds:[generatedModel.id],allowHosted:true},beta.settings.get().revision);
+      const routed=await beta.sessions.create(null,"Generated installed Single");
+      const installedSelection=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"slash","/model kupo","--session",routed.id,"--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+      assert.equal(JSON.parse(installedSelection.stdout).kind,"ok");
+      const installedRouting=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"slash","/kupo status","--session",routed.id,"--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+      assert.equal(JSON.parse(JSON.parse(installedRouting.stdout).text).policy.enabled,true);assert.equal(generatedRequests.length,4);
+      await beta.refresh();
+      await beta.command({type:"draft.save",sessionId:routed.id,expectedRevision:0,text:"Generated installed Single task.",attachments:[]});
+      await beta.command({type:"message.send",sessionId:routed.id,expectedRevision:1,delivery:"queue"});
+      for(let n=0;n<400&&!["completed","partial","failed","stopped"].includes(beta.getState().snapshot.sessions.find(value=>value.id===routed.id).status);n++)await new Promise(resolve=>setTimeout(resolve,20));
+      const routedSession=beta.getState().snapshot.sessions.find(value=>value.id===routed.id);
+      assert.equal(routedSession.status,"completed");assert.equal(routedSession.controls.modelId,KUPO_MODEL_ID);
+      assert.deepEqual(routedSession.usage.map(value=>value.role),["router","solver"]);
+      assert.equal(generatedRequests.length,6);assert.equal(generatedRequests[4].max_tokens??generatedRequests[4].max_completion_tokens,128);
+      assert.equal(generatedRequests[4].tools,undefined);assert.equal(JSON.stringify(generatedRequests[5]).includes("Generated installed classifier-only advice."),false);
+      assert.equal(beta.routing.history(routed.id)[0].status,"completed");assert.equal(beta.routing.history(routed.id)[0].plan.modelId,generatedModel.id);
+      assert.equal((await beta.budgets.status(routed.id)).status.totals.reportedTokens,84);
+      assert.deepEqual(sdk.routing.policy(),defaultKupoSettings());
+      await sdk.profiles.globalBudget({basis:"estimate",tokens:252},0,true);
       assert.equal((await beta.budgets.status(betaMetered.id)).status.remainingTokens,0);
+      await assert.rejects(()=>beta.sessions.configure(routed.id,routedSession.controls),/finite budgets|wind-down/);
       const globals=(await beta.profiles.list()).catalog.globalDefaults;
       await beta.profiles.defaults({autonomy:"Guided"},globals.revision);
       const inherited=await sdk.sessions.create(null,"Generated installed shared preference");
@@ -328,7 +353,7 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual solver-sourced Guided advice/human answer/artifact without an extra call, installed worker handshake, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed worker handshake, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000 });
 } finally { await rm(temporary, { recursive: true, force: true }); }

@@ -7,7 +7,7 @@ export async function retentionKey(path: string, injected?: Buffer): Promise<{ k
   let id: string;
   try {
     const version = Number(db.prepare("PRAGMA user_version").get()?.user_version);
-    if (version > 15) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+    if (version > 16) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
     id = version >= 4 ? String(db.prepare("SELECT value FROM retention_metadata WHERE id='key_id'").get()?.value ?? "") : randomUUID();
     if (!id || id.length > 128) throw new Error("Retention key metadata is invalid. Preserve state and restore its original key metadata.");
   } finally { db.close(); }
