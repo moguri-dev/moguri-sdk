@@ -14,6 +14,22 @@ Omitted provider metering stays null/unknown; adapter default cost zero is not
 a reported price, free Copilot entitlement or billed amount. No personal
 credentials, paid endpoint or microphone is used.
 
+### Observed streaming prerequisite
+
+The additional generated stream/category gate passes five checks in
+**752.75 ms**. The maintained adapter's real loopback SSE exchange completes
+in **133.40 ms**, exposes three normalized output chunks at 25-ms fixture
+spacing and observes at least 40 ms between first and last delivery. The
+same 20 uncached + 10 cached + 12 output report remains 42 total tokens.
+Absent cache detail is distinguishable from an explicitly reported zero.
+
+Timing uses the execution host's monotonic clock around normalized exposed
+output events, not provider timestamps, UI batching or hidden reasoning.
+A single/no output event has no measurable streaming interval. An observed
+delivery rate is not provider GPU generation throughput, a model benchmark or
+proof of productivity. This internal prerequisite is not yet durable usage or
+a complete dated/priced dashboard; the shipped 0.11 archives are unchanged.
+
 ## Accounting authority
 
 Factory session preference remains Unlimited. A finite preference does not
