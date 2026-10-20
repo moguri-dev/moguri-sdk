@@ -22,7 +22,9 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.15.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-<package-version>.tgz` in a Node 26 consumer with
+npm. The latest qualified delivery is `moguri-0.15.0-alpha.1.tgz`; a newer
+development manifest is not another qualified archive until explicitly checked.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
