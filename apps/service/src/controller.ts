@@ -12,6 +12,8 @@ import {
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
+  type RemotePlanSave, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse, type PlanFileResult, type SessionWorkspaceCommand,
+  PlanFileResultSchema, type RetainedArtifact,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -20,13 +22,13 @@ import { validateTool } from "./tools.ts";
 import { effectiveTools } from "./tools.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
 import { authorizeTool } from "./permissions.ts";
-import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest } from "./worker-protocol.ts";
-import { assertSessionTool, folderPolicy } from "./project-policy.ts";
+import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest, type UserPlanOperation } from "./worker-protocol.ts";
+import { assertSessionTool, assertFolderName, folderPolicy } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateModelOptions, validateContextSize } from "./model-controls.ts";
 import { attentionEvents } from "./attention.ts";
 import { ModelRegistry, localEndpointUrl } from "./model-registry.ts";
-import { RemoteRuntime, remoteRootLease, remoteRootQuarantined } from "./remote.ts";
+import { RemoteRuntime, remoteFingerprint, remoteRootLease, remoteRootQuarantined } from "./remote.ts";
 import { kupoAvailability, kupoPool, routingPlan, ROUTER_PROMPT } from "./routing.ts";
 import { reportedModelUsage, modelOutputExceeded } from "./budgets.ts";
 import { McpKeychain } from "./gateway.ts";
@@ -55,6 +57,11 @@ interface Run {
   repositoryContext?: string;
   root: string | null;
   compaction?: { id: string; context: Message[] };
+  planSave?: {
+    id: string; operation: UserPlanOperation; finish: WorkspaceFinish;
+    resolve(result: CommandResult): void; reject(error: Error): void;
+    terminal?: Extract<WorkerRequest, { kind: "finished" }>; cleanupTimer?: ReturnType<typeof setTimeout>;
+  };
 }
 export interface ProfileHooks {
   extendCommit(profileId: string, events: EventInput[]): EventInput[];
@@ -147,6 +154,8 @@ export class ControlPlane extends EventEmitter {
       contextPreview: (session) => this.previewContext(session),
       compactionQuery: (query) => this.compactionQuery(query),
       compactionCommand: (command, finish) => this.compactionCommand(command, finish),
+      planSaveQuery: (query) => this.planSaveQuery(query),
+      planSaveCommand: (command, finish) => this.planSaveCommand(command, finish),
       validateControls: (controls) => this.available(controls),
       startup: (projectId) => this.startup(projectId),
       modelCredential: async (id, token, finish) => {
@@ -160,6 +169,10 @@ export class ControlPlane extends EventEmitter {
       remoteCommand: (command, finish) => this.remoteCommand(command, finish),
       repositoryContext: (session) => this.repositoryContext(session),
       remoteRead: (session, query) => this.remoteRead(session, query),
+      remotePlanBinding: (session) => {
+        const scope = this.planIdentity(session);
+        return { bindingDigest: frameDigest(scope), boundary: { env: "Remote", root: scope.root, hostFingerprint: remoteFingerprint(scope.target), workerDigest: scope.workerDigest } };
+      },
       globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
       foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
       sharedGlobals: Boolean(this.profileHooks),
@@ -191,6 +204,7 @@ export class ControlPlane extends EventEmitter {
           ...this.cancelledQuestions(session, "Service restarted. No answer or replacement question was invented."),
           ...this.routingFinished(session, session.turnId, "partial", "Service restarted. Routing advice and owned work were not replayed."),
           ...this.projection.compactions.filter((entry) => entry.sessionId === session.id && entry.status === "running").map((entry) => this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: "partial", completedAt: new Date().toISOString(), diagnostic: "Service restarted. Compaction was not replayed or applied; unknown usage remains held." })),
+          ...this.projection.planSaves.filter((save) => save.sessionId === session.id && save.status === "running").map((save) => this.recoveredPlanSave(session, save)),
           ...unfinished.map((call) => this.event(session, "tool.completed", { call, text: "Service restarted before a durable tool result. Execution and cleanup are unconfirmed; this tool was not replayed.", isError: true, outcome: "unconfirmed" })),
           this.event(session, "turn.finished", {
             outcome: "partial",
@@ -210,6 +224,8 @@ export class ControlPlane extends EventEmitter {
     })));
     const unfinishedCompactions = this.projection.compactions.filter((entry) => entry.status === "running");
     if (unfinishedCompactions.length) this.commit(unfinishedCompactions.map((entry) => this.compactionEvent(this.session(entry.sessionId), { ...entry, revision: entry.revision + 1, status: "partial", completedAt: new Date().toISOString(), diagnostic: "Service restarted with unsettled compaction metadata. No call or context change was replayed." })));
+    const unfinishedPlanSaves = this.projection.planSaves.filter((save) => save.status === "running");
+    if (unfinishedPlanSaves.length) this.commit(unfinishedPlanSaves.map((save) => this.recoveredPlanSave(this.session(save.sessionId), save)));
     await this.provider.refresh();
   }
   snapshot(): Snapshot {
@@ -282,7 +298,7 @@ export class ControlPlane extends EventEmitter {
     const reserved = new Set(this.writerReservations.values());
     const roots = [...this.runs.values()].filter((run) => {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
-      return session && session.id !== exceptSessionId && session.kind === "agent" && (session.mode === "agent" || reserved.has(session.id));
+      return session && session.id !== exceptSessionId && (Boolean(run.planSave) || session.kind === "agent" && (session.mode === "agent" || reserved.has(session.id)));
     }).flatMap((run) => {
       if (!run.executionId) return run.root ? [run.root] : [];
       const execution = this.projection.executions.find((value) => value.id === run.executionId);
@@ -328,6 +344,11 @@ export class ControlPlane extends EventEmitter {
     if (!execution || status.runId !== id) return;
     this.commit([{ event_type: "execution.changed", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
       payload: { executionId: id, status: status.status, cancellation: status.cancellation, cleanup: status.cleanup, diagnostic: status.diagnostic, ...(status.workerPid ? { workerPid: status.workerPid } : {}) } }]);
+    const run = this.runs.get(execution.sessionId);
+    if (run?.executionId === id && run.planSave?.terminal && status.cleanup !== "pending") {
+      this.finishRun(run, status.status === "unconfirmed" || status.cleanup === "unconfirmed" ? "partial" : run.planSave.terminal.outcome,
+        status.status === "unconfirmed" || status.cleanup === "unconfirmed" ? status.diagnostic : run.planSave.terminal.diagnostic);
+    }
     queueMicrotask(() => this.pumpAll());
   }
   private modelUsage(session: Session, request: Extract<WorkerRequest, { kind: "model.complete" }>): Usage {
@@ -374,6 +395,26 @@ export class ControlPlane extends EventEmitter {
         const stepId = frame.request.stepId;
         const prior = session.usage.find((usage) => usage.stepId === stepId);
         if (prior?.quality === "unknown" && frame.request.usageReported && assistantMessage(frame.request.message).model === prior.apiModelId) events.push({ ...scope, event_type: "model.late_usage", payload: { usage: this.modelUsage(session, frame.request), executionId: execution.id, sequence: frame.sequence } });
+      }
+      if (frame.request.kind === "user-plan.complete") {
+        const call = frame.request.call;
+        const plan = this.projection.planSaves.find((save) => save.executionId === execution.id && save.id === execution.turnId);
+        if (!plan) throw new MoguriError("plan_authority", "The retained user-plan frame has no exact owned save intent. No result was adopted.", 409);
+        if (plan && plan.status !== "completed") {
+          const authorized = this.history.some((event) => event.event_type === "tool.started" && event.turn_id === plan.id && frameDigest(event.payload.call) === frameDigest(call));
+          if (!authorized) throw new MoguriError("plan_authority", "The retained plan frame has no exact durable user authorization. No result or artifact was adopted.", 409);
+          const result = this.decodePlanResult(plan, frame.request), diagnostic = "Late exact Remote plan result retained after inspection. Original partial/unconfirmed work was not replayed or promoted into a complete save.";
+          let artifact: RetainedArtifact | undefined;
+          if (!plan.artifactId && result.fileOutcome === "written" && result.text !== null && result.digest !== null) artifact = this.platform.artifacts.capture(
+            { ...session, projectId: plan.projectId, workspaceId: null }, plan.path, result.text, {
+              eventId: null, sessionId: session.id, messageId: call.id, actor: "user", modelId: null, outcome: "partial", contentDigest: result.digest,
+              boundary: { env: "Remote", executionId: execution.id, hostFingerprint: plan.hostFingerprint, root: plan.root, workerDigest: plan.workerDigest, path: plan.path, frame: { sequence: frame.sequence, digest: frame.digest } },
+            });
+          events.push({ ...scope, event_type: "tool.completed", payload: { call, text: JSON.stringify(result), isError: result.outcome !== "completed", outcome: result.outcome } },
+            ...(artifact ? [this.event(session, "artifact.revised", { artifact })] : []),
+            this.planSaveEvent(session, { ...plan, phase: "settled", status: "partial", fileOutcome: result.fileOutcome, createdDirectories: result.createdDirectories,
+              resultDigest: this.store.putBlob(JSON.stringify(result)), artifactId: artifact?.id ?? plan.artifactId, diagnostic, revision: plan.revision + 1, updatedAt: new Date().toISOString() }));
+        }
       }
       if (frame.request.kind === "tool.complete") {
         const call = frame.request.call;
@@ -603,6 +644,86 @@ export class ControlPlane extends EventEmitter {
   private compactionEvent(session: Session, compaction: ContextCompaction): EventInput {
     return { ...this.event(session, "compaction.saved", { compaction }), turn_id: compaction.turnId, step_id: compaction.stepId };
   }
+  private planSaveEvent(session: Session, save: RemotePlanSave): EventInput {
+    return { ...this.event(session, "plan.save_recorded", { save }), turn_id: save.id, step_id: save.id };
+  }
+  private planSave(id: string, sessionId: string): RemotePlanSave {
+    const save = this.projection.planSaves.find((save) => save.id === id && save.sessionId === sessionId);
+    if (!save) throw new MoguriError("plan_save_missing", "This plan save is missing or outside the selected session/profile.", 404);
+    return save;
+  }
+  private recoveredPlanSave(session: Session, save: RemotePlanSave): EventInput {
+    return this.planSaveEvent(session, { ...save, revision: save.revision + 1, status: "partial", phase: "settled",
+      fileOutcome: save.resultDigest ? save.fileOutcome : save.phase === "intent" ? "not-started" : "unconfirmed", updatedAt: new Date().toISOString(),
+      diagnostic: "Service restarted during this exact Remote plan save. Inspect its retained execution/result; no write, artifact receipt or successful outcome was replayed." });
+  }
+  private decodePlanResult(save: RemotePlanSave, request: Extract<WorkerRequest, { kind: "user-plan.complete" }>): PlanFileResult {
+    const text = this.store.blob(save.inputDigest), input = { path: save.path, text, expectedDigest: save.expectedDigest };
+    const expected = { id: save.id, name: "write_file", arguments: input };
+    const result = parse(PlanFileResultSchema, request.result);
+    const parents = input.path.replaceAll("\\", "/").split("/").slice(0, -1);
+    const allowedParents = parents.map((_, index) => parents.slice(0, index + 1).join("/"));
+    if (request.stepId !== save.id || frameDigest(request.call) !== frameDigest(expected) || digest(text) !== save.textDigest ||
+      result.path !== input.path ||
+      result.createdDirectories.some((path) => !allowedParents.includes(path)) ||
+      result.fileOutcome !== "written" && (result.text !== null || result.digest !== null || result.bytes !== null) ||
+      result.fileOutcome === "written" && (result.text !== input.text || result.digest !== digest(input.text) || result.bytes !== Buffer.byteLength(input.text)) ||
+      result.outcome === "completed" && (result.fileOutcome !== "written" || !result.readback || result.diagnostic !== null) ||
+      result.outcome === "stopped" && (result.fileOutcome !== "not-started" || result.createdDirectories.length)) throw new MoguriError("plan_result", "The worker's plan result did not match the authorized bytes, scope or actual outcome. No successful save was inferred.", 409);
+    return result;
+  }
+  private planIdentity(session: Session) {
+    if (session.controls.env !== "Remote" || !session.projectId || session.workspaceId) throw new MoguriError("plan_env", "Select an explicitly mapped Remote project. No Local or previous workspace was used.", 409);
+    const target = this.remote.assertReady(), workerDigest = this.remote.readiness.workerDigest;
+    if (!workerDigest) throw new MoguriError("remote_unready", "Probe this exact worker build before starting a Remote save.", 409);
+    const configuration = this.platform.sessions.projects.configuration(session.projectId);
+    return { profileId: this.profileId, sessionId: session.id, projectId: session.projectId, root: this.remoteWorkspace(session)!, target, workerDigest,
+      configuration, mode: session.mode, pendingMode: session.pendingMode, permissionRevision: this.projection.settings.permissionRevision, policy: this.projection.policy };
+  }
+  private planScope(session: Session) {
+    if (!this.projection.policy.allowedEnvs.includes("Remote")) throw new MoguriError("env_denied", "Remote is excluded by the current allowed-env policy.", 403);
+    if (session.status === "archived" || session.mode !== "agent" || session.pendingMode === "read-only" || session.kind === "side" || session.kind === "subagent") throw new MoguriError("read_only", "This session cannot edit a plan.", 403);
+    const scope = this.planIdentity(session);
+    assertFolderName(scope.configuration.values.planPath, true, folderPolicy(scope.configuration.values));
+    return scope;
+  }
+  private checkPlanScope(session: Session, save: RemotePlanSave): void {
+    if (frameDigest(this.planScope(session)) !== save.policyDigest) throw new MoguriError("plan_scope_changed", "The exact Remote plan root, target, build or policy changed. No result was relabeled as a save into another workspace.", 409);
+  }
+  private planSaveQuery(query: PlanSaveQuery): PlanSaveResponse {
+    this.session(query.sessionId);
+    if (query.type === "plan.saves") return { type: query.type, saves: this.projection.planSaves.filter((save) => save.sessionId === query.sessionId) };
+    const save = this.planSave(query.saveId, query.sessionId);
+    return { type: query.type, save, result: save.resultDigest ? parse(PlanFileResultSchema, JSON.parse(this.store.blob(save.resultDigest))) : null };
+  }
+  private planSaveCommand(command: PlanSaveCommand, finish: WorkspaceFinish): CommandResult {
+    const session = this.session(command.sessionId), save = this.planSave(command.saveId, session.id), run = this.runs.get(session.id);
+    if (save.status !== "running" || session.turnId !== save.id || run?.planSave?.id !== save.id) throw new MoguriError("plan_save_closed", "This plan save has settled or lost ownership. No newer turn was stopped.", 409);
+    const result = finish([], { id: save.id }); this.stop(session.id); return result;
+  }
+  private async saveRemotePlan(command: Extract<SessionWorkspaceCommand, { type: "plan.save" }>, commandId: string, commandDigest: string, finish: WorkspaceFinish): Promise<CommandResult> {
+    const session = this.session(command.sessionId), recorded = this.projection.planSaves.find((save) => save.commandId === commandId);
+    if (recorded) {
+      if (recorded.commandDigest !== commandDigest) throw new MoguriError("idempotency_conflict", "This command ID already owns a different plan intent. No write was replayed.", 409);
+      throw new MoguriError("plan_save_recorded", `Remote plan save ${recorded.id} is already recorded as ${recorded.status}. Inspect its exact outcome; no write was replayed.`, 409);
+    }
+    if (session.turnId || session.queue.some((item) => !item.held) || this.blocked(session) || this.otherWriter(session)) throw new MoguriError("workspace_busy", "Finish owned work and inspect unconfirmed effects before saving this Remote plan.", 409);
+    if (!command.text.isWellFormed() || command.text.includes("\0") || Buffer.byteLength(command.text) > MAX_TEXT) throw new MoguriError("plan_text", "Use valid non-binary Unicode plan text of at most 128 KiB. No replacement or filesystem effect was introduced.");
+    const scope = this.planScope(session);
+    if (!command.expectedBinding || command.expectedBinding !== frameDigest(scope)) throw new MoguriError("plan_scope_changed", "Read and review this exact Remote plan binding before saving. The root, path or policy changed or was not supplied; no write was started.", 409);
+    if (this.projection.executions.some((execution) => remoteRootLease(execution.target, execution.workspace) === remoteRootLease(scope.target, scope.root) && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("remote_cleanup", "Owned cleanup for this exact Remote root remains pending or unconfirmed. Inspect or reconcile it before another save.", 409);
+    const id = randomUUID(), now = new Date().toISOString(), inputDigest = this.store.putBlob(command.text);
+    const save: RemotePlanSave = { id, sessionId: session.id, projectId: scope.projectId, commandId, commandDigest, revision: 0, executionId: null,
+      root: scope.root, hostFingerprint: remoteFingerprint(scope.target), workerDigest: scope.workerDigest, path: scope.configuration.values.planPath,
+      expectedDigest: command.expectedDigest, textDigest: digest(command.text), inputDigest, policyDigest: frameDigest(scope), status: "running", phase: "intent",
+      fileOutcome: "not-started", createdDirectories: [], resultDigest: null, workerOutcome: null, artifactId: null, diagnostic: null, createdAt: now, updatedAt: now };
+    const intentDigest = this.store.putBlob(JSON.stringify({ save, scope }));
+    this.commit([this.planSaveEvent(session, save), { ...this.event(session, "turn.control_started", { purpose: "plan.save", saveId: id, controls: session.controls, policyRevision: scope.policy.revision, intentDigest }), turn_id: id }]);
+    return new Promise<CommandResult>((resolve, reject) => {
+      this.launchRun(this.session(session.id), id, { planSave: { id, operation: { kind: "plan.save", stepId: id, callId: id,
+        input: { path: save.path, text: command.text, expectedDigest: command.expectedDigest } }, finish, resolve, reject } });
+    });
+  }
   private compaction(sessionId: string, id: string): ContextCompaction {
     const entry = this.projection.compactions.find((entry) => entry.sessionId === sessionId && entry.id === id);
     if (!entry) throw new MoguriError("compaction_missing", "Compaction is missing or outside this session/profile.", 404);
@@ -680,7 +801,7 @@ export class ControlPlane extends EventEmitter {
         beforeTokens: preview.beforeTokens, afterTokens: null, inputDigest: this.store.putBlob(JSON.stringify(context)), resultDigest: null, replacementDigest: null, stepId: null,
         createdAt, completedAt: null, appliedAt: null, diagnostic: null };
       const result = finish([this.compactionEvent(session, entry), { ...this.event(session, "turn.control_started", { purpose: "compaction", compactionId: id, controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest: this.store.putBlob(COMPACTION_PROMPT) }), turn_id: id }], { id, revision: 0 });
-      this.launchRun(this.session(session.id), id, { id, context });
+      this.launchRun(this.session(session.id), id, { compaction: { id, context } });
       return result;
     }
     if (command.type === "compaction.restore") {
@@ -770,6 +891,7 @@ export class ControlPlane extends EventEmitter {
       return result;
     };
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
+    if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
     switch (command.type) {
       case "project.add": {
@@ -940,13 +1062,14 @@ export class ControlPlane extends EventEmitter {
   }
   private originalContextEntries(sessionId: string): ContextEntry[] {
     const entries: ContextEntry[] = [];
+    const userWrites = new Set(this.history.filter((event) => event.profile_id === this.profileId && event.session_id === sessionId && event.event_type === "turn.control_started" && event.payload.purpose === "plan.save").map((event) => event.turn_id));
     for (const event of this.history) if (event.profile_id === this.profileId && event.session_id === sessionId) {
       if (event.event_type === "session.created" && event.payload.contextDigest) {
         const context = contextMessages(JSON.parse(this.store.blob(event.payload.contextDigest)));
         entries.push(...context.map((message) => ({ seq: event.seq, turnId: null, message })));
       } else if (event.event_type === "turn.started" || event.event_type === "steer.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.contextItem(event.payload.item, Date.parse(event.timestamp)) });
       else if (event.event_type === "model.completed" && event.payload.usage.role !== "router" && event.payload.usage.role !== "compaction") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
-      else if (event.event_type === "tool.completed") entries.push({
+      else if (event.event_type === "tool.completed" && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: event.payload.call.name,
           content: [{ type: "text", text: event.payload.text }], isError: event.payload.isError, timestamp: Date.parse(event.timestamp),
@@ -988,21 +1111,25 @@ export class ControlPlane extends EventEmitter {
       this.launchRun(this.session(session.id), turnId);
     }
   }
-  private launchRun(current: Session, turnId: string, compaction?: Run["compaction"]): void {
+  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "planSave"> = {}): void {
+      const { compaction, planSave } = control;
       let owned: Run | undefined;
       try {
-        const context = compaction?.context ?? this.context(current.id); validateContextSize(context);
+        const context = planSave ? [] : compaction?.context ?? this.context(current.id); validateContextSize(context);
         const project = current.projectId ? this.platform.managed.project(current) : undefined;
         let execution: RemoteExecution | undefined;
         if (current.controls.env === "Remote") {
           const target = this.remote.assertReady();
           execution = { id: randomUUID(), sessionId: current.id, projectId: current.projectId, turnId, target, workspace: this.remoteWorkspace(current), workerDigest: this.remote.readiness.workerDigest!,
             configDigest: frameDigest(target), createdAt: new Date().toISOString(), status: "launching", cancellation: "none", cleanup: "pending", diagnostic: null, lastSequence: 0, workerPid: null };
-          this.commit([{ ...this.event(current, "execution.started", { execution }), turn_id: turnId }]);
+          const save = planSave ? this.planSave(planSave.id, current.id) : null;
+          this.commit([{ ...this.event(current, "execution.started", { execution }), turn_id: turnId },
+            ...(save ? [this.planSaveEvent(current, { ...save, executionId: execution.id, revision: save.revision + 1, updatedAt: new Date().toISOString() })] : [])]);
         }
         const child = execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
-        const run: Run = { sessionId: current.id, turnId, child, root: current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction };
+        const run: Run = { sessionId: current.id, turnId, child, root: current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, planSave };
         owned = run;
+        if (planSave) { if (!execution) throw new MoguriError("plan_env", "User Remote plan work has no exact SSH execution.", 409); run.stepId = planSave.operation.stepId; }
         this.runs.set(current.id, run);
         child.events.on("stderr", (data) => { run.stderr = (run.stderr + data).slice(-4096); });
         child.events.on("message", (message: unknown, frame) => {
@@ -1015,7 +1142,7 @@ export class ControlPlane extends EventEmitter {
               if (frame.sequence <= execution.lastSequence) {
                 const known = this.history.find((event) => event.event_type === "execution.frame_recorded" && event.payload.executionId === execution.id && event.payload.sequence === frame.sequence);
                 if (known?.event_type !== "execution.frame_recorded" || known.payload.digest !== frame.digest) throw new MoguriError("remote_frame", "A replay changed an already recorded remote frame.", 409);
-                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
+                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
               } else {
                 if (frame.sequence !== execution.lastSequence + 1) throw new MoguriError("remote_cursor", "Remote frame sequence has a gap. No operation was replayed.", 409);
                 const context = { frame, recorded: false };
@@ -1032,19 +1159,22 @@ export class ControlPlane extends EventEmitter {
         child.events.on("error", (error) => { this.finishRun(run, execution ? "partial" : "failed", execution ? error.message : "Could not start the agent worker. Rebuild Moguri and check the bundled Node runtime."); if (execution) child.kill("SIGTERM"); });
         child.events.on("exit", (code, signal) => {
           void run.chain.then(() => {
-            if (!run.done) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
+            if (!run.done && !run.planSave?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: execution ? execution.workspace : project?.path ?? null, context, readOnly: current.kind === "subagent" || Boolean(compaction) });
+        this.reply(run, { kind: "start", root: execution ? execution.workspace : project?.path ?? null, context, readOnly: current.kind === "subagent" || Boolean(compaction), ...(planSave ? { operation: planSave.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
         const diagnostic = error instanceof MoguriError ? error.message : "Agent worker launch failed. Rebuild Moguri and retry explicitly.";
         if (owned) { this.finishRun(owned, "partial", diagnostic); owned.child.kill("SIGTERM"); return; }
         const entry = compaction ? this.compaction(current.id, compaction.id) : null;
+        const save = planSave ? this.planSave(planSave.id, current.id) : null;
         const execution = this.projection.executions.find((execution) => execution.turnId === turnId);
         this.commit([...(entry ? [this.compactionEvent(current, { ...entry, revision: entry.revision + 1, status: "failed", completedAt: new Date().toISOString(), diagnostic })] : []),
+          ...(save ? [this.planSaveEvent(current, { ...save, revision: save.revision + 1, status: "failed", phase: "settled", updatedAt: new Date().toISOString(), diagnostic })] : []),
           ...(execution ? [this.event(current, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Worker launch was not confirmed. Inspect this exact remote execution; no replacement was started." })] : []),
           this.event(current, "turn.finished", { outcome: "failed", diagnostic })]);
+        planSave?.reject(new MoguriError("plan_save_failed", diagnostic, 409));
       }
   }
   private otherWriter(session: Session): boolean {
@@ -1157,6 +1287,54 @@ export class ControlPlane extends EventEmitter {
       maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, phase: "compaction", steers: [], tools: [], mode: "read-only",
       folders: { denied: [], readOnly: [] }, systemPrompt: COMPACTION_PROMPT } });
   }
+  private async userPlanMessage(run: Run, request: WorkerRequest): Promise<void> {
+    const operation = run.planSave;
+    if (!operation) throw new Error("User plan worker lost its exact operation.");
+    const session = this.session(run.sessionId), save = this.planSave(operation.id, session.id);
+    const call: ToolCall = { id: operation.operation.callId, name: "write_file", arguments: operation.operation.input };
+    if (request.kind === "approval") {
+      try {
+        if (run.abort.signal.aborted || save.phase !== "intent" || request.stepId !== run.stepId || frameDigest(request.call) !== frameDigest(call)) throw new MoguriError("plan_authority", "This exact user plan write is stopped, already authorized or changed. No additional effect was authorized.", 409);
+        this.checkPlanScope(session, save);
+        if (this.otherWriter(session)) throw new MoguriError("workspace_busy", "Another owned writer now owns this Remote root. No plan write was authorized.", 409);
+        const configuration = this.planScope(session).configuration;
+        this.commit([this.planSaveEvent(session, { ...save, phase: "authorized", fileOutcome: "unconfirmed", revision: save.revision + 1, updatedAt: new Date().toISOString() }),
+          this.event(session, "tool.started", { call }, request.stepId)]);
+        run.calls.set(call.id, call); run.granted.add(call.id);
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: "agent", folders: folderPolicy(configuration.values) } });
+      } catch (error) {
+        if (!(error instanceof MoguriError)) console.error("User Remote plan authorization failed: plan_authority");
+        this.reply(run, { kind: "reply", requestId: request.requestId, error: error instanceof MoguriError ? error.message : "Exact user plan authorization failed. No effect was authorized." });
+      }
+      return;
+    }
+    if (request.kind === "user-plan.complete") {
+      if (request.stepId !== run.stepId || !run.granted.has(call.id) || frameDigest(request.call) !== frameDigest(call) || save.phase !== "authorized") throw new MoguriError("plan_result", "The result does not belong to this exact authorized plan write.", 409);
+      const result = this.decodePlanResult(save, request);
+      this.commit([this.event(session, "tool.completed", { call, text: JSON.stringify(result), isError: result.outcome !== "completed", outcome: result.outcome }, request.stepId),
+        this.planSaveEvent(session, { ...save, phase: "result", fileOutcome: result.fileOutcome, createdDirectories: result.createdDirectories,
+          resultDigest: this.store.putBlob(JSON.stringify(result)), diagnostic: result.diagnostic, revision: save.revision + 1, updatedAt: new Date().toISOString() })]);
+      run.calls.delete(call.id); run.granted.delete(call.id);
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
+      return;
+    }
+    if (request.kind === "finished") {
+      const terminal = request.outcome === "completed" && save.phase !== "result" ?
+        { ...request, outcome: "partial" as const, diagnostic: "The user-plan worker ended without a durable exact file result. Inspect the operation; no successful save was inferred." } : request;
+      this.commit([this.planSaveEvent(session, { ...save, phase: "terminal", workerOutcome: terminal.outcome, diagnostic: terminal.diagnostic ?? save.diagnostic,
+        revision: save.revision + 1, updatedAt: new Date().toISOString() })]);
+      operation.terminal = terminal;
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
+      operation.cleanupTimer = setTimeout(() => {
+        if (!run.done) { run.child.kill("SIGTERM"); this.finishRun(run, "partial", "Remote plan worker cleanup was not confirmed after its retained result. Inspect the exact save; no write was replayed."); }
+      }, 5000);
+      const execution = this.projection.executions.find((value) => value.id === run.executionId);
+      if (execution && execution.cleanup !== "pending") this.finishRun(run, execution.status === "unconfirmed" || execution.cleanup === "unconfirmed" ? "partial" : terminal.outcome,
+        execution.status === "unconfirmed" || execution.cleanup === "unconfirmed" ? execution.diagnostic : terminal.diagnostic);
+      return;
+    }
+    throw new MoguriError("plan_worker_request", "A deterministic user plan worker requested an unrelated model/tool operation. No additional authority was granted.", 409);
+  }
   private async workerMessage(run: Run, request: WorkerRequest): Promise<void> {
     const session = this.session(run.sessionId);
     if (request.kind === "ack") {
@@ -1166,6 +1344,8 @@ export class ControlPlane extends EventEmitter {
       }
       return;
     }
+    if (run.planSave) { await this.userPlanMessage(run, request); return; }
+    if (request.kind === "user-plan.complete") throw new MoguriError("plan_worker_request", "This model turn does not own a user plan operation. No result was adopted.", 409);
     if (request.kind === "finished") {
       this.finishRun(run, request.outcome, request.diagnostic);
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
@@ -1427,6 +1607,7 @@ export class ControlPlane extends EventEmitter {
   }
   private finishRun(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
     if (run.done) return;
+    if (run.planSave) { this.finishPlanRun(run, outcome, diagnostic); return; }
     run.done = true;
     clearTimeout(run.stopTimer);
     if (run.abort.signal.aborted && outcome === "completed") { outcome = "stopped"; diagnostic = "Stop was requested before the turn settled."; }
@@ -1434,6 +1615,67 @@ export class ControlPlane extends EventEmitter {
       outcome = outcome === "completed" ? "partial" : outcome;
       diagnostic = `${diagnostic ?? "Turn interrupted."} The in-flight request's final usage is unavailable.`;
     }
+    this.finishModelRun(run, outcome, diagnostic);
+  }
+  private finishPlanRun(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
+      const operation = run.planSave;
+      if (!operation || run.done) return;
+      run.done = true; clearTimeout(run.stopTimer); clearTimeout(operation.cleanupTimer);
+      const session = this.session(run.sessionId), save = this.planSave(operation.id, session.id);
+      const execution = this.projection.executions.find((value) => value.id === run.executionId);
+      const result: PlanFileResult | null = save.resultDigest ? parse(PlanFileResultSchema, JSON.parse(this.store.blob(save.resultDigest))) : null;
+      const possibleEffects = save.fileOutcome !== "not-started" || save.createdDirectories.length > 0;
+      const clean = execution?.cleanup === "owned-worker-stopped" && execution.status !== "unconfirmed";
+      if (run.abort.signal.aborted) { outcome = possibleEffects ? "partial" : "stopped"; diagnostic = possibleEffects ? "Stop arrived after authorized filesystem work. Actual effects were retained; no rollback was inferred." : "Owned plan save stopped before a filesystem effect."; }
+      if (outcome === "completed") {
+        try {
+          if (!clean || !result || result.outcome !== "completed" || result.fileOutcome !== "written" || !result.readback || run.granted.size) throw new MoguriError("plan_partial", "Remote plan bytes or owned-worker cleanup were not confirmed. No complete save was inferred.", 409);
+          this.checkPlanScope(session, save);
+        } catch (error) { outcome = "partial"; diagnostic = error instanceof MoguriError ? error.message : "Remote plan scope changed before settlement. Inspect its actual outcome."; }
+      }
+      let artifact: RetainedArtifact | undefined;
+      let receipt: CommandResult | undefined;
+      try {
+        if (result?.fileOutcome === "written" && result.text !== null && result.digest === save.textDigest && execution) {
+          const source = this.history.findLast((event) => event.turn_id === run.turnId && event.event_type === "tool.completed" && event.payload.call.id === operation.operation.callId);
+          artifact = this.platform.artifacts.capture({ ...session, projectId: save.projectId, workspaceId: null }, save.path, result.text, {
+            eventId: source?.id ?? null, sessionId: session.id, messageId: operation.operation.callId, actor: "user", modelId: null, outcome,
+            contentDigest: result.digest, boundary: { env: "Remote", executionId: execution.id, hostFingerprint: save.hostFingerprint, root: save.root, workerDigest: save.workerDigest, path: save.path },
+          });
+        }
+        if (outcome === "completed" && !artifact) throw new MoguriError("plan_partial", "Remote file effect was not independently retained. Inspect the exact save before retrying.", 409);
+        const events: EventInput[] = [
+          ...(artifact ? [this.event(session, "artifact.revised", { artifact })] : []),
+          this.planSaveEvent(session, { ...save, status: outcome, phase: "settled", artifactId: artifact?.id ?? null, diagnostic: diagnostic ?? result?.diagnostic ?? null, revision: save.revision + 1, updatedAt: new Date().toISOString() }),
+          ...(session.pendingMode ? [
+            ...session.queue.filter((item) => item.mode && item.targetTurnId === run.turnId).map((item) => this.event(session, "queue.removed", { messageId: item.id })),
+            this.event(session, "session.mode_changed", { mode: session.pendingMode }),
+          ] : []),
+          this.event(session, "turn.finished", { outcome, diagnostic: diagnostic ?? result?.diagnostic ?? null, workspaceEffects: !possibleEffects && clean ? "none" : "possible" }, run.stepId),
+          ...(execution && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) ? [this.event(session, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Plan save settled locally without confirmed owned-worker cleanup. Inspect this exact execution; no write was replayed." })] : []),
+        ];
+        if (outcome === "completed" && artifact) receipt = operation.finish(events, { id: artifact.id, revision: 0 });
+        else this.commit(events);
+      } catch (error) {
+        console.error("Remote plan effect could not be fully retained:", error instanceof MoguriError ? error.code : "plan_retention");
+        outcome = "partial"; diagnostic = "Remote plan filesystem work may already be written, but its independent artifact/receipt was not committed. Inspect this exact save before retrying; no complete success or rollback was recorded.";
+        try {
+          this.commit([this.planSaveEvent(session, { ...save, status: "partial", phase: "settled", artifactId: null, diagnostic, revision: save.revision + 1, updatedAt: new Date().toISOString() }),
+            this.event(session, "turn.finished", { outcome: "partial", diagnostic, workspaceEffects: "possible" }, run.stepId)]);
+        } catch (persistence) {
+          console.error("Remote plan partial outcome persistence also failed:", persistence instanceof MoguriError ? persistence.code : "plan_persistence");
+          diagnostic += " Outcome persistence also failed; preserve the existing state and inspect its retained intent after recovery.";
+        }
+      } finally {
+        this.runs.delete(run.sessionId);
+        if ((outcome === "partial" || outcome === "failed") && possibleEffects) this.paused.add(session.id);
+        queueMicrotask(() => this.pumpAll());
+      }
+      if (outcome === "completed" && receipt) operation.resolve(receipt);
+      else operation.reject(new MoguriError(outcome === "partial" ? "plan_partial" : outcome === "stopped" ? "plan_stopped" : "plan_save_failed",
+        diagnostic ?? result?.diagnostic ?? `Remote plan save ${save.id} ${outcome}. No write was replayed.`, 409));
+  }
+  private finishModelRun(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
     const session = this.session(run.sessionId);
     const execution = this.projection.executions.find((value) => value.id === run.executionId);
     if (run.granted.size) { outcome = "partial"; diagnostic = "A tool was approved but its execution result or cleanup was not confirmed. Inspect the workspace before continuing."; }

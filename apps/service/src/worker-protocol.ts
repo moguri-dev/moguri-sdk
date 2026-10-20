@@ -1,8 +1,9 @@
 import { Type, type Static, type Message, type AssistantMessage, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { isRecord, MAX_TEXT, ModelStreamObservationSchema, type ToolCall, type SessionMode, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, type ToolCall, type SessionMode, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 import type { FolderPolicy } from "./project-policy.ts";
 import type { PreparedModel } from "./provider.ts";
+import { UserPlanInputSchema } from "./user-plan.ts";
 
 const toolCall = Type.Object({ id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()) });
 export const WorkerRequestSchema = Type.Union([
@@ -11,6 +12,7 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("approval"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("delegate"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: MAX_TEXT + 4096 }), isError: Type.Boolean(), outcome: Type.String() }),
+  Type.Object({ kind: Type.Literal("user-plan.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: PlanFileResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("delta"), stepId: Type.String(), text: Type.String({ maxLength: MAX_TEXT }) }),
   Type.Object({ kind: Type.Literal("output"), stepId: Type.String(), callId: Type.String(), text: Type.String({ maxLength: 16_384 }) }),
   Type.Object({ kind: Type.Literal("process"), stepId: Type.String(), callId: Type.String(), pid: Type.Integer({ minimum: 1 }) }),
@@ -18,7 +20,11 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("finished"), requestId: Type.String(), outcome: Type.Union([Type.Literal("completed"), Type.Literal("stopped"), Type.Literal("failed"), Type.Literal("partial")]), diagnostic: Type.Union([Type.String(), Type.Null()]) }),
 ]);
 export type WorkerRequest = Static<typeof WorkerRequestSchema>;
-export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean }
+export const UserPlanOperationSchema = Type.Object({
+  kind: Type.Literal("plan.save"), stepId: Type.String({ minLength: 1, maxLength: 128 }), callId: Type.String({ minLength: 1, maxLength: 128 }), input: UserPlanInputSchema,
+}, { additionalProperties: false });
+export type UserPlanOperation = Static<typeof UserPlanOperationSchema>;
+export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; operation?: UserPlanOperation }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction"; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
 export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean; continue?: true } | DelegatedResult; error?: string; halt?: true };
@@ -31,7 +37,10 @@ export function parentMessage(value: unknown): ParentMessage {
     (value.halt === undefined || value.halt === true) &&
     (value.error === undefined || typeof value.error === "string") &&
     (value.value === undefined || isRecord(value.value))) return value as ParentMessage;
-  if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) return value as ParentMessage;
+  if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) {
+    if (value.operation !== undefined && (!Value.Check(UserPlanOperationSchema, value.operation) || value.root === null || value.context.length || value.readOnly !== false)) throw new Error("Invalid owned user operation. No model or filesystem effect was started.");
+    return value as ParentMessage;
+  }
   throw new Error("Invalid parent message.");
 }
 const assistantSchema = Type.Object({

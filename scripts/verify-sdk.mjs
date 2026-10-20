@@ -87,6 +87,11 @@ try {
       await saveArtifactExport("/generated/explicit-export.json",exported);
       await sdk.sessions.env(general.id!,"Local");
       const remote=await sdk.remote.status();void remote.remote.workerDigest;
+      const planView=await sdk.plans.read("generated-id");void planView.boundary?.root;
+      await sdk.plans.save("generated-id","Generated exact user plan.",planView.digest,planView.bindingDigest);
+      const saves=await sdk.plans.saves("generated-id");void saves.saves[0]?.fileOutcome;
+      const saveInfo=await sdk.plans.saveInfo("generated-id","generated-save");void saveInfo.result?.readback;
+      await sdk.plans.stopSave("generated-id","generated-save");
       const workspace=await sdk.workspaces.create("generated-id","moguri/generated",{baseRef:"main"});
       await sdk.workspaces.wait(workspace.id!);
       const discovered=await sdk.workspaces.discover("generated-id"); void discovered.registrations[0]?.managedId;
@@ -131,7 +136,9 @@ try {
     git(["config","user.name","Generated fixture"]);git(["config","user.email","fixture@example.invalid"]);
     const makeProvider=()=>{const value={state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>value.onChange(),login:()=>{throw Error("No real authorization in SDK verification")},cancel:async()=>{},logout:async()=>{},prepare:async()=>{throw Error("No paid calls in SDK verification")}};return value;};
     const provider=makeProvider(),providers=new Map([["default",provider]]),vaults=new Map();
-    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]}};
+    const remoteSecrets=new Map();
+    const remoteVault={read:async id=>remoteSecrets.get(id)??null,write:async(id,value)=>{remoteSecrets.set(id,value);},remove:async id=>{remoteSecrets.delete(id);}};
+    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault}};
     const runtime=await createRuntime({stateDir:join(root,"state"),retentionKey:Buffer.alloc(32,0x67),platform,profiles:{
       provider:id=>{if(!providers.has(id))providers.set(id,makeProvider());return providers.get(id);},
       platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
@@ -195,6 +202,23 @@ try {
         assert.match((await sdk.workspaces.git(viewer.id)).diff,/Generated installed SSH-only change/);
         assert.equal((await sdk.plans.read(viewer.id)).text,"Generated installed SSH-only plan.\\n");
         assert.deepEqual(await sdk.slash(viewer.id,"/plan","cli"),{kind:"text",text:"Generated installed SSH-only plan.\\n"});
+        if(PROTOCOL_VERSION>=20){
+          const plan=await sdk.plans.read(viewer.id),inputPath=join(root,"generated-explicit-remote-plan.md");
+          await writeFile(inputPath,"Generated actual installed CLI Remote plan save.\\n");
+          const saved=JSON.parse((await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"plan","save",inputPath,"--session",viewer.id,"--digest",plan.digest,"--binding",plan.bindingDigest],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}})).stdout);
+          assert.equal((await sdk.plans.read(viewer.id)).text,"Generated actual installed CLI Remote plan save.\\n");
+          const retained=await sdk.artifacts.read(saved.id);assert.equal(retained.artifact.sources[0].boundary.env,"Remote");assert.equal(retained.artifact.sources[0].boundary.root,remoteRoot);
+          assert.equal(retained.artifact.sources[0].actor,"user");
+          const actual=await sdk.plans.read(viewer.id);
+          const second=await sdk.plans.save(viewer.id,"Generated actual installed SDK Remote plan save.\\n",actual.digest,actual.bindingDigest);
+          const operations=(await sdk.plans.saves(viewer.id)).saves;
+          assert.equal(operations.length,2);assert.ok(operations.every(value=>value.status==="completed"&&value.fileOutcome==="written"));
+          assert.equal((await sdk.plans.saveInfo(viewer.id,operations[1].id)).result.text,"Generated actual installed SDK Remote plan save.\\n");
+          assert.equal((await sdk.artifacts.read(second.id)).text,"Generated actual installed SDK Remote plan save.\\n");
+          await assert.rejects(()=>sdk.plans.stopSave(viewer.id,operations[0].id),/settled|newer|ownership/);
+          assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).usage.length,0);
+          assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).messages.some(value=>value.role==="user"),false);
+        }
         assert.match((await sdk.workspaces.file(s.id,"generated.ts")).text,/portableSdkMemory/);
       }
       const workerPath=fileURLToPath(new URL("../worker.mjs",import.meta.resolve("moguri/node")));
@@ -432,7 +456,7 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction preview/generate/read/apply/restore CLI and real metered SDK history, installed worker handshake, macOS SSH workspace files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "" } });
 } finally { try { await ssh?.close(); } finally { await rm(temporary, { recursive: true, force: true }); } }

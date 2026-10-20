@@ -40,7 +40,8 @@ function references(input: EventInput): string[] {
     case "session.created": return input.payload.contextDigest ? [input.payload.contextDigest] : [];
     case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.map((entry) => entry.digest)];
     case "turn.prompt_bound": return [input.payload.promptDigest];
-    case "turn.control_started": return [input.payload.promptDigest];
+    case "turn.control_started": return [input.payload.purpose === "compaction" ? input.payload.promptDigest : input.payload.intentDigest];
+    case "plan.save_recorded": return [input.payload.save.inputDigest, input.payload.save.resultDigest].filter((hash): hash is string => hash !== null);
     case "compaction.saved": return [input.payload.compaction.inputDigest, input.payload.compaction.resultDigest, input.payload.compaction.replacementDigest].filter((hash): hash is string => hash !== null);
     case "draft.saved": return input.payload.attachments.map((entry) => entry.digest);
     case "steer.applied": return input.payload.item.attachments.map((entry) => entry.digest);
@@ -136,6 +137,9 @@ export class EventStore {
       if (version < 19) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('context_compaction_schema','1');
         PRAGMA user_version=19; COMMIT;`);
+      if (version < 20) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('remote_plan_save_schema','1');
+        PRAGMA user_version=20; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

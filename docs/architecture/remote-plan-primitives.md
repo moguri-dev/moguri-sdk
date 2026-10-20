@@ -1,15 +1,18 @@
 # Owned SSH plan-mutation prerequisite
 
 This is a non-sandbox Phase-0 mechanical qualification, not the Remote plan-save
-feature. The current public `plans.save` still rejects Remote and the desktop
-view remains read-only. No existing qualified archive is replaced or relabeled.
+feature. At the 0.13/protocol-19 prerequisite checkpoint, public `plans.save`
+still rejected Remote and the desktop view was read-only. The subsequent
+[production contract](remote-plan-saves.md) adds the qualified owned path.
+No earlier qualified archive is replaced or relabeled.
 
 ## Reuse and boundary
 
 Reuse Node filesystem/crypto, maintained TypeBox and the existing private SSH
 bridge, encrypted replay journal, exact worker digest and `EventStore`.
-These libraries/tools are MIT-licensed; no runtime dependency, model provider
-or second agent framework is added. Esbuild only prepares a generated fixture.
+Node, TypeBox and the test-only esbuild are MIT-licensed; OpenSSH retains its
+upstream BSD/ISC-style licenses. No runtime dependency, model provider or
+second agent framework is added. Esbuild only prepares a generated fixture.
 
 The fixture copies the actual built bridge byte-for-byte into a private
 temporary prefix and pins a generated deterministic filesystem worker beside

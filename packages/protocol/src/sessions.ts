@@ -4,6 +4,7 @@ import { McpServerSchema, SandboxSchema } from "./config.ts";
 import type { ModelContextPreview } from "./model.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
 import { ProjectArtifactChoiceSchema, type RetainedArtifact } from "./artifacts.ts";
+import type { PlanBinding } from "./plan-saves.ts";
 export type { RetainedArtifact } from "./artifacts.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -77,7 +78,7 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.group"), projectId: id, id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision }),
   object({ type: Type.Literal("session.browser"), sessionId: id, url: Type.String({ minLength: 1, maxLength: 2048 }) }),
   object({ type: Type.Literal("artifact.capture"), sessionId: id, path: Type.Optional(path) }),
-  object({ type: Type.Literal("plan.save"), sessionId: id, text: Type.String({ maxLength: 128 * 1024 }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }) }),
+  object({ type: Type.Literal("plan.save"), sessionId: id, text: Type.String({ maxLength: 128 * 1024 }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }), expectedBinding: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })) }),
   object({ type: Type.Literal("terminal.open"), sessionId: id, scriptId: Type.Optional(id), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
   object({ type: Type.Literal("terminal.close"), terminalId: id }),
   object({ type: Type.Literal("terminal.acknowledge"), terminalId: id, confirmInspection: Type.Literal(true) }),
@@ -107,5 +108,5 @@ export type SessionWorkspaceResponse =
   | { type: "project.git"; branch: string; repository: string | null; status: string; diff: string }
   | { type: "project.sources"; instructions: string | null; mcp: string | null; instructionsPath: string; mcpPath: string; mcpDigest: string | null }
   | { type: "project.porto"; output: string }
-  | { type: "plan.read"; path: string; text: string; digest: string; exists: boolean }
+  | ({ type: "plan.read"; path: string; text: string; digest: string; exists: boolean } & Partial<PlanBinding>)
   | { type: "terminal.read"; terminal: TerminalState; data: string; baseOffset: number; nextOffset: number };

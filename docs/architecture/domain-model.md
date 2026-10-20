@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 19; immutable event
+Protocol version and database migration version are 20; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -22,6 +22,12 @@ retained proposal revisions and explicit user context changes. Old ciphertexts,
 receipts, keys/grants and charges are unchanged. No historical compaction is
 invented; interrupted calls become partial without retry/application.
 
+Migration 20 adds exact user Remote plan intents/results and Remote file/frame
+artifact provenance. The operation uses no model role/reservation or synthetic
+user prompt. Original ciphertexts, scoped receipts/grants and charge records
+stay unchanged; interrupted writes remain partial and cannot be replayed by
+their original command IDs.
+
 ## Implemented entities
 
 | Entity | Identity and authority |
@@ -35,6 +41,7 @@ invented; interrupted calls become partial without retry/application.
 | Step | One authorized provider request, normalized final context snapshot, usage quality, request wall time and declared tools. Worker completion requires durable acknowledgement before tools or the next step. |
 | Routing turn | Opt-in Single policy/task/revision snapshot, exact classifier/eligible solver IDs, untrusted typed plan and actual lifecycle. Uses the same owning turn, worker, approvals and ledger; classifier context is never solver history. |
 | Context compaction | Session-owned exact source/model/contract/prefix snapshot, revisioned running/proposed/applied/superseded/restored/discarded/stopped/failed/partial state, actual step/model role and retained input/result/context blobs. Explicit user application changes only effective context; original transcript and charges survive. |
+| Remote plan save | Exact user command/argument/binding intent, owning execution/root/peer/build, actual directory/file outcome and retained result/artifact. Result/terminal acknowledgement, actual worker exit and atomic artifact/receipt settlement remain separate; no model, replay or rollback is inferred. |
 | Draft | Text, approved attachment snapshots and optimistic revision. Local unacknowledged edits are explicitly not authoritative. |
 | Queue item | UUID, text, snapshots, delivery mode, held state, optional steer target and mode-control intent. Held prompts never auto-admit. Only unclaimed items are mutable. |
 | Approval | UUID, exact tool ID/name/arguments, step, policy and permission revisions. Human answers are `user`, invalidations `policy`, explicit grants `delegation` with rule ID. |

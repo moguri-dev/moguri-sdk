@@ -1,13 +1,14 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, BudgetQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, BudgetQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Side chat" | "Suggestions" | "Attention";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
+export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
 export type SlashResult =
   | { kind: "ok"; message: string }
   | { kind: "session"; sessionId: string; side: boolean }
-  | { kind: "panel"; panel: SessionPanel | "Settings" | "Models" | "Queue"; url?: string; path?: string; text?: string; allProjects?: boolean }
+  | { kind: "panel"; panel: SessionPanel | "Settings" | "Models" | "Queue"; url?: string; path?: string; text?: string; allProjects?: boolean; planEditor?: PlanEditorRequest }
   | { kind: "text"; text: string }
   | { kind: "copy"; text: string }
   | { kind: "artifact-editor"; artifact: ArtifactEditorRequest }
@@ -32,7 +33,7 @@ export const slashCommands = [
   { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal", desktopOnly: true },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
-  { name: "plan", description: "Open the project plan" },
+  { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
   { name: "artifacts", description: "View independent retained documents" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
@@ -66,9 +67,10 @@ export function parseAttachmentTrigger(text: string): { prefix: keyof typeof att
 }
 export function parseSlash(text: string): { name: string; argument: string } | null {
   if (!text.startsWith("/")) return null;
-  const [first, ...rest] = text.trim().split(/\s+/);
-  const name = first!.slice(1);
-  return { name: name === "termnial" ? "terminal" : name === "metachat" ? "meta" : name, argument: rest.join(" ") };
+  const match = text.trim().match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+  if (!match) return null;
+  const name = match[1]!;
+  return { name: name === "termnial" ? "terminal" : name === "metachat" ? "meta" : name, argument: match[2] ?? "" };
 }
 export const isSharedSlash = (name: string): boolean => slashCommands.some((command) => command.name === name || "aliases" in command && command.aliases.some((alias) => alias === name));
 export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: string, client: "desktop" | "tui" | "cli"): Promise<SlashResult> {
@@ -365,9 +367,28 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "plan": {
       if (!session.projectId) throw new ClientError("project_required", "Select a project to open its plan.");
+      if (command.argument === "edit") {
+        if (client === "desktop") return { kind: "panel", panel: "Plan" };
+        const result = await sdk.plans.read(session.id);
+        if (client === "cli") return { kind: "text", text: JSON.stringify({ ...result, guidance: "Use plan save FILE --digest OBSERVED_DIGEST and --binding BINDING_SHA for Remote. No Local file opener was used." }, null, 2) };
+        return { kind: "panel", panel: "Plan", planEditor: { sessionId: session.id, path: result.path, text: result.text, digest: result.digest, bindingDigest: result.bindingDigest, boundary: result.boundary, env: session.controls.env } };
+      }
+      if (command.argument === "saves") return { kind: "text", text: JSON.stringify(await sdk.plans.saves(session.id), null, 2) };
+      if (command.argument.startsWith("info ")) return { kind: "text", text: JSON.stringify(await sdk.plans.saveInfo(session.id, command.argument.slice(5).trim()), null, 2) };
+      if (command.argument.startsWith("stop ")) {
+        await sdk.plans.stopSave(session.id, command.argument.slice(5).trim());
+        return { kind: "ok", message: "Stop requested for this exact Remote plan save. Inspect its actual outcome; no newer turn was targeted." };
+      }
+      if (command.argument.startsWith("save ") && command.argument.endsWith(" confirm-write")) {
+        const value: unknown = JSON.parse(command.argument.slice(5, -" confirm-write".length));
+        if (!isRecord(value) || Object.keys(value).some((key) => !["text", "expectedDigest", "expectedBinding"].includes(key)) || typeof value.text !== "string" || typeof value.expectedDigest !== "string" || value.expectedBinding !== undefined && typeof value.expectedBinding !== "string") throw new ClientError("plan_command", "Use /plan save {text,expectedDigest,expectedBinding?} confirm-write after reviewing the exact bound plan. Remote requires its reviewed binding.");
+        const saved = await sdk.plans.save(session.id, value.text, value.expectedDigest, value.expectedBinding);
+        return { kind: "ok", message: `Exact plan saved and independently retained as ${saved.id}. No model was called or permission changed.` };
+      }
+      if (command.argument) throw new ClientError("plan_command", "Use /plan, saves, info ID, stop ID, or save {text,expectedDigest} confirm-write. Inspect partial outcomes before a new explicit save.");
       if (client === "desktop") return { kind: "panel", panel: "Plan" };
       const result = await sdk.plans.read(session.id);
-      if (session.controls.env === "Remote") return { kind: "text", text: result.exists ? result.text : `No plan file at ${result.path}. Remote plan viewing is read-only.` };
+      if (session.controls.env === "Remote") return { kind: "text", text: result.exists ? result.text : `No plan file at ${result.path}. Use the explicit SDK/plan save action; no Local file opener was used.` };
       const project = sdk.getState().snapshot!.projects.find((project) => project.id === session.projectId)!;
       const workspace = session.workspaceId ? sdk.getState().snapshot!.managedWorkspaces.find((value) => value.id === session.workspaceId) : undefined;
       if (session.workspaceId && !workspace) throw new ClientError("workspace_missing", "The bound worktree is unavailable. No base plan path was substituted.");

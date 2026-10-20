@@ -1,16 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import {
   defaultProjectConfiguration, defaultProjectSettings, defaultSettings, isRecord, McpServerSchema, MoguriError, parse,
   type Project, type ProjectConfiguration, type ProjectSettings, type SessionWorkspaceResponse, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
-import { isProtectedProjectPath, scopedPath, writeProjectFile } from "./files.ts";
+import { isProtectedProjectPath, writeProjectFile } from "./files.ts";
 import { validateSettings } from "./permissions.ts";
 import { assertFolderAccess, assertFolderName, folderPolicy, validateProjectPath, readOptionalProjectFile, repositoryContext, type FolderPolicy } from "./project-policy.ts";
 import { runProgram } from "./program.ts";
 import { digest } from "./store.ts";
 import { readWorkspaceGit } from "./project-git.ts";
+import { prepareProjectDirectory } from "./project-directory.ts";
 
 export class ProjectService {
   constructor(private readonly snapshot: () => Snapshot, private readonly stateDir: string) {}
@@ -160,14 +161,6 @@ export class ProjectService {
     }
   }
   async prepareDirectory(root: string, path: string): Promise<void> {
-    validateProjectPath(path);
-    if (isProtectedProjectPath(path)) throw new MoguriError("project_path", "Plan/default paths cannot enter protected directories.");
-    const parts = path.replaceAll("\\", "/").split("/").slice(0, -1).filter((part) => part && part !== ".");
-    let current = root;
-    for (const part of parts) {
-      current = join(current, part);
-      await mkdir(current, { mode: 0o755 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
-      await scopedPath(root, `${current}/.`);
-    }
+    await prepareProjectDirectory(root, path);
   }
 }

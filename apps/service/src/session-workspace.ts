@@ -4,7 +4,7 @@ import { basename, isAbsolute } from "node:path";
 import {
   MoguriError, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
-  type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice,
+  type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding,
 } from "../../../packages/protocol/src/index.ts";
 import type { ForgetRequest } from "./store.ts";
 import { readProjectFile, writeProjectFile } from "./files.ts";
@@ -33,6 +33,7 @@ export interface SessionWorkspaceHost {
   project(session: Pick<Session, "projectId" | "workspaceId">): Project;
   rootBusy(projectId: string, workspaceId: string | null): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
+  remotePlanBinding(session: Session): PlanBinding;
 }
 export class SessionWorkspace {
   readonly projects: ProjectService;
@@ -104,7 +105,7 @@ export class SessionWorkspace {
         if (session.controls.env === "Remote") {
           const result = await this.host.remoteRead(session, { type: "plan.read" });
           if (result.type !== "plan.read") throw new MoguriError("remote_workspace_type", "Remote plan response did not match its request.", 409);
-          return result;
+          return { ...result, ...this.host.remotePlanBinding(this.session(session.id)) };
         }
         if (session.controls.env !== "Local") throw new MoguriError("plan_env", "Plan workspace transport is not qualified for this environment. No local project was read as a fallback.", 409);
         const project = this.host.project(session);

@@ -66,7 +66,7 @@ test("a failed schema-17 marker transaction leaves schema-16 state usable withou
   } finally { await restarted?.close(); await fixture.close(); }
 });
 
-test("the current SSH inspector verifies generated authenticated protocol-16/17/18 receipts without attaching or replaying the legacy worker", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
+test("the current SSH inspector verifies generated authenticated protocol-16/17/18/19 receipts without attaching or replaying the legacy worker", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
   const fixture = await remoteFixture();
   try {
     await fixture.probe(); await fixture.select(); await fixture.send("Generated legacy-inspection reply.");
@@ -74,7 +74,7 @@ test("the current SSH inspector verifies generated authenticated protocol-16/17/
     const execution = await waitFor(() => fixture.controller.snapshot().executions.find((value) => value.cleanup === "owned-worker-stopped"));
     const key = fixture.secrets.get(execution.id)!; assert.ok(key);
     const path = join(execution.target.stateDir, execution.id, "status.json"), saved = JSON.parse(await readFile(path, "utf8"));
-    for (const protocol of [16, 17, 18]) {
+    for (const protocol of [16, 17, 18, 19]) {
       saved.info.protocol = protocol;
       saved.proof = createHmac("sha256", Buffer.from(key, "hex")).update(JSON.stringify({ status: saved.status, info: saved.info })).digest("hex");
       await writeFile(path, JSON.stringify(saved), { mode: 0o600 });

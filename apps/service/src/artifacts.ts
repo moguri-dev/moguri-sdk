@@ -60,8 +60,8 @@ export class ArtifactRuntime {
     if (workItemId && (!projectId || !this.host.snapshot().issues.some((issue) => issue.id === workItemId && issue.projectId === projectId))) throw new MoguriError("artifact_work_item", "Choose a work item from this artifact's own project, or clear the association.");
     return { folderId, workItemId };
   }
-  capture(session: Session, path: string, text: string): RetainedArtifact {
-    return this.create(session, "plan", basename(path), text, "file", [{ eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: null, contentDigest: digest(text) }], path);
+  capture(session: Session, path: string, text: string, source?: ArtifactSource): RetainedArtifact {
+    return this.create(session, "plan", basename(path), text, "file", [source ?? { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: null, contentDigest: digest(text) }], path);
   }
   answerEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
     if (!snapshot.settings.values.artifacts.retainAnswers) return [];

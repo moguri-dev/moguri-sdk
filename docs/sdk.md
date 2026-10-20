@@ -5,9 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 19 deliberately rejects incompatible running
-services and requires the matching SSH worker for reviewed compaction and model
-telemetry. State migrations preserve schema-1 through schema-18 history, sessions, drafts,
+This is an alpha API. Protocol 20 deliberately rejects incompatible running
+services and requires the matching SSH worker for exact user plan operations,
+reviewed compaction and model telemetry. State migrations preserve schema-1
+through schema-19 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -21,7 +22,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.13.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.14.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -52,11 +53,11 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.13.0-alpha.1.tgz`.
+repacking: `npm run verify:sdk -- release/moguri-0.14.0-alpha.1.tgz`.
 Current verification also exercises actual installed-worker SSH files,
 Git/plan reads, dated/per-call telemetry and actual metered compaction with the
 installed CLI/worker. Historical archives retain their separately
-recorded qualification; protocol-16/17/18 SSH receipts remain inspectable without
+recorded qualification; protocol-16/17/18/19 SSH receipts remain inspectable without
 reattaching or continuing an old worker.
 
 ## Connect to the shared service
@@ -120,7 +121,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `sessions` | Revisioned controls/modelOptions, local context preview, rename/mode/pin/unread/group/attach/delete, explicit side/agent children and work-item/verified-PR context. Side sessions cannot acquire write authority. |
 | `projects` | Configuration, ordered folders/color, atomic reorder, relocation/removal, scoped Git/source reads, reviewed MCP imports and explicit default-file publication. |
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
-| `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
+| `plans` | Digest-checked Local/Remote plan read/save and independent snapshots. Remote writes require the reviewed binding and an owned no-model operation; actual saves/info/exact-stop expose partial/recovery outcomes without replay. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
@@ -292,7 +293,21 @@ suppression apply on the execution host. Target, root, env or policy changes
 invalidate pending results; disconnects are errors, not empty views or fallback.
 These are explicit user views, not implicit attachments or model context.
 Remote `/plan` returns text in CLI/TUI, never a Local file-opener action.
-Remote plan viewing is read-only; `plans.save` remains unavailable there.
+Remote plan writes use the same owned worker without a model request.
+Pass the exact reviewed binding as the fourth argument:
+
+```ts
+const plan = await sdk.plans.read(sessionId);
+const saved = await sdk.plans.save(sessionId, editedText, plan.digest, plan.bindingDigest);
+const retained = await sdk.artifacts.read(saved.id!);
+```
+
+`plans.saves(sessionId)`, `saveInfo(sessionId, saveId)` and
+`stopSave(sessionId, saveId)` inspect/control actual operations. A thrown
+partial error can mean bytes already changed; inspect before a new explicit
+save. A repeated original command never replays its recorded intent after
+restart. Local callers retain the three-argument form. See
+[Remote plan saves](architecture/remote-plan-saves.md).
 
 `attachments.file`/`image` capture selected content. `folderPreview`,
 `githubPreview` and `sessionPreview` return exact source/size/exclusion/digest

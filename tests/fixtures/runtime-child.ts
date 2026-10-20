@@ -4,6 +4,7 @@ import type { ProviderAdapter } from "../../apps/service/src/provider.ts";
 import { isRecord } from "../../packages/protocol/src/index.ts";
 import { GeneratedFileVault } from "./generated-vault.ts";
 import { GENERATED_RETENTION_KEY } from "../fixture.ts";
+import { createRemoteFrameGate } from "./remote-frame-gate.ts";
 
 process.once("message", (raw: unknown) => {
   void (async () => {
@@ -19,6 +20,12 @@ process.once("message", (raw: unknown) => {
     };
     const vault = new GeneratedFileVault(raw.vaultPath);
     const service = await startService({ stateDir: raw.stateDir, provider, retentionKey: GENERATED_RETENTION_KEY, platform: { remote: { vault, modelsVault: vault } } });
+    if (raw.holdUserPlan === "approval" || raw.holdUserPlan === "result") {
+      const gate = createRemoteFrameGate(raw.holdUserPlan === "approval" ? "approval" : "user-plan.complete",
+        (frame) => process.send?.({ kind: "held-user-plan", executionId: frame?.executionId }));
+      const launch = service.controller.remote.launch.bind(service.controller.remote);
+      service.controller.remote.launch = (...args) => gate.wrap(launch(...args));
+    }
     process.send?.({ kind: "connection", connection: service.connection });
   })().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Generated runtime bootstrap failed."); process.exitCode = 1; process.disconnect?.(); });
 });

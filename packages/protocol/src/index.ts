@@ -20,9 +20,10 @@ import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 import type { RoutingTurn, SingleRoutingPlan } from "./routing.ts";
 import type { ContextCompaction } from "./compaction.ts";
+import type { RemotePlanSave } from "./plan-saves.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 19;
+export const PROTOCOL_VERSION = 20;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -217,7 +218,10 @@ export interface EventPayloads {
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
   "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string };
-  "turn.control_started": { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string };
+  "turn.control_started":
+    | { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string }
+    | { purpose: "plan.save"; saveId: string; controls: Controls; policyRevision: number; intentDigest: string };
+  "plan.save_recorded": { save: RemotePlanSave };
   "compaction.saved": { compaction: ContextCompaction };
   "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string };
   "steer.applied": { item: QueueItem };
@@ -239,7 +243,7 @@ export interface EventPayloads {
   "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string };
   "turn.stop_requested": Record<string, never>;
   "turn.stop_acknowledged": Record<string, never>;
-  "turn.finished": { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
+  "turn.finished": { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null; workspaceEffects?: "none" | "possible" };
   "policy.updated": { policy: Policy; finishingTurnIds: string[] };
   "provider.changed": { status: ProviderState["status"]; diagnostic: string | null };
   "mcp.oauth_changed": { authorization: McpAuthorization };
@@ -318,7 +322,7 @@ export const eventTypes: readonly EventType[] = [
   "budget.recorded", "budget.policy_changed", "budget.blocked",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
-  "turn.control_started", "compaction.saved", "context.changed",
+  "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -345,6 +349,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const questions = new Map<string, UserQuestion>();
   const routings = new Map<string, RoutingTurn>();
   const compactions = new Map<string, ContextCompaction>();
+  const planSaves = new Map<string, RemotePlanSave>();
   const budgetEntries = new Map<string, BudgetEntry>();
   let budgetPolicy: PlatformSnapshot["budgetPolicy"] = { revision: 0, limit: null };
   const terminals = new Map<string, TerminalState>();
@@ -356,6 +361,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "budget.recorded") budgetEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
     if (event.event_type === "budget.policy_changed") budgetPolicy = structuredClone(event.payload);
     if (event.event_type === "compaction.saved") compactions.set(event.payload.compaction.id, structuredClone(event.payload.compaction));
+    if (event.event_type === "plan.save_recorded") planSaves.set(event.payload.save.id, structuredClone(event.payload.save));
     if (event.event_type === "routing.started") routings.set(event.payload.routing.id, structuredClone(event.payload.routing));
     if (event.event_type === "routing.planned") {
       const routing = routings.get(event.payload.routingId);
@@ -374,12 +380,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       for (const [id, question] of questions) if (question.sessionId === event.payload.deletedSessionId) questions.delete(id);
       for (const [id, routing] of routings) if (routing.sessionId === event.payload.deletedSessionId) routings.delete(id);
       for (const [id, compaction] of compactions) if (compaction.sessionId === event.payload.deletedSessionId) compactions.delete(id);
+      for (const [id, save] of planSaves) if (save.sessionId === event.payload.deletedSessionId) planSaves.delete(id);
     }
     if (event.event_type === "project.removed") {
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
-      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings, compactions]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings, compactions, planSaves]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -446,11 +453,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         if (job.workspaceId) blockedWorkspaces.add(job.workspaceId); else blockedProjects.add(job.projectId);
       }
     }
-    if (event.event_type === "turn.finished" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) {
+    if (event.event_type === "turn.finished" && event.payload.workspaceEffects !== "none" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) {
       const workspaceId = event.session_id ? sessions.get(event.session_id)?.workspaceId : null;
       if (workspaceId) blockedWorkspaces.add(workspaceId); else blockedProjects.add(event.project_id);
     }
-    if (event.event_type === "turn.finished" && ["partial", "failed"].includes(event.payload.outcome) && !event.project_id && event.session_id) blockedSessions.add(event.session_id);
+    if (event.event_type === "turn.finished" && event.payload.workspaceEffects !== "none" && ["partial", "failed"].includes(event.payload.outcome) && !event.project_id && event.session_id) blockedSessions.add(event.session_id);
     if (event.event_type === "session.resumed" && event.project_id) {
       const workspaceId = event.session_id ? sessions.get(event.session_id)?.workspaceId : null;
       if (workspaceId) blockedWorkspaces.delete(workspaceId); else blockedProjects.delete(event.project_id);
@@ -629,7 +636,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
-    settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()],
+    settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],

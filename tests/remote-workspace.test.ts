@@ -37,7 +37,7 @@ test("remote workspace views use actual SSH files, Git and plan without reading 
     assert.equal(diff.kind, "text"); if (diff.kind === "text") assert.match(diff.text, /Generated remote-only diff/);
     const plan = await sdk.slash(fixture.sessionId, "/plan", "tui");
     assert.deepEqual(plan, { kind: "text", text: "Generated remote-only project plan.\n" });
-    await assert.rejects(() => sdk.plans.save(fixture.sessionId, "Generated forbidden direct remote plan write.", "absent"), /not qualified|no local|transport/i);
+    await assert.rejects(() => sdk.plans.save(fixture.sessionId, "Generated unreviewed direct remote plan write.", "absent"), /binding|not supplied/i);
     assert.equal(await readFile(join(fixture.project, "fixture.txt"), "utf8"), "generated original\n");
     assert.equal(await readFile(join(fixture.workspace, "docs/plan.md"), "utf8"), "Generated remote-only project plan.\n");
     assert.equal(fixture.requests.length, 0);
@@ -57,7 +57,10 @@ test("remote workspace views preserve protected, denied, alias, null-root and un
     const entries = (await sdk.workspaces.files(fixture.sessionId)).entries;
     assert.equal(entries.includes("denied/"), false); assert.equal(entries.includes(".env"), false); assert.equal(entries.includes("alias.txt"), false);
     for (const path of [".env", "denied/generated.txt", "../project/fixture.txt", "alias.txt"]) await assert.rejects(() => sdk.workspaces.file(fixture.sessionId, path));
-    assert.deepEqual(await sdk.plans.read(fixture.sessionId), { type: "plan.read", path: "docs/plan.md", text: "", digest: "absent", exists: false });
+    const { bindingDigest, boundary, ...plan } = await sdk.plans.read(fixture.sessionId), remote = (await sdk.remote.status()).remote;
+    assert.deepEqual(plan, { type: "plan.read", path: "docs/plan.md", text: "", digest: "absent", exists: false });
+    assert.match(bindingDigest!, /^[a-f0-9]{64}$/);
+    assert.deepEqual(boundary, { env: "Remote", root: fixture.workspace, hostFingerprint: remote.hostFingerprint, workerDigest: remote.workerDigest });
     const general = await sdk.sessions.create(null, "Generated remote view without a root", { env: "Remote", modelId: fixture.modelId });
     await assert.rejects(() => sdk.workspaces.files(general.id!), /project|root|workspace/i);
     await fixture.ssh.close();

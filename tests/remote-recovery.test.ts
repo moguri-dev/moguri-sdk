@@ -1,38 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fork } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { startService } from "../apps/service/src/server.ts";
 import { envelope } from "../apps/service/src/controller.ts";
-import { MoguriSdk, isRecord, type Connection } from "../packages/sdk/src/index.ts";
+import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 
 test("a real control-plane SIGKILL preserves remote identity and reconciles cancellation without restarting inference", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
   const temporary = await mkdtemp(join(tmpdir(), "moguri-ssh-recovery-")), root = await realpath(temporary), state = join(root, "state");
   const project = join(root, "local-project"), workspace = join(root, "remote-project"), sshRoot = join(root, "ssh");
   for (const path of [project, workspace, sshRoot]) await mkdir(path, { mode: 0o700 });
   const ssh = await createSshTarget(sshRoot), provider = await fixtureProvider({ exposeModels: true }), vaultPath = join(root, "generated-vault.json");
-  const child = fork(resolve("tests/fixtures/runtime-child.ts"), [], { execPath: process.execPath, execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  const runtime = await launchRuntimeChild({ stateDir: state, vaultPath, modelId: provider.modelId, baseUrl: provider.baseUrl });
+  const { child, exited } = runtime;
   let sdk: MoguriSdk | undefined, restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
-    const ready = new Promise<Connection>((resolve, reject) => {
-      const deadline = setTimeout(() => reject(new Error("Generated child runtime did not start.")), 8000);
-      child.once("error", reject);
-      child.once("message", (raw: unknown) => {
-        clearTimeout(deadline);
-        if (!isRecord(raw) || !isRecord(raw.connection)) { reject(new Error("Invalid generated runtime connection.")); return; }
-        const value = raw.connection;
-        if (typeof value.protocolVersion !== "number" || typeof value.baseUrl !== "string" || typeof value.wsUrl !== "string" || typeof value.token !== "string" || typeof value.pid !== "number") { reject(new Error("Incomplete generated connection.")); return; }
-        resolve({ protocolVersion: value.protocolVersion, baseUrl: value.baseUrl, wsUrl: value.wsUrl, token: value.token, pid: value.pid });
-      });
-    });
-    child.send({ stateDir: state, vaultPath, modelId: provider.modelId, baseUrl: provider.baseUrl });
-    sdk = await new MoguriSdk(await ready).ready();
+    sdk = await new MoguriSdk(runtime.connection).ready();
     const bound = await sdk.command({ type: "project.add", path: project }), session = await sdk.sessions.create(bound.id!);
     const settings = structuredClone(sdk.settings.get()!.values); settings.remote = ssh.target;
     await sdk.settings.update(settings, sdk.settings.get()!.revision);
@@ -69,7 +57,7 @@ test("a real control-plane SIGKILL preserves remote identity and reconciles canc
     assert.equal(restarted.controller.snapshot().budgetEntries.length, 1);
   } finally {
     sdk?.disconnect();
-    if (child.exitCode === null && child.signalCode === null) { child.kill("SIGKILL"); await exited; }
+    await runtime.stop();
     await restarted?.close(); await ssh.close(); await provider.close(); await rm(temporary, { recursive: true, force: true });
   }
 });

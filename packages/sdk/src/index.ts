@@ -215,9 +215,12 @@ export class MoguriSdk extends TransportClient {
   };
   readonly plans = {
     read: (sessionId: string) => this.query({ type: "plan.read", sessionId }),
-    save: (sessionId: string, text: string, expectedDigest: string) => this.command({ type: "plan.save", sessionId, text, expectedDigest }),
+    save: (sessionId: string, text: string, expectedDigest: string, expectedBinding?: string) => this.command({ type: "plan.save", sessionId, text, expectedDigest, ...(expectedBinding ? { expectedBinding } : {}) }),
     capture: (sessionId: string, path?: string) => this.command({ type: "artifact.capture", sessionId, ...(path ? { path } : {}) }),
     artifact: (artifactId: string) => this.query({ type: "artifact.read", artifactId }),
+    saves: (sessionId: string) => this.query({ type: "plan.saves", sessionId }),
+    saveInfo: (sessionId: string, saveId: string) => this.query({ type: "plan.save-info", sessionId, saveId }),
+    stopSave: (sessionId: string, saveId: string) => this.command({ type: "plan.stop-save", sessionId, saveId }),
   };
   private async terminalInput(request: TerminalInput): Promise<void> {
     parse(TerminalInputSchema, request);

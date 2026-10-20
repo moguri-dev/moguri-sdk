@@ -7,6 +7,7 @@ import { assistantMessage, parentMessage, toolCalls, usagePresent, type Boundary
 import { localProvider, localModelFetch } from "./local-provider.ts";
 import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 import { streamMetrics } from "./stream-metrics.ts";
+import { executeUserPlan } from "./user-plan.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -25,12 +26,26 @@ async function finish(outcome: "completed" | "stopped" | "failed" | "partial", d
   await request({ kind: "finished", requestId: randomUUID(), outcome, diagnostic });
 }
 async function run(start: WorkerStart): Promise<void> {
-  const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
-  models.setProvider(githubCopilotProvider());
-  models.setProvider(localProvider());
   const context: Message[] = start.context;
   let incompleteCleanup = false;
   try {
+    if (start.operation) {
+      const operation = start.operation;
+      if (!start.root) throw new Error("Owned user plan operation has no exact workspace.");
+      const call = { id: operation.callId, name: "write_file", arguments: operation.input };
+      const permission = await request({ kind: "approval", requestId: randomUUID(), stepId: operation.stepId, call });
+      if (permission.error || !permission.value || !("allow" in permission.value) || !permission.value.allow) throw new Error(permission.error ?? "This exact user plan write was not authorized.");
+      const result = await executeUserPlan(start.root, operation.input, abort.signal, { mode: permission.value.mode, folders: permission.value.folders });
+      incompleteCleanup = result.fileOutcome !== "not-started" || result.createdDirectories.length > 0;
+      const accepted = await request({ kind: "user-plan.complete", requestId: randomUUID(), stepId: operation.stepId, call, result });
+      if (accepted.error) throw new Error(accepted.error);
+      await finish(abort.signal.aborted && incompleteCleanup ? "partial" : result.outcome,
+        abort.signal.aborted && incompleteCleanup ? "Stop arrived after filesystem work. Actual effects were retained; no rollback or complete save was inferred." : result.diagnostic);
+      return;
+    }
+    const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
+    models.setProvider(githubCopilotProvider());
+    models.setProvider(localProvider());
     for (let index = 0; index < 32; index++) {
       abort.signal.throwIfAborted();
       const stepId = randomUUID();
