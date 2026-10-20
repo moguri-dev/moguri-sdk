@@ -100,3 +100,19 @@ draft preservation, compact layout, close/reopen/acknowledged stop and the
 existing model-request lifecycle cases. Source/packaged full qualification and
 exact external-consumer evidence are recorded separately in setup.
 Sandbox remains paused; nothing here establishes descendant containment.
+
+## Corrected source and artifact qualification
+
+The complete corrected source passes **366 checks in 279.27 s** and all **26**
+hidden source-desktop workflows in **52.6 s**. All 26 also pass against the
+actual packaged **0.13.0-alpha.1** app in **52.8 s**. Native TUI's complete
+compaction workflow passes in **1,105.20 ms** in that full run.
+
+The package verifier independently exercises the actual bundled Node service
+and worker: three generated source turns, one tool-less compactor call, real
+42-token role settlement and explicit review/apply/restore. The exact delivered
+SDK passes a fresh audited install, all four external type entrypoints,
+installed CLI lifecycle, ownership rejection and shipped SSH reads. Source and
+consumer audits are zero. Generated fixtures establish mechanical boundaries,
+not summary quality. Setup retains immutable artifact hashes and earlier
+failed evidence; no archive was rebuilt merely to add its qualification notes.
