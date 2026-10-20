@@ -17,7 +17,7 @@ credentials, paid endpoint or microphone is used.
 ## Accounting authority
 
 Factory session preference remains Unlimited. A finite preference does not
-override stricter profile policy. Calls must reserve atomically immediately
+override stricter profile/global policy. Calls must reserve atomically immediately
 before dispatch, including solver, side, subagent, routing, critic, revision,
 decision and retry roles. Model-created children charge their owning session;
 different roles or envs never reset a cumulative ledger.
@@ -38,7 +38,7 @@ invented discount. Estimated, provider-reported and billed amounts remain
 separate fields.
 
 Reserve input estimate plus an actual forwarded output limit. Check session
-and profile availability together; another concurrent leg cannot reuse a
+and profile/global availability together; another concurrent leg cannot reuse a
 reservation. Reconcile reported total once, without adding cached/category
 breakdowns again. Missing/lost completion keeps the entire reservation held
 and visible; late authenticated telemetry may refine it, never retroactively
@@ -67,7 +67,7 @@ implemented. Native Sandbox and Remote side-panel qualification are independent.
 ## Current executable scope
 
 Explicit estimate-based session token/USD limits, separate revisioned
-Default-profile hard policy, profile-owned reservations/settlements and
+profile/global hard policies, profile-owned reservations/settlements and
 source-retention-safe status/dashboard APIs are wired across clients. The
 actual maintained worker receives reduced output limits. A provider exceeding
 that bound is partial and cannot qualify finite retries silently.

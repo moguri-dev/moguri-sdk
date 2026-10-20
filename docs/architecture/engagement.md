@@ -129,7 +129,30 @@ encrypted grants, event identities and restart recovery. Profile-owned guidance,
 proposals and skills survive individual session deletion. Project removal still
 never deletes repository files or external PRs. CI remains main-push-only.
 
-## Local qualification
+## Protocol-15 Guided qualification
+
+The new source gate passes **247** local checks in **159,335.30 ms**,
+including nine new advice/migration checks, the actual TUI, existing profile/
+budget/SSH/recovery behavior and eight isolated System One prerequisites.
+The packed external consumer exercises the actual compiled solver asking a
+recommended question, the user choosing a different answer and an independently
+retained model/user artifact. No extra recommendation request is counted.
+Consumer install/rebuild/audit passes with zero findings.
+
+The first full gate failed on a generated SSH-fixture teardown race: the test
+closed its daemon/removed state before observing actual owned transport exit.
+The fixture now closes the authority before its daemon and the workspace-change
+regression awaits actual connection closure/worker cleanup. All seven focused
+SSH cases and the full corrected gate pass. This is test ownership ordering,
+not new proof of arbitrary remote descendant containment.
+
+The hidden Guided flow verifies queue-only shortcuts, a different actual user
+answer, untrusted solver provenance and real human tool denial. Compact
+geometry checks require both choice buttons **and** the persistent composer
+action fully inside the viewport. Text/advice scroll independently of those
+actions. Package qualification is recorded separately in setup.
+
+## Historical local qualification
 
 The 0.6 source checkpoint passes 115 generated unit/integration/native-TUI
 checks and eight hidden Electron workflows, including project-free chat,
