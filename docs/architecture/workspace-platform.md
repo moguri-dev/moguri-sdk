@@ -30,8 +30,9 @@ Sources: [npm cache](https://docs.npmjs.com/cli/v11/commands/npm-cache),
 
 ## Cache contract
 
-Immutable package archives share one profile-owned content-addressed cache
-across registered projects/worktrees. Every plan binds the exact manager,
+Immutable public package archives share one user-owned content-addressed cache
+across registered profiles/projects/worktrees. Mutable installs, staging and
+logs stay profile-owned. Every plan binds the exact manager,
 manifest and lockfile digests, not a mutable branch name. Switching branches
 invalidates a stale plan while common package/version/integrity content is
 reused. Different bytes under one name/version are never conflated.

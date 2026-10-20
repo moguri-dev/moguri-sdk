@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 13 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-12 history, sessions, drafts,
+This is an alpha API. Protocol 14 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-13 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -20,7 +20,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.7.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.8.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -51,7 +51,9 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.7.0-alpha.1.tgz`.
+repacking: `npm run verify:sdk -- release/moguri-0.8.0-alpha.1.tgz`.
+The current verification suite expects protocol 14; historical 0.7 archives
+retain their separately recorded protocol-13 qualification.
 
 ## Connect to the shared service
 
@@ -99,6 +101,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 
 | Facade | Operations and boundaries |
 | --- | --- |
+| `profiles` | Root catalog/create/revisioned name-color update/explicit retry-stop/wait, shared global defaults/caps and `open(id)` returning a new immutable scoped client. No account/data copy or automatic selection. |
 | `settings` / `prompt` | Get, revision-checked update/reset, effective prompt preview. Prompt edits require explicit risk acknowledgement; running turns retain their prompt digest. |
 | `memory` | Opt-in index, lexical-vector search, import/symbol graph, explicit project-style facts. Context injection has a separate opt-in. |
 | `capabilities` | Import disabled standard skills/plugins, inspect source, toggle with revision, propose, review and decide against an exact SHA-256. |
@@ -131,7 +134,45 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 over `project.values.defaults`, `settings.startup.profile`,
 `settings.startup.global` and factory values. `session.defaults` records sources
 and observed revisions. Existing sessions do not inherit later changes. These
-preferences do not weaken policy and do not imply multi-profile isolation.
+preferences do not weaken policy. Global preferences are intentionally shared;
+profile/project/session values remain isolated.
+
+### Immutable profiles
+
+```ts
+const created = await sdk.profiles.create("Work", "#557799");
+const profile = await sdk.profiles.wait(created.id!);
+const work = await sdk.profiles.open(profile.id);
+try {
+  const chat = await work.sessions.create();
+  console.log(work.profileId, chat.id);
+} finally {
+  work.disconnect();
+}
+```
+
+The original `sdk` and every existing `DraftEditor` keep their original
+destination. `profileId` is also non-writable at runtime. Clients switching
+scope must flush old draft editors, preserve/block unsaved local forms and
+owned dictation, then explicitly dispose the old client. Switching does not
+stop service-owned work or move model context, artifacts, accounts or approval
+authority.
+
+`connectMoguri({profileId})` selects an explicit scope; omission means actual
+Default. HTTP uses `X-Moguri-Profile`; WebSocket authentication carries the same
+immutable identity. Unknown/unready profiles fail explicitly, never fall back.
+The CLI/TUI accept `--profile ID`, overriding the explicit
+`MOGURI_PROFILE_ID` launch environment. One-shot CLI commands do not mutate
+another client's active selection.
+
+Global environment policy and configured global caps remain authoritative
+across profile switching, source deletion and restart. `profiles.defaults(values, revision)`
+and `profiles.globalBudget(limitOrNull, revision, true)` use root revisions from
+`profiles.list()`. Profile `settings.reset` preserves shared global preferences
+and hard policies. Restore global preferences explicitly with an empty
+`profiles.defaults({}, revision)` action. Global accounting invalidation
+contains an opaque sequence, never foreign ledger rows or prompt content.
+See the [profile contract](architecture/profiles.md).
 
 `settings.localModels` contains explicit endpoint IDs/names/URLs/auth methods
 and declared model limits. Metadata discovery lists only configured advertised

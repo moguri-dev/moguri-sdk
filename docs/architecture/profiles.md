@@ -1,7 +1,9 @@
 # Profile isolation contract
 
-Status: Phase-5 implementation/qualification in progress. The published
-protocol-13 alpha exposes only Default; this document does not enable profiles.
+Status: protocol-14 development sources implement isolated profiles over one
+local authority. CLI, native TUI and hidden desktop acceptance pass; the
+separately versioned 0.8 package is being qualified. This is not the completed
+first milestone or a native SendBox qualification.
 
 Reuse Node/SQLite/AES-GCM, TypeBox, maintained pi-ai and the explicit OS-keychain
 backend already qualified by this repository. No new dependency, forked agent
@@ -132,6 +134,16 @@ ciphertexts/keys/receipts, injected migration rollback/reopen, memory/style
 isolation on a shared physical repository, expired cross-profile approvals,
 actual opaque global-capacity refresh and concurrent revision races. The real
 TUI creates/renames/switches clients while preserving the old draft, and the
-CLI covers explicit/inherited scope without changing another client. Hidden
-desktop, full Default regression and exact packed-consumer qualification are
-still pending; these results do not enable native SendBox or routed decisions.
+CLI covers explicit/inherited scope without changing another client.
+
+Full Default/profile regression passes **229** local checks in **158,227.87
+ms**. Hidden desktop verifies old-work continuation, input-inert handoff,
+independent dirty budget forms, native startup/profile-bound notification
+navigation, preview partition identity and stale-close/foreign-session
+rejection. A fresh packed external consumer installs/audits with no findings
+and proves immutable JS scope, actual installed CLI selection, compiled model
+workers in both profiles, isolated ledgers/MCP/runtime resources and global
+capacity/defaults. The initial asynchronous global-budget acknowledgement
+clear and an obsolete Default-only UI test label were corrected explicitly;
+neither failed run was counted as a pass. Versioned macOS package and exact
+delivered-archive qualification remain separate below.

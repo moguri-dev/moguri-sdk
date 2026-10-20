@@ -36,7 +36,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D12 | Autonomy level defaults to Manual. Guided, Autopilot, and System One-backed Autopilot Max are independent of model, Env, and Budget; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
 | D13 | Remote SSH runs the agent task and model calls on a user-configured reachable machine; the local control plane retains durable authority. | Phase 0 cannot prove secure transport, remote model access, cancellation, and reconnect recovery. |
 | D14 | One importable SDK powers both clients, default-dark branding and user-controlled memory, extensions, MCP and local dictation. | SDK packaging, policy, recovery or physical runtime qualification fails. |
-| D15 | Profile-owned verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
+| D15 | Verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
 | D16 | Ghostty embeds the desktop terminal; shared held queues, read-only/side sessions and retained project artifacts extend the same SDK/event authority. | Native input/resize/cancellation, retention-key migration, multi-client policy or packaged-client acceptance fails. |
 | D17 | Compact icon controls expose shared working-context/thinking settings, estimated context preview and provenance-safe usage, with the original red-pom-pom mascot. | Supported transport options, bounded request sizing, migration/restart or compact native-popover behavior fails. |
 | D18 | Project-free chats, explicit MCP OAuth, scoped suggestions/reviewed metachat and shared attention extend the same SDK authority. | Scope isolation, issuer/resource binding, exact configuration review, cancellation, migration or private notification delivery fails. |
@@ -47,6 +47,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D23 | Structured clarifications record actual owning-turn answers; optional retained artifacts and saved-draft consumption are one transaction, never permissions. | Actor/turn/revision isolation, cancellation, atomic retention or cross-client answer/queue behavior fails. |
 | D24 | Artifact repository copies bind exact source/root/policy and optional new local commit intent; deleting stored grants requires real copy/commit verification. | Copy persistence, no-overwrite/index isolation, cancellation/recovery or deletion proof fails. |
 | D25 | Every owned model dispatch has an atomic profile-owned reservation. Finite limits require explicit estimates; unknown completion holds capacity and settings resets cannot lift policy. | Concurrent/late/restart accounting, actual output forwarding, unknown-price handling or role/source retention fails. |
+| D26 | Immutable profile views share one root event authority. Credentials/data stay scoped; global environment policy, startup values and budgets remain root-owned across client switching. | Default migration, cross-client isolation, atomic policy/cap races, resource ownership or external SDK/native preview qualification fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -568,6 +569,33 @@ extra model call or claimed commit. Exact bills, routed kupo wind-down,
 approved committed checkpoints and broader repository/visibility metadata
 remain separate qualification.
 
+## D26. Immutable profiles over one root authority
+
+**Decision.** Reuse Node/React/TypeBox (MIT), SQLite (public domain), the
+existing AES-GCM compartments and explicit keychain backend. No new library,
+provider loop or per-client database is introduced. Follow the
+[profile contract](profiles.md).
+
+Migration 14 preserves Default IDs, receipt results, ciphertexts, wrapped keys,
+directories and credential names. New UUID profiles have owned private resource
+markers and explicit creating/ready/partial state. Restart never replays setup;
+retry/stop is an actual user action. Profiles cannot copy or merge accounts.
+
+Every store/controller/client is scoped; a client property cannot be rebound
+even by JavaScript assignment. A switch flushes old editors before constructing
+the new client, blocks unsaved forms/dialogs/dictation and never moves owned work.
+Native notifications and preview partitions bind profile plus session identity.
+Shared verified public archives/official weights may deduplicate, while mutable
+installs, captures, grants, memory/style/indexes and task content stay private.
+
+Global environment policy and its per-profile replicas commit atomically,
+preserving only actual running Local turn exceptions. Revision checks happen
+after asynchronous initialization. Global estimated caps aggregate profile-owned
+reservations; deletion/reset/switching cannot refund them. Content-free sequence
+invalidation updates available capacity without exposing foreign model events.
+Global startup preferences are shared intentionally, with a separate explicit
+revisioned reset; profile resets preserve shared values and hard policy.
+
 ## Still open
 
 - Package manager and monorepo tooling.
@@ -589,7 +617,8 @@ OpenTUI 0.6.6 on a bundled Node 26.12 runtime; Electron 44 with a same-origin
 credentials via `@napi-rs/keyring`. Packaging uses `@electron/packager`.
 Development macOS artifacts are not notarized releases. Folder attachments,
 images, external references and snapshotted default inheritance follow D19.
-Finite caps, real isolated profiles and routing remain open.
+Estimated finite caps and immutable profiles follow D25/D26. Exact billing,
+routed wind-down and decision-model qualification remain open.
 
 The development app deliberately uses unpacked application files (`asar: false`):
 the external pinned Node runtime must execute the service/worker and load their

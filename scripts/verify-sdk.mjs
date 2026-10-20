@@ -135,6 +135,10 @@ try {
       assert.equal(JSON.parse(scopedCli.stdout).profileId,profile.id);
       assert.equal((await beta.voice.status()).voice.runtimeReady,true);
       assert.deepEqual((await beta.mcp.tools("builtin","",0,betaSession.id)).tools.map(tool=>tool.name),["fetch_page"]);
+      for(const client of [sdk,beta]){const settings=structuredClone(client.settings.get().values);settings.mcpServers=[{id:"generated-installed-mcp",name:"Generated scoped MCP",enabled:true,transport:{type:"http",url:"https://generated-sdk.invalid/mcp",auth:"bearer"}}];await client.settings.update(settings,client.settings.get().revision);}
+      await sdk.mcp.setToken("generated-installed-mcp","generated-installed-default-only");
+      assert.equal((await sdk.mcp.auth("generated-installed-mcp")).state,"configured");
+      assert.equal((await beta.mcp.auth("generated-installed-mcp")).state,"required");
       await sdk.profiles.update(profile.id,{name:"Generated installed profile renamed"},profile.revision);
       assert.equal(beta.profileId,profile.id);
       const isolated=await sdk.workspaces.create(p.id,"moguri/generated-external");
@@ -301,6 +305,12 @@ try {
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===inherited.id).controls.autonomy,"Guided");
       assert.ok(beta.getState().events.every(event=>event.profile_id===beta.profileId));
       assert.ok(sdk.getState().events.every(event=>event.profile_id==="default"));
+      await beta.command({type:"policy.set",allowedEnvs:["Remote"]});await sdk.refresh();
+      assert.deepEqual(sdk.getState().snapshot.policy.allowedEnvs,["Remote"]);
+      const gammaCreated=await sdk.profiles.create("Generated installed policy Gamma");
+      await sdk.profiles.wait(gammaCreated.id);
+      const gamma=await sdk.profiles.open(gammaCreated.id);
+      try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
     console.log("External SDK imports/types, approved/audited install, immutable profile/CLI/model/credential scopes and shared policies, installed worker handshake, context/worktrees/PTY, independent artifacts/repository copies/local commits, finite budgets/dashboard/checkpoints, metachat, vectors, MCP and script-free cache passed.");
   `);

@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 13; immutable event
+Protocol version and database migration version are 14; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -9,7 +9,7 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
 | Entity | Identity and authority |
 | --- | --- |
-| Profile | Only `default` is exposed. Every command/event is scoped; other profile rows are excluded from projection, replay and attachment authorization. Profile creation/switching is not implemented. |
+| Profile | Immutable Default/UUID identity, revisioned name/color and creating/ready/partial lifecycle. One root registry owns explicit setup/retry/stop. Scoped SDK/store/controller views exclude foreign state and never copy accounts or rebind old editors. |
 | Project | Stable UUID/canonical base folder, ordered navigation folder/color and revisioned repository/policy/script/MCP bindings. Worktrees are explicit owned bindings, never inferred from branch names. |
 | Session | UUID/nullable project and managed-workspace binding, controls/revisions/lifecycle, agent/read-only mode, pending safe-boundary mode, explicit agent/side/model-subagent/metachat kind, pin/unread/group/parent metadata, PR/work-item binding, drafts/queue/messages/usage and exact approval. A null project never resolves to another root. |
 | Managed workspace | Project-owned Local root, exact canonical directory/device/inode, common Git directory, branch/base, revision, change set and creation/removal job. Partial intent never authorizes a base-root fallback. |
@@ -23,12 +23,12 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | Attachment | Session-authorized project/client text, normalized image, exact folder/GitHub/session snapshot, SHA-256, bytes and source revision. Explicit selection grants captured content only, never arbitrary filesystem access. |
 | Usage | Solver/side/subagent model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
 | Budget entry | Independent profile-owned step/actual-role/owning-session record: estimated reservation, actual reported total, held unknowns, explicit dated rate and request outcome. Source deletion never refunds it. |
-| Budget policy | Revision-bound profile hard cap, separate from resettable preferences/rates. Unlimited session defaults do not widen it. No billing guarantee is inferred from input estimates. |
-| Settings | Revisioned shared values and factory defaults; separate permission revision invalidates stale approvals. Prompt text is not policy. |
+| Budget policy | Separate revision-bound profile/global hard caps, independent of resettable preferences/rates. Global admission counts every profile without exposing foreign task content. No billing guarantee is inferred from input estimates. |
+| Settings | Profile-owned revisioned values and factory defaults, with intentionally shared root startup preferences. A separate permission revision invalidates stale approvals. Prompt text is not policy. |
 | Capability | Project-scoped skill/script/plugin/style knowledge, immutable content digest, source, enablement revision and optional owning plugin. |
 | Proposal | Exact content/base digests, project, kind, actual user/model actor and pending/approved/rejected decision. Approval installs disabled content. |
 | Capability job | Owned kind/session/turn, progress, terminal status, retained result digest and explicit error. A wait timeout is not cancellation. |
-| Repository index | Derived root-partitioned lexical vectors, source digests/mtime/size, chunks and import/symbol graph. Base project IDs and workspace IDs are distinct namespaces, not a second session store. |
+| Repository index | Derived profile/root-partitioned lexical vectors, source digests/mtime/size, chunks and import/symbol graph. Default IDs remain unchanged; other profiles prefix derived index identity. Not a second session store. |
 | Issue board | Project, configuration revision, ordered phase IDs/names, merged destination, explicit PR-observation access and optional Linear team. |
 | Local issue | Stable UUID/project-local number, feature/bug/misc, title/body/phase, optimistic revision, archive state and verified remote-link provenance. No assignee. |
 | Dependency plan | Exact project/manager/manifest/lock digest, unique public package versions and SHA-512 artifacts. Branch names are not mutable cache identities. |
@@ -190,3 +190,14 @@ Reservations share the dispatch transaction, complete/late reports reconcile
 once, and stopped/interrupted requests keep capacity held. Price-free is an
 explicit configured estimate, never a default provider bill. Profile/source
 retention does not erase these sanitized counters.
+
+Migration 14 changes receipt identity to `(profile_id, id)` while preserving
+every legacy Default digest/result, event identity, ciphertext and wrapped
+key. A failed migration rolls the receipt conversion and schema marker back
+atomically. Internal `_global` registry/default/policy/budget events never
+enter user projections or event replay. Root policy changes and per-profile
+replicas commit together; only actual recorded running Local turns may finish.
+Opaque global accounting invalidation updates capacity without broadcasting
+another profile's calls. Profile resources have owned private markers; setup
+interruption is partial and does not replay on restart. See
+[the profile contract](profiles.md).

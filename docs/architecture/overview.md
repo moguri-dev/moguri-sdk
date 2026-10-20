@@ -31,7 +31,7 @@ migration and recovery tests, not deletion of user state.
 Migration 2 adds project-scoped derived repository caches and graph tables.
 Migration 3 adds derived dependency-cache object metadata, local board/ticket
 and cache-receipt events. Event envelopes remain schema version 1; the client
-protocol is version 13. The [workspace contract](workspace-platform.md) records
+protocol is version 14. The [workspace contract](workspace-platform.md) records
 cache/advisory, read-only integration and recovery boundaries.
 Migration 4 adds encrypted retention compartments while preserving prior event
 identity/sequence. The [session workspace contract](session-workspace.md)
@@ -67,6 +67,11 @@ Migration 13 adds cumulative profile-owned model accounting, atomic
 reservations, explicit estimated token/USD preferences and separate hard policy.
 Unknown usage is held across stop/restart/source retention; no exact bill or
 automatic checkpoint commit is claimed.
+Migration 14 adds the [profile authority](profiles.md): immutable scoped
+store/controller/SDK views, composite receipts preserving Default identities,
+owned setup/retry/stop, isolated secrets/data and global policy/preferences/
+budget authority. Switching preserves old editors' destinations and running
+work; native preview/notification identities include the profile.
 
 Both clients share the SDK and subscribe to the same sequenced stream. The
 service owns projects, sessions, transcripts, drafts, queue, pending approvals,
@@ -76,7 +81,7 @@ embed the same runtime without Electron. Public package declarations and
 consumption outside the checkout are executable acceptance checks.
 
 Local/core qualified SSH execution, fixed Copilot/configured local models and
-Unlimited budget are operational. Remote side-panel/executable-extension
+Unlimited or explicit estimated budgets are operational. Remote side-panel/executable-extension
 transports remain explicitly unavailable.
 Manual is default; Guided still needs a human and Autopilot uses only explicit
 user grants. Autopilot Max and unqualified environments remain unavailable.
