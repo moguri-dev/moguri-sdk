@@ -125,3 +125,19 @@ coverage; native tests never authorize a personal account or call a paid model.
 
 This does not implement a full GitHub workflow plugin, Remote authenticated
 CLI transport, license compliance, routed wind-down or native Sandbox.
+
+## Source qualification
+
+The protocol-22 source passes 448 complete local checks in 327.23 s and all
+31 hidden desktop workflows in 1.1 min, as reported by the runner.
+Focused checks use actual generated Local/SSH workers and every implemented
+model role, private fake CLI access, exact stop before/after publication,
+retention/schema failure, restart, scope-change admission rejection and
+cross-profile isolation. The native TUI exercises explicit review/refresh/state
+without model dispatch. Source types/build/audit pass; audit has zero findings.
+
+The initial second-send desktop assertion reused the previous terminal status;
+the corrected fixture waits for the real next provider request. Its failed
+trace/context remain retained. Both bounded desktop/compact visual rounds are
+complete. Packed consumer and actual artifact qualification are not inferred
+from these source results.
