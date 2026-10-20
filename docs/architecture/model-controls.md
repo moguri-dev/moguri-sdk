@@ -27,6 +27,12 @@ clearly labeled estimate, not exact tokenization. Reserve the library's context
 headroom and reject an overfull request without silently truncating history,
 compacting, selecting another model or adding a paid call.
 
+Request sizing never falls below a fresh maintained per-message estimate of the
+current normalized prompt/tools/history, even when a retained usage report is
+eligible as an anchor. Output is capped against the same estimate and headroom.
+This preserves finite-budget/context admission with stable source timestamps;
+it does not change actual usage, prices or billed-cost provenance.
+
 ## Domain and persistence
 
 Protocol/database migration 5 adds optional typed session model options and

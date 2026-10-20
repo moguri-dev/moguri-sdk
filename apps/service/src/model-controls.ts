@@ -1,6 +1,6 @@
-import { getSupportedThinkingLevels, hasApi, normalizeContext, type Api, type Context, type Model } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels, hasApi, normalizeContext, type Api, type Context, type Model, type Message } from "@earendil-works/pi-ai";
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
-import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
+import { estimateContextTokens, estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { MoguriError, type ModelInfo, type ModelOptions, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 
 const CONTEXT_HEADROOM = 4096;
@@ -14,7 +14,10 @@ export function validateModelOptions(model: Pick<ModelInfo, "contextWindow" | "t
   if (options.contextWindow !== undefined && options.contextWindow > model.contextWindow) throw new MoguriError("model_context", "The working context cannot exceed the selected model's supported maximum.");
   if (options.thinkingEffort !== undefined && !model.thinkingLevels?.includes(options.thinkingEffort)) throw new MoguriError("model_thinking", "This thinking effort is not supported by the selected model's actual transport. No fallback was applied.");
 }
-export const estimateModelContext = (context: Context): number => estimateContextTokens(normalizeContext(context)).tokens;
+export const estimateMessageContext = (messages: readonly Message[]): number => messages.reduce((total, message) => total + estimateMessageTokens(message), 0);
+// A retained report may describe an older prefix; it cannot lower current request sizing.
+const estimateNormalizedContext = (context: ReturnType<typeof normalizeContext>): number => Math.max(estimateContextTokens(context).tokens, estimateMessageContext(context.messages));
+export const estimateModelContext = (context: Context): number => estimateNormalizedContext(normalizeContext(context));
 export function contextHasImages(messages: Context["messages"]): boolean {
   return messages.some((message) => typeof message.content !== "string" && message.content.some((block) => block.type === "image"));
 }
@@ -30,8 +33,8 @@ export function modelRequest(model: Model<Api>, options: ModelOptions | undefine
   validateModelOptions({ contextWindow: model.contextWindow, thinkingLevels: supportedThinking(model) }, options);
   const selected = { ...model, contextWindow: options?.contextWindow ?? model.contextWindow };
   const normalized = normalizeContext(context);
-  const estimatedTokens = estimateContextTokens(normalized).tokens;
+  const estimatedTokens = estimateNormalizedContext(normalized);
   if (estimatedTokens + CONTEXT_HEADROOM >= selected.contextWindow) throw new MoguriError("model_context", "The estimated request exceeds the working context window. Shorten the prompt or start a new session; no history was truncated and no model request was sent.", 409);
-  const maxTokens = clampMaxTokensToContext(selected, normalized, Math.min(model.maxTokens, 8192));
+  const maxTokens = clampMaxTokensToContext(selected, normalized, Math.min(model.maxTokens, 8192, selected.contextWindow - estimatedTokens - CONTEXT_HEADROOM));
   return { model: { ...selected, maxTokens }, maxTokens, estimatedTokens, thinkingEffort: options?.thinkingEffort };
 }

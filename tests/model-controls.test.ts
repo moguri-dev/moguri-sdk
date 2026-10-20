@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
-import { createModels, hasApi } from "@earendil-works/pi-ai";
+import { createModels, hasApi, normalizeContext, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
+import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { modelRequest, supportedThinking } from "../apps/service/src/model-controls.ts";
+import { estimateModelContext, modelRequest, supportedThinking } from "../apps/service/src/model-controls.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
@@ -18,6 +19,26 @@ test("transport capability lists reject silently ignored or unsupported thinking
   assert.ok(supportedThinking(supported).includes("low"));
   assert.throws(() => modelRequest(supported, { contextWindow: supported.contextWindow + 1 }, { messages: [] }), /supported maximum/);
   assert.throws(() => modelRequest(supported, { contextWindow: 8192 }, { systemPrompt: "x".repeat(50000), messages: [] }), /working context/);
+});
+
+test("historical usage cannot undercut the fresh source estimate or output headroom after stable context reconstruction", () => {
+  const base = githubCopilotProvider().getModels().find((model) => hasApi(model, "openai-completions"))!;
+  const prior: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "github-copilot", model: base.id, timestamp: 2, stopReason: "stop",
+    content: [{ type: "text", text: "Generated prior result." }], usage: { input: 30, output: 12, cacheRead: 0, cacheWrite: 0, totalTokens: 42, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+  const context: Context = { systemPrompt: "Generated current system contract.", messages: [
+    { role: "user", content: "Generated retained source. ".repeat(350), timestamp: 1 }, prior,
+    { role: "user", content: "Generated follow-up.", timestamp: 3 },
+  ] };
+  const fresh = normalizeContext(context).messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+  assert.ok(fresh > 1000);
+  assert.equal(estimateModelContext(context), fresh);
+  const request = modelRequest(base, { contextWindow: 8192 }, context);
+  assert.equal(request.estimatedTokens, fresh);
+  assert.ok(request.maxTokens + request.estimatedTokens + 4096 <= 8192);
+  assert.equal(prior.usage.totalTokens, 42);
+  const larger: AssistantMessage = { ...prior, usage: { ...prior.usage, input: 3488, totalTokens: 3500 } };
+  assert.ok(estimateModelContext({ ...context, messages: [context.messages[0]!, larger, context.messages[2]!] }) > fresh);
+  assert.throws(() => modelRequest(base, { contextWindow: 8192 }, { ...context, systemPrompt: "Generated expanded policy. ".repeat(2000) }), /working context/);
 });
 
 test("reasoning cannot expand the output ceiling beyond the configured context room", async () => {

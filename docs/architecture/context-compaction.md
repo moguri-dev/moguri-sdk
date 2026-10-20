@@ -35,6 +35,15 @@ than the replaced/retained messages, so old solver or compactor input reports
 cannot describe the new prefix. The actual model completion, original usage
 and ledger charges stay separately retained, including unknown reports.
 
+The first complete source run passed 364 of 365 checks and exposed a related
+finite-budget regression: stable source timestamps made a historical report
+eligible as a low anchor for a different current request. A focused regression
+measured 48 anchored versus 2,723 fresh estimated tokens. Shared request sizing
+now uses at least the maintained fresh per-message estimate, including current
+system/tools, and caps output against that same estimate plus normal headroom.
+Actual reported tokens and prices are not rewritten. The failed full run stays
+recorded as failed, not a qualification pass.
+
 ## Authority and persistence contract
 
 Preview binds an idle session's exact effective conversation, complete prefix,

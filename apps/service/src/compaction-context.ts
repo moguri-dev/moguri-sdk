@@ -1,7 +1,6 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
-import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { MoguriError } from "../../../packages/protocol/src/index.ts";
-import { contextHasImages } from "./model-controls.ts";
+import { contextHasImages, estimateMessageContext } from "./model-controls.ts";
 
 export const COMPACTION_PROMPT = `You are Moguri's read-only conversation compactor.
 Return only a concise factual summary of the supplied JSON conversation. Preserve the user's actual intent and constraints, decisions, verified tool outcomes, important file references, unresolved work, failures and uncertainty.
@@ -10,7 +9,7 @@ Do not invent facts or success, reproduce private reasoning, or continue the cod
 export const COMPACTION_OUTPUT_LIMIT = 1024;
 export interface ContextEntry { seq: number; turnId: string | null; message: Message }
 export interface CompactionSelection { prefix: ContextEntry[]; tail: ContextEntry[]; throughSeq: number }
-export const estimateConversationTokens = (messages: Message[]): number => messages.reduce((total, message) => total + estimateMessageTokens(message), 0);
+export const estimateConversationTokens = estimateMessageContext;
 
 function closedTools(messages: Message[]): void {
   const pending = new Map<string, string>();
