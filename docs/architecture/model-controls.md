@@ -68,6 +68,15 @@ selection clear prior per-model overrides. Both clients expose actual metered
 roles/models and model-supplied plan provenance without promoting classifier
 text into solver instructions.
 
+Model-setting mutation ownership is request-scoped, not tied to a popover's
+mount lifetime. Closing/reopening the menu cannot release an in-flight gate or
+run a preserved command under stale settings. The composer tracks actual
+pending requests and retains refusal diagnostics outside the closed menu.
+Controlled hidden workflows hold the real service mutation, dismiss the menu,
+verify disabled submission/preserved drafts, then exercise both successful
+settlement and explicit refusal. Keyboard tests wait for actual enabled
+controls, not a completed click that merely started an asynchronous request.
+
 The original face/bat-wing mascot gains a small red antenna pom-pom. Visual
 reference: <https://en.wikipedia.org/wiki/File:MoogleFFIXConcept.png>, linked by
 the Moogle article. This is trait reference only: no image bytes, tracing,

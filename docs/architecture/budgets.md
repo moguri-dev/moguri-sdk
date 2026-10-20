@@ -83,6 +83,15 @@ Compaction history, repository/org/visibility metadata and routed wind-down
 still require their separate qualified implementations; this is not a claim
 that every Phase-4 or first-release metric is complete.
 
+The corrected protocol-18 source passes **341 complete local checks in
+261.37 s**, all **24** hidden desktop flows in **48.6 s**, and all 24 from the
+actual packaged **0.12.0-alpha.1** app in **49.1 s**. A first packaged failure
+exposed request ownership ending at model-popover unmount; the corrected parent
+gate preserves drafts and errors through real settlement. Failed evidence is
+retained rather than counted as a pass. The exact delivered external SDK
+installs/audits/exercises actual CLI dated/call queries and the shipped SSH
+worker. Source/consumer audits are zero. Setup records immutable artifacts.
+
 ## Accounting authority
 
 Factory session preference remains Unlimited. A finite preference does not
