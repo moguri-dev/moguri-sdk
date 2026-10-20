@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 10; immutable event
+Protocol version and database migration version are 11; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -37,6 +37,7 @@ initial checkpoint, not the complete Phase 1 schema for future capabilities.
 | MCP authorization | Non-secret owned OAuth lifecycle, server/scope/expiry and transient-link readiness. State/verifier/authorization URL are ephemeral; issuer/resource-bound clients and grants stay in the secret backend. A durable connected decision gates use. |
 | Configuration proposal | Actual user/model origin, exact target scope, source excerpts, content/base digests and revision, with pending/applied/rejected state. A model cannot decide it. Human approval never enables a skill or publishes instructions. |
 | Attention | Question/bell/done, real-state or heuristic provenance, session, active state and separate read acknowledgement. It never becomes a user answer or approval. |
+| Structured question | Exact model/step/call and owning session/turn, bounded choices/freeform, revision and real open/answered/cancelled state. Actual user answers are distinct from model/delegated actors and never permission grants. |
 | Remote execution | Owned run/target/verified build/root, actual worker PID, cancellation, durable frame cursor and pending/confirmed-worker/unconfirmed cleanup. SSH exit is not proof of descendant containment. |
 
 Provider-neutral session state is projected from immutable events. Normalized
@@ -156,5 +157,15 @@ Exact source preview/promotion distinguishes actual user/model/tool authors;
 manual text is user-entered, not verified authorship. Project removal binds an
 explicit retain/export/delete choice to the reviewed set. Retain detaches
 documents without retaining source sessions; deletion forgets all artifact
-revisions. Repository materialization/commit and structured-question policy
-remain open, not inferred from artifact storage.
+revisions. Artifact storage does not imply repository materialization, commits
+or authority to answer on the user's behalf.
+
+Migration 11 adds typed question/answer/cancellation events and answer-retention
+settings without changing prior IDs, ciphertext grants or saved controls.
+Legacy sessions get a null pending question. The actual-user endpoint checks
+owner/turn/revision and optional exact saved-draft revision. Primary answer,
+derived independent artifact/source actors, draft consumption and command
+receipt commit atomically. Stop/restart cancels waits without fake answers or
+tool replay; a heuristic badge/queued prompt never resolves a real question.
+Factory answer retention is on with explicit opt-out. Repository materialization
+and delegated decision-provider answer policy remain open.

@@ -6,10 +6,10 @@ import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  CommandSchema, isPlatformCommand, isRecord, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls,
+  CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, MAX_TEXT, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
-  type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice,
+  type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -66,6 +66,7 @@ export class ControlPlane extends EventEmitter {
   private writerReservations = new Map<string, string>();
   private deletingSessions = new Set<string>();
   private deletingProjects = new Set<string>();
+  private questionWaits = new Map<string, { run: Run; requestId: string }>();
   readonly provider: ModelRegistry;
   readonly remote: RemoteRuntime;
   private readonly remoteModels: ModelRegistry;
@@ -160,6 +161,7 @@ export class ControlPlane extends EventEmitter {
         const unfinished = this.history.filter((event) => event.turn_id === session.turnId && event.event_type === "model.completed")
           .flatMap((event) => event.event_type === "model.completed" ? event.payload.message.toolCalls ?? [] : []).filter((call) => !completed.has(call.id));
         this.commit([
+          ...this.cancelledQuestions(session, "Service restarted. No answer or replacement question was invented."),
           ...unfinished.map((call) => this.event(session, "tool.completed", { call, text: "Service restarted before a durable tool result. Execution and cleanup are unconfirmed; this tool was not replayed.", isError: true, outcome: "unconfirmed" })),
           this.event(session, "turn.finished", {
             outcome: "partial",
@@ -193,7 +195,11 @@ export class ControlPlane extends EventEmitter {
       if (!execution) throw new MoguriError("remote_frame", "The owned remote frame has no execution identity.", 409);
       events = [...events, { event_type: "execution.frame_recorded", profile_id: PROFILE_ID, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId, payload: context.frame }];
     }
-    const appended = this.store.commit(events, receipt, forget, (primary) => attentionEvents({ ...this.snapshot(), ...projectEvents([...this.history, ...primary]) }, primary));
+    const appended = this.store.commit(events, receipt, forget, (primary) => {
+      const next = { ...this.snapshot(), ...projectEvents([...this.history, ...primary]) };
+      const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
+      return [...answers, ...attentionEvents(next, primary)];
+    });
     if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended);
     this.projection = projectEvents(this.history);
@@ -549,6 +555,7 @@ export class ControlPlane extends EventEmitter {
       this.commit(events, { id: envelope.id, digest: commandDigest, result }, forget);
       return result;
     };
+    if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
     switch (command.type) {
       case "project.add": {
@@ -827,6 +834,43 @@ export class ControlPlane extends EventEmitter {
       if (error && !run.done) this.finishRun(run, "partial", "The worker control channel failed. Cleanup is unconfirmed.");
     });
   }
+  private cancelledQuestions(session: Session, diagnostic: string): EventInput[] {
+    return this.projection.questions.filter((question) => question.sessionId === session.id && question.status === "open").map((question) => ({
+      ...this.event(session, "question.cancelled", { questionId: question.id, diagnostic }), turn_id: question.turnId, step_id: question.stepId,
+    }));
+  }
+  private releaseQuestionWaits(sessionId: string): void {
+    for (const [id, waiting] of this.questionWaits) if (waiting.run.sessionId === sessionId) {
+      this.questionWaits.delete(id);
+      this.reply(waiting.run, { kind: "reply", requestId: waiting.requestId, value: { text: "Question cancelled. No user answer or permission was supplied.", isError: true, outcome: "stopped" } });
+    }
+  }
+  private askQuestion(run: Run, request: Extract<WorkerRequest, { kind: "delegate" }>): void {
+    const session = this.session(run.sessionId), input = parse(UserQuestionSchema, request.call.arguments);
+    if (session.pendingQuestionId || !session.controls.modelId || run.abort.signal.aborted) throw new MoguriError("question_state", "Only one current model question may wait for the actual user.", 409);
+    if (!input.question.trim() || Buffer.byteLength(input.question) > 16 * 1024 || !input.allowFreeform && !input.choices.length || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.question) || input.choices.some((choice) => /[\r\n\u0000-\u001f\u007f]/.test(choice))) throw new MoguriError("question_input", "Use a bounded, readable clarification with at least one actual answer path. No question or answer was invented.");
+    const question: UserQuestion = { ...input, id: randomUUID(), sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, turnId: run.turnId, stepId: request.stepId, callId: request.call.id, modelId: session.controls.modelId,
+      sourceEventId: null, revision: 0, createdAt: new Date().toISOString(), status: "open", answer: null, diagnostic: null };
+    this.commit([this.event(session, "question.asked", { question }, request.stepId)]);
+    this.questionWaits.set(question.id, { run, requestId: request.requestId });
+  }
+  private answerQuestion(command: QuestionCommand, finish: WorkspaceFinish): CommandResult {
+    const question = this.projection.questions.find((question) => question.id === command.questionId);
+    if (!question) throw new MoguriError("question_missing", "Question is missing or outside this profile.", 404);
+    this.revision(question.revision, command.expectedRevision);
+    const session = this.session(question.sessionId), waiting = this.questionWaits.get(question.id);
+    if (question.status !== "open" || session.turnId !== question.turnId || !waiting || waiting.run.done || waiting.run.abort.signal.aborted || this.runs.get(session.id) !== waiting.run || this.deletingProjects.has(session.projectId ?? "") || this.deletingSessions.has(session.id)) throw new MoguriError("question_closed", "This question was answered, cancelled or interrupted. No answer was applied to another turn.", 409);
+    if (!command.text.trim() || Buffer.byteLength(command.text) > 32 * 1024 || !question.allowFreeform && !question.choices.includes(command.text)) throw new MoguriError("question_answer", "Choose one exact offered answer, or use non-empty freeform text only when this question permits it.");
+    const events: EventInput[] = [this.event(session, "question.answered", { questionId: question.id, answer: { text: command.text, actor: "user", modelId: null, sourceCallId: null, answeredAt: new Date().toISOString() } }, question.stepId)];
+    if (command.consumeDraft) {
+      if (command.consumeDraft.sessionId !== session.id || session.draft.revision !== command.consumeDraft.expectedRevision || session.draft.text !== command.text) throw new MoguriError("revision_conflict", "The saved draft changed. Your answer/draft was preserved; review the current text before answering.", 409);
+      events.push(this.event(session, "draft.saved", { text: "", attachments: session.draft.attachments }));
+    }
+    const result = finish(events, { id: question.id, revision: question.revision + 1 });
+    this.questionWaits.delete(question.id);
+    this.reply(waiting.run, { kind: "reply", requestId: waiting.requestId, value: { text: JSON.stringify({ questionId: question.id, answer: command.text, actor: "user", permissionGrant: false }), isError: false, outcome: "completed" } });
+    return result;
+  }
   private async workerMessage(run: Run, request: WorkerRequest): Promise<void> {
     const session = this.session(run.sessionId);
     if (request.kind === "ack") {
@@ -934,6 +978,11 @@ export class ControlPlane extends EventEmitter {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
+      if (request.call.name === "ask_user") {
+        try { this.askQuestion(run, request); }
+        catch (error) { this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Question relay failed; no user answer was recorded.", isError: true, outcome: "failed" } }); }
+        return;
+      }
       if (session.controls.env === "Remote" && (request.call.name === "mcp_gateway" || request.call.name === "memory_search" || request.call.name === "moguri_config" && isRecord(request.call.arguments.proposal) && request.call.arguments.proposal.target === "repo-instructions")) {
         this.reply(run, { kind: "reply", requestId: request.requestId, error: "This capability has no qualified remote workspace transport. No local host operation or repository fallback was used." }); return;
       }
@@ -956,9 +1005,9 @@ export class ControlPlane extends EventEmitter {
         if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
         const approval = { id: randomUUID(), stepId: request.stepId, call: request.call, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision,
           recommendation: session.controls.autonomy === "Guided" ? session.messages.filter((message) => message.role === "assistant").at(-1)?.text.slice(0, 1200) || "The model supplied no recommendation. A human must decide." : undefined };
-        if (authorization.decision === "allow" || session.kind === "metachat" && request.call.name === "moguri_config") {
+        if (authorization.decision === "allow" || request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config") {
           run.granted.add(request.call.id);
-          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
+          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(this.platform.sessions.projects.values(session.projectId)) } });
           return;
         }
@@ -991,7 +1040,8 @@ export class ControlPlane extends EventEmitter {
     }
     const run = this.runs.get(sessionId);
     if (!run || run.abort.signal.aborted) return;
-    this.commit([this.event(this.session(sessionId), "turn.stop_requested", {})]);
+    this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), ...this.cancelledQuestions(this.session(sessionId), "Owning turn was stopped. No answer was supplied.")]);
+    this.releaseQuestionWaits(sessionId);
     run.abort.abort();
     this.reply(run, { kind: "stop" });
     run.stopTimer = setTimeout(() => {
@@ -1014,6 +1064,7 @@ export class ControlPlane extends EventEmitter {
     const execution = this.projection.executions.find((value) => value.id === run.executionId);
     if (run.granted.size) { outcome = "partial"; diagnostic = "A tool was approved but its execution result or cleanup was not confirmed. Inspect the workspace before continuing."; }
     this.commit([
+      ...this.cancelledQuestions(session, "Owning turn ended. No pending answer was invented."),
       ...(session.pendingMode ? [
         ...session.queue.filter((item) => item.mode && item.targetTurnId === run.turnId).map((item) => this.event(session, "queue.removed", { messageId: item.id })),
         this.event(session, "session.mode_changed", { mode: session.pendingMode }),
@@ -1026,6 +1077,7 @@ export class ControlPlane extends EventEmitter {
       ...(execution && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) ? [this.event(session, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Turn settled locally; remote worker/descendant cleanup awaits its actual terminal status or explicit reconciliation." })] : []),
     ]);
     this.runs.delete(run.sessionId);
+    this.releaseQuestionWaits(run.sessionId);
     if (outcome === "partial" || outcome === "failed") for (const current of this.projection.sessions) {
       if (session.projectId ? this.platform.managed.leaseKey(current) === this.platform.managed.leaseKey(session) : current.id === session.id) this.paused.add(current.id);
     }

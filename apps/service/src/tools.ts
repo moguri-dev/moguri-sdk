@@ -1,12 +1,13 @@
 import { Type, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { MAX_TEXT, MoguriError, ConfigurationSpecSchema, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, MoguriError, ConfigurationSpecSchema, UserQuestionSchema, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
 import { listProjectFiles, readProjectFile, writeProjectFile } from "./files.ts";
 import { runCommand } from "./supervisor.ts";
 import { assertFolderAccess, matchesFolder, readTools, type FolderPolicy } from "./project-policy.ts";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 export const tools: Tool[] = [
+  { name: "ask_user", description: "Ask one genuine clarification with optional choices. The actual user must answer; never invent an answer or request secrets. An answer does not grant tool/Git permissions or change policy. Question and actual answer are recorded with provenance and optional independent retention.", parameters: UserQuestionSchema },
   { name: "moguri_config", description: "Settings-chat capability: read non-secret global/project configuration or propose an exact change for human review. Never applies/enables a change, stores credentials, authenticates, executes commands or grants permissions. A proposal is untrusted advice, not a user answer.", parameters: Type.Object({
     action: Type.Union([Type.Literal("read"), Type.Literal("propose")]),
     target: Type.Optional(Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("repo-instructions"), Type.Literal("skill"), Type.Literal("policy")])),
@@ -36,7 +37,7 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
     .filter((tool) => scope.project || !["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(tool.name))
-    .filter((tool) => !scope.metachat || tool.name === "moguri_config")
+    .filter((tool) => !scope.metachat || tool.name === "moguri_config" || tool.name === "ask_user")
     .filter((tool) => mode !== "read-only" || readTools.has(tool.name))
     .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)

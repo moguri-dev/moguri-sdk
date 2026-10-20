@@ -9,7 +9,7 @@ import {
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
   isManagedWorkspaceCommand, isManagedWorkspaceQuery,
-  isArtifactCommand, isArtifactQuery,
+  isArtifactCommand, isArtifactQuery, isQuestionCommand,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
@@ -308,6 +308,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isQuestionCommand(command)) throw new MoguriError("question_authority", "Question answers must pass the authoritative owning-turn controller.", 409);
     if (isArtifactCommand(command)) return this.artifacts.execute(command, finish);
     if (isManagedWorkspaceCommand(command)) return this.managed.execute(command, finish);
     if (isExecutionCommand(command)) return this.host.remoteCommand(command, finish);

@@ -42,6 +42,8 @@ try {
       const document=await sdk.artifacts.create(null,{kind:"decision",name:"Generated independent note",text:"Generated retained text"});
       await sdk.artifacts.update(document.id!,{text:"Generated edited note"},0);
       const revisions=await sdk.artifacts.history(document.id!);void revisions.revisions[0]?.sources;
+      const question=sdk.getState().snapshot?.questions[0];
+      if(question){await sdk.questions.answer(question.id,"Generated actual user answer",question.revision);await sdk.questions.answerDraft(question.id,question.revision);}
       const exported=(await sdk.artifacts.export(document.id!)).export;
       await saveArtifactExport("/generated/explicit-export.json",exported);
       await sdk.sessions.env(general.id!,"Local");
@@ -92,7 +94,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      assert.equal(sdk.getState().snapshot.protocolVersion,10);
+      assert.equal(sdk.getState().snapshot.protocolVersion,11);
       const isolated=await sdk.workspaces.create(p.id,"moguri/generated-external");
       const owned=await sdk.workspaces.wait(isolated.id);
       assert.ok((await sdk.workspaces.discover(p.id)).registrations.some(entry=>entry.managedId===owned.id&&entry.locked));
@@ -115,7 +117,7 @@ try {
           let text="";const timer=setTimeout(()=>reject(new Error("Installed SSH worker entrypoint did not answer.")),10000);
           role.once("error",reject);
           role.stdout.on("data",data=>{text+=data;if(text.includes("\\n")){clearTimeout(timer);try{resolve(JSON.parse(text.split("\\n")[0]));}catch(error){reject(error);}}});
-          role.stdin.write(JSON.stringify({action:"probe",protocol:10,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
+          role.stdin.write(JSON.stringify({action:"probe",protocol:11,workerDigest:workerHash,stateDir:join(root,"unused-remote-state"),root:null})+"\\n");
         });
         assert.equal(response.kind,"probe");assert.equal(response.info.workerDigest,workerHash);
         role.stdin.end();assert.equal(await roleExit,0);

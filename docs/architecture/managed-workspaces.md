@@ -113,5 +113,43 @@ versus human provenance, stale revisions/source digests, source-session deletion
 project retain/export/delete, transaction rollback and restart. Standalone
 documents need no conversation or filesystem root. Native exports create a new
 0600 file, verify exact bytes/digest and fsync without overwriting a destination.
-Structured questions/automatic answer policy, repository materialization/commit
-and work-item/folder document organization are still required first-release work.
+Repository materialization/commit and work-item/folder document organization
+are still required first-release work. The structured-question slice below
+adds actual-user answers, not a delegated decision-provider implementation.
+
+## Implemented structured questions and actual-user answers
+
+An enabled model may ask a typed clarification with bounded choices/freeform
+text. Routing that question is not permission to execute its contents. Respect
+explicit tool denials, but do not require a redundant "may I ask" approval.
+The question remains untrusted model content; answers cannot approve tools,
+change policy or promote themselves into Core memory.
+
+Only an actual user answer endpoint records actor `user`. A future delegated
+decision path must retain its actual model/provider/call provenance, never
+reuse that endpoint or relabel its output. Exact question revision/owning turn
+checks reject stale or cancelled answers. Stop/restart cancels pending waits
+without inventing an answer or blocking the worker cancellation chain.
+
+Protocol/database 11 implements user-requested answer retention on by default, with an explicit setting to opt
+out. Answer source event, independent artifact revision and command receipt
+commit atomically, including optional exact saved-draft consumption. The artifact preserves model-question and actual-answer
+sources and survives session retention. New events/settings/projection require
+a numbered migration and generated multi-client/restart/cancellation coverage.
+Desktop and TUI must expose the same real waiting state, not a heuristic
+question badge masquerading as an authoritative request.
+
+Desktop's contextual Answer action and TUI Shift+Cmd/Ctrl+Enter use that saved
+draft; Cmd/Ctrl+Enter still holds queued intent. Choice answers do not clear
+other draft text or attachments. Routing uses policy authority, respects
+explicit denials and never claims a human approval. Independent artifacts label
+actual user answers separately from the model question.
+
+Generated protocol-11 qualification passes eight question cases: real owning
+turns and consumed drafts, concurrent choices, stop without deadlock/fake
+answers, retention opt-out, explicit tool denial, project-free read-only
+questions, rollback of derived-artifact failures, and schema-10/restart
+recovery. Actual CLI/native-TUI and hidden Electron flows exercise the same
+SDK. The complete local suite passes 185 checks; all 15 hidden desktop flows
+and a fresh audited external SDK install pass. No delegated-answer or native
+Sandbox readiness is inferred from these results.

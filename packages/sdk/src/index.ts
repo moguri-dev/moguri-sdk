@@ -78,6 +78,15 @@ export class MoguriSdk extends TransportClient {
     projectPreview: (projectId: string) => this.query({ type: "project.artifacts.preview", projectId }),
     projectExport: (projectId: string) => this.query({ type: "project.artifacts.export", projectId }),
   };
+  readonly questions = {
+    answer: (questionId: string, text: string, expectedRevision: number, consumeDraft?: { sessionId: string; expectedRevision: number }) => this.command({ type: "question.answer", questionId, text, expectedRevision, ...(consumeDraft ? { consumeDraft } : {}) }),
+    answerDraft: (questionId: string, expectedRevision: number) => {
+      const question = this.getState().snapshot?.questions.find((question) => question.id === questionId);
+      const session = this.getState().snapshot?.sessions.find((session) => session.id === question?.sessionId);
+      if (!question || !session) throw new ClientError("question_missing", "Connect and review the actual pending question.");
+      return this.command({ type: "question.answer", questionId, text: session.draft.text, expectedRevision, consumeDraft: { sessionId: session.id, expectedRevision: session.draft.revision } });
+    },
+  };
   readonly workspaces = {
     discover: (projectId: string) => this.query({ type: "workspace.discover", projectId }),
     create: (projectId: string, branch: string, options: { baseRef?: string; issueId?: string; prUrl?: string } = {}) => this.command({ type: "workspace.create", projectId, branch, ...options }),

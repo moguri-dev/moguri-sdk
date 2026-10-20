@@ -42,6 +42,20 @@ export class ArtifactRuntime {
   capture(session: Session, path: string, text: string): RetainedArtifact {
     return this.create(session, "plan", basename(path), text, "file", [{ eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: null, contentDigest: digest(text) }], path);
   }
+  answerEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
+    if (!snapshot.settings.values.artifacts.retainAnswers) return [];
+    return events.flatMap((event) => {
+      if (event.event_type !== "question.answered") return [];
+      const question = snapshot.questions.find((question) => question.id === event.payload.questionId);
+      if (!question) throw new MoguriError("question_missing", "The exact answered question is not retained; no artifact was invented.", 409);
+      const answer = event.payload.answer, text = `# Question\n\n${question.question}\n\n# Answer\n\n${answer.text}\n`;
+      const artifact = this.create({ id: question.sessionId, projectId: question.projectId, workspaceId: question.workspaceId }, "answer", `Answer: ${question.question.replace(/\s+/g, " ").slice(0, 140)}`, text, "question", [
+        { eventId: question.sourceEventId, sessionId: question.sessionId, messageId: question.callId, actor: "model", modelId: question.modelId, outcome: null, contentDigest: digest(question.question) },
+        { eventId: event.id, sessionId: question.sessionId, messageId: null, actor: answer.actor, modelId: answer.modelId, outcome: null, contentDigest: digest(answer.text) },
+      ]);
+      return [this.event({ ...artifact, questionId: question.id })];
+    });
+  }
   private event(artifact: RetainedArtifact): EventInput { return { event_type: "artifact.revised", profile_id: PROFILE_ID, project_id: artifact.projectId, payload: { artifact } }; }
   private revisions(id: string): RetainedArtifact[] {
     this.artifact(id);

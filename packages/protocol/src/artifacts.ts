@@ -12,13 +12,14 @@ export type ArtifactKind = Static<typeof ArtifactKindSchema>;
 export interface LegacyRetainedArtifact { id: string; projectId: string; originSessionId: string | null; name: string; path: string | null; contentDigest: string; createdAt: string; workspaceId?: string | null }
 export interface ArtifactSource {
   eventId: string | null; sessionId: string | null; messageId: string | null;
-  actor: "user" | "model" | "tool" | "unknown"; modelId: string | null; outcome: string | null; contentDigest: string;
+  actor: "user" | "model" | "decision-provider" | "tool" | "unknown"; modelId: string | null; outcome: string | null; contentDigest: string;
 }
 export interface RetainedArtifact {
   id: string; projectId: string | null; originSessionId: string | null; workspaceId: string | null;
   kind: ArtifactKind; name: string; path: string | null; contentDigest: string;
   revision: number; status: "active" | "archived"; createdAt: string; updatedAt: string;
-  origin: "manual" | "message" | "tool" | "file"; edited: boolean; sources: ArtifactSource[];
+  origin: "manual" | "message" | "tool" | "file" | "question"; edited: boolean; sources: ArtifactSource[];
+  questionId?: string;
 }
 export const legacyArtifact = (artifact: LegacyRetainedArtifact, eventId: string): RetainedArtifact => ({
   ...artifact, workspaceId: artifact.workspaceId ?? null, kind: "plan", revision: 0, status: "active",

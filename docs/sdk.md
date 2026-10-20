@@ -5,8 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 10 deliberately rejects incompatible running
-services. State migrations preserve schema-1 through schema-9 history, sessions, drafts,
+This is an alpha API. Protocol 11 deliberately rejects incompatible running
+services. State migrations preserve schema-1 through schema-10 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -112,6 +112,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
 | `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
+| `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
@@ -289,8 +290,29 @@ invalidate the choice. The explicit Node entrypoint exports
 digest verification and fsync, no overwrite or automatic app opening.
 
 Text is bounded to 128 KiB UTF-8, history pages to 100 records, JSON exports to
-8 MiB with no truncation. No structured-question answer policy, repository
-materialization/commit or work-item/folder artifact organization is claimed yet.
+8 MiB with no truncation. Repository materialization/commit and work-item/folder
+artifact organization are not claimed yet.
+
+### Actual structured answers
+
+`snapshot.questions` contains typed model clarifications and their real
+status/provenance; `session.pendingQuestionId` identifies an active owner.
+`questions.answer(id, text, observedRevision)` accepts only actual user input
+for that live question/turn. It cannot set an actor, approve tools or answer
+another turn. `questions.answerDraft(id, observedRevision)` consumes the exact
+saved owning-session text atomically; flush a `DraftEditor` first. Attached
+context is preserved and stale draft/question revisions reject the entire
+operation.
+
+Question routing respects explicit tool denials but does not ask for redundant
+permission to ask a clarification. Worker cancellation stays non-blocking;
+stop/restart cancels pending questions without manufacturing an answer.
+`settings.values.artifacts.retainAnswers` defaults true as requested.
+Answer event, independent artifact with model-question/user-answer sources,
+draft clearing and command receipt commit together; failure rolls back all.
+Disabling retention preserves canonical source events until their session
+retention applies. Model/delegated-decision answers require their own future
+policy/call provenance, never this actual-user endpoint.
 
 ### Managed Local roots
 

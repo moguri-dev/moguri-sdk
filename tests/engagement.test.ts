@@ -61,7 +61,7 @@ test("metachat has only read/propose authority and a real user must approve exac
     const proposal = sdk.getState().snapshot!.configurationProposals[0]!;
     assert.equal(proposal.actor, "model"); assert.equal(proposal.status, "pending"); assert.equal(proposal.projectId, null);
     assert.equal(sdk.settings.get()!.values.instructions, "");
-    assert.deepEqual((fixture.requests[0]!.tools as { function: { name: string } }[]).map((tool) => tool.function.name), ["moguri_config"]);
+    assert.deepEqual((fixture.requests[0]!.tools as { function: { name: string } }[]).map((tool) => tool.function.name), ["ask_user", "moguri_config"]);
     const review = await sdk.configuration.review(proposal.id);
     assert.equal(review.before, ""); assert.equal(review.spec.target, "global");
     await assert.rejects(() => sdk.configuration.decide(proposal.id, true, proposal.contentDigest, false), /Acknowledge/);
@@ -123,7 +123,7 @@ test("schema-5 encrypted history migrates without changing identities, receipts 
     const history = fixture.service.controller.events(0).map((event) => [event.seq, event.id]);
     sdk.disconnect(); await writeLegacyState(fixture.service, 5);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 10);
+    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 11);
     assert.deepEqual(restarted.controller.events(0).slice(0, history.length).map((event) => [event.seq, event.id]), history);
     assert.equal(restarted.controller.snapshot().sessions[0]?.draft.text, "Generated retained schema-five draft.");
     assert.equal(restarted.controller.snapshot().sessions[0]?.controls.modelId, fixture.modelId);

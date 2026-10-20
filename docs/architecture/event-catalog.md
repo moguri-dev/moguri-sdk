@@ -55,6 +55,7 @@ Unused scope fields are null in checkpoint 1.
 | `mcp.oauth_changed` | Non-secret explicit OAuth lifecycle and transient-link readiness. Tokens, authorization URLs, state, PKCE verifiers and client secrets are not event payloads. |
 | `configuration.proposed`, `configuration.decided` | Exact scoped content/base digests and revision, verified source excerpts, actual user/model origin and a real user decision. No self-approval, authentication, automatic enablement or publication. |
 | `attention.raised`, `attention.cleared`, `attention.acknowledged` | Atomically derived question/approval/failure/done state; heuristic provenance is explicit and read acknowledgement never resolves or approves. |
+| `question.asked`, `question.answered`, `question.cancelled` | Exact model/step/call and owning-turn question, actual answer actor and cancellation. Actual-user answers cannot be forged by a model, heuristic or queue item. Optional retained answer artifacts are derived atomically. |
 
 ## HTTP commands
 
@@ -110,13 +111,18 @@ bounded revision reads/history/exports and reviewed project artifact impact.
 Model content is never recorded as a user answer; export/materialization is not
 implicit filesystem authority. Project removal requires the explicit reviewed
 retain/export/delete choice when documents exist.
+Question commands accept only actual owning-turn user input with an observed
+question revision and optional exact draft consumption. Question, draft,
+artifact/source provenance and receipt failures roll back together. Stop/restart
+cancels waiting requests without inventing facts, changing permissions or
+holding the worker's cancellation chain behind a human response.
 
 ## WebSocket
 
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":10,"token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":11,"token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

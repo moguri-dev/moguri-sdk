@@ -43,6 +43,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D20 | Core SSH execution uses a pinned owned worker bridge and durable late receipts without replay. | Host/build/root verification, actual remote inference or truthful loss/cancellation accounting fails. |
 | D21 | Managed Local worktrees use explicit owned roots and per-root writer leases across every SDK/client filesystem surface. | Safe Git creation/removal, root consistency, concurrency or restart reconciliation fails. |
 | D22 | Typed text artifacts have independent encryption/revisions and exact source provenance; project removal binds an explicit reviewed retention choice. | Legacy rekeying, source-actor separation, deletion isolation or persistent client export fails. |
+| D23 | Structured clarifications record actual owning-turn answers; optional retained artifacts and saved-draft consumption are one transaction, never permissions. | Actor/turn/revision isolation, cancellation, atomic retention or cross-client answer/queue behavior fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -495,6 +496,26 @@ save action and a new private file, never silent overwrite or repository
 publication. Restart, concurrency, shared-content grants and rollback are
 generated acceptance. Structured questions, repository materialization/commit
 and work-item/folder organization remain separate first-release capabilities.
+
+## D23. Structured questions and actual-answer authority
+
+**Decision.** Reuse the worker's real tool/delegation path and shared durable
+composer. A typed model clarification is untrusted task context, not permission
+to execute its contents. Routing respects explicit tool denials but does not
+ask the user for redundant permission to ask a question.
+
+Only an actual owning-turn/revision-bound user endpoint records actor `user`.
+Choices do not consume unrelated draft text; freeform answers may atomically
+consume the exact saved draft while preserving attachments. Cmd/Ctrl+Enter
+still holds queued intent. Stop/restart cancels the wait without inventing an
+answer or blocking cancellation behind a human response.
+
+Migration 11 preserves prior state and adds source events plus explicit
+answer-retention settings, on by default as requested. Answer, independently
+keyed artifact/source actors, optional draft clearing and receipt commit
+together. Models and delegated decision providers cannot reuse this endpoint
+or promote automated answers into user-only Core memory. Their own evaluated
+policy/call path remains a separate capability.
 
 ## Still open
 

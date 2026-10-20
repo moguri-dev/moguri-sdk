@@ -33,6 +33,7 @@ export const slashCommands = [
   { name: "plan", description: "Open the project plan" },
   { name: "artifacts", description: "View independent retained documents" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
+  { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
   { name: "project-removal", description: "Preview independent artifacts before explicit project-data removal", argument: "[preview|export [ABSOLUTE_PATH]|retain DIGEST confirm-remove|delete DIGEST confirm-remove|export-delete PREVIEW_SHA EXPORT_SHA confirm-remove]" },
   { name: "insights", description: "Inspect session metadata and usage" },
   { name: "pr", description: "Open the connected pull request" },
@@ -67,6 +68,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "question": {
+      const [action, id, revision, ...text] = command.argument.split(/\s+/);
+      const question = sdk.getState().snapshot!.questions.find((question) => question.id === session.pendingQuestionId && question.status === "open");
+      if (!action) return { kind: "text", text: JSON.stringify({ question: question ?? null, diagnostic: "Only an actual answer endpoint resolves this state; heuristic attention or a queued prompt does not answer." }, null, 2) };
+      if (action !== "answer" || !id || !revision || !/^\d+$/.test(revision) || !text.length) throw new ClientError("question_answer", "Use /question, or explicitly /question answer ID REV TEXT. No answer or permission is inferred.");
+      if (!question || question.id !== id) throw new ClientError("question_scope", "This is not the current question for this conversation.");
+      await sdk.questions.answer(id, text.join(" "), Number(revision)); return { kind: "ok", message: "Actual user answer recorded. Tool/Git permissions and policy were not changed." };
+    }
     case "project-removal": {
       if (!session.projectId) throw new ClientError("project_required", "Select a project for its explicit removal workflow. No previous project was inferred.");
       const [action, ...args] = command.argument.split(/\s+/);

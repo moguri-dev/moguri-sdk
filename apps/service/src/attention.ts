@@ -15,12 +15,13 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): Even
       const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active).map((entry) => entry.id);
       if (ids.length) derived.push({ event_type: "attention.cleared", profile_id: PROFILE_ID, project_id: session.projectId, session_id: session.id, payload: { attentionIds: ids } });
     };
-    if (event.event_type === "turn.started" || event.event_type === "tool.decided") { clear(); continue; }
+    if (event.event_type === "turn.started" || event.event_type === "tool.decided" || event.event_type === "question.answered" || event.event_type === "question.cancelled") { clear(); continue; }
     let kind: Attention["kind"] | undefined;
     let reason: Attention["reason"] = "completed";
     let source: Attention["source"] = "state";
     let messageId: string | null = null;
     if (event.event_type === "tool.requested" && session.pendingApproval) { kind = "bell"; reason = "approval"; messageId = event.payload.approval.id; }
+    if (event.event_type === "question.asked") { kind = "question"; reason = "question"; messageId = event.payload.question.id; }
     if (event.event_type === "turn.finished") {
       if (event.payload.outcome === "completed") {
         if (session.queue.some((item) => !item.held && item.delivery !== "steer")) { clear(); continue; }

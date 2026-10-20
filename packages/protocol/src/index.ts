@@ -15,9 +15,10 @@ import type { McpAuthorization } from "./oauth.ts";
 import type { ConfigurationProposal, Attention, SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, type LegacyRetainedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
+import type { UserQuestion, QuestionAnswer } from "./questions.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -132,6 +133,7 @@ export interface Session {
   processes: OwnedProcess[];
   turnId: string | null;
   pendingApproval: Approval | null;
+  pendingQuestionId: string | null;
   lastError: string | null;
   localFinishing: boolean;
   createdAt: string;
@@ -187,6 +189,9 @@ export interface EventPayloads {
   "session.workspace_bound": { workspaceId: string | null };
   "workspace.saved": { workspace: ManagedWorkspace };
   "change_set.saved": { changeSet: ChangeSet };
+  "question.asked": { question: UserQuestion };
+  "question.answered": { questionId: string; answer: QuestionAnswer };
+  "question.cancelled": { questionId: string; diagnostic: string };
   "session.configured": { controls: Controls };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
@@ -283,7 +288,7 @@ export const eventTypes: readonly EventType[] = [
   "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
-  "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted",
+  "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
 ];
 
 export function projectEvents(events: StoredEvent[]): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -307,6 +312,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
   const projectFolders = new Map<string, NavigationFolder>();
   const sessionGroups = new Map<string, SessionGroup>();
   const artifacts = new Map<string, RetainedArtifact>();
+  const questions = new Map<string, UserQuestion>();
   const terminals = new Map<string, TerminalState>();
   const executions = new Map<string, RemoteExecution>();
   const managedWorkspaces = new Map<string, ManagedWorkspace>();
@@ -319,12 +325,13 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       for (const [id, terminal] of terminals) if (terminal.sessionId === event.payload.deletedSessionId) terminals.delete(id);
       for (const [id, entry] of attention) if (entry.sessionId === event.payload.deletedSessionId) attention.delete(id);
       for (const [id, execution] of executions) if (execution.sessionId === event.payload.deletedSessionId) executions.delete(id);
+      for (const [id, question] of questions) if (question.sessionId === event.payload.deletedSessionId) questions.delete(id);
     }
     if (event.event_type === "project.removed") {
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
-      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -338,6 +345,15 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     if (event.event_type === "artifact.saved") artifacts.set(event.payload.artifact.id, legacyArtifact(event.payload.artifact, event.id));
     if (event.event_type === "artifact.revised") artifacts.set(event.payload.artifact.id, structuredClone(event.payload.artifact));
     if (event.event_type === "artifact.deleted") artifacts.delete(event.payload.artifactId);
+    if (event.event_type === "question.asked") questions.set(event.payload.question.id, { ...structuredClone(event.payload.question), sourceEventId: event.id });
+    if (event.event_type === "question.answered") {
+      const question = questions.get(event.payload.questionId);
+      if (question) Object.assign(question, { answer: structuredClone(event.payload.answer), status: "answered", revision: question.revision + 1 });
+    }
+    if (event.event_type === "question.cancelled") {
+      const question = questions.get(event.payload.questionId);
+      if (question) Object.assign(question, { status: "cancelled", diagnostic: event.payload.diagnostic, revision: question.revision + 1 });
+    }
     if (event.event_type === "workspace.saved") {
       managedWorkspaces.set(event.payload.workspace.id, structuredClone(event.payload.workspace));
       if (event.payload.workspace.status === "partial") blockedWorkspaces.add(event.payload.workspace.id);
@@ -406,7 +422,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       sessions.set(event.session_id, {
         id: event.session_id, projectId: event.project_id ?? null, workspaceId: event.payload.workspaceId ?? null, title: event.payload.title,
         controls: structuredClone(event.payload.controls), defaults: event.payload.defaults ? structuredClone(event.payload.defaults) : undefined, revision: 0, status: "idle", draft: { revision: 0, text: "", attachments: [] },
-        queue: [], queueRevision: 0, messages: [], usage: [], processes: [], turnId: null, pendingApproval: null,
+        queue: [], queueRevision: 0, messages: [], usage: [], processes: [], turnId: null, pendingApproval: null, pendingQuestionId: null,
         lastError: null, localFinishing: false, createdAt: event.timestamp, updatedAt: event.timestamp,
         parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
@@ -425,6 +441,14 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       timestamp: event.timestamp, attachments: item.attachments.length ? structuredClone(item.attachments) : undefined,
     });
     switch (event.event_type) {
+      case "question.asked": session.pendingQuestionId = event.payload.question.id; session.status = "waiting_input"; break;
+      case "question.answered":
+      case "question.cancelled":
+        if (session.pendingQuestionId === event.payload.questionId) {
+          session.pendingQuestionId = null;
+          if (session.turnId && session.status === "waiting_input") session.status = "running";
+        }
+        break;
       case "session.configured":
         if (session.defaults) for (const key of controlKeys) if (JSON.stringify(session.controls[key]) !== JSON.stringify(event.payload.controls[key])) session.defaults.sources[key] = "session";
         session.controls = structuredClone(event.payload.controls); session.revision++; break;
@@ -539,7 +563,7 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
       case "turn.stop_requested": session.status = "stopping"; break;
       case "turn.stop_acknowledged": break;
       case "turn.finished":
-        session.status = event.payload.outcome; session.turnId = null; session.pendingApproval = null;
+        session.status = event.payload.outcome; session.turnId = null; session.pendingApproval = null; session.pendingQuestionId = null;
         session.lastError = event.payload.diagnostic; session.localFinishing = false;
         for (const usage of session.usage) if (usage.outcome === "running") usage.outcome = "unconfirmed";
         for (const process of session.processes) if (process.outcome === "running") process.outcome = "unconfirmed";
@@ -554,5 +578,5 @@ export function projectEvents(events: StoredEvent[]): { projects: Project[]; ses
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], questions: [...questions.values()], terminals: [...terminals.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }
