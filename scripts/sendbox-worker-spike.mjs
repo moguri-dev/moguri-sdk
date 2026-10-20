@@ -12,10 +12,13 @@ import { BridgeEnvelopeSchema } from "../apps/service/src/remote-protocol.ts";
 import { parse, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { tools, validateTool } from "../apps/service/src/tools.ts";
 import { assistantMessage } from "../apps/service/src/worker-protocol.ts";
+import { readNativeRollback } from "../apps/service/src/native-evidence.ts";
 import sharp from "sharp";
 
-const { values } = parseArgs({ options: { candidate: { type: "string" }, workload: { type: "string" }, turn: { type: "boolean" }, network: { type: "boolean" } } });
+const { values } = parseArgs({ options: { candidate: { type: "string" }, workload: { type: "string" }, turn: { type: "boolean" }, network: { type: "boolean" }, stop: { type: "string" } } });
 if (process.platform !== "darwin" || !values.candidate || !values.workload) throw new Error("Use Node --import tsx on macOS with --candidate PINNED_INSTALLATION.json --workload IMAGE_QUALIFICATION.json. No automatic installation or trust change.");
+if (values.stop && (!values.turn || values.network || !["model", "command"].includes(values.stop))) throw new Error("Use --turn --stop model|command for an offline generated cancellation primitive, without --network.");
+const expectedOutcome = values.stop === "command" ? "partial" : values.stop === "model" ? "stopped" : "completed";
 const candidate = JSON.parse(await readFile(values.candidate, "utf8")), workload = JSON.parse(await readFile(values.workload, "utf8"));
 const hash = (content) => createHash("sha256").update(content).digest("hex");
 for (const [path, expected] of [[candidate.executable, candidate.hostSha256], [candidate.key, candidate.keySha256], [join(candidate.bundle, "manifest.json"), candidate.manifestSha256]]) {
@@ -37,6 +40,8 @@ const directory = await mkdtemp(join(root, "sendbox-worker-")), workspace = join
 await mkdir(workspace, { mode: 0o700 });
 await writeFile(join(workspace, "generated.txt"), "Generated real guest worker original.\n", { mode: 0o600 });
 if (values.turn) await cp("scripts/worker-image/generated-provider.mjs", join(workspace, "generated-provider.mjs"));
+if (values.stop) await writeFile(join(workspace, "generated-mode.json"), JSON.stringify({ stop: values.stop }), { mode: 0o600 });
+const fixtureDigest = values.turn ? hash(await readFile(join(workspace, "generated-provider.mjs"))) : null;
 const pixels = values.turn ? await sharp(randomBytes(1024 * 1024 * 3), { raw: { width: 1024, height: 1024, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer() : null;
 const runId = randomUUID(), key = randomBytes(32).toString("hex");
 const startMessage = { kind: "start", root: "/workspace", context: [{ role: "user", timestamp: Date.now(), content: [{ type: "text", text: "Generated image and exact read/write qualification." }, ...(pixels ? [{ type: "image", mimeType: "image/png", data: pixels.toString("base64") }] : [])] }], readOnly: false };
@@ -81,8 +86,9 @@ await writeFile(config, JSON.stringify({
   devcontainer: { auto_generate: false, extensions: [] }, observability: { mcp_inspection: { enabled: false } },
 }, null, 2), { mode: 0o600 });
 let passed = false, terminal, ended = false, done;
-const transport = { bootstraps: 0, kinds: [], diagnostics: [], frames: 0, outcomes: [] };
+const transport = { bootstraps: 0, kinds: [], diagnostics: [], frames: 0, outcomes: [], stopRequested: false, cancellationAck: false, stopStartedAt: null, stopMs: null, finalStatus: null, cliExit: null, nativeSessionId: null };
 const started = performance.now();
+const createdAfter = Math.floor(Date.now() / 1000) - 2;
 try {
   execFileSync(candidate.executable, ["policy", "validate", "--config", config], { encoding: "utf8", timeout: 10_000 });
   const run = async (program, argv, filename) => {
@@ -118,8 +124,10 @@ try {
     assert.ok(response.status === 401 || response.status === 403); assert.equal(response.proxy, true); assert.equal(response.credentials, false);
   }
   const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output, true);
-  let info, failure, bootstraps = 0, diagnostics = 0, finished = false, modelCalls = 0, toolCalls = 0, sequence = 0, queue = Promise.resolve();
+  const stop = () => { if (!transport.stopRequested) { transport.stopRequested = true; transport.stopStartedAt = performance.now(); channel.send({ kind: "parent", message: { kind: "stop" } }); } };
+  let info, failure, retention = null, bootstraps = 0, diagnostics = 0, finished = false, modelCalls = 0, toolCalls = 0, sequence = 0, queue = Promise.resolve();
   const main = values.turn ? ["/usr/local/bin/node", "--import", "/workspace/generated-provider.mjs", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"] : ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"];
+  const priorMain = new Set(ownedVms().map((vm) => vm.configuration.id));
   terminal = pty.spawn(candidate.executable, ["run", "--interactive", ...args, "--", ...main], { cwd: workspace, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME, TERM: "xterm-256color" }, cols: 100, rows: 32 });
   done = new Promise((resolve) => terminal.onExit((value) => { ended = true; resolve(value); }));
   terminal.onData((data) => input.write(data)); output.on("data", (data) => terminal.write(data));
@@ -135,11 +143,17 @@ try {
       transport.kinds.push(message.kind); transport.kinds = transport.kinds.slice(-40);
       if (message.kind === "bootstrap") {
         bootstraps++; transport.bootstraps = bootstraps;
+        const active = ownedVms().filter((vm) => !priorMain.has(vm.configuration.id) && vm.status === "running");
+        assert.equal(active.length, 1, "Cannot bind the foreground workload to one owned native session.");
+        transport.nativeSessionId = active[0].configuration.id.slice(name.length + 1);
+        assert.match(transport.nativeSessionId, /^[a-f0-9]{32}$/);
         channel.send({ action: values.turn ? "start" : "probe", protocol: PROTOCOL_VERSION, workerDigest: workload.payload.files["dist/worker.mjs"], stateDir: `/tmp/moguri-generated-${runId}`, root: "/workspace", ...(values.turn ? { runId, key, after: 0 } : {}) });
       } else if (message.kind === "probe") info = message.info;
       else if (message.kind === "ready" && values.turn) {
         info = message.info; assert.equal(message.status.runId, runId);
         channel.send({ kind: "parent", message: startMessage });
+      } else if (message.kind === "status") {
+        transport.finalStatus = { status: message.status.status, cancellation: message.status.cancellation, cleanup: message.status.cleanup };
       } else if (message.kind === "frame" && values.turn) {
         queue = queue.then(async () => {
           assert.equal(message.sequence, ++sequence); assert.equal(hash(Buffer.from(JSON.stringify(message.request))), message.digest);
@@ -147,10 +161,15 @@ try {
           const request = message.request, reply = (value) => channel.send({ kind: "parent", message: { kind: "reply", requestId: request.requestId, value } });
           if (request.kind === "boundary") {
             reply({ model: { id: "generated-native", name: "Generated fetch fixture, no real network", provider: "moguri-local", api: "openai-completions", baseUrl: "https://generated.native.invalid/v1", reasoning: false, input: ["text", "image"], contextWindow: 65536, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-              auth: { apiKey: "moguri-keyless", headers: { Authorization: null } }, steers: [], systemPrompt: "Generated qualification only. Use exactly the declared read/write fixture tools.", tools: tools.filter((tool) => tool.name === "read_file" || tool.name === "write_file"), mode: "agent", folders: { denied: [], readOnly: [] }, maxTokens: 1024 });
+              auth: { apiKey: "moguri-keyless", headers: { Authorization: null } }, steers: [], systemPrompt: "Generated qualification only. Use exactly the declared fixture tools.", tools: tools.filter((tool) => values.stop === "model" ? false : values.stop === "command" ? tool.name === "run_command" : tool.name === "read_file" || tool.name === "write_file"), mode: "agent", folders: { denied: [], readOnly: [] }, maxTokens: 1024 });
           } else if (request.kind === "approval") {
-            validateTool(request.call); assert.ok(request.call.name === "read_file" || request.call.name === "write_file"); assert.equal(request.call.arguments.path, "generated.txt");
-            if (request.call.name === "write_file") assert.equal(request.call.arguments.text, "Generated real guest worker replacement.\n");
+            validateTool(request.call);
+            if (values.stop === "command") {
+              assert.equal(request.call.name, "run_command"); assert.equal(request.call.arguments.command, "printf 'Generated native partial command.\\n' > generated-command.txt; sleep 30 & printf 'GENERATED_NATIVE_COMMAND_READY=%s\\n' \"$!\"; wait"); assert.equal(request.call.arguments.timeoutMs, 30_000);
+            } else {
+              assert.ok(request.call.name === "read_file" || request.call.name === "write_file"); assert.equal(request.call.arguments.path, "generated.txt");
+              if (request.call.name === "write_file") assert.equal(request.call.arguments.text, "Generated real guest worker replacement.\n");
+            }
             toolCalls++; reply({ allow: true, mode: "agent", folders: { denied: [], readOnly: [] } });
           } else if (request.kind === "model.complete") {
             const model = assistantMessage(request.message);
@@ -159,7 +178,9 @@ try {
             reply({ accepted: true }); transport.outcomes.push({ kind: "tool", outcome: request.outcome, isError: request.isError });
           } else if (request.kind === "finished") {
             reply({ accepted: true }); finished = true; transport.outcomes.push({ kind: "finished", outcome: request.outcome, diagnostic: request.diagnostic });
-          }
+          } else if (request.kind === "ack") transport.cancellationAck = true;
+          else if (request.kind === "delta" && values.stop === "model" && request.text.includes("GENERATED_NATIVE_MODEL_PENDING")) stop();
+          else if (request.kind === "output" && values.stop === "command" && request.text.includes("GENERATED_NATIVE_COMMAND_READY")) stop();
           channel.send({ kind: "ack", sequence: message.sequence });
         }).catch((error) => { failure = error; channel.send({ kind: "parent", message: { kind: "stop" } }); });
       }
@@ -169,24 +190,57 @@ try {
   let timer;
   try {
     const exit = await Promise.race([done, new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Real SendBox foreground-PTY worker timed out. Cleanup is not assumed.")), 90_000); })]);
+    transport.cliExit = exit.exitCode;
+    if (transport.stopStartedAt !== null) transport.stopMs = performance.now() - transport.stopStartedAt;
     await queue;
     if (failure) throw failure;
-    assert.equal(exit.exitCode, 0); assert.equal(exit.signal ?? 0, 0); assert.equal(bootstraps, 1);
+    assert.equal(exit.exitCode, expectedOutcome === "partial" ? 2 : expectedOutcome === "stopped" ? 130 : 0);
+    assert.equal(exit.signal ?? 0, 0); assert.equal(bootstraps, 1);
     assert.equal(info?.platform, "linux"); assert.equal(info?.nodeVersion, "26.12.0");
     assert.equal(info?.workerDigest, workload.payload.files["dist/worker.mjs"]); assert.equal(info?.root, "/workspace");
     if (values.turn) {
-      assert.equal(finished, true); assert.equal(modelCalls, 3); assert.equal(toolCalls, 2);
-      assert.equal(transport.outcomes.findLast((outcome) => outcome.kind === "finished")?.outcome, "completed");
-      assert.ok(transport.outcomes.filter((outcome) => outcome.kind === "tool").every((outcome) => !outcome.isError && outcome.outcome === "completed"));
-      assert.equal(await readFile(join(workspace, "generated.txt"), "utf8"), "Generated real guest worker replacement.\n");
-      const provider = JSON.parse(await readFile(join(workspace, "generated-provider-proof.json"), "utf8"));
-      assert.ok(provider.uid > 0); assert.equal(provider.requests.length, 3); assert.equal(provider.transport, "generated-fetch-fixture-not-network"); assert.equal(provider.enforcedProxy, true);
+      assert.equal(finished, true); assert.equal(modelCalls, values.stop ? 1 : 3); assert.equal(toolCalls, values.stop === "model" ? 0 : values.stop === "command" ? 1 : 2);
+      assert.equal(transport.outcomes.findLast((outcome) => outcome.kind === "finished")?.outcome, expectedOutcome);
+      if (values.stop) {
+        assert.equal(transport.stopRequested, true); assert.equal(transport.cancellationAck, true);
+        assert.ok(transport.stopMs < 10_000, "Native cancellation exceeded its measured 10-second qualification bound.");
+        assert.deepEqual(transport.finalStatus, { status: expectedOutcome, cancellation: "acknowledged", cleanup: "owned-worker-stopped" });
+      }
+      assert.ok(transport.outcomes.filter((outcome) => outcome.kind === "tool").every((outcome) => values.stop === "command" ? outcome.isError && outcome.outcome === "partial" : !outcome.isError && outcome.outcome === "completed"));
+      assert.equal(await readFile(join(workspace, "generated.txt"), "utf8"), values.stop ? "Generated real guest worker original.\n" : "Generated real guest worker replacement.\n");
+      let provider;
+      if (values.stop) {
+        if (!process.env.HOME) throw new Error("Native retained evidence needs the exact original host HOME; no state-root fallback.");
+        const expected = { stateRoot: join(process.env.HOME, ".sendbox", "run"), sessionId: transport.nativeSessionId, workspace, image: workload.image, exitCode: exit.exitCode,
+          file: "generated-provider-proof.json", command: { program: main[0], arguments: main.slice(1) }, createdAfter, createdBefore: Math.ceil(Date.now() / 1000) + 2,
+          maxBytes: 64 * 1024, baseline: { "generated-provider.mjs": fixtureDigest } };
+        const retained = await readNativeRollback(expected);
+        assert.equal(retained.added, true); assert.equal(retained.rollback, "confirmed");
+        await assert.rejects(() => lstat(join(workspace, expected.file)), { code: "ENOENT" });
+        provider = JSON.parse(retained.content);
+        retention = { sessionId: retained.sessionId, signerFingerprint: retained.signerFingerprint, planDigest: retained.planDigest, auditDigest: retained.auditDigest,
+          beforeId: retained.beforeId, afterId: retained.afterId, afterBinding: retained.afterBinding, rollback: retained.rollback,
+          files: [{ path: expected.file, digest: retained.digest, bytes: retained.content.length }] };
+        if (values.stop === "command") {
+          const partial = await readNativeRollback({ ...expected, file: "generated-command.txt" });
+          assert.equal(partial.added, true); assert.equal(partial.content.toString("utf8"), "Generated native partial command.\n");
+          await assert.rejects(() => lstat(join(workspace, "generated-command.txt")), { code: "ENOENT" });
+          retention.files.push({ path: "generated-command.txt", digest: partial.digest, bytes: partial.content.length });
+        }
+      } else provider = JSON.parse(await readFile(join(workspace, "generated-provider-proof.json"), "utf8"));
+      assert.ok(provider.uid > 0); assert.equal(provider.requests.length, values.stop ? 1 : 3); assert.equal(provider.transport, "generated-fetch-fixture-not-network"); assert.equal(provider.enforcedProxy, true);
+      assert.equal(provider.runId, runId);
+      if (values.stop === "model") {
+        assert.equal(provider.cancelled, true);
+        const completed = transport.outcomes.find((outcome) => outcome.kind === "model");
+        assert.equal(completed.stopReason, "aborted"); assert.equal(completed.usageReported, false);
+      }
       for (const request of provider.requests) { assert.equal(request.authorization, false); assert.deepEqual(request.images, [{ bytes: pixels.length, digest: hash(pixels) }]); }
       assert.ok(Buffer.byteLength(JSON.stringify(startMessage)) > 1024 * 1024);
     }
   } finally { clearTimeout(timer); input.end(); channel.end(); }
   cleanup();
-  const receipt = { status: "PASS", primitive: values.turn ? "Actual Moguri worker fork/IPC and maintained pi-ai loop with generated fetch fixture, exact approved read/write and >1 MiB image through real SendBox foreground PTY" : "Actual SendBox Node ELF with non-root/NNP/seccomp/no capabilities and workspace I/O, then real Moguri raw foreground-PTY bootstrap", unauthenticatedMetadataEgress: Boolean(values.network), generatedImageBytes: pixels?.length ?? 0, startFrameBytes: values.turn ? Buffer.byteLength(JSON.stringify(startMessage)) : 0, modelCalls, toolCalls, image: workload.image, protocol: PROTOCOL_VERSION, workerDigest: info.workerDigest, candidate: { hostSha256: candidate.hostSha256, manifestSha256: candidate.manifestSha256, trustRootId: candidate.trustRootId, minimumReleaseSequence: candidate.minimumReleaseSequence }, ms: performance.now() - started, qualification: "Development candidate/worker primitive with generated model fetch only; optional real egress is credential-free metadata, never inference. No real credentials, paid inference, SDK/controller adapter, cancellation/restart or production release qualification." };
+  const receipt = { status: "PASS", primitive: values.stop ? `Actual native ${values.stop} cancellation with acknowledged ${expectedOutcome} worker and verified owned VM absence` : values.turn ? "Actual Moguri worker fork/IPC and maintained pi-ai loop with generated fetch fixture, exact approved read/write and >1 MiB image through real SendBox foreground PTY" : "Actual SendBox Node ELF with non-root/NNP/seccomp/no capabilities and workspace I/O, then real Moguri raw foreground-PTY bootstrap", stopMode: values.stop ?? null, stopRequested: transport.stopRequested, cancellationAck: transport.cancellationAck, stopMs: transport.stopMs, workerStatus: transport.finalStatus, cliExit: transport.cliExit, nativeSessionId: transport.nativeSessionId, retention, fixtureDigest, unauthenticatedMetadataEgress: Boolean(values.network), generatedImageBytes: pixels?.length ?? 0, startFrameBytes: values.turn ? Buffer.byteLength(JSON.stringify(startMessage)) : 0, modelCalls, toolCalls, image: workload.image, protocol: PROTOCOL_VERSION, workerDigest: info.workerDigest, candidate: { hostSha256: candidate.hostSha256, manifestSha256: candidate.manifestSha256, trustRootId: candidate.trustRootId, minimumReleaseSequence: candidate.minimumReleaseSequence }, ms: performance.now() - started, qualification: "Development candidate/worker primitive with generated model fetch only; optional real egress is credential-free metadata, never inference. No real credentials, paid inference, SDK/controller lifecycle/restart, real provider-completion guarantee or production release qualification." };
   await writeFile(join(directory, "qualification.json"), JSON.stringify(receipt, null, 2), { mode: 0o600 });
   console.log(JSON.stringify({ ...receipt, directory }, null, 2)); passed = true;
 } finally {

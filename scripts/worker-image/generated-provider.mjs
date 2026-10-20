@@ -1,9 +1,14 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rename } from "node:fs/promises";
 
 const original = await readFile("/workspace/generated.txt", "utf8");
 const originalDigest = createHash("sha256").update(original).digest("hex");
-const proof = { pid: process.pid, uid: process.getuid(), transport: "generated-fetch-fixture-not-network", enforcedProxy: process.env.NODE_USE_ENV_PROXY === "1" && Boolean(process.env.HTTPS_PROXY && process.env.ALL_PROXY), status: (await readFile("/proc/self/status", "utf8")).split("\n").filter((line) => /^(NoNewPrivs|Seccomp|CapEff):/.test(line)), requests: [] };
+let mode = null;
+try { mode = JSON.parse(await readFile("/workspace/generated-mode.json", "utf8")).stop; } catch (error) { if (error.code !== "ENOENT") throw error; }
+if (mode !== null && mode !== "model" && mode !== "command") throw new Error("Unknown generated native stop fixture.");
+const command = "printf 'Generated native partial command.\\n' > generated-command.txt; sleep 30 & printf 'GENERATED_NATIVE_COMMAND_READY=%s\\n' \"$!\"; wait";
+const proof = { pid: process.pid, uid: process.getuid(), runId: process.env.MOGURI_TURN_ID ?? null, transport: "generated-fetch-fixture-not-network", mode, cancelled: false, enforcedProxy: process.env.NODE_USE_ENV_PROXY === "1" && Boolean(process.env.HTTPS_PROXY && process.env.ALL_PROXY), status: (await readFile("/proc/self/status", "utf8")).split("\n").filter((line) => /^(NoNewPrivs|Seccomp|CapEff):/.test(line)), requests: [] };
+const save = async () => { const path = `/workspace/generated-provider-proof.${process.pid}.tmp`; await writeFile(path, JSON.stringify(proof), { mode: 0o600 }); await rename(path, "/workspace/generated-provider-proof.json"); };
 globalThis.fetch = async (input, options) => {
   const request = new Request(input, options);
   if (request.url !== "https://generated.native.invalid/v1/chat/completions") throw new Error("Generated fixture refuses every real network destination.");
@@ -18,8 +23,27 @@ globalThis.fetch = async (input, options) => {
     return { bytes: content.length, digest: createHash("sha256").update(content).digest("hex") };
   }) : []);
   proof.requests.push({ model: body.model, bytes: Buffer.byteLength(text), images, authorization: false });
-  await writeFile("/workspace/generated-provider-proof.json", JSON.stringify(proof), { mode: 0o600 });
-  const call = proof.requests.length === 1 ? { name: "read_file", arguments: { path: "generated.txt" } } :
+  await save();
+  if (mode === "model") {
+    let closed = false, onAbort;
+    const stream = new ReadableStream({
+      start(controller) {
+        const cancel = () => {
+          if (closed) return;
+          closed = true; request.signal.removeEventListener("abort", cancel); proof.cancelled = true;
+          void save().then(() => controller.error(new DOMException("Generated native model stopped.", "AbortError")), (error) => controller.error(error));
+        };
+        onAbort = cancel;
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ id: "generated-native-pending", object: "chat.completion.chunk", model: body.model, choices: [{ index: 0, delta: { role: "assistant", content: "GENERATED_NATIVE_MODEL_PENDING" }, finish_reason: null }] })}\n\n`));
+        request.signal.addEventListener("abort", cancel, { once: true });
+        if (request.signal.aborted) cancel();
+      },
+      cancel() { if (closed) return; closed = true; if (onAbort) request.signal.removeEventListener("abort", onAbort); proof.cancelled = true; return save(); },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }
+  const call = mode === "command" ? proof.requests.length === 1 ? { name: "run_command", arguments: { command, timeoutMs: 30_000 } } : null :
+    proof.requests.length === 1 ? { name: "read_file", arguments: { path: "generated.txt" } } :
     proof.requests.length === 2 ? { name: "write_file", arguments: { path: "generated.txt", text: "Generated real guest worker replacement.\n", expectedDigest: originalDigest } } : null;
   const chunks = [];
   const chunk = (delta, finishReason = null) => chunks.push(`data: ${JSON.stringify({ id: `generated-native-${proof.requests.length}`, object: "chat.completion.chunk", model: body.model, choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`);

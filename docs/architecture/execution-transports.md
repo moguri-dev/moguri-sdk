@@ -189,6 +189,92 @@ responses and are labeled as such; live proxy/networking is a separate gate.
 
 ## Native SDK contract being qualified
 
+### Live mounts and failure rollback
+
+The separately qualified R5 runtime live-binds its selected workspace. It does
+not wait for exit 0 to copy files back. Its common security wrapper regards only
+`GuestTerminal::Exited { code: 0 }` as successful. Normal non-success finalization
+captures an after-snapshot/diff, then restores the pre-run tree by swapping the
+host workspace directory. Newly created files disappear and baseline files
+return. A later security-finalization failure can also roll back guest exit 0.
+This applies equally to awaited direct writes and same-filesystem atomic
+rename; `fsync` is not a way to bypass the rollback policy.
+
+These semantics are explicit in the retained SendBox revision
+`f2d8770ba3e9b5c95cdfa7eca0fe0d20f7279d39`:
+`crates/sendbox-host/src/lib.rs:223-246`,
+`crates/sendbox-host/src/security.rs:448-499`,
+`crates/sendbox-session-security/src/lifecycle.rs:617-684` and
+`crates/sendbox-security/src/snapshot.rs:475-545`.
+
+Therefore a native SDK execution must not hand a concurrently editable user
+checkout to automatic security rollback. It needs a private Moguri-owned
+staging root and captured source/base identity. Retain failed/stopped
+after-snapshot provenance and pending changes separately; apply only an accepted
+change set after rechecking the exact host base, current policy and required
+human decision. Rollback of the private root must never erase a concurrent user
+edit in the source checkout. Every client must identify staged versus actually
+published effects through the SDK rather than assuming a completed guest
+`write_file` survived teardown.
+
+Do not force a stopped/partial worker to exit 0 merely to retain its files.
+Keep actual worker, CLI, snapshot, publication and cleanup outcomes distinct.
+Generated acceptance must include stop/nonzero rollback, retained after-state,
+publication failure, changed host base and concurrent source edits, alongside
+the model/control/VM gates below.
+
+### Current protocol-16 R5 prerequisite
+
+The separate user-authenticated R5 prefix is
+`/opt/sendbox-readiness-adc32f48-r5`, host/guest 0.2.0/aarch64,
+trust root `readiness-qualification-adc32f48-r5`, caller minimum sequence 9
+(bundle sequence 9/minimum accepted 8). Moguri independently verified regular
+canonical root-owned installed host/key/manifest hashes and non-writable modes.
+Production trust, guest controls and Apple's service were not changed.
+
+| R5 candidate artifact | SHA-256 |
+| --- | --- |
+| Host | `b1cecdc3b9ae472adcf3027c3b23078f3106760729db8de9527b4848fa67663d` |
+| Guest tar, reported by the coordinated installer | `47512860170186ec6fe4a5f5059b6f456851e43fe5ca75b4f116cd77ba913948` |
+| Public key | `9834a580e8997500e446525776a6f28fdba8aee774b107a501258e46a844aa4f` |
+| Manifest | `030b950048469331adfe40865301765e9c9f9f20431c9c46ca5f1a4e41d3cee3` |
+
+A fresh no-cache arm64 image passed in **33,482.15 ms**, with locked
+dependencies, zero npm audit findings, native PTY and all current payload
+hashes verified. Its local-only immutable reference is
+`docker.io/library/moguri-worker@sha256:0a0a9eb33a894ee34ec5c31d33465a859ce2bec84f868f75d9e65cace0fd5825`;
+protocol 16 worker SHA-256 is
+`9190c0d469413924acb65ea90626739e12fd6c9666c89f731c7e8b04e9fb3b0b`.
+The parent-owned builder was stopped afterward.
+
+The current payload passed genuine R5 normal Node/thread/workspace and
+foreground worker primitives in **4,832.06 ms**: three explicitly generated
+pi-ai responses, two exact approved read/write tools, a **3,151,914-byte**
+generated image and a **4,202,798-byte** start frame. All owned VMs were removed.
+The refreshed atomic-proof fixture separately passed its normal run in
+**5,248.49 ms**. Neither run uses a real provider response or egress.
+
+The first model-stop harness run observed a pending model delta, requested and
+acknowledged stop, `aborted`/unreported model completion, a stopped worker and
+CLI 130 in **289.63 ms**. The command-stop run observed an actual approved
+process, acknowledged stop, conservative partial tool/turn outcome and CLI 2
+in **1,309.35 ms**. Both had empty independently checked generated-prefix VM
+inventory. Their overall harness gates remain failed pending verification of
+retained after-snapshot proof: the initial assertion incorrectly expected a
+new file to remain in the host workspace after normal failure rollback.
+Missing live-path proof alone does not establish that the guest never wrote it.
+
+Networking remains a separate failed/unqualified gate. An api-only deny-first
+R5 fetch retained CONNECT 502 and explicit CONNECT 403; these are not evidence
+of user cancellation. Fresh public DNS still shows the unapproved exact alias
+`glb-db52c2cf8be544.github.com` for `api.githubcopilot.com`, but no retained guest
+audit proves it is the sole cause. The user's domain-consent question returned
+automatic unavailability, not either offered choice, so no domain, wildcard,
+IP or production-policy extension was made. Offline cancellation work does not
+enable Sandbox/API readiness.
+
+### Owned SDK execution requirements
+
 The control plane must record an owned native execution before CLI effects:
 profile/session/turn, immutable configuration signature, pinned image/worker,
 actual host/guest mount mapping, trust metadata, unique runtime prefix and
