@@ -50,6 +50,9 @@ exercises the packed package's actual PTY transport on macOS after explicit
 script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
+Pass an existing archive to qualify the exact delivered bytes rather than
+repacking: `npm run verify:sdk -- release/moguri-0.7.0-alpha.1.tgz`.
+
 ## Connect to the shared service
 
 ```ts

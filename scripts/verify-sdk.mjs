@@ -6,8 +6,8 @@ import { join, resolve } from "node:path";
 const temporary = await mkdtemp(join(tmpdir(), "moguri-sdk-consumer-"));
 try {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-  const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", temporary], { encoding: "utf8" }));
-  const archive = join(temporary, packed[0].filename);
+  const archive = process.argv[2] ? resolve(process.argv[2]) :
+    join(temporary, JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", temporary], { encoding: "utf8" }))[0].filename);
   const consumer = join(temporary, "consumer");
   await mkdir(consumer);
   await writeFile(join(consumer, "package.json"), JSON.stringify({

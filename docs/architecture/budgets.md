@@ -101,3 +101,11 @@ termination now revokes that worker's authority and releases pending exchanges,
 including before bootstrap, without inventing an accepted result. The bounded
 regression confirms the owned process handle exits. This does not prove
 detached/reparented descendant containment.
+
+The resulting protocol-13 **0.7.0-alpha.1** development app also passes all 17
+hidden workflows from its actual ad-hoc-signed macOS arm64 package (37.8 s),
+including the budget/actual-dashboard flow. The delivered SDK archive, not a
+freshly repacked proxy, passes the generated-model admission and profile-cap
+test. DMG integrity and exact hashes are recorded in [setup](../setup.md).
+These are development artifacts, not notarization, real billing or native R5
+qualification.
