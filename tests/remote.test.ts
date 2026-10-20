@@ -31,7 +31,7 @@ async function remoteFixture(options: { exposeModels?: boolean; imageInput?: boo
   await controller.dispatch(envelope({ type: "project.settings", projectId: project.projectId, expectedRevision: project.revision, settings: { ...project.values, remotePath: workspace } }));
   const probe = () => controller.dispatch(envelope({ type: "remote.probe" }));
   const select = async (modelId = fixture.modelId) => controller.dispatch(envelope({ type: "session.configure", sessionId: fixture.sessionId, expectedRevision: fixture.session().revision, controls: { ...fixture.session().controls, env: "Remote", modelId } }));
-  return { ...fixture, controller, ssh, workspace, secrets, probe, select, close: async () => { await ssh.close(); await fixture.close(); } };
+  return { ...fixture, controller, ssh, workspace, secrets, probe, select, close: async () => { await fixture.service.close(); await ssh.close(); await fixture.close(); } };
 }
 
 test("Remote keeps authority local while real SSH models, instructions, approvals and writes use only the approved remote root", native, async () => {
@@ -169,6 +169,9 @@ test("remote workspace changes invalidate an exact pending approval instead of s
     await sdk.projects.configure(configuration.projectId, { ...configuration.values, remotePath: changed }, configuration.revision);
     await assert.rejects(() => sdk.command({ type: "approval.respond", sessionId: fixture.sessionId, approvalId: approval.id, allow: true }), /expired|no longer|pending|changed/i);
     await waitFor(() => ["failed", "partial"].includes(fixture.session().status));
+    const execution = fixture.controller.snapshot().executions.at(-1)!;
+    await waitFor(() => !fixture.controller.remote.owns(execution.id));
+    assert.equal(fixture.controller.snapshot().executions.find((value) => value.id === execution.id)?.cleanup, "owned-worker-stopped");
     assert.equal(await readFile(join(fixture.workspace, "fixture.txt"), "utf8"), "generated actual remote source\n");
     assert.equal(await readFile(join(fixture.project, "fixture.txt"), "utf8"), "generated original\n");
   } finally { sdk.disconnect(); await fixture.close(); }
