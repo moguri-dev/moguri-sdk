@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as pty from "node-pty";
-import { MoguriError, type TerminalInput, type TerminalState } from "../../../packages/protocol/src/index.ts";
+import { MoguriError } from "../../../packages/protocol/src/core.ts";
+import type { TerminalInput, TerminalState } from "../../../packages/protocol/src/index.ts";
 import { stopGroup } from "./supervisor.ts";
 
 export interface TerminalLaunchOptions { executable?: string; args?: string[] }

@@ -1,5 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { MAX_TEXT, MoguriError } from "./core.ts";
+export { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
 import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
 export * from "./platform.ts";
 export * from "./model.ts";
@@ -28,7 +30,6 @@ export * from "./inputs.ts";
 
 export const PROTOCOL_VERSION = 23;
 export const PROFILE_ID = "default";
-export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
 const revision = Type.Integer({ minimum: 0 });
@@ -67,15 +68,6 @@ export const CommandSchema = object({
 export type CommandEnvelope = Static<typeof CommandSchema>;
 export type Command = CommandEnvelope["command"];
 export type CommandResult = { id?: string; revision?: number };
-
-export class MoguriError extends Error {
-  constructor(public readonly code: string, message: string, public readonly status = 400) { super(message); }
-}
-export function parse<T extends TSchema>(schema: T, value: unknown): Static<T> {
-  if (!Value.Check(schema, value)) throw new MoguriError("invalid_request", "The request does not match the protocol schema.");
-  return value;
-}
-export const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
 export interface Project { id: string; name: string; path: string }
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }

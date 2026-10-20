@@ -146,3 +146,20 @@ one-owner multi-console memory measurements, are required before describing a
 new development archive as delivered. See [setup](../setup.md) for the currently
 qualified source/artifact results. No personal authorization, microphone,
 model weights, paid inference or Sandbox probe is used.
+
+The existing 600-MiB development budget is the **Electron-shell process
+aggregate** in `scripts/spikes.mjs`, not an invented total-runtime cap. Report
+control-plane/broker RSS and the combined application total separately, along
+with generated user programs. The initial package verifier incorrectly
+applied that shell threshold to all components. Its retained per-process
+diagnostic measured 554.08 MiB Electron plus
+277.33 MiB control-plane/broker, 831.41 MiB combined. That rejected result is
+retained; correcting its scope does not erase or relabel the combined memory.
+
+Import-boundary checks also exposed unnecessary service/provider/MCP/native
+loads during SDK discovery. `createRuntime` now explicitly loads its separate
+`runtime.mjs` entry only when embedding is requested. The private broker uses
+the existing core validation/error helpers and narrow terminal schema, not the
+entire application protocol. Public API/class identity and durable schema
+semantics are unchanged. These are measured module boundaries, not a Rust
+qualification or a claim that the overall application uses less than 600 MiB.

@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { ensureConnection as ensureTransportConnection, readConnection, stateDirectory } from "../../client/src/node.ts";
-import { startService, type ServiceOptions } from "../../../apps/service/src/server.ts";
+import type { ServiceOptions } from "../../../apps/service/src/server.ts";
 import { MoguriSdk } from "./index.ts";
 import { dirname, join } from "node:path";
 import { lstat, readFile } from "node:fs/promises";
@@ -14,14 +14,15 @@ const worker = (name: string) => fileURLToPath(new URL(source ? `../../../apps/s
 export function ensureConnection(options: Parameters<typeof ensureTransportConnection>[0] = {}) {
   return ensureTransportConnection({ ...options, servicePath: options?.servicePath ?? sdkServicePath() });
 }
-export function createRuntime(options: ServiceOptions) {
+export async function createRuntime(options: ServiceOptions) {
+  const runtime: typeof import("../../../apps/service/src/server.ts") = await import(new URL(source ? "../../../apps/service/src/server.ts" : "../runtime.mjs", import.meta.url).href);
   const profilePlatform = options.profiles?.platform;
   const platform = (configured: PlatformOptions | undefined): PlatformOptions => ({
     ...configured, mcpWorkerPath: configured?.mcpWorkerPath ?? worker("mcp-worker"),
     terminal: { ...configured?.terminal, brokerPath: configured?.terminal?.brokerPath ?? worker("terminal-broker") },
     speech: { ...configured?.speech, executable: configured?.speech?.executable ?? fileURLToPath(new URL(source ? "../../../.native/speech/bin/nemo-speech" : "../native/speech/bin/nemo-speech", import.meta.url)) },
   });
-  return startService({
+  return runtime.startService({
     ...options, workerPath: options.workerPath ?? worker("worker"),
     platform: platform(options.platform),
     ...(profilePlatform ? { profiles: { ...options.profiles, platform: (id: string) => platform(profilePlatform(id) ?? options.platform) } } : {}),

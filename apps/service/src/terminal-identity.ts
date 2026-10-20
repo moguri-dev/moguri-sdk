@@ -2,7 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
-import { MoguriError, type TerminalBinding, type TerminalOwner } from "../../../packages/protocol/src/index.ts";
+import { MoguriError } from "../../../packages/protocol/src/core.ts";
+import type { TerminalBinding, TerminalOwner } from "../../../packages/protocol/src/terminals.ts";
 import { frameDigest } from "./worker-wire.ts";
 
 export function terminalBinding(scope: { profileId: string; sessionId: string; projectId: string; workspaceId: string | null; root: string }): TerminalBinding {

@@ -1,6 +1,6 @@
 import * as pty from "node-pty";
 import { setTimeout as sleep } from "node:timers/promises";
-import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/core.ts";
 import { stripVTControlCharacters } from "node:util";
 
 function signalGroup(pid: number, signal: NodeJS.Signals | 0): "present" | "absent" | "unconfirmed" {

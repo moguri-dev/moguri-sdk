@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
-import { isRecord, MoguriError, parse, type TerminalOwner } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, parse } from "../../../packages/protocol/src/core.ts";
+import type { TerminalOwner } from "../../../packages/protocol/src/terminals.ts";
 import { JsonLineChannel } from "./worker-wire.ts";
 import { assertTerminalEndpoint, terminalProof, validTerminalProof } from "./terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES, TerminalOwnerInfoSchema, type TerminalOwnerInfo, type TerminalRequestInput } from "./terminal-protocol.ts";

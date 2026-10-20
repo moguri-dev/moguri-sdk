@@ -1,5 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
-import { TerminalOwnerSchema, TerminalStateSchema } from "../../../packages/protocol/src/index.ts";
+import { TerminalOwnerSchema, TerminalStateSchema } from "../../../packages/protocol/src/terminals.ts";
 
 export const TERMINAL_PROTOCOL = 1;
 export const TERMINAL_FRAME_BYTES = 512 * 1024;

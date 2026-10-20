@@ -101,7 +101,9 @@ try {
 ```
 
 Only embed when no other service owns that directory. Importing the SDK alone
-does not start a service or read credentials. Default provider initialization
+does not start a service or read credentials. Node discovery does not load the
+provider/MCP/native PTY runtime; `createRuntime` explicitly loads its packaged
+`runtime.mjs` entry. Default provider initialization
 uses Moguri's OS-keychain backend; generated providers are injected only in tests.
 
 ## Shared capability APIs

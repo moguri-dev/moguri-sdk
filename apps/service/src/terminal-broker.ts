@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type Socket } from "node:net";
 import { chmod } from "node:fs/promises";
-import { isRecord, MoguriError, parse, type TerminalOwner, type TerminalState } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, parse } from "../../../packages/protocol/src/core.ts";
+import type { TerminalOwner, TerminalState } from "../../../packages/protocol/src/terminals.ts";
 import { TerminalEngine } from "./terminal-engine.ts";
 import { assertTerminalBinding, assertTerminalEndpoint, terminalKey, terminalProof, validTerminalProof } from "./terminal-identity.ts";
 import { JsonLineChannel, frameDigest } from "./worker-wire.ts";
