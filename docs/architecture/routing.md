@@ -140,3 +140,11 @@ external consumer exercises the delivered SDK's real staged worker, actual
 role accounting, no classifier-context promotion and inherited-cap rejection.
 No personal credential, paid provider, VM, calibrated benchmark or production
 SendBox qualification is implied.
+
+The `0.10.0-alpha.1` checkpoint passes 291 full local checks (188.15 s), 21 hidden
+packaged-app workflows (46.4 s), exact-archive external SDK/CLI exchanges and
+source/consumer audits with zero reported vulnerabilities. Ad-hoc signature,
+native assets and actual DMG integrity are verified. The historical failed
+schema assertions and unchanged older artifacts are recorded in
+[setup](../setup.md#current-010-checkpoint); none of these mechanical checks
+establishes model-confidence calibration or compound-workflow readiness.
