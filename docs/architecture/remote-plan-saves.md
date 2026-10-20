@@ -135,3 +135,13 @@ and reviewed edit/save/retained-inspection flow in **1,452.70 ms**, alongside
 existing profiles, budgets, context, Local behavior and recovery. Source and
 external-consumer locked installs/audits report zero vulnerabilities. Exact
 versioned app/archive qualification is recorded separately after packaging.
+
+The **0.14.0-alpha.1** artifacts now pass all **29** hidden source-desktop and
+all **29** actual packaged-app flows, **1.1 min each** per runner summary.
+Independent package verification drives the actual bundled Node service and
+private SSH worker's provider-free plan save, exact bytes and retained boundary
+artifact, not a source-service proxy. The exact SDK archive passes a fresh
+audited/approved install, four external type entrypoints, actual installed CLI/
+SDK Remote saves and the preserved complete shared foundation. Source/consumer
+audits report zero vulnerabilities. Setup records immutable bytes/hashes;
+no archive was rebuilt merely to include its final qualification notes.
