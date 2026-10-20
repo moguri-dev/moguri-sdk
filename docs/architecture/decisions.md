@@ -217,6 +217,13 @@ complete containment or enable background execution.
 
 **Schema impact.** Phase 1 defines versioned routing-policy snapshots, plans, leg ownership, candidate bases, acceptance/application outcomes, and complete per-call accounting. Use the existing event/projection model and normal migration and restart-recovery rules; do not build a second hidden workflow store.
 
+**Measured prerequisite.** The [generated routing transport probe](routing-primitives.md)
+passes eight mechanical Single-pattern cases through maintained pi-ai:
+actual 128/64 output bounds, role telemetry, approved snapshot membership,
+receipt failure, unknown usage, changed eligibility and cancellation before
+solver dispatch. It does not qualify production routing, calibrated quality,
+durable all-role admission, compound candidates or budget wind-down.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.

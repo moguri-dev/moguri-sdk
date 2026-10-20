@@ -16,6 +16,9 @@ scope/upgrade/client/package behavior. The separate
 [decision-provider prerequisite](decision-primitives.md) records generated
 wire/failure measurements and the missing output-limit constraint; it does not
 promote routing or automated decisions to operational.
+The [routing transport prerequisite](routing-primitives.md) separately
+measures an actual generated classifier-to-solver exchange and its fail-closed
+eligibility/receipt/stop paths; full kupo admission remains unqualified.
 
 Initial budgets were set before the run: SQLite append p95 below 20 ms; bounded
 2,000-file listing below 500 ms and Git status below 1 s; Electron shell ready
