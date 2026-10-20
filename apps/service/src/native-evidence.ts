@@ -165,15 +165,18 @@ const sessionHex = (value: unknown): string => {
   return fail("Native evidence has an invalid session binding.");
 };
 
-export interface NativeRollbackInput {
-  stateRoot: string; sessionId: string; workspace: string; image: string; exitCode: number; file: string;
-  command: { program: string; arguments: string[] }; createdAfter: number; createdBefore: number; maxBytes?: number;
+export interface NativeBoundaryInput {
+  stateRoot: string; sessionId: string; workspace: string; image: string;
+  command: { program: string; arguments: string[] }; createdAfter: number; createdBefore: number;
+}
+export interface NativeRollbackInput extends NativeBoundaryInput {
+  exitCode: number; file: string; maxBytes?: number;
   baseline?: Record<string, string>;
 }
-export async function readNativeRollback(input: NativeRollbackInput) {
-  const sid = sessionHex(input.sessionId), root = join(await privateDirectory(input.stateRoot), "sessions", sid), fileName = pathName(input.file);
+async function boundary(input: NativeBoundaryInput) {
+  const sid = sessionHex(input.sessionId), root = join(await privateDirectory(input.stateRoot), "sessions", sid);
   await privateDirectory(root);
-  if (!uint(input.exitCode) || input.exitCode === 0 || !uint(input.createdAfter) || !uint(input.createdBefore) || input.createdAfter > input.createdBefore) fail("Native rollback needs an actual bounded unsuccessful run.");
+  if (!uint(input.createdAfter) || !uint(input.createdBefore) || input.createdAfter > input.createdBefore) fail("Native boundary needs a captured launch interval.");
   const planRaw = await bytes(join(root, "boundary-plan.json"), 16 * 1024 * 1024), envelope = record(json(planRaw)), plan = record(envelope.plan), identity = record(envelope.signer);
   if (envelope.format !== "sendbox-signed-boundary-plan" || envelope.version !== 3 || plan.format !== "sendbox-boundary-plan" || plan.version !== 3) fail("Native boundary version is unsupported.");
   if (sessionHex(plan.session_id) !== sid || record(plan.workspace).source !== input.workspace || record(plan.workload).reference !== input.image || record(plan.provider).runtime !== "apple") fail("Native boundary belongs to another workspace, image or runtime.");
@@ -181,6 +184,17 @@ export async function readNativeRollback(input: NativeRollbackInput) {
   if (command.program !== input.command.program || JSON.stringify(command.arguments) !== JSON.stringify(input.command.arguments) || created < input.createdAfter || created > input.createdBefore) fail("Native boundary does not match the captured command/time.");
   const planContent = planBytes(planRaw), planDigest = hash(planContent);
   const signerFingerprint = signature(envelope.signature, identity, planContent, "configuration", `boundary-plan:${sid}`, { format: "sendbox-boundary-plan", runtime: "apple", session_id: sid });
+  return { sid, root, identity, planDigest, signerFingerprint };
+}
+export async function readNativeBoundary(input: NativeBoundaryInput) {
+  const value = await boundary(input);
+  return { sessionId: value.sid, planDigest: value.planDigest, signerFingerprint: value.signerFingerprint,
+    workspace: input.workspace, image: input.image };
+}
+export async function readNativeRollback(input: NativeRollbackInput) {
+  const fileName = pathName(input.file);
+  if (!uint(input.exitCode) || input.exitCode === 0) fail("Native rollback needs an actual unsuccessful run.");
+  const { sid, root, identity, planDigest, signerFingerprint } = await boundary(input);
   const auditRaw = await bytes(join(root, "audit-log.json"), 16 * 1024 * 1024), audit = record(json(auditRaw));
   signature(json(await bytes(join(root, "audit-log.signature.json"), 64 * 1024)), identity, auditRaw, "artifact", "audit-log.json", { session_id: sid, boundary_plan_digest: planDigest });
   if (audit.format !== "sendbox-host-audit-publication" || audit.version !== 1 || audit.session_id !== sid || audit.boundary_plan_digest !== planDigest || !Array.isArray(audit.records) || audit.event_count !== audit.records.length) fail("Native signed audit does not match the captured boundary.");

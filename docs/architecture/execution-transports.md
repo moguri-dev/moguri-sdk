@@ -251,6 +251,11 @@ after-state hashes remain verified. It completes in **5,673.40 ms**, settling
 as **partial / CLI 2** in **1,207.54 ms**, without publishing to the source.
 This qualifies the isolated text-set primitive, not source application or
 complete native Git/command/project mapping.
+The complete local suite then passes **308 checks in 244.35 s** with clean
+types/build. A separate privately staged model-stop gate settles in **232.00 ms**
+(CLI 130, total 5,195.97 ms), preserving the concurrent source edit and rejecting
+the changed base. Normal staged execution passes in **8,056.98 ms**, changes only
+its candidate, and publishes nothing to the source.
 
 ### Current protocol-16 R5 prerequisite
 
@@ -326,7 +331,9 @@ manifest in the same private SID store. It rejects ambiguity rather than
 claiming a cryptographic after-ID binding. Eight generated checks cover
 signatures/subject mutation, foreign scope, unsafe paths and sizes, missing
 rollback, aliases, ambiguous after-state, lost integer/order fidelity,
-snapshot self-hashing and changed baselines. This helper is not a new trust
+snapshot self-hashing and changed baselines. A ninth generated case now binds
+the live signed plan before an audit/final result exists and rejects a foreign
+workspace. This helper is not a new trust
 root, SDK execution capability or statement of real provider completion.
 The combined portable/native-local suite passes **299 checks in 187.67 s**,
 including these eight generated evidence groups and the existing TUI/SSH/budget
@@ -338,9 +345,74 @@ R5 fetch retained CONNECT 502 and explicit CONNECT 403; these are not evidence
 of user cancellation. Fresh public DNS still shows the unapproved exact alias
 `glb-db52c2cf8be544.github.com` for `api.githubcopilot.com`, but no retained guest
 audit proves it is the sole cause. The user's domain-consent question returned
-automatic unavailability, not either offered choice, so no domain, wildcard,
-IP or production-policy extension was made. Offline cancellation work does not
-enable Sandbox/API readiness.
+automatic unavailability, not either offered choice, so no user-profile,
+factory or production policy was changed or represented as approved.
+Offline cancellation work does not enable Sandbox/API readiness.
+
+Further isolation uses a **separate generated, credential-free development
+fixture**, explicitly naming only the API host and exact observed GitHub alias.
+It is not a user-policy grant, never adds wildcards/literal IPs, and retains
+deny-first DNS/egress controls. The first fetch in a fresh VM still fails
+CONNECT 502 with `signal.aborted=false`: adding the alias is demonstrably not
+sufficient, and those failures remain failures.
+
+A bounded SOCKS DOMAIN diagnostic uses the gateway's existing policy/pin/dial
+path, not a new route or control port. Five generated framing groups cover
+split/truncated/IPv6/domain replies, cancellation and target/proxy restrictions.
+A genuinely first operation in a fresh R5 VM returns SOCKS **REP 0x04
+(`resolution_failed`)**. The subsequent HTTP fetch in that same VM obtains a
+verified TLS Response **400**; later A lookup succeeds, AAAA is empty, raw HTTP
+CONNECT returns 200 and another TLS fetch obtains 400. A credential-free host
+control also returns 400. These classify their own ordered requests, not
+retrospectively every historical 502.
+
+The shared per-VM authorization cache makes cold/warm ordering significant.
+CONNECT 502 can be resolution or upstream-dial failure; the existing HTTP
+status alone does not distinguish them. SOCKS REP4 versus REP5 does, per request.
+A 1.5-second diagnostic DNS timeout was shorter than the resolver's documented
+three-second exchange/five-second combined lookup budget and was not evidence
+of gateway failure; current DNS diagnostics respect that budget. No retry,
+sleep, cache priming or warmed result is substituted for the failing fresh
+first-request gate. TLS 400 is transport evidence, not authenticated model
+access or a paid inference pass. Sandbox/API remains unavailable while the
+cold-resolution failure is investigated.
+
+The opt-in `--observe-dns` diagnostic verifies the live signed plan's exact
+workspace/image/command/time before attaching a bounded, privileged observer
+only to that owned generated VM. It reads the non-auth resolver-state
+`upstream` scalar and retains only DNS header metadata, request ports and
+SHA-256 query comparisons excluding transaction IDs. It never retains raw
+packets, names, response bodies, bootstrap/control configuration or credentials.
+The workload still verifies non-root execution, NNP, seccomp and zero effective
+capabilities. This diagnostic is not the execution path or a weakening of those
+controls. The four generated parser checks include upstream scope, unsupported/
+truncated frames, transaction-ID-independent hashes and unexpected response
+sources restricted to observed request ports.
+
+In the correlated owned run, the selected upstream was `192.168.64.1:53`.
+Initial A/AAAA requests were observed at **84.85-84.88 ms**, with no matching
+DNS reply during the bounded **12-second** observation. The first SOCKS
+request returned REP4. New requests at **3,159.44-3,159.48 ms** had identical
+per-type query hashes and received NOERROR replies from the expected upstream
+at **3,161.03 ms** and **3,186.90 ms**. Later requests also received replies.
+This narrows the failing request to absent observed DNS responses, not a
+hostname-policy rejection, API/TLS failure or changed DNS question. It does
+not establish where packets were lost, prove a particular host/upstream bug or
+recover discarded gateway errors.
+
+Observer attachment delayed the gated workload by **105 ms**; its total
+**13,579 ms** includes the observation window. The separate unmodified fresh
+first-fetch gate still failed CONNECT 502 afterward. A response-only initial
+collector was insufficient to observe outgoing queries; the corrected
+bidirectional collector and source-port correlation are recorded separately.
+All generated VMs were removed. No warmed pass, retry or observation-induced
+timing change is substituted for cold-network qualification.
+
+This source checkpoint passes **314 local checks in 239.47 s**, all **21**
+hidden desktop workflows in **44.2 s**, clean types/build and the externally
+installed SDK/CLI/worker checks. Source and consumer audits report zero
+vulnerabilities. These internal Node-only prerequisites add no protocol/schema
+version, migration or ready capability; delivered 0.10 archives are unchanged.
 
 ### Owned SDK execution requirements
 

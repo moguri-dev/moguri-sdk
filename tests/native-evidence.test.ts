@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readNativeRollback } from "../apps/service/src/native-evidence.ts";
+import { readNativeBoundary, readNativeRollback } from "../apps/service/src/native-evidence.ts";
 
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const ordered = (values: Record<string, string>) => Object.keys(values).sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)))
@@ -67,6 +67,17 @@ test("native rollback evidence verifies exact provenance and lossless plan/audit
     assert.equal(result.signerFingerprint, fixture.identity.fingerprint);
     assert.equal(result.beforeId, fixture.before.id); assert.equal(result.afterId, fixture.after.id);
     assert.equal(result.rollback, "confirmed"); assert.equal(result.afterBinding, "unique-private-store");
+  } finally { await fixture.close(); }
+});
+
+test("native launch identity can bind a live owned VM before an audit or final result exists", async () => {
+  const fixture = await evidenceFixture();
+  try {
+    await rm(join(fixture.root, "audit-log.json")); await rm(join(fixture.root, "audit-log.signature.json"));
+    const result = await readNativeBoundary(fixture.input);
+    assert.equal(result.sessionId, fixture.input.sessionId); assert.equal(result.workspace, fixture.input.workspace);
+    assert.equal(result.image, fixture.input.image); assert.equal(result.signerFingerprint, fixture.identity.fingerprint);
+    await assert.rejects(() => readNativeBoundary({ ...fixture.input, workspace: join(fixture.directory, "foreign-root") }), /another workspace/);
   } finally { await fixture.close(); }
 });
 

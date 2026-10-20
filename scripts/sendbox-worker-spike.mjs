@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -12,14 +12,17 @@ import { BridgeEnvelopeSchema } from "../apps/service/src/remote-protocol.ts";
 import { parse, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { tools, validateTool } from "../apps/service/src/tools.ts";
 import { assistantMessage } from "../apps/service/src/worker-protocol.ts";
-import { readNativeRollback } from "../apps/service/src/native-evidence.ts";
+import { readNativeBoundary, readNativeRollback } from "../apps/service/src/native-evidence.ts";
 import { captureNativeSource, assertNativeSource, inspectNativeStage, materializeNativeStage } from "../apps/service/src/native-staging.ts";
 import sharp from "sharp";
 
-const { values } = parseArgs({ options: { candidate: { type: "string" }, workload: { type: "string" }, turn: { type: "boolean" }, network: { type: "boolean" }, stop: { type: "string" } } });
+const { values } = parseArgs({ options: { candidate: { type: "string" }, workload: { type: "string" }, turn: { type: "boolean" }, network: { type: "boolean" }, "copilot-cname": { type: "string" }, "observe-dns": { type: "boolean" }, stop: { type: "string" } } });
 if (process.platform !== "darwin" || !values.candidate || !values.workload) throw new Error("Use Node --import tsx on macOS with --candidate PINNED_INSTALLATION.json --workload IMAGE_QUALIFICATION.json. No automatic installation or trust change.");
 if (values.stop && (!values.turn || values.network || !["model", "command", "control"].includes(values.stop))) throw new Error("Use --turn --stop model|command|control for an offline generated cancellation primitive, without --network.");
+if (values["copilot-cname"] && (!values.network || !/^glb-[a-f0-9]{14}\.github\.com$/.test(values["copilot-cname"]))) throw new Error("A generated network fixture needs --network and one exact observed Copilot glb GitHub hostname, never a wildcard or IP.");
+if (values["observe-dns"] && !values.network) throw new Error("DNS header observation needs the explicit generated network fixture.");
 const expectedOutcome = values.stop && values.stop !== "model" ? "partial" : values.stop === "model" ? "stopped" : "completed";
+const allowedDomains = values.network ? ["api.githubcopilot.com", ...(values["copilot-cname"] ? [values["copilot-cname"]] : [])] : [];
 const candidate = JSON.parse(await readFile(values.candidate, "utf8")), workload = JSON.parse(await readFile(values.workload, "utf8"));
 const hash = (content) => createHash("sha256").update(content).digest("hex");
 for (const [path, expected] of [[candidate.executable, candidate.hostSha256], [candidate.key, candidate.keySha256], [join(candidate.bundle, "manifest.json"), candidate.manifestSha256]]) {
@@ -45,6 +48,11 @@ const source = await captureNativeSource(sourceRoot, ["generated.txt"], { denied
 const stage = await materializeNativeStage(stateRoot, { profileId: "generated-native-qualification", sessionId: randomUUID(), turnId: runId }, source, sourceSignal);
 const workspace = (await inspectNativeStage(stage)).workspace;
 if (values.turn) await cp("scripts/worker-image/generated-provider.mjs", join(workspace, "generated-provider.mjs"));
+if (values.network) {
+  await cp("scripts/worker-image/network-diagnostic.mjs", join(workspace, "generated-network-diagnostic.mjs"));
+  await cp("apps/service/src/proxy-probe.ts", join(workspace, "proxy-probe.ts"));
+  if (values["observe-dns"]) await cp("scripts/worker-image/dns-observer.py", join(workspace, "generated-dns-observer.py"));
+}
 if (values.stop) await writeFile(join(workspace, "generated-mode.json"), JSON.stringify({ stop: values.stop === "control" ? "model" : values.stop }), { mode: 0o600 });
 const fixtureDigest = values.turn ? hash(await readFile(join(workspace, "generated-provider.mjs"))) : null;
 const pixels = values.turn ? await sharp(randomBytes(1024 * 1024 * 3), { raw: { width: 1024, height: 1024, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer() : null;
@@ -81,9 +89,9 @@ await writeFile(config, JSON.stringify({
   name, project_path: workspace, runtime: { provider: "apple" },
   resources: { cpus: 2, memory_mb: 2048, disk_size_mb: 2048 },
   policy: {
-    commands: { default_action: "deny", log_blocked: true, allowlist: ["/usr/local/bin/node -e *", "/usr/local/bin/node /opt/moguri/dist/remote-bridge.mjs --foreground", "/usr/local/bin/node --import /workspace/generated-provider.mjs /opt/moguri/dist/remote-bridge.mjs --foreground", "/usr/bin/python3.13 -c *"], denylist: [] },
+    commands: { default_action: "deny", log_blocked: true, allowlist: ["/usr/local/bin/node -e *", "/usr/local/bin/node /workspace/generated-network-diagnostic.mjs", "/usr/local/bin/node /opt/moguri/dist/remote-bridge.mjs --foreground", "/usr/local/bin/node --import /workspace/generated-provider.mjs /opt/moguri/dist/remote-bridge.mjs --foreground", "/usr/bin/python3.13 -c *"], denylist: [] },
     boundaries: { enabled: true, tool_calls: { servers: {} }, syscalls: { additional_denylist: [], log_blocked: true } },
-    network: { default_action: "deny", allow_dns: Boolean(values.network), max_connections: values.network ? 3 : 1, allowed_domains: values.network ? ["api.githubcopilot.com"] : [], blocked_domains: [] },
+    network: { default_action: "deny", allow_dns: Boolean(values.network), max_connections: values.network ? 3 : 1, allowed_domains: allowedDomains, blocked_domains: [] },
     packages: { enabled: false },
   },
   secrets: [], github: { forward_auth: false, forward_copilot_auth: false, allow_private_repository_access: false, branch_protection: { enabled: false, protected_branches: [], allowed_branch_patterns: [] } },
@@ -95,20 +103,23 @@ const started = performance.now();
 const createdAfter = Math.floor(Date.now() / 1000) - 2;
 try {
   execFileSync(candidate.executable, ["policy", "validate", "--config", config], { encoding: "utf8", timeout: 10_000 });
+  const decodeOutput = (text) => {
+    const events = text.trim().split("\n").map((line) => JSON.parse(line)), result = events.filter((event) => event.event === "result");
+    assert.equal(result.length, 1); assert.equal(result[0].execution, "persistent_guest"); assert.equal(result[0].ok, true); assert.equal(result[0].exit_code, 0);
+    const streams = { stdout: [], stderr: [] };
+    for (const event of events) {
+      if (event.event === "result") continue;
+      assert.equal(event.event, "output"); assert.equal(event.encoding, "hex");
+      assert.ok(event.stream === "stdout" || event.stream === "stderr"); assert.match(event.data, /^(?:[a-f0-9]{2})*$/);
+      streams[event.stream].push(Buffer.from(event.data, "hex"));
+    }
+    return { stdout: Buffer.concat(streams.stdout).toString("utf8"), stderr: Buffer.concat(streams.stderr).toString("utf8") };
+  };
   const run = async (program, argv, filename) => {
     try {
       const text = execFileSync(candidate.executable, ["run", "--json", ...args, "--", program, ...argv], { encoding: "utf8", timeout: 90_000, maxBuffer: 2 * 1024 * 1024 });
       await writeFile(join(directory, filename), text, { mode: 0o600 });
-      const events = text.trim().split("\n").map((line) => JSON.parse(line)), result = events.filter((event) => event.event === "result");
-      assert.equal(result.length, 1); assert.equal(result[0].execution, "persistent_guest"); assert.equal(result[0].ok, true); assert.equal(result[0].exit_code, 0);
-      const streams = { stdout: [], stderr: [] };
-      for (const event of events) {
-        if (event.event === "result") continue;
-        assert.equal(event.event, "output"); assert.equal(event.encoding, "hex");
-        assert.ok(event.stream === "stdout" || event.stream === "stderr"); assert.match(event.data, /^(?:[a-f0-9]{2})*$/);
-        streams[event.stream].push(Buffer.from(event.data, "hex"));
-      }
-      return { stdout: Buffer.concat(streams.stdout).toString("utf8"), stderr: Buffer.concat(streams.stderr).toString("utf8") };
+      return decodeOutput(text);
     } catch (error) {
       if (typeof error.stdout === "string") await writeFile(join(directory, filename), error.stdout, { mode: 0o600 });
       throw error;
@@ -123,9 +134,83 @@ try {
   const controls = JSON.parse(lines[1]); assert.ok(controls.uid > 0); assert.equal(controls.nnp, "1"); assert.equal(controls.seccomp, "2"); assert.match(controls.capabilities, /^0+$/);
   assert.equal(controls.node, "26.12.0"); assert.equal(controls.protocol, PROTOCOL_VERSION); assert.equal(lines.length, 2);
   if (values.network) {
-    const code = `if(process.env.NODE_USE_ENV_PROXY!=="1"||!process.env.HTTPS_PROXY||!process.env.ALL_PROXY)throw Error("Missing enforced native proxy environment");fetch("https://api.githubcopilot.com/models",{redirect:"error",signal:AbortSignal.timeout(10000)}).then(response=>{console.log(JSON.stringify({endpoint:"api.githubcopilot.com/models",status:response.status,proxy:true,credentials:false}));if(![401,403].includes(response.status))throw Error("Unexpected unauthenticated model metadata status");}).catch(error=>{console.error(error.message);process.exitCode=1;});`;
+    const observed = async () => {
+      const gate = `const fs=require("node:fs");(async()=>{const s=fs.readFileSync("/proc/self/status","utf8");if(process.getuid()===0||!/^NoNewPrivs:\\s*1$/m.test(s)||!/^Seccomp:\\s*2$/m.test(s)||!/^CapEff:\\s*0+$/m.test(s))throw Error("Workload controls changed");fs.writeFileSync("/workspace/generated-workload-ready","ready");const end=Date.now()+60000;while(!fs.existsSync("/workspace/generated-observer-ready")){if(Date.now()>end)throw Error("Owned observer did not become ready");await new Promise(r=>setTimeout(r,20));}await import("file:///workspace/generated-network-diagnostic.mjs");while(!fs.existsSync("/workspace/generated-observer-finished")){if(Date.now()>end)throw Error("Owned observer did not finish");await new Promise(r=>setTimeout(r,20));}})().catch(()=>{console.error("Generated observed network workload failed");process.exitCode=1;});`;
+      const launch = Date.now(), prior = new Set(ownedVms().map((vm) => vm.configuration.id));
+      const child = spawn(candidate.executable, ["run", "--json", ...args, "--", "/usr/local/bin/node", "-e", gate], { env: { PATH: process.env.PATH, HOME: process.env.HOME }, stdio: ["ignore", "pipe", "pipe"] });
+      let text = "", stderr = 0, exit, observer, observerExit, observerCode, ready = false, observerText = "", observerError = 0, collectionError;
+      const headers = [];
+      const bounded = async (promise, milliseconds, message) => {
+        let timer;
+        try { return await Promise.race([promise, new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(message)), milliseconds); })]); }
+        finally { clearTimeout(timer); }
+      };
+      const done = new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", (code) => { exit = code; resolve(code); }); });
+      void done.catch((error) => { collectionError = error; });
+      child.stdout.on("data", (part) => { if (collectionError) return; if (Buffer.byteLength(text) + part.length > 2 * 1024 * 1024) { collectionError = new Error("Observed native output exceeded its bound."); child.kill("SIGTERM"); return; } text += part; });
+      child.stderr.on("data", (part) => { stderr += part.length; if (stderr > 64 * 1024) child.kill("SIGTERM"); });
+      try {
+        while (true) {
+          if (collectionError) throw collectionError;
+          if (exit !== undefined || Date.now() - launch > 60_000) throw new Error("Owned observed workload did not enter its bounded ready gate.");
+          try { await lstat(join(workspace, "generated-workload-ready")); break; } catch (error) { if (error.code !== "ENOENT") throw error; }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        const payloadReadyAt = Date.now();
+        const active = ownedVms().filter((vm) => !prior.has(vm.configuration.id) && vm.status === "running");
+        assert.equal(active.length, 1);
+        const id = active[0].configuration.id, sid = id.slice(name.length + 1);
+        const bound = await readNativeBoundary({ stateRoot: join(process.env.HOME, ".sendbox", "run"), sessionId: sid, workspace, image: workload.image,
+          command: { program: "/usr/local/bin/node", arguments: ["-e", gate] }, createdAfter: Math.floor(launch / 1000) - 2, createdBefore: Math.ceil(Date.now() / 1000) + 2 });
+        transport.networkObserver = { sessionId: sid, planDigest: bound.planDigest, headersOnly: true, events: headers };
+        observer = spawn("container", ["exec", "--user", "0:0", id, "/usr/bin/python3.13", "-u", "/workspace/generated-dns-observer.py", "--seconds", "12"], { env: { PATH: process.env.PATH, HOME: process.env.HOME }, stdio: ["ignore", "pipe", "pipe"] });
+        observerExit = new Promise((resolve, reject) => { observer.once("error", reject); observer.once("exit", (code) => { observerCode = code; resolve(code); }); });
+        void observerExit.catch((error) => { collectionError = error; });
+        observer.stdout.on("data", (part) => {
+          if (collectionError) return;
+          observerText += part; if (Buffer.byteLength(observerText) > 32 * 1024) { collectionError = new Error("Owned observer output exceeded its bound."); observer.kill("SIGTERM"); return; }
+          try {
+            while (observerText.includes("\n")) {
+              const index = observerText.indexOf("\n"), line = observerText.slice(0, index); observerText = observerText.slice(index + 1);
+              const value = JSON.parse(line), allowed = value.observer ? ["observer", "upstream", "headers_only", "events"] : ["direction", "id", "qtype", "rcode", "truncated", "answers", "source_port", "target_port", "elapsed_ms", "expected_source", "query_hash"];
+              if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !allowed.includes(key)) || headers.length >= 66) throw new Error("Owned observer returned unsupported metadata.");
+              if (value.observer === "ready" && value.headers_only === true) ready = true;
+              headers.push(value);
+            }
+          } catch (error) { collectionError = error; observer.kill("SIGTERM"); }
+        });
+        observer.stderr.on("data", (part) => { observerError += part.length; if (observerError > 16 * 1024) observer.kill("SIGTERM"); });
+        const start = Date.now();
+        while (!ready) {
+          if (collectionError) throw collectionError;
+          if (observerCode !== undefined || Date.now() - start > 10_000) throw new Error("The owned DNS observer is unavailable; no guest control was relaxed.");
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        const observerAttachMs = Date.now() - payloadReadyAt;
+        await writeFile(join(workspace, "generated-observer-ready"), "ready");
+        await bounded(observerExit, 20_000, "Owned DNS observer did not stop within its bound."); assert.equal(observerCode, 0);
+        await writeFile(join(workspace, "generated-observer-finished"), "finished");
+        await bounded(done, 90_000, "Owned observed native workload did not finish."); if (collectionError) throw collectionError; assert.equal(exit, 0);
+        transport.networkObserver = { sessionId: sid, planDigest: bound.planDigest, headersOnly: true, observerAttachMs, totalMs: Date.now() - launch, events: headers, observerStderrBytes: observerError };
+        await writeFile(join(directory, "dns-headers.json"), JSON.stringify(transport.networkObserver, null, 2), { mode: 0o600 });
+        await writeFile(join(directory, "network-diagnostic.jsonl"), text, { mode: 0o600 });
+        return decodeOutput(text);
+      } finally {
+        if (observer && observerCode === undefined) {
+          observer.kill("SIGTERM"); const stopped = await bounded(observerExit.then(() => true), 3000, "Owned observer TERM did not settle.").catch(() => false);
+          if (!stopped) { observer.kill("SIGKILL"); await bounded(observerExit, 3000, "Owned observer cleanup remains unconfirmed."); }
+        }
+        if (exit === undefined) {
+          child.kill("SIGTERM"); const stopped = await bounded(done.then(() => true), 5000, "Owned native TERM did not settle.").catch(() => false);
+          if (!stopped) { child.kill("SIGKILL"); await bounded(done, 3000, "Owned native cleanup remains unconfirmed."); }
+        }
+        if (transport.networkObserver) Object.assign(transport.networkObserver, { observerExit: observerCode ?? null, observerStderrBytes: observerError, workloadExit: exit ?? null });
+      }
+    };
+    transport.networkDiagnostic = JSON.parse((values["observe-dns"] ? await observed() : await run("/usr/local/bin/node", ["/workspace/generated-network-diagnostic.mjs"], "network-diagnostic.jsonl")).stdout);
+    const code = `if(process.env.NODE_USE_ENV_PROXY!=="1"||!process.env.HTTPS_PROXY||!process.env.ALL_PROXY)throw Error("Missing enforced native proxy environment");const signal=AbortSignal.timeout(10000);fetch("https://api.githubcopilot.com/models",{redirect:"error",signal}).then(response=>{console.log(JSON.stringify({endpoint:"api.githubcopilot.com/models",status:response.status,proxy:true,credentials:false}));if(![400,401,403].includes(response.status))throw Error("Unexpected unauthenticated model metadata status");}).catch(error=>{const causes=[];for(let current=error;current&&causes.length<5;current=current.cause)causes.push({name:String(current.name).slice(0,64),code:typeof current.code==="string"&&/^[A-Z0-9_-]{1,64}$/.test(current.code)?current.code:null,proxyStatus:/Proxy response \\((\\d{3})\\)/.exec(current.message??"")?.[1]??null});console.error(JSON.stringify({network:"failed",aborted:signal.aborted,causes,credentials:false}));process.exitCode=1;});`;
     const response = JSON.parse((await run("/usr/local/bin/node", ["-e", code], "network-result.jsonl")).stdout);
-    assert.ok(response.status === 401 || response.status === 403); assert.equal(response.proxy, true); assert.equal(response.credentials, false);
+    assert.ok([400, 401, 403].includes(response.status)); assert.equal(response.proxy, true); assert.equal(response.credentials, false);
   }
   const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output, true);
   const stop = async () => {
@@ -255,6 +340,7 @@ try {
   } else await assertNativeSource(source, sourceSignal);
   cleanup();
   const receipt = { status: "PASS", primitive: values.stop ? `Actual native ${values.stop} cancellation with acknowledged ${expectedOutcome} worker and verified owned VM absence` : values.turn ? "Actual Moguri worker fork/IPC and maintained pi-ai loop with generated fetch fixture, exact approved read/write and >1 MiB image through real SendBox foreground PTY" : "Actual SendBox Node ELF with non-root/NNP/seccomp/no capabilities and workspace I/O, then real Moguri raw foreground-PTY bootstrap", sourceStaging: { digest: source.digest, separateMount: workspace !== sourceRoot, sourceEditPreserved: Boolean(values.stop), changedBaseRejected: Boolean(values.stop), replacedExecutionBindingRejected: Boolean(values.stop), publication: "none" }, stopMode: values.stop ?? null, stopRequested: transport.stopRequested, cancellationAck: transport.cancellationAck, stopMs: transport.stopMs, workerStatus: transport.finalStatus, cliExit: transport.cliExit, nativeSessionId: transport.nativeSessionId, retention, fixtureDigest, unauthenticatedMetadataEgress: Boolean(values.network), generatedImageBytes: pixels?.length ?? 0, startFrameBytes: values.turn ? Buffer.byteLength(JSON.stringify(startMessage)) : 0, modelCalls, toolCalls, image: workload.image, protocol: PROTOCOL_VERSION, workerDigest: info.workerDigest, candidate: { hostSha256: candidate.hostSha256, manifestSha256: candidate.manifestSha256, trustRootId: candidate.trustRootId, minimumReleaseSequence: candidate.minimumReleaseSequence }, ms: performance.now() - started, qualification: "Development candidate/worker primitive with generated model fetch only; optional real egress is credential-free metadata, never inference. No real credentials, paid inference, SDK/controller lifecycle/restart, real provider-completion guarantee or production release qualification." };
+  receipt.networkPolicy = { scope: "generated-development-fixture", allowedDomains, credentials: false, userProfilePolicyChanged: false };
   await writeFile(join(directory, "qualification.json"), JSON.stringify(receipt, null, 2), { mode: 0o600 });
   console.log(JSON.stringify({ ...receipt, directory }, null, 2)); passed = true;
 } finally {
