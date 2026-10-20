@@ -221,6 +221,47 @@ SendBox entry allow rules match argv token counts, not shell-style tail globs:
 not. `scripts/sendbox-spike.mjs` preserves failed configuration and reports the
 actual exit status rather than converting missing readiness to a skip.
 
+### Released SendBox 0.2.1
+
+The user subsequently requested and authenticated installation of the official
+[v0.2.1 release](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.1).
+Its macOS arm64 PKG passed the adjacent SHA-256 check and GitHub/Sigstore
+attestation before installation. The attestation binds
+`.github/workflows/release.yaml@refs/tags/v0.2.1` to source
+`b9dc95e6e28c128ae3c12533d7e32b9ad91d44dc`; the PKG digest is
+`8cc2165ec7916f9ac26be2d6d9dce7c84aabe38e1787223ae9972b1576b3fd79`.
+Administrator authentication used macOS's own prompt, never a password in
+agent input. The receipt is `dev.sendbox.cli` version 0.2.1.
+
+The installed arm64 `/usr/local/bin/sendbox` reports **0.2.1**. The matching
+root-owned guest bundle is
+`/usr/local/share/sendbox/guest/aarch64/bundle`, with its adjacent
+`release-public.key`. The signed manifest binds host and guest 0.2.1,
+`external-release-root`, release sequence **5**, minimum accepted **1**;
+qualification pins caller minimum **5**. Installed files are non-writable by
+the user and byte-identical to the independently attested host archive:
+
+| Installed artifact | SHA-256 |
+| --- | --- |
+| Host | `0dd8dde709673a4eb5dd890091ec190a1c2b53b4237c6271a2fe23621fc5d9f2` |
+| Manifest | `7a802c4acbe305a6d0071033b74b49fb763a568ada674d16a3765f59e958f353` |
+| Public key | `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88` |
+
+This explicitly authorized release installation replaces the old production
+host/bundle, not the separate R5 development prefix. The R5 host/key hashes
+remain unchanged; Apple Containerization remains 0.10.0 and no Porto or runtime
+service is stopped or reconfigured. Release trust does not inherit a
+development candidate's key or sequence.
+
+The current protocol-16 workload passes genuine Node/thread/workspace and
+foreground-worker execution against the released signed bundle. Cold
+credential-free networking still fails: first SOCKS REP4, then a separate
+fresh first-fetch CONNECT502 with `signal.aborted=false` and CLI1. No retry,
+extra hostname/IP grant or Local fallback converts it into a pass. Native SDK
+lifecycle and real provider completion remain unavailable. The
+[execution contract](execution-transports.md#released-021-qualification)
+records the individual worker/cancellation measurements and retained evidence.
+
 ## Model registry and defaults
 
 An explicit registry combines Copilot's independent account state with configured

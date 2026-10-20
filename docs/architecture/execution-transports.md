@@ -414,6 +414,34 @@ installed SDK/CLI/worker checks. Source and consumer audits report zero
 vulnerabilities. These internal Node-only prerequisites add no protocol/schema
 version, migration or ready capability; delivered 0.10 archives are unchanged.
 
+### Released 0.2.1 qualification
+
+The user-authorized, checksum/provenance-verified **SendBox 0.2.1** system
+installation now supplies the matching root-owned host and signed guest.
+[Runtime foundation](runtime-foundation.md#released-sendbox-021) records its
+exact installed paths, artifact hashes, release identity and retained R5
+separation. This is not a silent development-key substitution or Apple upgrade.
+
+With the same immutable protocol-16 workload, real Node/thread/workspace and
+foreground-worker execution passes in **4,940.86 ms**: three generated pi-ai
+responses, two approved file tools and the existing **3,151,914-byte** image /
+**4,202,798-byte** start frame. Source remains unchanged and no candidate is
+published. Released-guest model stop settles **stopped / CLI130** in
+**283.11 ms** (total **4,969.95 ms**). Approved command stop remains
+**partial / CLI2** in **1,284.88 ms** (total **5,932.89 ms**); its retained
+34-byte partial file, baseline rollback and concurrent source-edit survival
+are verified. Explicit `control-lost` settles **partial / CLI2** in
+**285.46 ms** (total **4,839.83 ms**) without granting late continuation.
+These remain explicit control-message tests, not service SIGKILL/restart.
+
+The released runtime does **not** fix the cold-network gate. Under the
+unchanged generated exact API/CNAME policy, first SOCKS returns **REP4**;
+later same-VM HTTP obtains TLS400, A lookup succeeds, AAAA is empty and raw
+CONNECT returns 200. A separate fresh first-fetch still fails CONNECT502,
+`signal.aborted=false`, CLI1. All generated VMs are removed. Neither release
+installation nor later transport success enables Sandbox: native SDK
+ownership/application/recovery and reliable cold networking remain open.
+
 ### Owned SDK execution requirements
 
 The control plane must record an owned native execution before CLI effects:
