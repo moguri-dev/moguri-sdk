@@ -64,6 +64,26 @@ test("global capacity changes refresh another live profile through content-free 
   } finally { await fixture.close(); }
 });
 
+test("foreign tool attempts and retained ciphertext do not leak into another live SDK profile or its storage projection", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await profileFixture();
+  try {
+    const root = join(fixture.directory, "generated-outcome-root"); await mkdir(root); await writeFile(join(root, "fixture.txt"), "Generated private outcome source.\n");
+    const { client: beta } = await fixture.create("Generated outcome Beta"), project = await beta.command({ type: "project.add", path: root });
+    const session = await beta.sessions.create(project.id!, "Generated private outcome", { modelId: fixture.providers[1]!.modelId });
+    const own = (await fixture.sdk.telemetry.storage()).storage;
+    await fixture.send(beta, session.id!, "generated tool GENERATED_BETA_PRIVATE_OUTCOME");
+    const approval = await waitFor(() => fixture.session(beta, session.id!).pendingApproval);
+    await beta.command({ type: "approval.respond", sessionId: session.id!, approvalId: approval.id, allow: true });
+    await waitFor(() => fixture.session(beta, session.id!).status === "completed");
+    assert.equal((await beta.telemetry.operations()).totals.completed, 1); assert.equal((await fixture.sdk.telemetry.operations()).totals.attempts, 0);
+    assert.equal(JSON.stringify(fixture.sdk.getState()).includes("GENERATED_BETA_PRIVATE_OUTCOME"), false);
+    assert.ok((await beta.telemetry.storage()).storage.bytes.total > 0);
+    const after = (await fixture.sdk.telemetry.storage()).storage;
+    assert.deepEqual({ ...after, measuredAt: own.measuredAt }, own);
+    assert.equal(after.profileId, "default"); assert.equal((await beta.telemetry.storage()).storage.profileId, beta.profileId);
+  } finally { await fixture.close(); }
+});
+
 test("style registry and vector/graph data stay private even when both profiles explicitly open the same physical repository", async () => {
   const fixture = await profileFixture();
   try {

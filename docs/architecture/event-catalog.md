@@ -62,6 +62,8 @@ Unused scope fields are null in checkpoint 1.
 | `question.asked`, `question.answered`, `question.cancelled` | Exact model/step/call and owning-turn question, optional offered-choice Guided model recommendation, actual answer actor and cancellation. Advice never resolves the wait; actual-user answers cannot be forged by a model, heuristic or queue item. Retained model advice/actual answer keep distinct source digests. |
 | `budget.recorded` | Immutable profile-owned reservation/settlement/import: actual model role/session/owning turn, held unknowns, captured price basis, reported total and nullable category/stream/time provenance. Source deletion/restart never refunds unconfirmed calls; filters do not change admission. |
 | `budget.policy_changed`, `budget.blocked` | Explicit revision-bound profile cap or actual admission rejection. A blocked request retains a diagnostic checkpoint without inventing an answer, extra paid call or Git success. |
+| `operation.recorded` | Atomic sanitized profile-root tool/MCP attempt revision: actual actor, safe identifiers, owning scope, exact outcome and nullable timing/source provenance. No arguments, command/output/error text or prompt contents. |
+| `operation.coverage_started` | Versioned tracking boundary and retained-only historical coverage. Previously forgotten history is unavailable, not zero calls. |
 | `profile.saved`, `global.controls_changed`, `global.policy_changed`, `global.budget_changed` | Root-only profile lifecycle and shared preference/policy/cap revisions. Atomic scoped replicas preserve enforcement without exposing foreign payloads. These internal events never enter a user's scoped replay. |
 
 ## HTTP commands
@@ -147,7 +149,7 @@ estimated admission; missing historical pricing is not free usage.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":18,"profileId":"default","token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":21,"profileId":"default","token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

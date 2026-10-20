@@ -75,6 +75,8 @@ const dashboardFilters = {
   env: Type.Optional(Type.Union([Type.Literal("Local"), Type.Literal("Remote"), Type.Literal("Sandbox"), Type.Literal("unknown")])),
   range: Type.Optional(BudgetRangeSchema),
 };
+export const UsageFiltersSchema = object(dashboardFilters);
+export type UsageFilters = Static<typeof UsageFiltersSchema>;
 const page = { offset: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) };
 export const BudgetQuerySchema = Type.Union([
   object({ type: Type.Literal("budget.status"), sessionId: id }),

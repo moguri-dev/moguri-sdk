@@ -140,6 +140,9 @@ export class EventStore {
       if (version < 20) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('remote_plan_save_schema','1');
         PRAGMA user_version=20; COMMIT;`);
+      if (version < 21) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('operation_metrics_schema','1');
+        PRAGMA user_version=21; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

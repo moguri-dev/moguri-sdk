@@ -5,10 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 20 deliberately rejects incompatible running
+This is an alpha API. Protocol 21 deliberately rejects incompatible running
 services and requires the matching SSH worker for exact user plan operations,
 reviewed compaction and model telemetry. State migrations preserve schema-1
-through schema-19 history, sessions, drafts,
+through schema-20 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -22,7 +22,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.14.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.15.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -53,7 +53,7 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.14.0-alpha.1.tgz`.
+repacking: `npm run verify:sdk -- release/moguri-0.15.0-alpha.1.tgz`.
 Current verification also exercises actual installed-worker SSH files,
 Git/plan reads, dated/per-call telemetry and actual metered compaction with the
 installed CLI/worker. Historical archives retain their separately
@@ -125,6 +125,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
+| `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single policy/configure with an observed settings revision and session-owned plan history. Actual router/solver roles use the existing worker/ledger; finite caps, images and model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
@@ -536,6 +537,36 @@ A provider exceeding its forwarded output bound is partial/unqualified for
 finite retry. A blocked request creates a deterministic retained checkpoint,
 not a model answer or successful commit. Kupo wind-down and committed checkpoints
 remain separate scheduler/Git qualification.
+
+### Tool outcomes and retained size
+
+`telemetry.operations({...sameScopeFilters,family?,actor?,name?,serverId?,outcome?,offset?,limit?})`
+returns all matching totals/groups and a bounded attempt page. Families are
+`tool` and `mcp`; actual actors are `model`, `external` or `unknown`.
+MCP attempts are not added a second time as gateway/result jobs. The failure
+rate denominator is completed + failed; denial, pending/running, stopped,
+partial, unconfirmed and unknown outcomes have independent counts. No known
+results means a null rate, not zero-percent failure.
+
+The allowlisted ledger retains no arguments, paths, commands, prompts, output
+or error text. Source deletion does not erase sanitized metadata. Startup can
+import only retained evidence; coverage explicitly discloses unavailable
+pre-upgrade deleted history. Missing start time or elapsed samples are unknown,
+not zero. A late result does not turn its owning partial session into success.
+Explicit user plan saves remain their own control-operation history.
+
+`telemetry.storage()` returns current-profile sealed event-payload, encrypted
+blob-grant and encrypted key bytes/counts in one read transaction. One content
+digest can have multiple real encrypted grants. Physical/freed disk remain
+null, and key presence is not a decryption/integrity audit. Structural payload
+copies, metadata/receipts/tombstones, SQLite overhead/WAL, forgotten ciphertext,
+worktrees/repositories, caches, weights, memory indexes and terminal buffers
+are excluded. It accepts no date/project/model filters.
+
+Use CLI `telemetry operations --filters JSON`, `telemetry storage`, or shared
+`/dashboard operations JSON` and `/dashboard storage`. F7 and desktop Dashboard
+expose the same SDK projections. See [the exact contract and prerequisite
+measurements](architecture/operation-telemetry.md).
 
 ### Managed Local roots
 

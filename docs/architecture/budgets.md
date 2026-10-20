@@ -4,6 +4,12 @@ Phase 4 reuses maintained pi-ai (MIT), Node primitives (MIT), TypeBox (MIT) and
 the existing append-only SQLite authority. No new dependency or second ledger
 database is needed.
 
+Protocol 21 additionally provides a separate sanitized tool/MCP outcome
+projection and current-profile retained ciphertext measurements. These do not
+alter model charges, caps, permission authority or provider invoices. See
+[tool outcomes and retained storage](operation-telemetry.md) for their precise
+denominators, privacy/coverage boundaries and byte exclusions.
+
 ## Measured metering prerequisite
 
 Two generated real-worker/maintained-adapter probes pass in **711.29 ms**.

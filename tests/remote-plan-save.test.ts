@@ -87,6 +87,7 @@ test("stop after actual Remote bytes were written is partial and retains the ori
     assert.equal(actual.status, "partial"); assert.equal(actual.fileOutcome, "written"); assert.ok(actual.artifactId);
     const artifact = await f.sdk.artifacts.read(actual.artifactId!);
     assert.equal(artifact.text, text); assert.equal(artifact.artifact.sources[0]?.boundary?.root, f.workspace);
+    assert.equal((await f.sdk.telemetry.operations({ sessionId: f.sessionId })).totals.attempts, 0);
     assert.equal(f.requests.length, 0);
   } finally { await f.close(); }
 });

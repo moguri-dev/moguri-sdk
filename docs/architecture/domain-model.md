@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 20; immutable event
+Protocol version and database migration version are 21; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -27,6 +27,13 @@ artifact provenance. The operation uses no model role/reservation or synthetic
 user prompt. Original ciphertexts, scoped receipts/grants and charge records
 stay unchanged; interrupted writes remain partial and cannot be replayed by
 their original command IDs.
+
+Migration 21 adds the tool/MCP metrics compatibility marker. Typed
+`operation.recorded` revisions and `operation.coverage_started` are encrypted
+at the profile root, independently of source session/project keys. Startup
+imports only provable retained events once; earlier forgotten contents are
+not reconstructed. Schema-20 ciphertext, grants and receipts are unchanged.
+Current-profile key-backed byte queries add no durable storage/deletion policy.
 
 ## Implemented entities
 

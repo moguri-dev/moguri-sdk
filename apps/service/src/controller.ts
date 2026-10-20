@@ -189,6 +189,8 @@ export class ControlPlane extends EventEmitter {
   async initialize(): Promise<void> {
     const legacyAccounting = this.platform.budgets.legacyEvents();
     if (legacyAccounting.length) this.commit(legacyAccounting);
+    const legacyOperations = this.platform.telemetry.legacyEvents();
+    if (legacyOperations.length) this.commit(legacyOperations);
     this.platform.recover();
     const interruptedExecutions = this.projection.executions.filter((execution) => ["launching", "running", "stopping"].includes(execution.status));
     if (interruptedExecutions.length) this.commit(interruptedExecutions.map((execution) => ({
@@ -276,7 +278,7 @@ export class ControlPlane extends EventEmitter {
       const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
       const accounting = this.platform.budgets.derived(next, primary);
       const checkpoints = primary.some((event) => event.event_type === "budget.blocked") ? this.platform.artifacts.checkpointEvents(next, primary) : [];
-      return [...answers, ...accounting, ...checkpoints, ...attentionEvents(next, primary)];
+      return [...answers, ...accounting, ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended.filter((event) => event.profile_id === this.profileId));

@@ -17,6 +17,8 @@ import { ProfileCommandSchema, ProfileQuerySchema, type ProfileResponse } from "
 import { KupoSettingsSchema, defaultKupoSettings, type RoutingTurn } from "./routing.ts";
 import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
 import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type RemotePlanSave } from "./plan-saves.ts";
+import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
+export * from "./telemetry.ts";
 export * from "./plan-saves.ts";
 export * from "./compaction.ts";
 export * from "./routing.ts";
@@ -141,6 +143,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  TelemetryQuerySchema,
   PlanSaveQuerySchema,
   CompactionQuerySchema,
   BudgetQuerySchema,
@@ -188,6 +191,8 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
+  operationEntries: OperationEntry[];
+  operationCoverage: OperationCoverage | null;
   planSaves: RemotePlanSave[];
   compactions: ContextCompaction[];
   routings: RoutingTurn[];
@@ -211,6 +216,7 @@ export interface VoiceStatus {
 }
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
+  | TelemetryResponse
   | PlanSaveResponse
   | CompactionResponse
   | ProfileResponse

@@ -61,6 +61,9 @@ try {
       void dated.periods[0]?.totals.observedOutputTokensPerSecond;void dated.pricing[0]?.rate.effectiveAt;
       const calls=await sdk.budgets.calls({range:{kind:"days",days:30},turnId:"generated-turn",limit:20});
       void calls.calls[0]?.stream?.firstOutputMs;
+      const operations=await sdk.telemetry.operations({range:{kind:"days",days:30},family:"mcp",actor:"external",limit:20});
+      void operations.totals.failureRate;void operations.entries[0]?.sourceEventId;
+      const retained=(await sdk.telemetry.storage()).storage;void retained.bytes.blobGrants;void retained.integrity;
       const routingPolicy:KupoSettings=defaultKupoSettings();
       await sdk.routing.configure(routingPolicy,snapshot.revision);void sdk.routing.policy();
       const routing=sdk.routing.history("generated-id");void routing[0]?.plan?.modelId;void KUPO_MODEL_ID;
@@ -407,6 +410,33 @@ try {
       assert.equal(retainedCalls.calls.length,1);assert.equal(retainedCalls.calls[0].stream.outputEvents,1);assert.equal(retainedCalls.calls[0].stream.streamMs,null);
       const cliCalls=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"budget","calls","--profile",beta.profileId,"--filters",JSON.stringify({range:{kind:"days",days:7},sessionId:routed.id,limit:1})],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
       assert.equal(JSON.parse(cliCalls.stdout).type,"budget.calls");assert.equal(JSON.parse(cliCalls.stdout).calls[0].reportedTokens,42);
+      if(PROTOCOL_VERSION>=21){
+        const outcomes=await beta.telemetry.operations({sessionId:routed.id});
+        assert.equal(outcomes.type,"telemetry.operations");assert.equal(outcomes.totals.attempts,0);assert.equal(outcomes.totals.failureRate,null);
+        assert.equal(outcomes.coverage.priorHistory,"retained-events-only");
+        const retained=(await beta.telemetry.storage()).storage;
+        assert.equal(retained.profileId,beta.profileId);assert.ok(retained.bytes.total>0);assert.equal(retained.physicalBytes,null);
+        assert.equal(retained.bytes.total,retained.bytes.events+retained.bytes.blobGrants+retained.bytes.keys);
+        const operationCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","operations","--profile",beta.profileId,"--filters",JSON.stringify({sessionId:routed.id})],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+        assert.equal(JSON.parse(operationCli.stdout).totals.attempts,0);
+        const storageCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","storage","--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+        assert.equal(JSON.parse(storageCli.stdout).storage.measurement,"key-backed-retained-ciphertext");
+        const slash=await beta.slash(routed.id,"/dashboard operations "+JSON.stringify({sessionId:routed.id}),"tui");
+        assert.equal(slash.kind,"text");assert.equal(JSON.parse(slash.text).totals.attempts,0);
+        const actualTool=(await sdk.mcp.tools("builtin","grep",0,s.id)).tools.find(value=>value.name==="grep_logs");
+        assert.ok(actualTool);
+        const actualJob=await sdk.mcp.call(s.id,"builtin",actualTool.name,{path:"generated.ts",query:"portableSdkMemory"},actualTool.digest);
+        let actualApproval;
+        for(let n=0;n<400&&!actualApproval;n++){actualApproval=sdk.getState().snapshot.sessions.find(value=>value.id===s.id).pendingApproval;if(!actualApproval)await new Promise(resolve=>setTimeout(resolve,20));}
+        assert.ok(actualApproval);await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:actualApproval.id,allow:true});
+        assert.equal((await sdk.jobs.wait(actualJob.id)).status,"completed");
+        const actualOutcome=await sdk.telemetry.operations({sessionId:s.id,family:"mcp"});
+        assert.equal(actualOutcome.totals.completed,1);assert.equal(actualOutcome.entries[0].actor,"external");
+        assert.equal((await beta.telemetry.operations({sessionId:s.id})).totals.attempts,0);
+        const actualCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","operations","--session",s.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+        assert.equal(JSON.parse(actualCli.stdout).totals.completed,1);
+        assert.equal(JSON.stringify(actualOutcome).includes("portableSdkMemory"),false);assert.equal(generatedRequests.length,6);
+      }
       assert.deepEqual(sdk.routing.policy(),defaultKupoSettings());
       if(PROTOCOL_VERSION>=19){
         const compact=await beta.sessions.create(null,"Generated installed compaction",{modelId:generatedModel.id,autonomy:"Manual"});

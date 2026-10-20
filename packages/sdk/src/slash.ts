@@ -1,6 +1,6 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, BudgetQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Side chat" | "Suggestions" | "Attention";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -38,7 +38,7 @@ export const slashCommands = [
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
-  { name: "dashboard", description: "Inspect profile-wide actual model accounting", argument: "[FILTERS_JSON]" },
+  { name: "dashboard", description: "Inspect model accounting, tool/MCP outcomes and retained profile storage", argument: "[FILTERS_JSON|calls FILTERS_JSON|operations FILTERS_JSON|storage]" },
   { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
   { name: "profiles", description: "Choose or manage isolated profiles" },
   { name: "profile", description: "Explicit profile navigation and metadata", argument: "[use ID|create NAME|rename ID REV NAME|retry ID REV confirm-review|stop ID]" },
@@ -122,6 +122,13 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "dashboard": {
       if (!command.argument && client === "desktop") return { kind: "panel", panel: "Dashboard" };
+      if (command.argument === "storage") return { kind: "text", text: JSON.stringify(await sdk.telemetry.storage(), null, 2) };
+      if (command.argument === "operations" || command.argument.startsWith("operations ")) {
+        const argument = command.argument.slice("operations".length).trim(), filters: unknown = argument ? JSON.parse(argument) : {};
+        if (!isRecord(filters) || Object.hasOwn(filters, "type")) throw new ClientError("telemetry_query", "Use an object of operation filters, without a query type.");
+        const query = parse(TelemetryQuerySchema, { ...filters, type: "telemetry.operations" });
+        return { kind: "text", text: JSON.stringify(await sdk.query(query), null, 2) };
+      }
       const calls = command.argument === "calls" || command.argument.startsWith("calls ");
       const argument = calls ? command.argument.slice(5).trim() : command.argument;
       const filters: unknown = argument ? JSON.parse(argument) : {};

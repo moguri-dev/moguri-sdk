@@ -7,7 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventStore } from "../apps/service/src/store.ts";
 import type { EventInput, StoredEvent } from "../packages/protocol/src/index.ts";
-import { operationProjection, profileCipherStorage } from "./fixtures/outcome-prototype.ts";
+import { operationProjection, profileCipherStorage as storage } from "../apps/service/src/operation-telemetry.ts";
+
+const profileCipherStorage = (store: EventStore) => storage(store, "2024-01-01T00:00:00.000Z");
 
 const controls = { env: "Local", modelId: "generated-model", autonomy: "Manual", budget: { kind: "unlimited" } } as const;
 const meta = { profile_id: "default", session_id: "generated-session", project_id: "generated-project", turn_id: "generated-turn", step_id: "generated-step" };
@@ -84,6 +86,14 @@ test("explicit user plan controls are excluded from model tool/MCP counts and le
   assert.equal(result.actor, "unknown"); assert.equal(result.env, "unknown"); assert.equal(result.startedAt, null); assert.equal(result.elapsedMs, null);
 });
 
+test("duplicate starts and a regressed wall clock cannot create a successful result or a fake elapsed sample", () => {
+  const events = source();
+  const duplicate = operationProjection([events[0]!, events[1]!, events[2]!, { ...events[2]!, id: "generated-duplicate-start", seq: 4 }, events[3]!])[0]!;
+  assert.equal(duplicate.outcome, "unknown"); assert.equal(duplicate.diagnostic, "duplicate-start"); assert.equal(duplicate.elapsedMs, null);
+  const regressed = operationProjection(events.map((event) => event.event_type === "tool.completed" ? { ...event, timestamp: "2023-12-31T23:59:59.000Z" } : event))[0]!;
+  assert.equal(regressed.outcome, "completed"); assert.equal(regressed.elapsedMs, null); assert.equal(regressed.diagnostic, "clock-regressed");
+});
+
 test("sanitized retained projection survives session-key deletion without copying source contents", () => {
   const store = new EventStore(":memory:");
   try {
@@ -122,6 +132,15 @@ test("missing keys without a deletion tombstone fail storage measurement instead
     store.commit([{ event_type: "session.created", profile_id: "default", session_id: "generated-corrupt-session", payload: { title: "Generated corruption", controls } }]);
     store.db.prepare("DELETE FROM retention_keys WHERE session_id=?").run("generated-corrupt-session");
     assert.throws(() => profileCipherStorage(store), /missing without a deletion record/);
+  } finally { store.close(); }
+});
+
+test("an invalid event ciphertext scope cannot silently reduce another profile's measured bytes", () => {
+  const store = new EventStore(":memory:");
+  try {
+    store.commit([{ event_type: "session.created", profile_id: "default", session_id: "generated-invalid-scope", payload: { title: "Generated invalid scope", controls } }]);
+    store.db.exec("DROP TRIGGER events_no_update; UPDATE events SET payload=json_set(payload,'$.scope','profile/generated-foreign')");
+    assert.throws(() => profileCipherStorage(store), /outside its owning profile/);
   } finally { store.close(); }
 });
 

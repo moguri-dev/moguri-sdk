@@ -32,6 +32,12 @@ test("Remote keeps authority local while real SSH models, instructions, approval
     const execution = fixture.controller.snapshot().executions[0]!;
     assert.equal(execution.workspace, fixture.workspace); assert.equal(execution.status, "completed");
     const events = fixture.controller.events(0);
+    const outcomes = fixture.controller.platform.telemetry.query({ type: "telemetry.operations", env: "Remote", sessionId: fixture.session().id });
+    assert.equal(outcomes.type, "telemetry.operations");
+    if (outcomes.type === "telemetry.operations") {
+      assert.equal(outcomes.totals.completed, 2); assert.ok(outcomes.entries.every((entry) => entry.actor === "model" && entry.env === "Remote"));
+      assert.equal(JSON.stringify(outcomes).includes(fixture.workspace), false);
+    }
     for (const event of events.filter((value) => value.event_type === "model.completed")) assert.equal(events.find((value) => value.seq === event.seq + 1)?.event_type, "execution.frame_recorded");
     await fixture.controller.dispatch(envelope({ type: "remote.reconcile", executionId: execution.id }));
     assert.equal(fixture.session().usage.length, 3);

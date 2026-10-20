@@ -10,7 +10,7 @@ import {
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
   isManagedWorkspaceCommand, isManagedWorkspaceQuery,
   isArtifactCommand, isArtifactQuery, isQuestionCommand,
-  isBudgetCommand, isBudgetQuery,
+  isBudgetCommand, isBudgetQuery, isTelemetryQuery,
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   isPlanSaveCommand, isPlanSaveQuery, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse,
@@ -34,6 +34,7 @@ import type { RemoteOptions } from "./remote.ts";
 import { ManagedWorkspaces } from "./managed-workspaces.ts";
 import { ArtifactRuntime } from "./artifacts.ts";
 import { BudgetRuntime } from "./budgets.ts";
+import { OperationTelemetry } from "./operation-telemetry.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
@@ -81,9 +82,11 @@ export class PlatformRuntime {
   readonly managed: ManagedWorkspaces;
   readonly artifacts: ArtifactRuntime;
   readonly budgets: BudgetRuntime;
+  readonly telemetry: OperationTelemetry;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
+    this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
     this.memory = new RepositoryMemory(store);
     this.gateway = new McpGateway(options.vault ?? new McpKeychain(`dev.moguri.profile.${store.profileId}.mcp`), options.mcpWorkerPath, { oauth: options.oauth,
       authorized: (id) => this.snapshot().oauthAuthorizations.some((authorization) => authorization.id === id && authorization.state === "connected"),
@@ -202,6 +205,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isTelemetryQuery(query)) return this.telemetry.query(query);
     if (isPlanSaveQuery(query)) return this.host.planSaveQuery(query);
     if (isCompactionQuery(query)) return this.host.compactionQuery(query);
     if (isProfileQuery(query)) throw new MoguriError("profile_authority", "Profile registry queries require the root service authority, not a profile fallback.", 409);
