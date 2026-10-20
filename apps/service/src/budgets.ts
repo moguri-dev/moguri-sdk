@@ -284,7 +284,10 @@ export class BudgetRuntime {
       return { type: query.type, calls: structuredClone(calls.slice(offset, end)), nextOffset: end < calls.length ? end : null, window };
     }
     const grouped = new Map<string, BudgetEntry[]>();
-    for (const entry of entries) { const key = JSON.stringify([entry.role, entry.modelId, entry.providerId]); grouped.set(key, [...grouped.get(key) ?? [], entry]); }
+    for (const entry of entries) {
+      const key = JSON.stringify([entry.role, entry.modelId, entry.providerId]), group = grouped.get(key) ?? [];
+      group.push(entry); grouped.set(key, group);
+    }
     const prices = new Map<string, { rate: BudgetRate; entries: BudgetEntry[] }>();
     for (const entry of entries) if (entry.rate) {
       const rate = entry.rate, key = JSON.stringify([rate.modelId, rate.effectiveAt, rate.inputUsdPerMillion, rate.outputUsdPerMillion, rate.source]);
