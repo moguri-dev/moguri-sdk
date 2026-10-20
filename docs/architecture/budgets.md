@@ -79,3 +79,25 @@ checkpoint. This is synthetic qualification, not real Copilot billing.
 No extra model or Git commit is performed by the fixed-model stop path.
 Routed wind-down/accepted-work commit and repository/visibility filters remain
 open alongside their scheduler/transport dependencies.
+
+## Qualification
+
+The complete local gate passes **208** checks in **148,048.03 ms**. All **17**
+hidden Electron flows pass in **37.5 s**, including real composer limits,
+profile-policy persistence through factory reset and actual dashboard values.
+The packed external consumer's generated model exchange and fresh audited
+installation pass; source and consumer audits both report zero findings.
+
+Coverage includes exact token/micro-dollar thresholds, actual concurrent
+project-free admission, model-child ownership after source deletion,
+unknown/lost completion, stale/zero price distinctions, cached input without
+double-counting, forwarded output-limit violations, old-state import, real
+control-plane SIGKILL and authenticated late SSH settlement.
+
+Injected SQLite settlement failure proves primary completion and its ledger
+update roll back together while the unknown reservation stays held. It also
+exposed a worker waiting indefinitely for the failed acknowledgement:
+termination now revokes that worker's authority and releases pending exchanges,
+including before bootstrap, without inventing an accepted result. The bounded
+regression confirms the owned process handle exits. This does not prove
+detached/reparented descendant containment.
