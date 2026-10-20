@@ -45,6 +45,13 @@ settings and voice preferences are isolated. Public immutable package archives
 and verified speech weights may share user-owned caches; mutable workspaces,
 capture data and credentials may not. A shared filesystem root is not a
 sandbox: cross-profile writers still need the common root authority.
+Remote writers additionally share the captured pinned-peer/canonical-SSH-root
+lease across different Local mappings or profile/target aliases. Failed-root
+quarantine derives from retained execution identity even before its owner
+profile is loaded after restart. See the
+[shared pinned-root contract](execution-transports.md#shared-pinned-root-writer-ownership).
+Only actual mode acknowledgement releases write ownership; a pending
+restriction is not successful handoff.
 
 ## Global policy and defaults
 

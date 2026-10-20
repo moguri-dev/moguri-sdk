@@ -25,7 +25,7 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateModelOptions, validateContextSize } from "./model-controls.ts";
 import { attentionEvents } from "./attention.ts";
 import { ModelRegistry, localEndpointUrl } from "./model-registry.ts";
-import { RemoteRuntime } from "./remote.ts";
+import { RemoteRuntime, remoteRootLease, remoteRootQuarantined } from "./remote.ts";
 import { McpKeychain } from "./gateway.ts";
 import { localWorker, type WorkerConnection, type WorkerFrame } from "./worker-connection.ts";
 import { frameDigest } from "./worker-wire.ts";
@@ -237,14 +237,21 @@ export class ControlPlane extends EventEmitter {
     queueMicrotask(() => this.pumpAll());
   }
   wake(): void { queueMicrotask(() => this.pumpAll()); }
-  ownedLocalRoots(): string[] {
+  ownedLocalRoots(): string[] { return this.ownedWriteRoots().filter((root) => !root.startsWith("remote/")); }
+  ownedWriteRoots(exceptSessionId?: string): string[] {
+    const reserved = new Set(this.writerReservations.values());
     const roots = [...this.runs.values()].filter((run) => {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
-      return session?.controls.env === "Local" && session.kind === "agent" && (session.pendingMode ?? session.mode) === "agent";
-    }).flatMap((run) => run.root ? [run.root] : []);
+      return session && session.id !== exceptSessionId && session.kind === "agent" && (session.mode === "agent" || reserved.has(session.id));
+    }).flatMap((run) => {
+      if (!run.executionId) return run.root ? [run.root] : [];
+      const execution = this.projection.executions.find((value) => value.id === run.executionId);
+      if (!execution) throw new MoguriError("remote_ownership", "An active writer lost its exact execution/root identity. No alternative root was used.", 409);
+      const key = remoteRootLease(execution.target, execution.workspace); return key ? [key] : [];
+    });
     for (const run of this.externalRuns.values()) {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
-      if (session?.controls.env === "Local" && session.projectId) roots.push(this.platform.managed.project(session).path);
+      if (session?.id !== exceptSessionId && session?.controls.env === "Local" && session.projectId) roots.push(this.platform.managed.project(session).path);
     }
     for (const job of this.projection.jobs.filter((job) => ["cache.install", "project.artifacts.materialize", "project.defaults"].includes(job.kind) && ["running", "waiting_input"].includes(job.status))) {
       if (job.projectId) roots.push(this.platform.managed.project({ projectId: job.projectId, workspaceId: job.workspaceId ?? null }).path);
@@ -795,9 +802,11 @@ export class ControlPlane extends EventEmitter {
         continue;
       }
       if (session.kind === "subagent" && [...this.runs.values()].filter((run) => this.session(run.sessionId).kind === "subagent").length >= this.projection.settings.values.subagents.maxParallel) continue;
-      if (session.kind === "agent" && (session.pendingMode ?? session.mode) === "agent" && this.otherWriter(session)) continue;
       const item = session.queue.find((item) => item.delivery !== "steer" && !item.held)!;
-      try { this.available(session.controls, true, session); this.imageModel(session, item.attachments); } catch (error) {
+      try {
+        this.available(session.controls, true, session); this.imageModel(session, item.attachments);
+        if (session.kind === "agent" && (session.pendingMode ?? session.mode) === "agent" && this.otherWriter(session)) continue;
+      } catch (error) {
         const diagnostic = error instanceof Error ? error.message : "Queued turn admission failed.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
         continue;
@@ -858,7 +867,8 @@ export class ControlPlane extends EventEmitter {
   }
   private otherWriter(session: Session): boolean {
     if (session.projectId === null) return false;
-    if (session.controls.env === "Local" && this.profileHooks?.foreignRootBusy(this.profileId, this.platform.managed.project(session).path)) return true;
+    const root = session.controls.env === "Remote" ? remoteRootLease(this.remote.assertReady(), this.remoteWorkspace(session)) : this.platform.managed.project(session).path;
+    if (root && (this.profileHooks?.foreignRootBusy(this.profileId, root) || this.ownedWriteRoots(session.id).includes(root) || remoteRootQuarantined(this.projection, root))) return true;
     if (this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) return true;
     const key = this.platform.managed.leaseKey(session)!;
     return this.projection.sessions.some((other) => other.id !== session.id && this.platform.managed.leaseKey(other) === key && other.turnId && other.kind === "agent" && other.mode === "agent") ||

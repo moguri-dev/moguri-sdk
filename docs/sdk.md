@@ -20,7 +20,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.9.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.9.1-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -51,7 +51,7 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.9.0-alpha.1.tgz`.
+repacking: `npm run verify:sdk -- release/moguri-0.9.1-alpha.1.tgz`.
 The current verification suite expects protocol 15; historical 0.7/0.8 archives
 retain their separately recorded protocol-13/14 qualification.
 
@@ -183,6 +183,12 @@ and hard policies. Restore global preferences explicitly with an empty
 `profiles.defaults({}, revision)` action. Global accounting invalidation
 contains an opaque sequence, never foreign ledger rows or prompt content.
 See the [profile contract](architecture/profiles.md).
+
+Writable Remote turns serialize by captured pinned SSH peer plus canonical
+workspace, including across profiles with different Local mappings. A
+foreign failed-root quarantine survives unloaded-profile restart until the
+actual owner explicitly resumes after inspection. Distinct SSH roots remain
+independent; pending read-only changes are not acknowledged lease release.
 
 `settings.localModels` contains explicit endpoint IDs/names/URLs/auth methods
 and declared model limits. Metadata discovery lists only configured advertised

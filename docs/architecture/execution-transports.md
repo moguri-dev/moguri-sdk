@@ -46,6 +46,39 @@ authorizer. Tool policy is rechecked locally and filesystem policy at the actual
 worker root. Unqualified MCP/extension/terminal transports remain blocked rather
 than executing on the local host.
 
+## Shared pinned-root writer ownership
+
+Writable Remote turns share a root lease across profiles, keyed by the pinned
+SSH public host key and the explicit canonical remote workspace. Local
+project IDs, profile IDs, target display names/IDs and connection aliases are
+not physical ownership boundaries. The active lease uses the execution's
+captured peer/root, not later editable project/target settings. Distinct remote
+roots remain independent; project-free Remote chats acquire no fake root.
+
+The previous Local-only cross-profile lookup let two distinct Local project
+mappings dispatch writers to the same Remote root. A generated two-profile
+real-SSH regression reproduced `running` where the second turn had to remain
+queued. The corrected root authority checks actual captured Remote leases
+before dispatch and derives quarantine from retained execution metadata,
+including unloaded profiles after restart. Another profile's resume or
+readiness probe cannot clear that quarantine; the actual owner's explicit
+inspection/resume is required. Same-profile duplicate remote mappings remain
+rejected rather than silently creating competing writers.
+
+A requested read-only restriction does not release an effective writer early.
+An acknowledged read-only boundary releases its lease and wakes other
+controllers even while the original read-only turn continues. Promotion uses
+the actual acquisition reservation, not a pending mode label that could make
+two readers falsely claim the same writer lease.
+
+This reuses Node crypto and existing execution/mode/blocked events; no new
+durable shape, account backend, migration or client-specific state is added.
+Generated coverage exercises actual SSH models, aliases, same-profile
+refusal, independent roots, delayed mode acknowledgement and unloaded-profile
+restart quarantine. It does not infer that distinct/rekeyed host keys identify
+the same OS filesystem, discover Local/Remote aliasing or establish SSH
+process isolation. Unqualified remote side panels remain blocked.
+
 ## Failure and recovery
 
 Run IDs are unique and start is create-only. Reattachment never creates another

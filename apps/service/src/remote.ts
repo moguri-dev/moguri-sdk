@@ -5,7 +5,7 @@ import { mkdir, lstat, readFile, writeFile, realpath } from "node:fs/promises";
 import { isIP } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { Value } from "typebox/value";
-import { isRecord, MoguriError, PROTOCOL_VERSION, type ProjectSettings, type RemoteTarget, type RemoteIdentity, type RemoteReadiness, type RemoteExecution } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, PROTOCOL_VERSION, type ProjectSettings, type RemoteTarget, type RemoteIdentity, type RemoteReadiness, type RemoteExecution, type Snapshot } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { BridgeEnvelopeSchema, type BridgeEnvelope, type BridgeInit, type BridgeStatus } from "./remote-protocol.ts";
@@ -24,6 +24,11 @@ export function validateRemoteTarget(target: RemoteTarget | null): void {
   validateLocalEndpoints(target.models);
 }
 export const remoteFingerprint = (target: RemoteIdentity) => `SHA256:${createHash("sha256").update(Buffer.from(target.hostKey.split(" ")[1]!, "base64")).digest("base64").replace(/=+$/, "")}`;
+export const remoteRootLease = (target: Pick<RemoteIdentity, "hostKey">, root: string | null): string | null => root === null ? null : `remote/${frameDigest({ hostKey: target.hostKey, root })}`;
+export function remoteRootQuarantined(snapshot: Pick<Snapshot, "executions" | "blockedSessions" | "blockedProjects">, root: string): boolean {
+  return snapshot.executions.some((execution) => remoteRootLease(execution.target, execution.workspace) === root &&
+    (snapshot.blockedSessions.includes(execution.sessionId) || execution.projectId !== null && snapshot.blockedProjects.includes(execution.projectId)));
+}
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const absentReadiness = (): RemoteReadiness => ({ ready: false, diagnostic: "Configure an explicit SSH target, pinned host key, identity and compatible Moguri worker, then probe. SSH is not SendBox isolation; no Local fallback.", configDigest: null, hostFingerprint: null, nodeVersion: null, platform: null, workerDigest: null });
 interface SshConnection { child: ChildProcessWithoutNullStreams; wire: JsonLineChannel; diagnostic(): string }

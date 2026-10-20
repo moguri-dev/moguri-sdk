@@ -618,6 +618,11 @@ reservations; deletion/reset/switching cannot refund them. Content-free sequence
 invalidation updates available capacity without exposing foreign model events.
 Global startup preferences are shared intentionally, with a separate explicit
 revisioned reset; profile resets preserve shared values and hard policy.
+Remote writer identity uses the execution's captured pinned SSH key and
+canonical root, not a profile's Local mapping or target alias. Existing
+execution/quarantine events enforce that identity across restart without
+rewriting durable payloads. Effective mode/acquisition, not a requested
+read-only label, determines when the common writer lease is released.
 
 ## Still open
 

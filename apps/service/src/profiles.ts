@@ -9,6 +9,7 @@ import { ControlPlane, type ProfileHooks } from "./controller.ts";
 import { budgetCharges } from "./budgets.ts";
 import { digest, EventStore } from "./store.ts";
 import { writeArtifactExport } from "./artifact-export.ts";
+import { remoteRootQuarantined } from "./remote.ts";
 
 interface Options {
   controller(store: EventStore, stateDir: string, hooks: ProfileHooks): ControlPlane;
@@ -146,7 +147,7 @@ export class ProfileRuntime {
     const globalChanged = events.some((event) => event.profile_id === GLOBAL_PROFILE_ID), policyChanged = events.some((event) => event.event_type === "global.policy_changed");
     if (globalChanged) for (const [other, control] of this.controllers) if (other !== id) control.refreshProfile(policyChanged);
     if (globalChanged || this.catalog().globalBudget.limit && events.some((event) => event.event_type === "budget.recorded")) this.options.changed(GLOBAL_PROFILE_ID, []);
-    if (events.some((event) => ["turn.finished", "job.finished", "session.resumed", "workspace.saved"].includes(event.event_type))) {
+    if (events.some((event) => ["turn.finished", "job.finished", "session.resumed", "session.mode_changed", "workspace.saved"].includes(event.event_type))) {
       for (const [other, control] of this.controllers) if (other !== id) control.wake();
     }
   }
@@ -166,9 +167,9 @@ export class ProfileRuntime {
     for (const profile of this.catalog().profiles) {
       if (profile.id === id) continue;
       const control = this.controllers.get(profile.id);
-      if (control?.ownedLocalRoots().includes(root)) return true;
+      if (control?.ownedWriteRoots().includes(root)) return true;
       const state = control?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
-      if (state.projects.some((project) => project.path === root && state.blockedProjects.includes(project.id)) ||
+      if (remoteRootQuarantined(state, root) || state.projects.some((project) => project.path === root && state.blockedProjects.includes(project.id)) ||
         state.managedWorkspaces.some((workspace) => workspace.path === root && state.blockedWorkspaces.includes(workspace.id))) return true;
     }
     return false;
