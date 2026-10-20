@@ -132,3 +132,13 @@ source deletion/restart, legacy retained-only import, schema-marker/derived
 append failure, exact date filters, profile isolation, native TUI and hidden
 desktop views. The wider repository/org/visibility, full active-time and retry
 attribution roadmap remains unimplemented.
+
+The protocol-21 delivery passes 425 complete local checks in 310.09 s, 30 hidden
+source-desktop flows in 1.0 min and 30 against the actual packaged app in 1.1 min.
+The exact installed SDK independently exercises real approved MCP outcomes,
+source deletion, private profile views and actual CLI projections, with no
+extra model call. Its initial reused-source qualification errors are retained;
+the final harness uses a dedicated idle source rather than relaxing authority.
+The packaged Node/MCP/service and key-backed-storage gates, archive audit and
+DMG integrity also pass. Exact artifacts and the broader remaining scope are
+recorded in [setup](../setup.md#current-015-checkpoint).

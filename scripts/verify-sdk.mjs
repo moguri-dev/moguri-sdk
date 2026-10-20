@@ -152,6 +152,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
+      let operationSessionId;
       assert.equal(sdk.getState().snapshot.protocolVersion,PROTOCOL_VERSION);
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
@@ -286,6 +287,20 @@ try {
       const job=await sdk.memory.index(p.id); assert.equal((await sdk.jobs.wait(job.id)).status,"completed");
       assert.ok((await sdk.memory.search(p.id,"portable sdk memory")).items.length>0);
       assert.ok((await sdk.mcp.tools("builtin","grep",0,s.id)).tools.some(t=>t.name==="grep_logs"));
+      if(PROTOCOL_VERSION>=21){
+        const beforeCalls=(await sdk.budgets.dashboard()).totals.calls;
+        operationSessionId=(await sdk.sessions.create(p.id,"Generated installed MCP source",{env:"Local"})).id;
+        const actualTool=(await sdk.mcp.tools("builtin","grep",0,operationSessionId)).tools.find(value=>value.name==="grep_logs");
+        assert.ok(actualTool);
+        const actualJob=await sdk.mcp.call(operationSessionId,"builtin",actualTool.name,{path:"generated.ts",query:"portableSdkMemory"},actualTool.digest);
+        let actualApproval;
+        for(let n=0;n<400&&!actualApproval;n++){actualApproval=sdk.getState().snapshot.sessions.find(value=>value.id===operationSessionId).pendingApproval;if(!actualApproval)await new Promise(resolve=>setTimeout(resolve,20));}
+        assert.ok(actualApproval);await sdk.command({type:"approval.respond",sessionId:operationSessionId,approvalId:actualApproval.id,allow:true});
+        assert.equal((await sdk.jobs.wait(actualJob.id)).status,"completed");
+        assert.equal((await sdk.telemetry.operations({sessionId:operationSessionId,family:"mcp"})).totals.completed,1);
+        assert.equal((await sdk.budgets.dashboard()).totals.calls,beforeCalls);
+        await sdk.refresh();await sdk.sessions.delete(operationSessionId,true);
+      }
       const ticket=await sdk.issues.create(p.id,{title:"Generated external SDK ticket",body:"Generated",kind:"feature",phaseId:"backlog",pullRequestUrl:null});
       await sdk.issues.move(ticket.id,"in-progress",0);
       assert.equal((await sdk.issues.board(p.id)).issues[0].phaseId,"in-progress");
@@ -423,17 +438,10 @@ try {
         assert.equal(JSON.parse(storageCli.stdout).storage.measurement,"key-backed-retained-ciphertext");
         const slash=await beta.slash(routed.id,"/dashboard operations "+JSON.stringify({sessionId:routed.id}),"tui");
         assert.equal(slash.kind,"text");assert.equal(JSON.parse(slash.text).totals.attempts,0);
-        const actualTool=(await sdk.mcp.tools("builtin","grep",0,s.id)).tools.find(value=>value.name==="grep_logs");
-        assert.ok(actualTool);
-        const actualJob=await sdk.mcp.call(s.id,"builtin",actualTool.name,{path:"generated.ts",query:"portableSdkMemory"},actualTool.digest);
-        let actualApproval;
-        for(let n=0;n<400&&!actualApproval;n++){actualApproval=sdk.getState().snapshot.sessions.find(value=>value.id===s.id).pendingApproval;if(!actualApproval)await new Promise(resolve=>setTimeout(resolve,20));}
-        assert.ok(actualApproval);await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:actualApproval.id,allow:true});
-        assert.equal((await sdk.jobs.wait(actualJob.id)).status,"completed");
-        const actualOutcome=await sdk.telemetry.operations({sessionId:s.id,family:"mcp"});
+        const actualOutcome=await sdk.telemetry.operations({sessionId:operationSessionId,family:"mcp"});
         assert.equal(actualOutcome.totals.completed,1);assert.equal(actualOutcome.entries[0].actor,"external");
-        assert.equal((await beta.telemetry.operations({sessionId:s.id})).totals.attempts,0);
-        const actualCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","operations","--session",s.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+        assert.equal((await beta.telemetry.operations({sessionId:operationSessionId})).totals.attempts,0);
+        const actualCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","operations","--session",operationSessionId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
         assert.equal(JSON.parse(actualCli.stdout).totals.completed,1);
         assert.equal(JSON.stringify(actualOutcome).includes("portableSdkMemory"),false);assert.equal(generatedRequests.length,6);
       }
@@ -486,7 +494,7 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, metachat, vectors, MCP credentials and script-free cache passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, sanitized MCP outcomes surviving source deletion and current-profile key-backed storage/CLI views, metachat, vectors, MCP credentials and script-free cache passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "" } });
 } finally { try { await ssh?.close(); } finally { await rm(temporary, { recursive: true, force: true }); } }
