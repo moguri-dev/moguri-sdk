@@ -85,6 +85,12 @@ existing same-profile refusal, independent roots, unloaded-owner restart
 quarantine and both sides of actual read-only acknowledgement. The temporary
 lifecycle-only handle probe was removed; no native VM, personal credential,
 system SSH daemon change or new containment claim was involved.
+The versioned **0.9.1-alpha.1** development app then passes all **20** actual
+packaged hidden workflows in **45.2 s**, strict runtime/assets/signature and
+DMG integrity. A fresh audited installation of the exact delivered SDK passes
+its compiled runtime and existing profile/Guided/model/platform exchanges.
+The seven peer/root scenarios above are actual generated SSH integration,
+not simulated native VM evidence. Setup records hashes and historical limits.
 
 ## Failure and recovery
 
