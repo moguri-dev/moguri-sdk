@@ -31,6 +31,10 @@ Git changes and plan views below. Protocol 20 adds
 same owned worker with no model or Local fallback. Embedded Remote consoles,
 executable MCP transport and repository-memory retrieval remain blocked. Explicit
 client-side browser URLs do not create an implicit remote-port tunnel.
+The later [Remote MCP prerequisite](remote-mcp-primitives.md) separately
+qualifies actual generated SSH stdio/HTTP connector origin, exact scopes,
+denied-by-default synthetic access, cancellation and lost-result inspection.
+It is not public Remote MCP support or a grant to forward real credentials.
 
 Protocol 22 reuses the qualified Git view for optional immutable repository
 attribution at model admission. It reads the actual pinned Remote origin and
