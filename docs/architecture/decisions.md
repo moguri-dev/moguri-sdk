@@ -153,6 +153,14 @@ cancellation/deadlines remain partial and pause admission even after the known
 group exits. Do not treat the measured nested-process fixture as proof of
 complete containment or enable background execution.
 
+The later [user-terminal reattachment prerequisite](terminal-reattachment-primitives.md)
+qualifies a separate generated Node/Node-PTY broker on macOS: a controller
+SIGKILL preserves one actual PTY, with authenticated scope-bound reconnect,
+bounded volatile output and no relaunch/input replay. Public terminal
+integration is still pending. This is a candidate for explicitly opened user
+terminals and intentional service restart, not general model/agent background
+execution, Linux/Rust acceptance or complete descendant containment.
+
 ## D07. Local API transport
 
 **Decision.** The service listens on loopback. Commands use HTTP. Events stream over WebSocket with sequence numbers, so clients can replay missed events after reconnecting.

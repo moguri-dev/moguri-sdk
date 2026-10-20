@@ -11,9 +11,10 @@ export class JsonLineChannel extends EventEmitter<{ message: [unknown]; error: [
   private bytes = 0;
   private pending = 0;
   private closed = false;
-  constructor(readonly input: Readable, readonly output: Writable, private readonly tty = false) {
+  constructor(readonly input: Readable, readonly output: Writable, private readonly tty = false, private readonly maxFrameBytes = MAX_WORKER_FRAME) {
     super();
-    const wireLimit = tty ? Math.ceil(MAX_WORKER_FRAME * 4 / 3) + TTY_FRAME_PREFIX.length + 4 : MAX_WORKER_FRAME;
+    if (!Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 1 || maxFrameBytes > MAX_WORKER_FRAME) throw new Error("Control frame limit must be a positive safe byte count within the worker ceiling.");
+    const wireLimit = tty ? Math.ceil(maxFrameBytes * 4 / 3) + TTY_FRAME_PREFIX.length + 4 : maxFrameBytes;
     const decoder = new TextDecoder("utf-8", { fatal: true });
     input.on("data", (data: Buffer) => {
       if (this.closed) return;
@@ -33,7 +34,7 @@ export class JsonLineChannel extends EventEmitter<{ message: [unknown]; error: [
             if (start > 0) this.emit("diagnostic", line.slice(0, Math.min(start, 4096)));
             const encoded = line.slice(start + TTY_FRAME_PREFIX.length);
             const value = Buffer.from(encoded, "base64");
-            if (value.toString("base64") !== encoded || value.length + 1 > MAX_WORKER_FRAME) throw new Error("Invalid or oversized canonical TTY worker frame.");
+            if (value.toString("base64") !== encoded || value.length + 1 > this.maxFrameBytes) throw new Error("Invalid or oversized canonical TTY worker frame.");
             line = new TextDecoder("utf-8", { fatal: true }).decode(value);
           }
           this.emit("message", JSON.parse(line));
@@ -53,7 +54,7 @@ export class JsonLineChannel extends EventEmitter<{ message: [unknown]; error: [
   send(value: unknown, callback?: (error: Error | null) => void): void {
     if (this.closed) { callback?.(new Error("Worker control channel closed.")); return; }
     const json = JSON.stringify(value), frame = this.tty ? `${TTY_FRAME_PREFIX}${Buffer.from(json).toString("base64")}\n` : `${json}\n`, bytes = Buffer.byteLength(frame);
-    if (Buffer.byteLength(json) + 1 > MAX_WORKER_FRAME || this.pending + bytes > MAX_WORKER_FRAME * 2) {
+    if (Buffer.byteLength(json) + 1 > this.maxFrameBytes || this.pending + bytes > this.maxFrameBytes * 2) {
       const error = new Error("Worker control output exceeded its bounded frame/queue limit.");
       callback?.(error); this.fail(error); return;
     }
