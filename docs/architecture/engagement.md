@@ -151,6 +151,12 @@ answer, untrusted solver provenance and real human tool denial. Compact
 geometry checks require both choice buttons **and** the persistent composer
 action fully inside the viewport. Text/advice scroll independently of those
 actions. Package qualification is recorded separately in setup.
+The actual **0.9.0-alpha.1** app passes all **20** hidden workflows in
+**45.3 s**, plus strict signature/runtime/assets and DMG integrity. The exact
+delivered SDK archive independently passes a fresh approved install/rebuild/
+audit and actual compiled-worker Guided exchange, with no extra request and
+zero audit findings. No personal account, microphone, model weights or live
+decision provider is involved. This does not qualify automated delegation.
 
 ## Historical local qualification
 
