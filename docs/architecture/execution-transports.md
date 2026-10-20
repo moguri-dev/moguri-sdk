@@ -170,6 +170,15 @@ and read-only Plan controls. The external installed SDK exercises its shipped
 worker and the same queries; these checks establish mechanical macOS behavior,
 not Linux release readiness, paid provider access or process containment.
 
+The complete source gate passes **326 checks in 201.84 s** and all **21**
+hidden desktop workflows in **45.8 s**. Native TUI interaction reads actual
+SSH file/diff/plan data in **1,210.76 ms**, with no model call or Local opener.
+All 21 flows also pass against the real ad-hoc-signed **0.11.0-alpha.1**
+packaged app in **46.5 s**. The exact delivered SDK archive independently
+installs, audits and exercises its shipped SSH worker; its four entrypoint
+types remain external-consumer compatible. Source/consumer audits are zero.
+Setup records immutable artifact hashes and remaining first-release limits.
+
 ## Linux payload preparation
 
 `node scripts/prepare-worker-image.mjs --build` prepares an isolated context
