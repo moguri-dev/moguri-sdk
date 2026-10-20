@@ -146,9 +146,17 @@ async function bytes(path: string, limit: number): Promise<Buffer> {
   try {
     const metadata = await file.stat();
     if (!metadata.isFile() || metadata.uid !== process.getuid?.() || metadata.mode & 0o022 || metadata.size > limit) return fail("Native evidence file is not regular, owned and bounded.");
-    const value = await file.readFile();
-    if (value.length !== metadata.size || value.length > limit) return fail("Native evidence changed while being read.");
-    return value;
+    const chunks: Buffer[] = []; let total = 0;
+    while (true) {
+      const chunk = Buffer.alloc(Math.min(64 * 1024, limit + 1 - total)), read = await file.read(chunk, 0, chunk.length, null);
+      if (!read.bytesRead) break;
+      total += read.bytesRead;
+      if (total > limit) return fail("Native evidence grew beyond its requested bound.");
+      chunks.push(chunk.subarray(0, read.bytesRead));
+    }
+    const final = await file.stat();
+    if (total !== metadata.size || final.size !== metadata.size || final.mtimeMs !== metadata.mtimeMs) return fail("Native evidence changed while being read.");
+    return Buffer.concat(chunks, total);
   } finally { await file.close(); }
 }
 const sessionHex = (value: unknown): string => {

@@ -76,8 +76,15 @@ test("native evidence rejects another workspace/image/command/time, successful e
     for (const changed of [
       { workspace: join(fixture.directory, "other-generated-workspace") }, { image: `${fixture.input.image}invalid` },
       { command: { program: fixture.input.command.program, arguments: ["different-generated-command"] } }, { createdAfter: 101 },
-      { exitCode: 0 }, { exitCode: 2 }, { file: "../boundary-signing.key" }, { file: "/generated/absolute" },
+      { exitCode: 0 }, { exitCode: 2 }, { file: "../boundary-signing.key" }, { file: "/generated/absolute" }, { maxBytes: 1 }, { maxBytes: 0 },
     ]) await assert.rejects(() => readNativeRollback({ ...fixture.input, ...changed }), /Native|native/);
+  } finally { await fixture.close(); }
+});
+
+test("retained native evidence checks the captured baseline rather than trusting the after-object alone", async () => {
+  const fixture = await evidenceFixture();
+  try {
+    await assert.rejects(() => readNativeRollback({ ...fixture.input, baseline: { "generated-source.mjs": fixture.proofDigest } }), /captured source/);
   } finally { await fixture.close(); }
 });
 

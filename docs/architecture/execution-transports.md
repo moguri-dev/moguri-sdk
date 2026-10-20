@@ -259,10 +259,50 @@ acknowledged stop, `aborted`/unreported model completion, a stopped worker and
 CLI 130 in **289.63 ms**. The command-stop run observed an actual approved
 process, acknowledged stop, conservative partial tool/turn outcome and CLI 2
 in **1,309.35 ms**. Both had empty independently checked generated-prefix VM
-inventory. Their overall harness gates remain failed pending verification of
-retained after-snapshot proof: the initial assertion incorrectly expected a
-new file to remain in the host workspace after normal failure rollback.
-Missing live-path proof alone does not establish that the guest never wrote it.
+inventory. Those first harness runs failed because their assertions incorrectly
+expected a new file to remain in the host workspace after normal failure
+rollback. The failures remain recorded; missing live-path proof did not mean
+the guest never wrote it.
+
+Fresh corrected gates now verify the live-captured native SID, exact generated
+workspace/image/argv/time and host public Ed25519 plan/audit signatures.
+The model stream stopped in **277.23 ms** (CLI **130**, aborted/unreported
+metering, total **5,133.10 ms**). The approved command wrote a generated file,
+then stopped with its conservative **partial** tool/turn outcome in
+**1,313.52 ms** (CLI **2**, total **6,073.19 ms**). Both verify successful
+audited baseline rollback and recover nonce-bound proof from the retained
+after-state. The command's **34-byte** partial file is hash-verified there,
+not falsely reported as surviving in the live workspace. The final normal
+three-call/two-tool run passes in **4,882.61 ms**. All owned VMs are removed.
+
+An additional explicit **`control-lost` message** gate passes in
+**4,913.67 ms**, settling in **242.76 ms** after authority loss. Its late
+model/final frames receive no continuation/terminal acknowledgement; the worker
+and CLI remain **partial / 2**, usage stays unreported, and retained rollback
+proof is verified before owned VM absence. This is not a real service SIGKILL
+or restart-recovery qualification. Those still belong to the SDK lifecycle gate.
+
+`native-evidence.ts` reads only the known SID's public plan/audit/snapshots and
+requested content-addressed object, never the host signing key or bootstrap
+material. It verifies domain-prefixed provenance-v1 Ed25519 payloads using the
+host public identity, preserving typed field order, explicit nulls and UTF-8
+metadata ordering. Inner plan bytes are losslessly minified, while audit
+subjects hash the exact file bytes: nanosecond timestamps must not round through
+JavaScript numbers. Snapshot IDs hash typed content excluding `id`; object
+length/SHA-256 and captured baseline hashes are checked independently.
+
+Audit v1 does not sign an explicit after-ID. The reader therefore labels the
+association **`unique-private-store`**, requiring one distinct non-baseline
+manifest in the same private SID store. It rejects ambiguity rather than
+claiming a cryptographic after-ID binding. Eight generated checks cover
+signatures/subject mutation, foreign scope, unsafe paths and sizes, missing
+rollback, aliases, ambiguous after-state, lost integer/order fidelity,
+snapshot self-hashing and changed baselines. This helper is not a new trust
+root, SDK execution capability or statement of real provider completion.
+The combined portable/native-local suite passes **299 checks in 187.67 s**,
+including these eight generated evidence groups and the existing TUI/SSH/budget
+foundation. Clean type/build checks pass without changing protocol 16 or the
+previously delivered 0.10 archive bytes.
 
 Networking remains a separate failed/unqualified gate. An api-only deny-first
 R5 fetch retained CONNECT 502 and explicit CONNECT 403; these are not evidence

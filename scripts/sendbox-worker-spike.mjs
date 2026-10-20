@@ -17,8 +17,8 @@ import sharp from "sharp";
 
 const { values } = parseArgs({ options: { candidate: { type: "string" }, workload: { type: "string" }, turn: { type: "boolean" }, network: { type: "boolean" }, stop: { type: "string" } } });
 if (process.platform !== "darwin" || !values.candidate || !values.workload) throw new Error("Use Node --import tsx on macOS with --candidate PINNED_INSTALLATION.json --workload IMAGE_QUALIFICATION.json. No automatic installation or trust change.");
-if (values.stop && (!values.turn || values.network || !["model", "command"].includes(values.stop))) throw new Error("Use --turn --stop model|command for an offline generated cancellation primitive, without --network.");
-const expectedOutcome = values.stop === "command" ? "partial" : values.stop === "model" ? "stopped" : "completed";
+if (values.stop && (!values.turn || values.network || !["model", "command", "control"].includes(values.stop))) throw new Error("Use --turn --stop model|command|control for an offline generated cancellation primitive, without --network.");
+const expectedOutcome = values.stop && values.stop !== "model" ? "partial" : values.stop === "model" ? "stopped" : "completed";
 const candidate = JSON.parse(await readFile(values.candidate, "utf8")), workload = JSON.parse(await readFile(values.workload, "utf8"));
 const hash = (content) => createHash("sha256").update(content).digest("hex");
 for (const [path, expected] of [[candidate.executable, candidate.hostSha256], [candidate.key, candidate.keySha256], [join(candidate.bundle, "manifest.json"), candidate.manifestSha256]]) {
@@ -40,7 +40,7 @@ const directory = await mkdtemp(join(root, "sendbox-worker-")), workspace = join
 await mkdir(workspace, { mode: 0o700 });
 await writeFile(join(workspace, "generated.txt"), "Generated real guest worker original.\n", { mode: 0o600 });
 if (values.turn) await cp("scripts/worker-image/generated-provider.mjs", join(workspace, "generated-provider.mjs"));
-if (values.stop) await writeFile(join(workspace, "generated-mode.json"), JSON.stringify({ stop: values.stop }), { mode: 0o600 });
+if (values.stop) await writeFile(join(workspace, "generated-mode.json"), JSON.stringify({ stop: values.stop === "control" ? "model" : values.stop }), { mode: 0o600 });
 const fixtureDigest = values.turn ? hash(await readFile(join(workspace, "generated-provider.mjs"))) : null;
 const pixels = values.turn ? await sharp(randomBytes(1024 * 1024 * 3), { raw: { width: 1024, height: 1024, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer() : null;
 const runId = randomUUID(), key = randomBytes(32).toString("hex");
@@ -124,7 +124,7 @@ try {
     assert.ok(response.status === 401 || response.status === 403); assert.equal(response.proxy, true); assert.equal(response.credentials, false);
   }
   const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output, true);
-  const stop = () => { if (!transport.stopRequested) { transport.stopRequested = true; transport.stopStartedAt = performance.now(); channel.send({ kind: "parent", message: { kind: "stop" } }); } };
+  const stop = () => { if (!transport.stopRequested) { transport.stopRequested = true; transport.stopStartedAt = performance.now(); channel.send({ kind: "parent", message: { kind: values.stop === "control" ? "control-lost" : "stop" } }); } };
   let info, failure, retention = null, bootstraps = 0, diagnostics = 0, finished = false, modelCalls = 0, toolCalls = 0, sequence = 0, queue = Promise.resolve();
   const main = values.turn ? ["/usr/local/bin/node", "--import", "/workspace/generated-provider.mjs", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"] : ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"];
   const priorMain = new Set(ownedVms().map((vm) => vm.configuration.id));
@@ -161,7 +161,7 @@ try {
           const request = message.request, reply = (value) => channel.send({ kind: "parent", message: { kind: "reply", requestId: request.requestId, value } });
           if (request.kind === "boundary") {
             reply({ model: { id: "generated-native", name: "Generated fetch fixture, no real network", provider: "moguri-local", api: "openai-completions", baseUrl: "https://generated.native.invalid/v1", reasoning: false, input: ["text", "image"], contextWindow: 65536, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
-              auth: { apiKey: "moguri-keyless", headers: { Authorization: null } }, steers: [], systemPrompt: "Generated qualification only. Use exactly the declared fixture tools.", tools: tools.filter((tool) => values.stop === "model" ? false : values.stop === "command" ? tool.name === "run_command" : tool.name === "read_file" || tool.name === "write_file"), mode: "agent", folders: { denied: [], readOnly: [] }, maxTokens: 1024 });
+              auth: { apiKey: "moguri-keyless", headers: { Authorization: null } }, steers: [], systemPrompt: "Generated qualification only. Use exactly the declared fixture tools.", tools: tools.filter((tool) => values.stop === "model" || values.stop === "control" ? false : values.stop === "command" ? tool.name === "run_command" : tool.name === "read_file" || tool.name === "write_file"), mode: "agent", folders: { denied: [], readOnly: [] }, maxTokens: 1024 });
           } else if (request.kind === "approval") {
             validateTool(request.call);
             if (values.stop === "command") {
@@ -173,13 +173,13 @@ try {
             toolCalls++; reply({ allow: true, mode: "agent", folders: { denied: [], readOnly: [] } });
           } else if (request.kind === "model.complete") {
             const model = assistantMessage(request.message);
-            modelCalls++; reply({ accepted: true }); transport.outcomes.push({ kind: "model", stopReason: model.stopReason, usageReported: request.usageReported });
+            modelCalls++; if (values.stop !== "control") reply({ accepted: true }); transport.outcomes.push({ kind: "model", stopReason: model.stopReason, usageReported: request.usageReported });
           } else if (request.kind === "tool.complete") {
             reply({ accepted: true }); transport.outcomes.push({ kind: "tool", outcome: request.outcome, isError: request.isError });
           } else if (request.kind === "finished") {
-            reply({ accepted: true }); finished = true; transport.outcomes.push({ kind: "finished", outcome: request.outcome, diagnostic: request.diagnostic });
+            if (values.stop !== "control") reply({ accepted: true }); finished = true; transport.outcomes.push({ kind: "finished", outcome: request.outcome, diagnostic: request.diagnostic });
           } else if (request.kind === "ack") transport.cancellationAck = true;
-          else if (request.kind === "delta" && values.stop === "model" && request.text.includes("GENERATED_NATIVE_MODEL_PENDING")) stop();
+          else if (request.kind === "delta" && (values.stop === "model" || values.stop === "control") && request.text.includes("GENERATED_NATIVE_MODEL_PENDING")) stop();
           else if (request.kind === "output" && values.stop === "command" && request.text.includes("GENERATED_NATIVE_COMMAND_READY")) stop();
           channel.send({ kind: "ack", sequence: message.sequence });
         }).catch((error) => { failure = error; channel.send({ kind: "parent", message: { kind: "stop" } }); });
@@ -199,7 +199,7 @@ try {
     assert.equal(info?.platform, "linux"); assert.equal(info?.nodeVersion, "26.12.0");
     assert.equal(info?.workerDigest, workload.payload.files["dist/worker.mjs"]); assert.equal(info?.root, "/workspace");
     if (values.turn) {
-      assert.equal(finished, true); assert.equal(modelCalls, values.stop ? 1 : 3); assert.equal(toolCalls, values.stop === "model" ? 0 : values.stop === "command" ? 1 : 2);
+      assert.equal(finished, true); assert.equal(modelCalls, values.stop ? 1 : 3); assert.equal(toolCalls, values.stop === "model" || values.stop === "control" ? 0 : values.stop === "command" ? 1 : 2);
       assert.equal(transport.outcomes.findLast((outcome) => outcome.kind === "finished")?.outcome, expectedOutcome);
       if (values.stop) {
         assert.equal(transport.stopRequested, true); assert.equal(transport.cancellationAck, true);
@@ -230,7 +230,7 @@ try {
       } else provider = JSON.parse(await readFile(join(workspace, "generated-provider-proof.json"), "utf8"));
       assert.ok(provider.uid > 0); assert.equal(provider.requests.length, values.stop ? 1 : 3); assert.equal(provider.transport, "generated-fetch-fixture-not-network"); assert.equal(provider.enforcedProxy, true);
       assert.equal(provider.runId, runId);
-      if (values.stop === "model") {
+      if (values.stop === "model" || values.stop === "control") {
         assert.equal(provider.cancelled, true);
         const completed = transport.outcomes.find((outcome) => outcome.kind === "model");
         assert.equal(completed.stopReason, "aborted"); assert.equal(completed.usageReported, false);
