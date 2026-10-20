@@ -27,3 +27,19 @@ test("budget primitive: omitted provider telemetry stays unknown rather than inh
     assert.equal(fixture.requests.length, 1);
   } finally { await fixture.close(); }
 });
+
+test("actual owned model calls retain observed stream timing and explicit cache categories in their independent ledger", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({ stream: { chunks: ["Generated ", "owned ", "stream."], delayMs: 25 }, maxOutputTokens: 128,
+    usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42, prompt_tokens_details: { cached_tokens: 10 } } });
+  try {
+    await fixture.configure(); await fixture.send("Generated durable stream telemetry."); await fixture.terminal();
+    const usage = fixture.session().usage[0]!, entry = fixture.service.controller.snapshot().budgetEntries[0]!;
+    assert.ok(usage.stream); assert.equal(usage.stream.outputEvents, 3); assert.ok(usage.stream.streamMs! >= 40);
+    assert.equal(usage.stream.cacheReadReported, true); assert.equal(usage.stream.cacheWriteReported, false);
+    assert.equal(usage.cacheReadTokens, 10); assert.equal(usage.cacheWriteTokens, null);
+    assert.equal(entry.inputTokens, 30); assert.equal(entry.outputTokens, 12);
+    assert.equal(entry.cacheReadTokens, 10); assert.equal(entry.cacheWriteTokens, null);
+    assert.equal(entry.reportedTokens, 42); assert.deepEqual(entry.stream, usage.stream);
+    assert.equal(fixture.requests.length, 1);
+  } finally { await fixture.close(); }
+});

@@ -49,6 +49,10 @@ try {
       const budget=await sdk.budgets.status("generated-id");void budget.status.totals.heldTokens;
       await sdk.budgets.policy({basis:"estimate",tokens:100000},0,true);
       const dashboard=await sdk.budgets.dashboard({role:"solver",limit:50});void dashboard.nextOffset;
+      const dated=await sdk.budgets.dashboard({range:{kind:"custom",from:"2024-02-28",to:"2024-02-29"},bucket:"day"});
+      void dated.periods[0]?.totals.observedOutputTokensPerSecond;void dated.pricing[0]?.rate.effectiveAt;
+      const calls=await sdk.budgets.calls({range:{kind:"days",days:30},turnId:"generated-turn",limit:20});
+      void calls.calls[0]?.stream?.firstOutputMs;
       const routingPolicy:KupoSettings=defaultKupoSettings();
       await sdk.routing.configure(routingPolicy,snapshot.revision);void sdk.routing.policy();
       const routing=sdk.routing.history("generated-id");void routing[0]?.plan?.modelId;void KUPO_MODEL_ID;
@@ -364,6 +368,13 @@ try {
       assert.equal(generatedRequests[4].tools,undefined);assert.equal(JSON.stringify(generatedRequests[5]).includes("Generated installed classifier-only advice."),false);
       assert.equal(beta.routing.history(routed.id)[0].status,"completed");assert.equal(beta.routing.history(routed.id)[0].plan.modelId,generatedModel.id);
       assert.equal((await beta.budgets.status(routed.id)).status.totals.reportedTokens,84);
+      const dated=await beta.budgets.dashboard({sessionId:routed.id,range:{kind:"days",days:7},bucket:"day"});
+      assert.equal(dated.totals.calls,2);assert.equal(dated.totals.reportedTokens,84);assert.equal(dated.totals.inputTokens,60);assert.equal(dated.totals.outputTokens,24);
+      assert.equal(dated.periods.length,1);assert.equal(dated.totals.observedOutputTokensPerSecond,null);
+      const retainedCalls=await beta.budgets.calls({sessionId:routed.id,limit:1});
+      assert.equal(retainedCalls.calls.length,1);assert.equal(retainedCalls.calls[0].stream.outputEvents,1);assert.equal(retainedCalls.calls[0].stream.streamMs,null);
+      const cliCalls=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"budget","calls","--profile",beta.profileId,"--filters",JSON.stringify({range:{kind:"days",days:7},sessionId:routed.id,limit:1})],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+      assert.equal(JSON.parse(cliCalls.stdout).type,"budget.calls");assert.equal(JSON.parse(cliCalls.stdout).calls[0].reportedTokens,42);
       assert.deepEqual(sdk.routing.policy(),defaultKupoSettings());
       await sdk.profiles.globalBudget({basis:"estimate",tokens:252},0,true);
       assert.equal((await beta.budgets.status(betaMetered.id)).status.remainingTokens,0);

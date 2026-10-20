@@ -10,6 +10,13 @@ export const ModelOptionsSchema = Type.Object({
   thinkingEffort: Type.Optional(ThinkingEffortSchema),
 }, { additionalProperties: false });
 export type ModelOptions = Static<typeof ModelOptionsSchema>;
+export const ModelStreamObservationSchema = Type.Object({
+  firstOutputMs: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+  streamMs: Type.Union([Type.Number({ exclusiveMinimum: 0 }), Type.Null()]),
+  outputEvents: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  cacheReadReported: Type.Boolean(), cacheWriteReported: Type.Boolean(),
+}, { additionalProperties: false });
+export type ModelStreamObservation = Static<typeof ModelStreamObservationSchema>;
 export interface ModelContextPreview {
   estimatedTokens: number;
   contextWindow: number | null;

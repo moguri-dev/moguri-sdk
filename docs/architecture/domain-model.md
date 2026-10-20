@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 17; immutable event
+Protocol version and database migration version are 18; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -10,6 +10,12 @@ boundary without rewriting event ciphertexts, receipts, keys or retained grants.
 Queries remain ephemeral user views, not a second workflow store or model
 context. The updated inspector accepts authenticated protocol-16 receipt
 metadata without attaching or continuing a legacy worker.
+
+Migration 18 adds observed stream/category metadata and explicit time/owning-turn
+provenance to the independent ledger. Old ciphertexts, receipts, keys and
+charges remain unchanged; missing observations are unknown. Metadata backfill
+appends events only when supported by retained normalized usage/start records.
+UTC/pricing/call-history projections never reset or filter admission charges.
 
 ## Implemented entities
 

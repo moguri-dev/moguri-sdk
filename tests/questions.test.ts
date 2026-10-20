@@ -6,7 +6,7 @@ import { MoguriSdk, type UserQuestion } from "../packages/sdk/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 20_000 };
 test("a real typed question routes without redundant approval and atomically retains the actual user answer from the shared draft", native, async () => {
@@ -137,7 +137,7 @@ test("schema-10 state upgrades and interrupted question recovery never replay a 
     ]);
     store.close();
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+    assertCurrentSchema(restarted.store);
     assert.equal(restarted.controller.snapshot().settings.values.artifacts.retainAnswers, true);
     assert.equal(restarted.controller.snapshot().questions[0]?.status, "cancelled");
     assert.equal(restarted.controller.snapshot().sessions[0]?.status, "partial"); assert.equal(fixture.requests.length, 0);

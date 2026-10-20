@@ -7,7 +7,7 @@ import { modelRequest, supportedThinking } from "../apps/service/src/model-contr
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("transport capability lists reject silently ignored or unsupported thinking effort", () => {
   const catalog = githubCopilotProvider().getModels();
@@ -87,7 +87,7 @@ test("schema-4 state upgrades without changing events, receipts or encrypted con
     const before = fixture.service.controller.events(0).map(({ id, seq }) => ({ id, seq }));
     sdk.disconnect(); await writeLegacyState(fixture.service, 4);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+    assertCurrentSchema(restarted.store);
     assert.deepEqual(restarted.controller.events(0).slice(0, before.length).map(({ id, seq }) => ({ id, seq })), before);
     sdk = await new MoguriSdk(restarted.connection).ready();
     if (process.platform === "darwin") {

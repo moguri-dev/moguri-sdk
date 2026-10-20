@@ -128,6 +128,9 @@ export class EventStore {
       if (version < 17) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('remote_workspace_read_schema','1');
         PRAGMA user_version=17; COMMIT;`);
+      if (version < 18) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('stream_telemetry_schema','1');
+        PRAGMA user_version=18; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

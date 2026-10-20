@@ -1,5 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
+import type { ModelStreamObservation } from "./model.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -32,11 +33,19 @@ export interface BudgetEntry {
   reservedTokens: number | null; reportedTokens: number | null; reservedUsdMicros: number | null; estimatedUsdMicros: number | null;
   rate: BudgetRate | null; requestMs: number; outcome: string; diagnostic: string | null;
   outputLimitViolation?: boolean;
+  inputTokens?: number | null; outputTokens?: number | null; cacheReadTokens?: number | null; cacheWriteTokens?: number | null;
+  stream?: ModelStreamObservation | null; telemetryDiagnostic?: string | null;
+  timeBasis?: "admission" | "model-start" | "unknown";
+  ownerTurnId?: string | null;
 }
 export interface BudgetTotals {
   calls: number; reportedTokens: number | null; knownReportedTokens: number; unknownTokenCalls: number;
   heldTokens: number | null; unboundedTokenCalls: number; estimatedUsd: number | null; knownEstimatedUsd: number;
   heldUsd: number | null; unpricedCalls: number; providerReportedUsd: null; billedUsd: null; requestMs: number;
+  inputTokens: number | null; outputTokens: number | null; cacheReadTokens: number | null; cacheWriteTokens: number | null;
+  knownInputTokens: number; knownOutputTokens: number;
+  observedOutputTokensPerSecond: number | null; measuredStreamCalls: number; unmeasuredStreamCalls: number;
+  observedStreamMs: number; observedOutputTokens: number; meanFirstOutputMs: number | null; firstOutputSamples: number;
 }
 export interface BudgetStatus {
   sessionId: string; ownerSessionId: string; totals: BudgetTotals; profileTotals: BudgetTotals;
@@ -50,12 +59,36 @@ export const BudgetCommandSchema = object({
 });
 export type BudgetCommand = Static<typeof BudgetCommandSchema>;
 export const isBudgetCommand = (value: unknown): value is BudgetCommand => Value.Check(BudgetCommandSchema, value);
+const date = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" });
+export const BudgetRangeSchema = Type.Union([
+  object({ kind: Type.Literal("all") }),
+  object({ kind: Type.Literal("days"), days: Type.Union([Type.Literal(7), Type.Literal(30), Type.Literal(60), Type.Literal(90), Type.Literal(365)]) }),
+  object({ kind: Type.Literal("year"), year: Type.Integer({ minimum: 1970, maximum: 9999 }) }),
+  object({ kind: Type.Literal("custom"), from: date, to: date }),
+]);
+export type BudgetRange = Static<typeof BudgetRangeSchema>;
+export const BudgetBucketSchema = Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("all")]);
+export type BudgetBucket = Static<typeof BudgetBucketSchema>;
+const dashboardFilters = {
+  projectId: Type.Optional(id), folderId: Type.Optional(id), sessionId: Type.Optional(id), turnId: Type.Optional(id),
+  modelId: Type.Optional(id), providerId: Type.Optional(id), role: Type.Optional(ModelRoleSchema),
+  env: Type.Optional(Type.Union([Type.Literal("Local"), Type.Literal("Remote"), Type.Literal("Sandbox"), Type.Literal("unknown")])),
+  range: Type.Optional(BudgetRangeSchema),
+};
+const page = { offset: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) };
 export const BudgetQuerySchema = Type.Union([
   object({ type: Type.Literal("budget.status"), sessionId: id }),
-  object({ type: Type.Literal("budget.dashboard"), projectId: Type.Optional(id), folderId: Type.Optional(id), sessionId: Type.Optional(id), modelId: Type.Optional(id), providerId: Type.Optional(id), role: Type.Optional(ModelRoleSchema), offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }),
+  object({ type: Type.Literal("budget.dashboard"), ...dashboardFilters, ...page, bucket: Type.Optional(BudgetBucketSchema) }),
+  object({ type: Type.Literal("budget.calls"), ...dashboardFilters, ...page }),
 ]);
 export type BudgetQuery = Static<typeof BudgetQuerySchema>;
 export const isBudgetQuery = (value: unknown): value is BudgetQuery => Value.Check(BudgetQuerySchema, value);
+export interface BudgetWindow {
+  from: string | null; to: string | null; timezone: "UTC"; uncertainTimeCalls: number; excludedUncertainTimeCalls: number;
+}
 export type BudgetResponse =
   | { type: "budget.status"; status: BudgetStatus }
-  | { type: "budget.dashboard"; totals: BudgetTotals; groups: Array<{ role: ModelRole; modelId: string; providerId: string | null; totals: BudgetTotals }>; policy: { revision: number; limit: BudgetLimit | null }; nextOffset: number | null };
+  | { type: "budget.dashboard"; totals: BudgetTotals; groups: Array<{ role: ModelRole; modelId: string; providerId: string | null; totals: BudgetTotals }>; policy: { revision: number; limit: BudgetLimit | null }; nextOffset: number | null;
+      window: BudgetWindow; bucket: BudgetBucket; periods: Array<{ from: string | null; to: string | null; totals: BudgetTotals }>;
+      pricing: Array<{ rate: BudgetRate; calls: number; estimatedUsd: number | null }>; currency: "USD" }
+  | { type: "budget.calls"; calls: BudgetEntry[]; nextOffset: number | null; window: BudgetWindow };

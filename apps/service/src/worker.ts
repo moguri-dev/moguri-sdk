@@ -6,6 +6,7 @@ import { executeTool } from "./tools.ts";
 import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
 import { localProvider, localModelFetch } from "./local-provider.ts";
 import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
+import { streamMetrics } from "./stream-metrics.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -49,6 +50,7 @@ async function run(start: WorkerStart): Promise<void> {
       const flush = () => { if (buffered) { const text = redactor.push(buffered); if (text) send({ kind: "delta", stepId, text }); buffered = ""; } };
       const timer = setInterval(flush, 50);
       const started = performance.now();
+      const metrics = streamMetrics(started);
       try {
         const stream = models.streamSimple(model, {
           systemPrompt: boundary.systemPrompt,
@@ -59,18 +61,21 @@ async function run(start: WorkerStart): Promise<void> {
           ...(model.provider === "moguri-local" ? { fetch: localModelFetch } : {}),
           ...(boundary.thinkingEffort && boundary.thinkingEffort !== "off" ? { reasoning: boundary.thinkingEffort } : {}),
           sessionId: process.env.MOGURI_TURN_ID,
-          onProviderStreamEvent: (event) => { usageReported ||= usagePresent(event); },
+          onProviderStreamEvent: (event) => { usageReported ||= usagePresent(event); metrics.provider(event); },
         });
-        for await (const event of stream) if (event.type === "text_delta") {
-          buffered += event.delta;
-          if (buffered.length > 16_384) flush();
+        for await (const event of stream) {
+          metrics.output(event);
+          if (event.type === "text_delta") {
+            buffered += event.delta;
+            if (buffered.length > 16_384) flush();
+          }
         }
         flush();
         const tail = redactor.finish(); if (tail) send({ kind: "delta", stepId, text: tail });
         const message = assistantMessage(redactSecrets(await stream.result(), secrets));
         const accepted = await request({
           kind: "model.complete", requestId: randomUUID(), stepId, message,
-          usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started,
+          usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started, stream: metrics.snapshot(),
         });
         if (accepted.halt && accepted.error) { await finish(abort.signal.aborted ? "stopped" : "partial", accepted.error); return; }
         if (accepted.error) throw new Error(accepted.error);

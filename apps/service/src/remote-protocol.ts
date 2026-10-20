@@ -52,7 +52,7 @@ export const BridgeInitSchema = Type.Object({
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText }, { additionalProperties: false });
 const SavedBridgeInfoSchema = Type.Object({
-  ...BridgeInfoSchema.properties, protocol: Type.Union([Type.Literal(16), Type.Literal(PROTOCOL_VERSION)]),
+  ...BridgeInfoSchema.properties, protocol: Type.Integer({ minimum: 16, maximum: PROTOCOL_VERSION }),
 }, { additionalProperties: false });
 const BridgeStatusSchema = Type.Object({
   runId, workerPid: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),

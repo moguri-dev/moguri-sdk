@@ -3,7 +3,7 @@ import { Value } from "typebox/value";
 import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
 export * from "./platform.ts";
 export * from "./model.ts";
-import type { ThinkingEffort } from "./model.ts";
+import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
 import { defaultProjectSettings } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
@@ -21,7 +21,7 @@ import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.
 import type { RoutingTurn, SingleRoutingPlan } from "./routing.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 export const PROFILE_ID = "default";
 export const MAX_TEXT = 128 * 1024;
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -95,6 +95,9 @@ export interface Usage {
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
+  cacheWriteTokens?: number | null;
+  stream?: ModelStreamObservation | null;
+  telemetryDiagnostic?: string | null;
   totalTokens: number | null;
   estimatedUsd: number | null;
   providerReportedUsd: number | null;

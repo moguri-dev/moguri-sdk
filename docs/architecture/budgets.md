@@ -27,8 +27,61 @@ Timing uses the execution host's monotonic clock around normalized exposed
 output events, not provider timestamps, UI batching or hidden reasoning.
 A single/no output event has no measurable streaming interval. An observed
 delivery rate is not provider GPU generation throughput, a model benchmark or
-proof of productivity. This internal prerequisite is not yet durable usage or
-a complete dated/priced dashboard; the shipped 0.11 archives are unchanged.
+proof of productivity. At that internal-prerequisite checkpoint it was not
+durable usage or a complete dated/priced dashboard. The shipped 0.11 archives
+remain unchanged.
+
+## Protocol-18 telemetry and dated views
+
+The owned worker now retains observed first-output delay, first-to-last
+normalized output delivery interval, event count and cache-report presence.
+Observations come from the execution host, not controller/UI delivery times.
+Actual cache categories are nullable: omitted metadata is not reported zero.
+Input including cache derives from reported total minus output; cache subsets
+are not added to the total again. Independently valid token charges survive
+inconsistent timing, which becomes explicitly unknown with a diagnostic.
+
+The independent ledger retains category/timing metadata, captured dated price,
+actual turn and owning turn alongside existing role/model/owner and charges.
+Model-created child execution IDs stay distinct, while an owning-turn view can
+include their actual charges. Decision/steering/unknown roles, unreported output
+and single-event streams cannot produce a generative delivery rate. Aggregated
+rates use paired reported output/observed intervals only and disclose coverage.
+They remain observed delivery estimates, not active GPU time or productivity.
+
+`budgets.dashboard` supports the last 7/30/60/90/365 UTC calendar days, selectable
+year, inclusive custom dates and all time. Day, Monday-based week, month and
+whole-range buckets use the same scoped complete ledger before role pagination.
+Only periods with calls are listed; edge buckets can be partial. More than
+3,660 calendar buckets is an explicit error, not truncation or fallback.
+Captured-rate history uses the admission-time user estimate, never today's
+replacement rate, an inferred Copilot price or a bill.
+
+`budgets.calls` returns bounded current-accounting pages with deterministic
+time/ID ordering and per-call provenance. New calls/late reports can reorder
+pages; totals are not computed by adding those pages. Project/folder/session/
+owning-turn/provider/model/role/env/date filters never alter cumulative cap
+admission. Other profiles' payloads remain outside this view.
+
+Imported source timestamps are not automatically request times. A matching
+recorded model-start event can establish that provenance; otherwise date
+filters exclude the uncertain call with an explicit count and All time
+includes it. A dated total therefore covers verified-time calls only, not an
+asserted zero for excluded history.
+
+Migration 18 preserves old event ciphertexts, receipts and retention grants.
+Startup appends only provable ledger metadata; it neither rewrites old rows
+nor changes/refunds charges, fabricates missing timings or reprices calls.
+Source deletion/restart preserves the independent records. An injected marker
+failure leaves schema-17 state unchanged and reopenable. Legacy protocol-16/17
+SSH receipts remain inspectable without attachment or continuation.
+
+Desktop exposes UTC range/bucket controls, token details, observed streaming,
+periods, captured prices and per-call/owning-turn views. The SDK and shared
+CLI/TUI `/dashboard` / `/dashboard calls` paths expose the same data.
+Compaction history, repository/org/visibility metadata and routed wind-down
+still require their separate qualified implementations; this is not a claim
+that every Phase-4 or first-release metric is complete.
 
 ## Accounting authority
 

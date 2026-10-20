@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DraftEditor, MoguriSdk, type Session } from "../packages/sdk/src/index.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { startService } from "../apps/service/src/server.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
@@ -123,7 +123,7 @@ test("schema-5 encrypted history migrates without changing identities, receipts 
     const history = fixture.service.controller.events(0).map((event) => [event.seq, event.id]);
     sdk.disconnect(); await writeLegacyState(fixture.service, 5);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+    assertCurrentSchema(restarted.store);
     assert.deepEqual(restarted.controller.events(0).slice(0, history.length).map((event) => [event.seq, event.id]), history);
     assert.equal(restarted.controller.snapshot().sessions[0]?.draft.text, "Generated retained schema-five draft.");
     assert.equal(restarted.controller.snapshot().sessions[0]?.controls.modelId, fixture.modelId);

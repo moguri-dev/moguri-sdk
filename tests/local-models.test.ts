@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { MoguriSdk, type LocalEndpoint } from "../packages/sdk/src/index.ts";
 import { localModelId } from "../apps/service/src/model-registry.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { SecretStreamRedactor, redactSecrets } from "../apps/service/src/secret-redactor.ts";
 
@@ -102,7 +102,7 @@ test("startup preferences preserve precedence/provenance and existing sessions a
     assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === general.id)?.defaults?.sources.autonomy, "profile");
     sdk.disconnect(); await writeLegacyState(fixture.service, 6);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+    assertCurrentSchema(restarted.store);
     const recovered = restarted.controller.snapshot().sessions.find((value) => value.id === session.id)!;
     assert.deepEqual(recovered.controls, session.controls); assert.deepEqual(recovered.defaults, session.defaults);
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }

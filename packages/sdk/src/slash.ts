@@ -119,10 +119,12 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "dashboard": {
       if (!command.argument && client === "desktop") return { kind: "panel", panel: "Dashboard" };
-      const filters: unknown = command.argument ? JSON.parse(command.argument) : {};
+      const calls = command.argument === "calls" || command.argument.startsWith("calls ");
+      const argument = calls ? command.argument.slice(5).trim() : command.argument;
+      const filters: unknown = argument ? JSON.parse(argument) : {};
       if (!isRecord(filters) || Object.hasOwn(filters, "type")) throw new ClientError("budget_query", "Use an object of dashboard filter fields, without a query type.");
-      const query = parse(BudgetQuerySchema, { ...filters, type: "budget.dashboard" });
-      if (query.type !== "budget.dashboard") throw new ClientError("budget_query", "Use dashboard filter fields, not another query type.");
+      const query = parse(BudgetQuerySchema, { ...filters, type: calls ? "budget.calls" : "budget.dashboard" });
+      if (query.type === "budget.status") throw new ClientError("budget_query", "Use dashboard/calls filter fields, not another query type.");
       return { kind: "text", text: JSON.stringify(await sdk.query(query), null, 2) };
     }
     case "budget": {

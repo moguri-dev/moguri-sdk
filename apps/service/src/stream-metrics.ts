@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { isRecord } from "../../../packages/protocol/src/index.ts";
+import { isRecord, type ModelStreamObservation } from "../../../packages/protocol/src/index.ts";
 
 const tokens = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
@@ -28,4 +28,12 @@ export function streamMetrics(started = performance.now(), now: () => number = (
         outputEvents, cacheReadReported, cacheWriteReported };
     },
   };
+}
+
+export function normalizeStreamObservation(stream: ModelStreamObservation | undefined, requestMs: number): { stream: ModelStreamObservation | null; telemetryDiagnostic: string | null } {
+  const valid = stream !== undefined && Number.isFinite(requestMs) && requestMs >= 0 && Number.isSafeInteger(stream.outputEvents) && stream.outputEvents >= 0 &&
+    (stream.outputEvents === 0 ? stream.firstOutputMs === null && stream.streamMs === null :
+      stream.firstOutputMs !== null && Number.isFinite(stream.firstOutputMs) && stream.firstOutputMs >= 0 && stream.firstOutputMs <= requestMs &&
+      (stream.streamMs === null || stream.outputEvents > 1 && Number.isFinite(stream.streamMs) && stream.streamMs > 0 && stream.firstOutputMs + stream.streamMs <= requestMs));
+  return { stream: valid ? stream : null, telemetryDiagnostic: stream && !valid ? "Observed stream timing was inconsistent with its owning request. Token charges remain retained; no timing or velocity was inferred." : null };
 }

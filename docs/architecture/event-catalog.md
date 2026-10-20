@@ -21,7 +21,7 @@ Unused scope fields are null in checkpoint 1.
 | `model.started` | Step, actual role/canonical model/provider/API model, effective context window/effort and estimated context. The session may retain the synthetic selection; actual role/model never become `kupo` charges. Creates an unknown, in-progress accounting entry; estimates are not provider token telemetry. |
 | `routing.started`, `routing.planned`, `routing.finished` | Single owning-turn policy/task/revision snapshot, exact classifier/eligible pool, untrusted plan and actual lifecycle/diagnostic. Completion/accounting and accepted-plan commitment precede any solver continuation. Restart never replays a routed effect. |
 | `assistant.delta` | Durable streamed text for that step, batched by the worker. Router deltas remain audit events and never append to a public assistant answer or solver context. |
-| `model.completed` | Public message, normalized-context blob digest and actual/unknown usage. Does not imply overall turn success. |
+| `model.completed` | Public message, normalized-context blob digest and actual/unknown usage, nullable cache categories and execution-host stream observations. Inconsistent timing becomes unknown without discarding independently valid token charges. Does not imply overall turn success. |
 | `model.late_usage` | Exact owned remote step/frame improves unknown accounting after disconnect; no new continuation, tool replay or rewrite of a partial turn. |
 | `execution.started`, `execution.changed` | Pinned target/build/root/run, actual worker and cancellation/cleanup status. SSH exit is not descendant-containment proof. |
 | `execution.frame_recorded` | Run, sequence and digest committed atomically with the primary events; a duplicate cannot authorize another side effect. |
@@ -57,7 +57,7 @@ Unused scope fields are null in checkpoint 1.
 | `configuration.proposed`, `configuration.decided` | Exact scoped content/base digests and revision, verified source excerpts, actual user/model origin and a real user decision. No self-approval, authentication, automatic enablement or publication. |
 | `attention.raised`, `attention.cleared`, `attention.acknowledged` | Atomically derived question/approval/failure/done state; heuristic provenance is explicit and read acknowledgement never resolves or approves. |
 | `question.asked`, `question.answered`, `question.cancelled` | Exact model/step/call and owning-turn question, optional offered-choice Guided model recommendation, actual answer actor and cancellation. Advice never resolves the wait; actual-user answers cannot be forged by a model, heuristic or queue item. Retained model advice/actual answer keep distinct source digests. |
-| `budget.recorded` | Immutable profile-owned reservation/settlement/import: actual model role/owner, held unknowns, explicit price basis and reported total. Source deletion/restart never refunds unconfirmed calls. |
+| `budget.recorded` | Immutable profile-owned reservation/settlement/import: actual model role/session/owning turn, held unknowns, captured price basis, reported total and nullable category/stream/time provenance. Source deletion/restart never refunds unconfirmed calls; filters do not change admission. |
 | `budget.policy_changed`, `budget.blocked` | Explicit revision-bound profile cap or actual admission rejection. A blocked request retains a diagnostic checkpoint without inventing an answer, extra paid call or Git success. |
 | `profile.saved`, `global.controls_changed`, `global.policy_changed`, `global.budget_changed` | Root-only profile lifecycle and shared preference/policy/cap revisions. Atomic scoped replicas preserve enforcement without exposing foreign payloads. These internal events never enter a user's scoped replay. |
 
@@ -144,7 +144,7 @@ estimated admission; missing historical pricing is not free usage.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":17,"profileId":"default","token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":18,"profileId":"default","token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import { createModels } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { streamMetrics } from "../apps/service/src/stream-metrics.ts";
+import { normalizeStreamObservation, streamMetrics } from "../apps/service/src/stream-metrics.ts";
 import { fixtureProvider } from "./fixture.ts";
 
 test("stream observations distinguish absent, single-event and measured output without inventing GPU throughput", () => {
@@ -33,6 +33,16 @@ test("cache category presence remains separate from missing details and accepts 
   const responses = streamMetrics();
   responses.provider({ response: { usage: { input_tokens_details: { cached_tokens: 10 } } } });
   assert.equal(responses.snapshot().cacheReadReported, true);
+});
+
+test("inconsistent stream intervals become explicit unknown timing without invalidating independently reported usage", () => {
+  const measured = { firstOutputMs: 10, streamMs: 50, outputEvents: 3, cacheReadReported: true, cacheWriteReported: false };
+  assert.deepEqual(normalizeStreamObservation(measured, 100), { stream: measured, telemetryDiagnostic: null });
+  for (const stream of [{ ...measured, firstOutputMs: 200 }, { ...measured, firstOutputMs: -1 }, { ...measured, outputEvents: 0 }, { ...measured, outputEvents: 1 }, { ...measured, streamMs: Number.NaN }]) {
+    const result = normalizeStreamObservation(stream, 100);
+    assert.equal(result.stream, null); assert.match(result.telemetryDiagnostic!, /Token charges remain retained/);
+  }
+  assert.deepEqual(normalizeStreamObservation(undefined, 100), { stream: null, telemetryDiagnostic: null });
 });
 
 test("the maintained streaming adapter exposes timed normalized chunks and actual cached-input report presence", { timeout: 10_000 }, async () => {

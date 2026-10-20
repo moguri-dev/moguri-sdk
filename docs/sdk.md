@@ -5,9 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 17 deliberately rejects incompatible running
-services and requires an updated SSH worker for new workspace queries. State
-migrations preserve schema-1 through schema-16 history, sessions, drafts,
+This is an alpha API. Protocol 18 deliberately rejects incompatible running
+services and requires the matching SSH worker for new model telemetry. State
+migrations preserve schema-1 through schema-17 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -21,7 +21,7 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-0.11.0-alpha.1.tgz` in a Node 26 consumer with npm.
+Install the resulting `moguri-0.12.0-alpha.1.tgz` in a Node 26 consumer with npm.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
 speech runtime, but no speech weights. Native dependencies must match the
@@ -52,10 +52,10 @@ script approval and an independent consumer audit. It does
 not authorize a personal account, record audio or download model weights.
 
 Pass an existing archive to qualify the exact delivered bytes rather than
-repacking: `npm run verify:sdk -- release/moguri-0.11.0-alpha.1.tgz`.
-Protocol-17 verification also exercises actual installed-worker SSH files,
-Git and plan reads on macOS. Historical archives retain their separately
-recorded qualification; protocol-16 SSH receipts remain inspectable without
+repacking: `npm run verify:sdk -- release/moguri-0.12.0-alpha.1.tgz`.
+Current verification also exercises actual installed-worker SSH files,
+Git/plan reads and dated/per-call telemetry on macOS. Historical archives retain their separately
+recorded qualification; protocol-16/17 SSH receipts remain inspectable without
 reattaching or continuing an old worker.
 
 ## Connect to the shared service
@@ -122,7 +122,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `plans` | Digest-checked plan read/save, independent project-owned snapshots, retained artifact reads. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
-| `budgets` | Cumulative owning-session/profile status, revision-bound hard policy and filtered/paged role/model/provider dashboard. Reservations precede dispatch; unknown usage is held, not free. |
+| `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `routing` | Opt-in scoped Single policy/configure with an observed settings revision and session-owned plan history. Actual router/solver roles use the existing worker/ledger; finite caps, images and model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Owned Local PTY open/read/resize/input/close and explicit unconfirmed inspection acknowledgement. Input/resize bypass durable receipts. |
@@ -463,8 +463,21 @@ Authenticated late SSH receipts can improve accounting without replaying work
 or completing partial turns. Profile-owned entries survive session/project
 retention. Historical unknown bounds/prices block affected finite units.
 
-`budgets.dashboard({projectId?,folderId?,sessionId?,providerId?,modelId?,role?,offset?,limit?})`
-returns complete matching totals plus paged actual role/model groups.
+`budgets.dashboard({projectId?,folderId?,sessionId?,turnId?,providerId?,modelId?,role?,env?,range?,bucket?,offset?,limit?})`
+returns complete matching totals, UTC periods/captured price history and paged
+actual role/model groups. `range` is `{kind:"days",days:7|30|60|90|365}`,
+`{kind:"year",year}`, `{kind:"custom",from:"YYYY-MM-DD",to:"YYYY-MM-DD"}`
+(inclusive UTC dates), or `{kind:"all"}`/omitted. `bucket` is `day`, `week`
+(Monday), `month` or `all`. Unknown historical request times are disclosed and
+excluded from dated views, not treated as zero; All time includes them.
+
+`budgets.calls({...sameScopeFilters,offset?,limit?})` returns bounded retained
+current-accounting call pages, actual/owning turn, nullable categories, captured
+rate and observed stream metadata. New/late reports can reorder pages; do not
+sum pages to derive totals. Observed delivery rates exclude unqualified and
+non-generative observations and are not GPU benchmarks. Absent cache details or
+single-chunk timing stay unknown. Use the same filters via `/dashboard JSON`,
+`/dashboard calls JSON` or CLI `budget dashboard|calls --filters JSON`.
 Estimates, provider reports and bills are separate; no billed USD is invented.
 Input reservation is estimated and provider charges can lag or exceed it.
 A provider exceeding its forwarded output bound is partial/unqualified for

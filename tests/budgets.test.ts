@@ -5,7 +5,7 @@ import { BudgetRuntime } from "../apps/service/src/budgets.ts";
 import { MoguriSdk, type Session, type Snapshot } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("exact token/USD reservations share one owner across internal roles and cannot reuse another pending leg's capacity", async () => {
   const fixture = await setupFixture();
@@ -179,7 +179,7 @@ test("schema-12 accounting imports exact legacy usage without rewriting identiti
     upgraded = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     const peer = await new MoguriSdk(upgraded.connection).ready();
     try {
-      assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+      assertCurrentSchema(upgraded.store);
       const entry = upgraded.controller.snapshot().budgetEntries[0]!;
       assert.equal(entry.imported, true); assert.equal(entry.reportedTokens, 42); assert.equal(entry.rate, null);
       assert.equal((await peer.budgets.status(fixture.sessionId)).status.totals.estimatedUsd, null);

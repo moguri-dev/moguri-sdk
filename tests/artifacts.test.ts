@@ -8,7 +8,7 @@ import { MoguriSdk, type ArtifactKind } from "../packages/sdk/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { saveArtifactExport } from "../packages/sdk/src/node.ts";
 
 test("typed artifacts retain independent content revisions, optimistic edits and grants after origin deletion", async () => {
@@ -144,7 +144,7 @@ test("schema-9 artifact rekeying rolls back atomically, preserves identity/share
       assert.equal(Number(old.prepare("SELECT count(*) AS count FROM retention_keys WHERE scope LIKE 'profile/default/artifact/%'").get()?.count), 0);
     } finally { old.close(); }
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
-    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+    assertCurrentSchema(restarted.store);
     assert.deepEqual(restarted.store.events().slice(0, before.length).map(({ id, seq }) => ({ id, seq })), before);
     const sdk = await new MoguriSdk(restarted.connection).ready();
     try {

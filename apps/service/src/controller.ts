@@ -32,6 +32,7 @@ import { McpKeychain } from "./gateway.ts";
 import { localWorker, type WorkerConnection, type WorkerFrame } from "./worker-connection.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
+import { normalizeStreamObservation } from "./stream-metrics.ts";
 
 interface Run {
   sessionId: string;
@@ -323,11 +324,15 @@ export class ControlPlane extends EventEmitter {
   }
   private modelUsage(session: Session, request: Extract<WorkerRequest, { kind: "model.complete" }>): Usage {
     const message = assistantMessage(request.message), prior = session.usage.find((usage) => usage.stepId === request.stepId);
+    const stream = request.stream;
     return this.platform.budgets.estimated({
       stepId: request.stepId, modelId: prior?.modelId ?? message.model, providerId: prior?.providerId, apiModelId: prior?.apiModelId, source: prior?.source,
       role: prior?.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
       inputTokens: request.usageReported ? message.usage.input : null, outputTokens: request.usageReported ? message.usage.output : null,
-      cacheReadTokens: request.usageReported ? message.usage.cacheRead : null, totalTokens: request.usageReported ? message.usage.totalTokens : null,
+      cacheReadTokens: request.usageReported && (stream?.cacheReadReported || stream === undefined && message.usage.cacheRead > 0) ? message.usage.cacheRead : null,
+      cacheWriteTokens: request.usageReported && (stream?.cacheWriteReported || stream === undefined && message.usage.cacheWrite > 0) ? message.usage.cacheWrite : null,
+      ...normalizeStreamObservation(stream, request.generationMs),
+      totalTokens: request.usageReported ? message.usage.totalTokens : null,
       estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: request.generationMs,
       quality: request.usageReported ? "provider-reported" : "unknown", outcome: message.stopReason,
       contextWindow: prior?.contextWindow, contextEstimate: prior?.contextEstimate, thinkingEffort: prior?.thinkingEffort,

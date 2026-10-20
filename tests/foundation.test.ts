@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
 import { projectEvents } from "../packages/protocol/src/index.ts";
 import { GENERATED_RETENTION_KEY } from "./fixture.ts";
+import { assertCurrentSchema } from "./fixtures/legacy-state.ts";
 
 test("events and command receipts commit together, replay, and cannot be mutated", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-foundation-"));
@@ -28,7 +29,7 @@ test("events and command receipts commit together, replay, and cannot be mutated
     assert.equal(restored?.event_type, "project.added");
     if (restored?.event_type === "project.added") assert.equal(restored.payload.project.name, project.name);
     assert.equal(store.events(1).length, 0);
-    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+    assertCurrentSchema(store);
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });

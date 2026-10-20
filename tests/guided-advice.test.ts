@@ -7,7 +7,7 @@ import { MoguriSdk, parse, UserQuestionSchema, type UserQuestion } from "../pack
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 20_000 };
 test("a model's recommendation schema cannot forge trusted advice provenance or a user answer", () => {
@@ -132,7 +132,7 @@ test("schema 14 upgrades both profiles without changing encrypted grants, receip
     restarted = await startService(fixture.options);
     const current = await new MoguriSdk(restarted.connection).ready(), scoped = await current.profiles.open(profile.id);
     try {
-      assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+      assertCurrentSchema(restarted.store);
       assert.deepEqual(restarted.store.db.prepare("SELECT seq,id,data,payload FROM events WHERE seq<=? ORDER BY seq").all(Number(rows.at(-1)!.seq)), rows);
       assert.deepEqual(restarted.store.db.prepare("SELECT * FROM receipts ORDER BY profile_id,id").all(), receipts);
       assert.equal(current.getState().snapshot!.sessions[0]?.id, first.id);
@@ -165,7 +165,7 @@ test("a failed Guided-advice migration preserves schema-14 metadata and reopens 
       preserved.exec("DROP TRIGGER generated_guidance_migration_failure");
     } finally { preserved.close(); }
     upgraded = await startService(options);
-    assert.equal(upgraded.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+    assertCurrentSchema(upgraded.store);
     assert.equal(upgraded.controller.snapshot().sessions[0]?.id, fixture.sessionId);
     assert.equal(fixture.requests.length, 0);
   } finally { await upgraded?.close(); await fixture.close(); }

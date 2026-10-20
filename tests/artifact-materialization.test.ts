@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { MoguriSdk, type LegacyVersionedArtifact } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { startService } from "../apps/service/src/server.ts";
 
 test("artifact organization uses profile folders and same-project work items, retaining provenance and history", async () => {
@@ -128,7 +128,7 @@ test("schema-11 artifact history and interrupted materialization recover without
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     const peer = await new MoguriSdk(restarted.connection).ready();
     try {
-      assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, 17);
+      assertCurrentSchema(restarted.store);
       assert.deepEqual(restarted.store.events().slice(0, identities.length).map(({ id, seq }) => ({ id, seq })), identities);
       assert.equal((await peer.artifacts.read(current.id!, 1)).artifact.folderId, null);
       assert.equal((await peer.artifacts.read(current.id!)).text, "Generated historical content.");

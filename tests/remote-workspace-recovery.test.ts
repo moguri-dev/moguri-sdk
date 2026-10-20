@@ -66,7 +66,7 @@ test("a failed schema-17 marker transaction leaves schema-16 state usable withou
   } finally { await restarted?.close(); await fixture.close(); }
 });
 
-test("the current SSH inspector verifies generated authenticated protocol-16 receipts without attaching or replaying the legacy worker", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
+test("the current SSH inspector verifies generated authenticated protocol-16/17 receipts without attaching or replaying the legacy worker", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
   const fixture = await remoteFixture();
   try {
     await fixture.probe(); await fixture.select(); await fixture.send("Generated legacy-inspection reply.");
@@ -74,15 +74,17 @@ test("the current SSH inspector verifies generated authenticated protocol-16 rec
     const execution = await waitFor(() => fixture.controller.snapshot().executions.find((value) => value.cleanup === "owned-worker-stopped"));
     const key = fixture.secrets.get(execution.id)!; assert.ok(key);
     const path = join(execution.target.stateDir, execution.id, "status.json"), saved = JSON.parse(await readFile(path, "utf8"));
-    saved.info.protocol = 16;
-    saved.proof = createHmac("sha256", Buffer.from(key, "hex")).update(JSON.stringify({ status: saved.status, info: saved.info })).digest("hex");
-    await writeFile(path, JSON.stringify(saved), { mode: 0o600 });
-    await fixture.controller.dispatch(envelope({ type: "remote.reconcile", executionId: execution.id }));
-    assert.equal(fixture.requests.length, 1); assert.equal(fixture.session().usage.length, 1); assert.equal(fixture.session().status, "completed");
-    await assert.rejects(() => fixture.controller.remote.query(execution.target, {
-      action: "attach", protocol: PROTOCOL_VERSION, workerDigest: execution.workerDigest, root: execution.workspace,
-      stateDir: execution.target.stateDir, runId: execution.id, key, after: execution.lastSequence,
-    }, AbortSignal.timeout(5000)), /inspection only|reattached|resumed/);
+    for (const protocol of [16, 17]) {
+      saved.info.protocol = protocol;
+      saved.proof = createHmac("sha256", Buffer.from(key, "hex")).update(JSON.stringify({ status: saved.status, info: saved.info })).digest("hex");
+      await writeFile(path, JSON.stringify(saved), { mode: 0o600 });
+      await fixture.controller.dispatch(envelope({ type: "remote.reconcile", executionId: execution.id }));
+      assert.equal(fixture.requests.length, 1); assert.equal(fixture.session().usage.length, 1); assert.equal(fixture.session().status, "completed");
+      await assert.rejects(() => fixture.controller.remote.query(execution.target, {
+        action: "attach", protocol: PROTOCOL_VERSION, workerDigest: execution.workerDigest, root: execution.workspace,
+        stateDir: execution.target.stateDir, runId: execution.id, key, after: execution.lastSequence,
+      }, AbortSignal.timeout(5000)), /inspection only|reattached|resumed/);
+    }
     assert.equal(fixture.requests.length, 1);
   } finally { await fixture.close(); }
 });
