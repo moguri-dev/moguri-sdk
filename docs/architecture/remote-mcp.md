@@ -6,8 +6,10 @@ Remote MCP, following the measured
 qualified delivery remains 0.17. Scoped discovery and exact approved model or
 provider-free external calls now run over SSH after an explicit grant. CLI, actual OpenTUI
 and factory-dark desktop share review/revoke/operation APIs.
-This remains a macOS development alpha; a saved grant is not a claim that a
-tool operation ran. Exact archive qualification is recorded in setup.
+The exact 0.18.0-alpha.2 SDK and actual bundled macOS application are
+independently qualified. This remains a development alpha, not the completed
+first milestone; a saved grant is not a claim that a tool operation ran.
+Exact archive identities and qualification are recorded in setup.
 
 Reuse the existing Node/MCP SDK (MIT), OpenSSH transport (BSD), private worker,
 owned connector, exact tool approvals, all-role accounting and encrypted
@@ -172,4 +174,13 @@ including actual granted no-model SSH MCP. A cross-surface copy check then
 found an obsolete Remote SSH settings sentence claiming MCP unavailable.
 Alpha.2 corrects that sentence with a native regression assertion; alpha.1
 archives are retained unchanged. See setup for both exact identities and the
-new candidate's qualification. No extra permission or transport was introduced.
+corrected build's qualification. No extra permission or transport was introduced.
+
+Alpha.2's exact SDK passes fresh explicit script approval/install/rebuild,
+zero-vulnerability audit, all four external type entrypoints and actual
+installed no-model SSH MCP/CLI/TUI/root/result/cleanup/revocation flows.
+All **35 desktop workflows pass on the actual packaged application in 1.2 min**,
+with corrected capability guidance. Actual bundled Node/worker/MCP and native
+assets/signature/DMG integrity pass. Its Electron-only/combined memory
+measurements remain separately reported in setup; no whole-runtime 600-MiB
+claim or production notarization is implied. These artifacts are immutable.
