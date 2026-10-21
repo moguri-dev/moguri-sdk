@@ -43,7 +43,7 @@ export function remoteMcpPreview(scope: RemoteMcpScope, server: McpServerConfig 
     sessionId: scope.sessionId, projectId: scope.projectId, root: scope.root, peerDigest, resourceDigest,
     digest: frameDigest(["moguri-remote-mcp-scope-v1", scope, resourceDigest, helperDigest]),
     settingsRevision: scope.settingsRevision, permissionRevision: scope.permissionRevision, policyRevision: scope.policyRevision, projectRevision: scope.projectRevision,
-    host: { name: scope.target.name, host: scope.target.host, user: scope.target.user, fingerprint: remoteFingerprint(scope.target) },
+    host: { name: scope.target.name, host: scope.target.host, port: scope.target.port, user: scope.target.user, fingerprint: remoteFingerprint(scope.target) },
     server: { id: resource.id, name: resource.name, transport: resource.transport, resource: resource.resource, auth: resource.auth },
     granted: Boolean(grant), forwardAccess: grant?.forwardAccess === true,
     warning: "This is execution on the selected SSH host, not SendBox isolation. Remote stdio uses that host's command/cwd and may have its own account. Access forwarding is a separate peer/resource/profile grant; bearer values may be long-lived API keys and the host can retain received access. Refresh credentials never leave their backend. No Local or anonymous fallback.",

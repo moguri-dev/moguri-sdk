@@ -15,7 +15,7 @@ import {
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   isPlanSaveCommand, isPlanSaveQuery, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse,
   isRemoteMcpCommand, isRemoteMcpQuery, type RemoteMcpCommand, type RemoteMcpQuery, type RemoteMcpResponse,
-  type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig, type McpToolInfo,
+  type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig, type McpServerInfo, type McpToolInfo,
   type RuntimeCloseOptions,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
@@ -245,6 +245,33 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (!server || server.projectIds && !server.projectIds.includes(projectId ?? "")) throw new MoguriError("mcp_denied", "This MCP is not enabled for the current profile/project.", 403);
     return server;
   }
+  private async mcpServers(session?: Session): Promise<McpServerInfo[]> {
+    const snapshot = this.snapshot(), env = session?.controls.env ?? "Local";
+    const enabled = [...snapshot.settings.values.mcpServers, ...this.sessions.projects.values(session?.projectId ?? null).mcpServers]
+      .filter((server) => server.enabled && (!server.projectIds || session?.projectId && server.projectIds.includes(session.projectId)));
+    const servers = [null, ...[...new Set(enabled.map((server) => server.id))].map((id) => this.server(id, session?.projectId))];
+    let scope: RemoteMcpScope | undefined, helper: string | undefined, diagnostic: string | undefined;
+    if (!snapshot.policy.allowedEnvs.includes(env)) diagnostic = `${env} is excluded by current policy. No discovery or execution fallback.`;
+    else if (env === "Sandbox") diagnostic = "This MCP execution transport is not qualified. No Local fallback.";
+    else if (env === "Remote" && session) {
+      try { scope = this.host.remoteMcpScope(session); helper = await this.gateway.workerDigest(); }
+      catch (error) { if (!(error instanceof MoguriError)) throw error; diagnostic = error.message; }
+    }
+    return servers.map((server) => {
+      const info: McpServerInfo = { id: server?.id ?? "builtin", name: server?.name ?? "Moguri foundational scripts", transport: server?.transport.type ?? "builtin",
+        env, state: diagnostic ? "unready" : "configured", diagnostic: diagnostic ?? "Configured metadata only. Discovery, credentials and exact calls remain subject to current policy." };
+      if (scope && helper) {
+        try {
+          const preview = remoteMcpPreview(scope, server, helper);
+          info.state = !preview.granted ? "review-required" : preview.server.auth !== "none" && !preview.forwardAccess ? "access-required" : "configured";
+          info.diagnostic = !preview.granted ? "Explicit pinned-peer/resource review is required; nothing was connected." :
+            info.state === "access-required" ? "This authenticated resource needs a separate access-forwarding grant." : "Remote grant configured. Discovery and exact approval are still required; no credential/server was accessed.";
+          info.remote = { granted: preview.granted, forwardAccess: preview.forwardAccess, root: preview.root, hostFingerprint: preview.host.fingerprint };
+        } catch (error) { if (!(error instanceof MoguriError)) throw error; info.state = "unready"; info.diagnostic = error.message; }
+      }
+      return info;
+    });
+  }
   private async scripts(projectId?: string | null) {
     const directory = join(this.stateDir, "approved-scripts");
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -286,6 +313,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         const ids = new Set(nodes.map((node) => node.id));
         return { type: query.type, nodes, edges: graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)) };
       }
+      case "mcp.servers": return { type: query.type, servers: await this.mcpServers(query.sessionId ? this.session(query.sessionId) : undefined) };
       case "mcp.tools": {
         const session = query.sessionId ? this.session(query.sessionId) : undefined;
         const server = this.server(query.serverId, session?.projectId);
@@ -642,7 +670,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }
     if (call.name === "mcp_gateway") {
       const action = call.arguments.action;
-      if (action === "discover") return { text: JSON.stringify([{ id: "builtin", name: "Moguri foundational scripts" }, ...[...this.snapshot().settings.values.mcpServers, ...this.sessions.projects.values(session.projectId).mcpServers].filter((server) => server.enabled && (!server.projectIds || session.projectId !== null && server.projectIds.includes(session.projectId))).map((server) => ({ id: server.id, name: server.name, transport: server.transport.type }))]), isError: false, outcome: "completed" };
+      if (action === "discover") return { text: JSON.stringify(await this.mcpServers(session)), isError: false, outcome: "completed" };
       if (action === "tools") return { text: JSON.stringify(await this.query({ type: "mcp.tools", sessionId: session.id, serverId: String(call.arguments.serverId), query: String(call.arguments.query ?? ""), offset: Number(call.arguments.offset ?? 0) })), isError: false, outcome: "completed" };
       if (action === "auth") {
         this.server(String(call.arguments.serverId), session.projectId);

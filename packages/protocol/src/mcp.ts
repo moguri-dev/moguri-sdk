@@ -9,6 +9,11 @@ export const RemoteMcpGrantSchema = object({
   serverId: id, peerDigest: hash, resourceDigest: hash, forwardAccess: Type.Boolean(),
 });
 export type RemoteMcpGrant = Static<typeof RemoteMcpGrantSchema>;
+export interface McpServerInfo {
+  id: string; name: string; transport: "builtin" | "stdio" | "http"; env: "Local" | "Remote" | "Sandbox";
+  state: "configured" | "review-required" | "access-required" | "unready"; diagnostic: string;
+  remote?: { granted: boolean; forwardAccess: boolean; root: string; hostFingerprint: string };
+}
 export const McpToolInfoSchema = object({
   serverId: id, name: Type.String({ minLength: 1, maxLength: 160 }), description: Type.String({ maxLength: 2000 }),
   inputSchema: Type.Record(Type.String(), Type.Unknown()), digest: hash,
@@ -18,7 +23,7 @@ export type McpToolInfo = Static<typeof McpToolInfoSchema>;
 export const RemoteMcpPreviewSchema = object({
   sessionId: id, projectId: id, root: path, peerDigest: hash, resourceDigest: hash, digest: hash,
   settingsRevision: revision, permissionRevision: revision, policyRevision: revision, projectRevision: revision,
-  host: object({ name: Type.String({ maxLength: 120 }), host: Type.String({ maxLength: 253 }), user: id, fingerprint: Type.String({ maxLength: 128 }) }),
+  host: object({ name: Type.String({ maxLength: 120 }), host: Type.String({ maxLength: 253 }), port: Type.Integer({ minimum: 1, maximum: 65535 }), user: id, fingerprint: Type.String({ maxLength: 128 }) }),
   server: object({ id, name: Type.String({ maxLength: 120 }), transport: Type.Union([Type.Literal("builtin"), Type.Literal("stdio"), Type.Literal("http")]),
     resource: Type.String({ maxLength: 16384 }), auth: Type.Union([Type.Literal("none"), Type.Literal("bearer"), Type.Literal("oauth")]) }),
   granted: Type.Boolean(), forwardAccess: Type.Boolean(), warning: Type.String({ maxLength: 4096 }),

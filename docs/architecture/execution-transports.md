@@ -28,13 +28,18 @@ This qualifies the macOS core agent path, not Linux release readiness or live
 Copilot entitlement. Protocol 17 separately qualifies read-only SSH files,
 Git changes and plan views below. Protocol 20 adds
 [exact user-requested Remote plan saves](remote-plan-saves.md) through the
-same owned worker with no model or Local fallback. Embedded Remote consoles,
-executable MCP transport and repository-memory retrieval remain blocked. Explicit
+same owned worker with no model or Local fallback. In the qualified 0.17
+delivery, embedded Remote consoles, executable MCP transport and repository-memory retrieval remain blocked. Explicit
 client-side browser URLs do not create an implicit remote-port tunnel.
 The later [Remote MCP prerequisite](remote-mcp-primitives.md) separately
 qualifies actual generated SSH stdio/HTTP connector origin, exact scopes,
 denied-by-default synthetic access, cancellation and lost-result inspection.
 It is not public Remote MCP support or a grant to forward real credentials.
+The subsequent [protocol-24 development integration](remote-mcp.md) now adds
+explicit peer/resource grants and actual approved model/external MCP calls in
+that same worker, with encrypted intent/results, no-replay restart/late
+receipts and shared CLI/TUI/desktop review. Remote memory/scripts/consoles
+remain blocked, and complete exact 0.18 archive qualification is still pending.
 
 Protocol 22 reuses the qualified Git view for optional immutable repository
 attribution at model admission. It reads the actual pinned Remote origin and

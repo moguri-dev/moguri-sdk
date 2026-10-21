@@ -20,7 +20,7 @@ import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type
 import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
 import type { TerminalOwner } from "./terminals.ts";
-import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
+import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
 export * from "./mcp.ts";
 export * from "./repositories.ts";
 export * from "./telemetry.ts";
@@ -161,6 +161,7 @@ export const QuerySchema = Type.Union([
   object({ type: Type.Literal("memory.search"), projectId: id, workspaceId: Type.Optional(id), text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
   object({ type: Type.Literal("memory.graph"), projectId: id, workspaceId: Type.Optional(id), path: Type.String({ maxLength: 4096 }) }),
   object({ type: Type.Literal("mcp.tools"), serverId: id, sessionId: Type.Optional(id), query: Type.String({ maxLength: 200 }), offset: Type.Integer({ minimum: 0, maximum: 10000 }) }),
+  object({ type: Type.Literal("mcp.servers"), sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("mcp.auth"), serverId: id, sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("result.read"), resultId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 32768 }) }),
   object({ type: Type.Literal("voice.status") }),
@@ -246,6 +247,7 @@ export type PlatformResponse =
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }
   | { type: "mcp.tools"; tools: McpToolInfo[]; nextOffset: number | null }
+  | { type: "mcp.servers"; servers: McpServerInfo[] }
   | { type: "mcp.auth"; state: "not-required" | "configured" | "required"; method: "none" | "bearer" | "oauth"; diagnostic: string; expiresAt?: number | null;
       remote?: { granted: boolean; forwardAccess: boolean; root: string; hostFingerprint: string } }
   | { type: "result.read"; text: string; nextOffset: number | null }

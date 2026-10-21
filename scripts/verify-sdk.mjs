@@ -106,6 +106,12 @@ try {
       await saveArtifactExport("/generated/explicit-export.json",exported);
       await sdk.sessions.env(general.id!,"Local");
       const remote=await sdk.remote.status();void remote.remote.workerDigest;
+      const mcps=await sdk.mcp.servers("generated-id");void mcps.servers[0]?.remote?.root;
+      const remoteMcp=(await sdk.mcp.remotePreview("generated-id","builtin")).preview;void remoteMcp.host.port;
+      await sdk.mcp.grantRemote("generated-id","builtin",remoteMcp.digest,remoteMcp.settingsRevision,false,true);
+      await sdk.mcp.revokeRemote("generated-id","builtin",remoteMcp.settingsRevision,true);
+      const mcpCalls=await sdk.mcp.remoteCalls("generated-id");void mcpCalls.calls[0]?.accessForwarded;
+      const mcpCall=await sdk.mcp.remoteCall("generated-id","generated-operation");void mcpCall.call.actor;
       const planView=await sdk.plans.read("generated-id");void planView.boundary?.root;
       await sdk.plans.save("generated-id","Generated exact user plan.",planView.digest,planView.bindingDigest);
       const saves=await sdk.plans.saves("generated-id");void saves.saves[0]?.fileOutcome;
@@ -240,6 +246,30 @@ try {
           await assert.rejects(()=>sdk.plans.stopSave(viewer.id,operations[0].id),/settled|newer|ownership/);
           assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).usage.length,0);
           assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).messages.some(value=>value.role==="user"),false);
+        }
+        if(PROTOCOL_VERSION>=24){
+          const preview=(await sdk.mcp.remotePreview(viewer.id,"builtin")).preview;
+          assert.equal(preview.granted,false);assert.equal((await sdk.mcp.servers(viewer.id)).servers[0].state,"review-required");
+          await sdk.mcp.grantRemote(viewer.id,"builtin",preview.digest,preview.settingsRevision,false,true);await sdk.remote.probe();
+          const tool=(await sdk.mcp.tools("builtin","grep",0,viewer.id)).tools.find(tool=>tool.name==="grep_logs");
+          assert.equal(tool.scope.root,remoteRoot);
+          const pending=await sdk.mcp.call(viewer.id,"builtin",tool.name,{path:"generated.ts",query:"SSH-only change"},tool.digest);
+          const waiting=(await sdk.mcp.remoteCalls(viewer.id)).calls[0];
+          assert.equal(waiting.actor,"external");assert.equal(waiting.executionId,null);assert.equal(waiting.accessForwarded,false);
+          const approval=sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).pendingApproval;
+          await sdk.command({type:"approval.respond",sessionId:viewer.id,approvalId:approval.id,allow:true});
+          assert.equal((await sdk.jobs.wait(pending.id)).status,"completed");
+          const call=(await sdk.mcp.remoteCalls(viewer.id)).calls[0],result=await sdk.mcp.remoteCall(viewer.id,call.id);
+          assert.equal(call.status,"completed");assert.equal(call.root,remoteRoot);
+          assert.match(JSON.stringify(result.result),/Generated installed SSH-only change/);
+          assert.equal(sdk.getState().snapshot.executions.find(value=>value.id===call.executionId).cleanup,"owned-worker-stopped");
+          assert.equal((await sdk.telemetry.operations({sessionId:viewer.id,family:"mcp",env:"Remote"})).totals.completed,1);
+          const inspected=await sdk.slash(viewer.id,"/mcp-remote inspect "+call.id,"tui");assert.equal(inspected.kind,"text");assert.match(inspected.text,/SSH-only change/);
+          const cli=JSON.parse((await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"mcp","remote-calls","--session",viewer.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}})).stdout);
+          assert.equal(cli.calls[0].id,call.id);
+          await sdk.mcp.revokeRemote(viewer.id,"builtin",sdk.settings.get().revision,true);
+          assert.match(JSON.stringify((await sdk.mcp.remoteCall(viewer.id,call.id)).result),/SSH-only change/);
+          assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).usage.length,0);
         }
         assert.match((await sdk.workspaces.file(s.id,"generated.ts")).text,/portableSdkMemory/);
       }
@@ -567,7 +597,7 @@ try {
         assert.equal(keys.size,0);await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and CLI/TUI/private-profile/deletion-safe MCP attribution, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and CLI/TUI/private-profile/deletion-safe MCP attribution, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "" } });
 } finally { try { await ssh?.close(); } finally { await rm(temporary, { recursive: true, force: true }); } }

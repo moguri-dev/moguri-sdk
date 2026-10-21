@@ -19,9 +19,13 @@ test("Remote SDK discovery uses the actual SSH connector and scoped catalog, nev
   const f = await remoteFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await f.probe(); await sdk.sessions.env(f.sessionId, "Remote");
+    const metadata = (await sdk.mcp.servers(f.sessionId)).servers;
+    assert.equal(metadata[0]?.env, "Remote"); assert.equal(metadata[0]?.state, "review-required"); assert.equal(metadata[0]?.remote?.granted, false);
+    assert.equal(metadata[0]?.remote?.root, f.workspace); assert.equal(f.requests.length, 0);
     await assert.rejects(() => sdk.mcp.tools("builtin", "", 0, f.sessionId), { code: "remote_mcp_grant" });
     const local = t.mock.method(f.controller.platform.gateway, "operate", async () => { throw new Error("Local MCP fallback is forbidden."); });
     await grant(sdk, f, "builtin", false);
+    assert.equal((await sdk.mcp.servers(f.sessionId)).servers[0]?.state, "configured");
     const catalog = await sdk.mcp.tools("builtin", "", 0, f.sessionId);
     assert.deepEqual(catalog.tools.map((tool) => tool.name).sort(), ["fetch_page", "grep_logs"]);
     assert.ok(catalog.tools.every((tool) => tool.scope?.env === "Remote" && tool.scope.root === f.workspace));

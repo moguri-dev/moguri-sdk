@@ -168,3 +168,36 @@ test("revoking a Remote MCP grant during an awaited access read prevents credent
     assert.equal(f.session().processes.length, 0); assert.equal(f.requests.length, 0);
   } finally { release(); sdk.disconnect(); await f.close(); }
 });
+
+test("failed external MCP result retention preserves one exact late result without promoting the partial job", native, async (t) => {
+  const f = await remoteFixture({ exposeModels: false }), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const tool = await configure(sdk, f), commit = f.service.store.commit.bind(f.service.store);
+    let failed = false;
+    const failure = t.mock.method(f.service.store, "commit", (...args: Parameters<typeof commit>) => {
+      if (!failed && args[0].some((event) => event.event_type === "mcp.remote_recorded" && event.payload.call.phase === "result-retained")) {
+        failed = true; throw new Error("Generated external result-receipt failure.");
+      }
+      return commit(...args);
+    });
+    const pending = await sdk.mcp.call(f.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "remote source" }, tool.digest);
+    await f.approve(); assert.equal((await sdk.jobs.wait(pending.id!)).status, "partial"); failure.mock.restore();
+    const call = (await sdk.mcp.remoteCalls(f.sessionId)).calls[0]!;
+    assert.equal(call.status, "partial"); assert.equal(call.resultDigest, null);
+    const execution = f.controller.snapshot().executions.find((entry) => entry.id === call.executionId)!;
+    let stopped = false;
+    for (let index = 0; index < 100 && !stopped; index++) {
+      const inspection = await f.controller.remote.inspect(execution);
+      stopped = inspection.status.cleanup === "owned-worker-stopped";
+      if (!stopped) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(stopped, true);
+    await sdk.remote.reconcile(execution.id);
+    assert.equal((await sdk.jobs.wait(pending.id!)).status, "partial");
+    const late = await sdk.mcp.remoteCall(f.sessionId, call.id);
+    assert.equal(late.call.actor, "external"); assert.equal(late.call.status, "partial"); assert.equal(late.call.jobId, pending.id);
+    assert.match(JSON.stringify(late.result), /generated actual remote source/);
+    assert.match((await sdk.mcp.readResult(pending.id!)).text, /generated actual remote source/);
+    assert.equal(f.controller.snapshot().executions.length, 1); assert.equal(f.requests.length, 0);
+  } finally { sdk.disconnect(); await f.close(); }
+});

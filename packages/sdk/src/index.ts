@@ -303,6 +303,7 @@ export class MoguriSdk extends TransportClient {
     decide: (proposalId: string, approve: boolean, expectedDigest: string) => this.command({ type: "proposal.decide", proposalId, approve, expectedDigest }),
   };
   readonly mcp = {
+    servers: (sessionId?: string) => this.query({ type: "mcp.servers", ...(sessionId ? { sessionId } : {}) }),
     remotePreview: (sessionId: string, serverId: string) => this.query({ type: "mcp.remote.preview", sessionId, serverId }),
     grantRemote: (sessionId: string, serverId: string, expectedDigest: string, expectedRevision: number, forwardAccess: boolean, confirmReview: true) =>
       this.command({ type: "mcp.remote.grant", sessionId, serverId, expectedDigest, expectedRevision, forwardAccess, confirmReview }),

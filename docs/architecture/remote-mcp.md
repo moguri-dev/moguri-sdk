@@ -4,9 +4,10 @@ The 0.18 development source introduces **protocol/database 24 foundations** for
 Remote MCP, following the measured
 [real-SSH prerequisite](remote-mcp-primitives.md). The latest independently
 qualified delivery remains 0.17. Scoped discovery and exact approved model or
-provider-free external calls now run over SSH after an explicit grant.
-This is development source, not a qualified 0.18 archive or completed native
-client integration; a saved grant is not a claim that a tool operation ran.
+provider-free external calls now run over SSH after an explicit grant. CLI, actual OpenTUI
+and factory-dark desktop share review/revoke/operation APIs.
+This is development source, not a qualified 0.18 archive; a saved grant is not
+a claim that a tool operation ran.
 
 Reuse the existing Node/MCP SDK (MIT), OpenSSH transport (BSD), private worker,
 owned connector, exact tool approvals, all-role accounting and encrypted
@@ -43,6 +44,10 @@ credentials remain in their explicit backend. A bearer value may be a
 long-lived API key, and SSH transport does not prevent the remote host from
 retaining access it receives. No real grant was inferred from
 the implementation conversation or generated tests.
+The shared `mcp.servers` metadata query labels Remote resources as configured,
+review-required, access-required or unready. Neither model nor outward gateway
+can advertise an ungranted resource as connected/approved, or use metadata
+listing to read a credential. Actual tool/schema discovery is a separate call.
 
 ## Durable execution identity
 
@@ -140,3 +145,17 @@ type checks. It includes actual access-only OAuth execution and proof that
 retained private frames/results contain neither generated access nor refresh
 values, plus revocation during an awaited access read. These are generated
 same-host SSH fixtures, not real account consent or proof of every remote OS.
+
+The related Local/Remote/connector gate passes **45/45 in 13,540.01 ms**.
+The shared CLI command gate and discovery checks pass **5/5 in 5,033.57 ms**;
+actual OpenTUI review/grant/list/revoke passes in **908.07 ms**. Two hidden
+desktop workflows pass in **6.3 s**, including an actual separately approved
+no-model SSH call, offline revocation/retained reads, stale held-review
+rejection and initially unchecked authenticated forwarding. The first stale
+UI assertion released its response before the second renderer had observed
+the settings update; its safe stale-review warning was retained. The harness
+now waits for that actual committed renderer state, not a sleep or weakened
+permission guard. Both bounded desktop/compact visual rounds are complete.
+Model and external failed-result-ACK reconciliation additionally pass
+**10/10 in 13,603.17 ms**, retaining the exact late result without another
+model step, tool effect, attempt or promotion of the partial turn/job.

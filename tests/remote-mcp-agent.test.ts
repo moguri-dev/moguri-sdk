@@ -66,12 +66,19 @@ test("failed Remote MCP result retention cannot acknowledge success, continue an
     const record = f.controller.snapshot().remoteMcpCalls[0]!;
     assert.equal(record.status, "unconfirmed"); assert.equal(record.resultDigest, null); assert.ok(record.executionId);
     const execution = f.controller.snapshot().executions.find((execution) => execution.id === record.executionId)!;
-    let retained = false;
-    for (let index = 0; index < 100 && !retained; index++) {
+    let retained = false, stopped = false;
+    for (let index = 0; index < 100 && (!retained || !stopped); index++) {
       const inspection = await f.controller.remote.inspect(execution);
       retained = inspection.frames.some((frame) => frame.request.kind === "mcp.complete");
-      if (!retained) await new Promise((resolve) => setTimeout(resolve, 20));
+      stopped = inspection.status.cleanup === "owned-worker-stopped";
+      if (!retained || !stopped) await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    assert.equal(retained, true); assert.equal(f.requests.length, 1);
+    assert.equal(retained, true); assert.equal(stopped, true); assert.equal(f.requests.length, 1);
+    await sdk.remote.reconcile(execution.id);
+    const reconciled = await sdk.mcp.remoteCall(f.sessionId, record.id);
+    assert.equal(reconciled.call.status, "partial"); assert.equal(reconciled.call.actor, "model"); assert.ok(reconciled.call.jobId);
+    assert.match(JSON.stringify(reconciled.result), /generated actual remote source/);
+    assert.equal((await sdk.telemetry.operations({ sessionId: f.sessionId, family: "mcp" })).totals.attempts, 1);
+    assert.equal(f.session().status, "partial"); assert.equal(f.requests.length, 1);
   } finally { sdk.disconnect(); await f.close(); }
 });

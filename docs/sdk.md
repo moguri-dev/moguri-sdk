@@ -755,6 +755,32 @@ Configure that command as a stdio MCP in another client. It exposes only
 credentials, permissions or answer its own approval. Calls wait for the human
 in the bound idle session, then retain a paged result.
 
+Protocol-24 development also exposes `mcp.servers(sessionId?)` as authoritative,
+non-connecting metadata for the model gateway, outward MCP, CLI and clients.
+`configured` is not entitlement or permission; Remote resources separately
+report `review-required`, `access-required` or `unready`. Listing reads no
+access credential and does not execute a configured MCP.
+
+`mcp.remotePreview(sessionId, serverId)` returns the exact profile-bound
+host/port/key/root/resource and revision/digest review without reading a token.
+After explicit human review, `grantRemote(sessionId, serverId, digest,
+settingsRevision, forwardAccess, true)` saves the peer/resource grant.
+`forwardAccess` is independently false unless explicitly selected; an HTTP
+bearer can be long-lived and a remote host can retain it. Refresh credentials
+are never transferred. Probe the changed target and rediscover the scoped
+catalog before `mcp.call`; Local or stale schema digests cannot authorize it.
+The external call needs no model and still waits for its own exact approval.
+
+`mcp.remoteCalls(sessionId)` and `remoteCall(sessionId, operationId)` expose
+original actor/command/execution and retained result, including unknown access
+or partial effects. Results are bounded to 2 MiB; ordinary `readResult` pages
+the corresponding job. `revokeRemote(sessionId, serverId, settingsRevision,
+true)` needs neither a ready host nor current permission to execute. Explicit
+`remote.reconcile(executionId)` can retain an original late result without
+re-reading access, replaying a connector or promoting a partial owning turn.
+The same user controls are available through `/mcp-remote` and desktop's
+**Remote MCP access**, never outward model settings/approval tools.
+
 Backend MCP transports are stdio and Streamable HTTP, using no auth or a scoped
 OS-keychain bearer credential or explicit OAuth. HTTPS is required except explicitly configured
 loopback HTTP. Discovery

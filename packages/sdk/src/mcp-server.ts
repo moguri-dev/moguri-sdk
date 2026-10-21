@@ -30,7 +30,7 @@ export function createGatewayMcpServer(sdk: MoguriSdk, sessionId: string): Serve
       let result: unknown;
       switch (request.params.name) {
         case "moguri_discover_mcps":
-          result = [{ id: "builtin", name: "Moguri foundational scripts" }, ...enabled.map((server) => ({ id: server.id, name: server.name, transport: server.transport.type }))]; break;
+          result = (await sdk.mcp.servers(sessionId)).servers; break;
         case "moguri_find_tools":
           allowed(String(args.serverId));
           result = await sdk.mcp.tools(String(args.serverId), String(args.query ?? ""), Number(args.offset ?? 0), sessionId); break;
