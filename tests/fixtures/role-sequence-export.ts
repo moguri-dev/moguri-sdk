@@ -1,4 +1,4 @@
-import { cp, mkdir } from "node:fs/promises";
+import { cp } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { roleSequenceFixture } from "./role-sequence-api.ts";
 
@@ -11,7 +11,7 @@ try {
   await f.sdk.sessions.delete(f.sessionId, true, f.session().revision);
   const preview = (await f.sdk.artifacts.projectPreview(sequence.projectId!)).preview, configuration = (await f.sdk.projects.configuration(sequence.projectId!)).configuration;
   await f.sdk.projects.remove(sequence.projectId!, true, configuration.revision, { action: "retain", expectedDigest: preview.digest });
-  await f.service.close(); await mkdir(destination, { mode: 0o700 });
+  await f.service.close();
   await cp(join(f.directory, "state"), destination, { recursive: true, force: false, errorOnExist: true });
   if (f.requests.length) throw new Error("Generated retained-role export must never dispatch inference.");
   console.log(JSON.stringify({ stateDir: destination, sequenceId: sequence.id, commandId: sequence.commandId, commandDigest: sequence.commandDigest,
