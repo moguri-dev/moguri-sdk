@@ -5,6 +5,9 @@ independent, authenticated Node/Node-PTY owner. One owner process serves a
 profile's consoles; the service remains the only durable state writer. This
 extends D06's measured Node exception, not general agent background execution,
 Remote/Sandbox consoles, Rust supervision or complete descendant containment.
+Protocol 25 separately extends this to
+[owned pinned SSH consoles](remote-user-consoles.md), preserving the Local
+version-1 format and never relabeling an existing Local process.
 
 The [prerequisite spike](terminal-reattachment-primitives.md) qualified the real
 PTY, process-loss, framing and authentication primitives before integration.

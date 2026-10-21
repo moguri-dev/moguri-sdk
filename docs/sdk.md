@@ -5,10 +5,11 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 24 deliberately rejects incompatible running
+This is an alpha API. Qualified 0.18 uses protocol 24; current 0.19 source
+uses protocol 25. Both deliberately reject incompatible running
 services and requires the matching SSH worker for exact user plan operations,
 reviewed compaction, model telemetry and explicitly granted Remote MCP.
-State migrations preserve schema-1 through schema-23 history, sessions, drafts,
+Current state migrations preserve schema-1 through schema-24 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -22,9 +23,9 @@ and qualification are recorded in [setup](setup.md); older immutable
 deliveries are not repacked.
 The current 0.19 development source extends this with protocol-25 Remote
 owner/binding and migration foundations. Development service/SDK Remote
-console execution and recovery are implemented; native client/complete
-lifecycle and exact-package qualification remain unfinished. There is no
-qualified 0.19 archive yet.
+console execution, recovery and native clients are implemented and pass the
+complete source/native checks. Exact-package qualification remains
+unfinished. There is no qualified 0.19 archive yet.
 
 ## Build and consume
 
@@ -147,7 +148,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single policy/configure with an observed settings revision and session-owned plan history. Actual router/solver roles use the existing worker/ledger; finite caps, images and model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
-| `terminal` | Exact Local PTY open/read/resize/input/close, terminal/owner reconciliation and explicit process-inspection acknowledgements. Authenticated per-profile ownership survives explicit restart. Input/resize bypass durable receipts. |
+| `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, terminal/owner reconciliation and explicit process-inspection acknowledgements. Immutable env/peer/root and authenticated per-profile ownership survive explicit restart. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
@@ -156,10 +157,10 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
 
-### Local user consoles
+### Owned Local and Remote user consoles
 
 `terminal.open(sessionId)` is an explicit user action, not an agent tool.
-`terminal.read(id, offset, limit)` returns the exact Local binding, actual
+`terminal.read(id, offset, limit)` returns the exact Local or Remote binding, actual
 attachment generation, bounded volatile data and base/next offsets. A missing
 prefix or expired buffer is not reconstructed as a transcript.
 
@@ -176,7 +177,20 @@ surrogate pair, and checks cancellation/current `attachmentId` between chunks.
 An error can mean some bytes arrived: inspect before typing again, never retry
 the same input automatically. Neither input nor resize uses durable command
 receipts. Reconciliation and input require the original profile/root identity;
-policy can block new Local input without preventing inspection or close.
+policy can block new input in either captured env without preventing inspection
+or exact close. Remote metadata never becomes a Local filesystem path or PID.
+
+For Remote, explicitly configure/probe the installed worker and mapped project
+before a new `terminal.open`. Probe metadata separates optional console helper
+availability from core-agent readiness. The technical owner key is independent
+of provider/MCP credentials. The actual SSH host chooses the default shell;
+controller-side shell preferences are not substituted. No model is required.
+`TerminalOwner.env === "Remote"` and `owner.remote` expose the immutable peer/
+helper boundary; `preparing` can retain null paths/PID before remote resources.
+Consumers must handle that state, not cast it to a prepared Local owner.
+Existing recovered Remote input needs its current allowed peer/root and
+authenticated attachment, not another core-agent probe. See the
+[Remote lifecycle contract](architecture/remote-user-consoles.md).
 
 `terminal.reconcileOwner(ownerId)` also inspects an empty pending owner.
 `acknowledge(id, true)` and `acknowledgeOwner(ownerId, true)` require actual user
@@ -189,7 +203,7 @@ authenticated **service-wide** restart detach; ordinary stop/default embedded
 An explicit embedded `runtime.close({ preserveTerminals: true })` also preserves
 them. Failed private cleanup keeps the registry and writer lock, blocks new
 work and permits an explicit cleanup retry. No saved PID is blindly signalled.
-See [ownership, secret backend and cancellation](architecture/terminal-reattachment.md).
+See [Local ownership, secret backend and cancellation](architecture/terminal-reattachment.md).
 
 ### Reviewed context compaction
 

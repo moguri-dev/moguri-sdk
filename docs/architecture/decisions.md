@@ -504,7 +504,10 @@ closed. Additional transports are qualified separately, never locally
 substituted: protocol 17 adds read-only files/Git/plan, protocol 20 exact
 provider-free plan saves, and protocol 24 [reviewed Remote MCP](remote-mcp.md)
 with independent peer/resource access grants and no refresh forwarding.
-Remote consoles and repository-memory retrieval remain unavailable.
+Protocol 25 adds [owned Remote user consoles](remote-user-consoles.md)
+through a separate pinned, bounded carrier with explicit env/peer/root
+identity and the same SDK/client lifecycle. Repository-memory retrieval
+remains unavailable; no protected transport falls back to Local.
 
 Protocol/database migration 8 preserves prior inputs, settings and event/grant
 identities. Actual generated macOS SSH, worker/file/model operations, image

@@ -38,8 +38,11 @@ It is not public Remote MCP support or a grant to forward real credentials.
 The subsequent [protocol-24 development integration](remote-mcp.md) now adds
 explicit peer/resource grants and actual approved model/external MCP calls in
 that same worker, with encrypted intent/results, no-replay restart/late
-receipts and shared CLI/TUI/desktop review. Remote memory/scripts/consoles
-remain blocked, and complete exact 0.18 archive qualification is still pending.
+receipts and shared CLI/TUI/desktop review. The exact 0.18.0-alpha.2 delivery
+is independently qualified. Protocol-25 source now adds
+[owned Remote user consoles](remote-user-consoles.md) with separate
+immutable peer/root/technical-key state and no input replay. Exact 0.19
+archive qualification remains pending. Remote memory/scripts remain blocked.
 
 Protocol 22 reuses the qualified Git view for optional immutable repository
 attribution at model admission. It reads the actual pinned Remote origin and
