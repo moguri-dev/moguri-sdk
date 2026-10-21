@@ -9,6 +9,8 @@ This is an alpha API. Qualified **0.20.0-alpha.1 uses protocol 26** and
 deliberately rejects incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
+The 0.21 development memory prerequisite keeps protocol 26; its private
+source-stream proof does not enable Remote SDK memory APIs.
 Current state migrations preserve schema-1 through schema-25 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project

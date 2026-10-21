@@ -1,11 +1,12 @@
-import { readdir, stat } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { stat } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
 import * as vec from "sqlite-vec";
 import { MoguriError, type GraphNode, type GraphEdge, type MemoryHit } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, scopedPath } from "./files.ts";
 import { EventStore } from "./store.ts";
 import { matchesFolder } from "./project-policy.ts";
-import { ignoredPath, readIgnoreScope, type IgnoreScope } from "./ignore-rules.ts";
+import type { IgnoreScope } from "./ignore-rules.ts";
+import { repositoryFiles, repositoryIgnored } from "./repository-source.ts";
 
 const dimensions = 384;
 export interface MemoryScope { id: string; path: string }
@@ -31,44 +32,9 @@ export class RepositoryMemory {
     this.store.db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(project_id TEXT PARTITION KEY, embedding FLOAT[384] DISTANCE_METRIC=cosine)");
     this.loaded = true;
   }
-  private localRules = readIgnoreScope;
-  private excluded = ignoredPath;
-  private async currentlyIgnored(root: string, path: string, cache: Map<string, IgnoreScope>): Promise<boolean> {
-    const chain: IgnoreScope[] = [];
-    const parts = path.split(/[\\/]/);
-    for (let index = 0; index < parts.length; index++) {
-      const directory = join(root, ...parts.slice(0, index));
-      let rule = cache.get(directory);
-      if (!rule) { rule = await this.localRules(root, directory); cache.set(directory, rule); }
-      chain.push(rule);
-      if (this.excluded(root, join(directory, parts[index]!), index < parts.length - 1, chain)) return true;
-    }
-    return false;
-  }
-  private async files(root: string, maxFiles: number, signal: AbortSignal, denied: string[] = []): Promise<string[]> {
-    const files: string[] = [];
-    let directories = 0;
-    const walk = async (directory: string, inherited: IgnoreScope[] = []) => {
-      signal.throwIfAborted();
-      if (matchesFolder(relative(root, directory) || ".", denied)) return;
-      if (++directories > 5000) throw new MoguriError("memory_limit", "The repository directory walk exceeded its bounded limit.");
-      const chain = [...inherited, await this.localRules(root, directory)];
-      const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
-      for (const entry of entries) {
-        if (files.length >= maxFiles) return;
-        const absolute = join(directory, entry.name);
-        const path = relative(root, absolute);
-        if (entry.isSymbolicLink() || matchesFolder(path, denied) || this.excluded(root, absolute, entry.isDirectory(), chain)) continue;
-        if (entry.isDirectory()) await walk(absolute, chain);
-        else if (entry.isFile()) files.push(path);
-      }
-    };
-    await walk(root);
-    return files;
-  }
   async index(project: MemoryScope, maxFiles: number, signal: AbortSignal, progress: (text: string) => void, denied: string[] = []) {
     this.ready();
-    const paths = await this.files(project.path, maxFiles, signal, denied);
+    const paths = await repositoryFiles(project.path, maxFiles, signal, denied);
     const records: { path: string; digest: string; mtime: number; size: number; chunks: string[] }[] = [];
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
@@ -141,7 +107,7 @@ export class RepositoryMemory {
       let stale = true;
       try {
         const file = await stat(await scopedPath(project.path, String(hit.path)));
-        stale = file.mtimeMs !== hit.mtime || file.size !== hit.size || await this.currentlyIgnored(project.path, String(hit.path), rules);
+        stale = file.mtimeMs !== hit.mtime || file.size !== hit.size || await repositoryIgnored(project.path, String(hit.path), rules);
       }
       catch (error) { if (!(error instanceof MoguriError || error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
       result.push({ path: String(hit.path), text: stale ? "" : String(hit.text), digest: String(hit.digest), distance: Number(hit.distance), stale, source: "lexical-vector" });
