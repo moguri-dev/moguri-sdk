@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 import { MoguriError, isRecord, parse } from "../../../packages/protocol/src/core.ts";
 import type { PreparedRemoteTerminalOwner, RemoteTerminalBoundary } from "../../../packages/protocol/src/terminals.ts";
 import type { RemoteRuntime, SshConnection } from "./remote.ts";
-import { remoteTerminalBuild } from "./terminal-build.ts";
+import { terminalBuildDigests } from "./terminal-build.ts";
 import { remoteTerminalPeer, terminalKey } from "./terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES, TerminalOwnerInfoSchema, type TerminalControlChannel, type TerminalOwnerInfo, type TerminalRequestInput } from "./terminal-protocol.ts";
 import type { RemoteTerminalInit } from "./remote-terminal-protocol.ts";
 
 const format = { format: "moguri-remote-user-console" as const, version: 1 as const };
 async function checkedBoundary(boundary: RemoteTerminalBoundary, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted(); const build = await remoteTerminalBuild(); signal.throwIfAborted();
+  signal.throwIfAborted(); const build = await terminalBuildDigests(); signal.throwIfAborted();
   if (remoteTerminalPeer(boundary.target) !== boundary.peerDigest || build.bridgeDigest !== boundary.bridgeDigest || build.brokerDigest !== boundary.brokerDigest) {
     throw new MoguriError("terminal_remote_build", "This exact pinned peer/console bridge/broker no longer matches its retained scope. No key or request was sent.", 409);
   }

@@ -209,6 +209,26 @@ secret-write cancellation and changed authority before broker/PTY dispatch.
 Remaining source-wide and exact installed/package qualification is separate;
 the latest delivered immutable alpha remains 0.18.0-alpha.2.
 
+The first full source run completed **547 cases**, with 531 passing and 16
+core MCP/plan primitive failures. Their intentionally partial worker installs
+had no optional console helpers: the new probe incorrectly made those helper
+files mandatory for core-agent readiness. Probe metadata now explicitly
+reports missing/inaccessible console helpers or an invalid console shell
+without disabling an independently qualified core worker. Console admission
+still rejects missing/mismatched helpers; no anonymous or Local fallback was
+added and no fixture was padded to hide the regression.
+The targeted core/console/plan gate then passes **26/26 in 12,410.05 ms**, with
+both type checks and a complete build. All **37 hidden desktop workflows
+passed in 1.3 min** on the preceding source build. Full source requalification
+and exact artifacts remain required.
+Local expected-helper checks now compare file digests without choosing or
+validating the controller's shell. Only the execution host supplies a new
+Remote console shell, and existing owner recovery/cleanup depends on retained
+helper bytes, not a changed default shell. The refreshed **24/24
+console/core-MCP/plan cases pass in 12,530.99 ms**, including a deliberately
+invalid Local shell with valid Remote admission. Console unavailability
+remains explicit and cannot authorize a fallback.
+
 ## Required public acceptance
 
 Before advertising Remote user consoles, the authoritative service/SDK must

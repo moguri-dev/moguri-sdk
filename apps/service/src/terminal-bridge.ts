@@ -8,7 +8,7 @@ import { MoguriError, isRecord, parse } from "../../../packages/protocol/src/cor
 import { PreparedRemoteTerminalOwnerSchema, type PreparedRemoteTerminalOwner, type RemoteTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
 import { TerminalChannel } from "./terminal-channel.ts";
 import { assertTerminalEndpoint, remoteTerminalPeer, terminalBinding, terminalKey, terminalOwnerScope } from "./terminal-identity.ts";
-import { terminalBrokerPath, remoteTerminalBuild } from "./terminal-build.ts";
+import { terminalBrokerPath, terminalBuildDigests } from "./terminal-build.ts";
 import { TERMINAL_FRAME_BYTES, TerminalRequestSchema } from "./terminal-protocol.ts";
 import { RemoteTerminalInitSchema } from "./remote-terminal-protocol.ts";
 import { JsonLineChannel } from "./worker-wire.ts";
@@ -26,7 +26,7 @@ async function checkedFile(path: string, expected: string): Promise<void> {
     await readFile(path, "utf8") !== expected) throw new MoguriError("terminal_remote_metadata", "Remote owner metadata is no longer a bounded private original file. Nothing was adopted or removed.", 409);
 }
 async function checkedOwner(owner: RemoteTerminalOwner): Promise<void> {
-  const build = await remoteTerminalBuild();
+  const build = await terminalBuildDigests();
   if (owner.remote.peerDigest !== remoteTerminalPeer(owner.remote.target) || owner.scopeDigest !== terminalOwnerScope(owner) ||
     owner.buildDigest !== build.brokerDigest || owner.remote.brokerDigest !== build.brokerDigest || owner.remote.bridgeDigest !== build.bridgeDigest) {
     throw new MoguriError("terminal_remote_identity", "Remote console peer/scope/helper identity differs from its retained intent. No key, shell or fallback was used.", 409);
@@ -138,7 +138,7 @@ export function runRemoteTerminalBridge(): void {
       if (!initialized) {
         initialized = true; const init = parse(RemoteTerminalInitSchema, raw);
         if (init.action === "binding") {
-          const build = await remoteTerminalBuild();
+          const build = await terminalBuildDigests();
           if (build.bridgeDigest !== init.bridgeDigest || build.brokerDigest !== init.brokerDigest) throw new MoguriError("terminal_remote_build", "The exact Remote console bridge/broker build changed before root admission.", 409);
           const binding = terminalBinding({ ...init, env: "Remote" });
           if (active) wire.send({ id, ok: true, value: { binding } }, detach); return;

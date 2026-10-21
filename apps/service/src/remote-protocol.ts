@@ -55,7 +55,7 @@ export const BridgeInitSchema = Type.Object({
   mcpTools: Type.Optional(RemoteMcpToolsRequestSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,
-  terminalBuild: Type.Optional(RemoteTerminalBuildSchema) }, { additionalProperties: false });
+  terminalBuild: Type.Optional(RemoteTerminalBuildSchema), terminalDiagnostic: Type.Optional(Type.String({ maxLength: 4096 })) }, { additionalProperties: false });
 const SavedBridgeInfoSchema = Type.Object({
   ...BridgeInfoSchema.properties, protocol: Type.Integer({ minimum: 16, maximum: PROTOCOL_VERSION }),
 }, { additionalProperties: false });

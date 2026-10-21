@@ -14,7 +14,7 @@ import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME } from "./worker-wire.ts
 import type { ParentMessage } from "./worker-protocol.ts";
 import type { WorkerConnection, WorkerConnectionEvents } from "./worker-connection.ts";
 import type { PreparedModel } from "./provider.ts";
-import { remoteTerminalBuild } from "./terminal-build.ts";
+import { probeTerminalDigests } from "./terminal-build.ts";
 import type { RemoteTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
 import { remoteTerminalPeer, terminalOwnerScope } from "./terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES } from "./terminal-protocol.ts";
@@ -148,14 +148,16 @@ export class RemoteRuntime {
     this.probeAbort?.abort(); this.probeAbort = abort;
     const task = (async () => {
       try {
-        const [workerDigest, expectedTerminal] = await Promise.all([this.workerDigest(), remoteTerminalBuild()]);
+        const [workerDigest, localTerminal] = await Promise.all([this.workerDigest(), probeTerminalDigests()]);
         const result = await this.query(target, { action: "probe", protocol: PROTOCOL_VERSION, stateDir: target.stateDir, root: null, workerDigest }, AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]));
         if (result.kind !== "probe") throw new MoguriError("remote_protocol", "Remote readiness returned the wrong response.", 409);
         if (this.closed || signature !== frameDigest(this.target()) || abort.signal.aborted) throw new MoguriError("remote_changed", "Remote configuration changed during qualification. Probe the current target.", 409);
-        const terminal = result.info.terminalBuild, matchingTerminal = terminal?.bridgeDigest === expectedTerminal.bridgeDigest && terminal.brokerDigest === expectedTerminal.brokerDigest;
+        const terminal = result.info.terminalBuild, expectedTerminal = localTerminal.terminalBuild;
+        const matchingTerminal = Boolean(expectedTerminal && terminal?.bridgeDigest === expectedTerminal.bridgeDigest && terminal.brokerDigest === expectedTerminal.brokerDigest);
         this.readiness = { ready: true, diagnostic: `Verified SSH host ${target.name}; ${result.info.platform}/Node ${result.info.nodeVersion}. Remote execution is not SendBox isolation.`, configDigest: signature, hostFingerprint: remoteFingerprint(target), nodeVersion: result.info.nodeVersion, platform: result.info.platform, workerDigest,
           ...(matchingTerminal ? { terminalBuild: terminal } : {}),
-          terminalDiagnostic: matchingTerminal ? "Exact console bridge/broker bytes are present. Public console lifecycle qualification remains separate." : "This host has no matching console bridge/broker build. No console or Local fallback is authorized." };
+          terminalDiagnostic: matchingTerminal ? "Exact console bridge/broker bytes are present. User console admission still requires its exact peer/root/policy." :
+            !expectedTerminal ? localTerminal.terminalDiagnostic : result.info.terminalDiagnostic ?? "This host has no matching console bridge/broker build. No console or Local fallback is authorized." };
       } catch (error) {
         if (signature === frameDigest(this.target()) && !this.closed && !abort.signal.aborted) {
           this.readiness = { ...absentReadiness(), diagnostic: error instanceof MoguriError ? error.message : "Remote qualification failed. Check the pinned target, private identity and installed worker build; no Local fallback." };

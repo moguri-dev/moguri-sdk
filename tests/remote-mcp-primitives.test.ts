@@ -8,6 +8,7 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { isRecord, type McpServerConfig } from "../packages/protocol/src/index.ts";
 import { remoteMcpPrimitive, type RemoteMcpPrimitiveResult } from "./fixtures/remote-mcp-prototype.ts";
 import { waitFor } from "./fixture.ts";
+import { RemoteConsoles } from "../apps/service/src/remote-terminals.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 20_000 };
 const tool = (result: RemoteMcpPrimitiveResult, name: string) => {
@@ -26,6 +27,10 @@ const text = (result: RemoteMcpPrimitiveResult) => {
 test("real SSH MCP discovery/call reads the exact Remote root, not the Local counterpart, without a model request", native, async () => {
   const f = await remoteMcpPrimitive();
   try {
+    assert.equal(f.runtime.readiness.ready, true);
+    assert.equal(f.runtime.readiness.terminalBuild, undefined);
+    assert.match(f.runtime.readiness.terminalDiagnostic ?? "", /helpers are missing or inaccessible/);
+    assert.throws(() => new RemoteConsoles(f.runtime).admission(), { code: "terminal_remote_unready" });
     const selected = tool(await f.run({ action: "tools", server: null }), "grep_logs");
     const result = await f.run({ action: "call", server: null, tool: selected.name, schemaDigest: selected.digest, arguments: { path: "fixture.txt", query: "MCP_ROOT" } });
     assert.equal(result.terminal?.outcome, "completed"); assert.match(text(result), /GENERATED_REMOTE_MCP_ROOT/);

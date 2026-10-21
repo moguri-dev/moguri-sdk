@@ -6,6 +6,7 @@ import { lstat, mkdir, readFile, realpath, unlink, writeFile } from "node:fs/pro
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
+import { RemoteConsoles } from "../apps/service/src/remote-terminals.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 30_000 };
 const program = { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_REMOTE_SDK_READY\\n'; pwd; exec cat"] };
@@ -175,4 +176,19 @@ test("a Remote broker PID-publication failure closes its exact authenticated emp
     assert.equal(await f.terminalVault.read(`terminal-owner-${owner.id}`), null);
     assert.equal(f.requests.length, 0);
   } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("a controller's Local shell cannot block or replace the actual execution-host Remote shell", native, async () => {
+  const f = await remoteFixture({ exposeModels: false, platform: { terminal: program } }), sdk = await new MoguriSdk(f.service.connection).ready();
+  const original = process.env.SHELL;
+  try {
+    process.env.SHELL = "generated-invalid-local-shell";
+    await configure(sdk, f);
+    const selected = new RemoteConsoles(f.controller.remote).admission();
+    assert.equal(selected.launch.executable, f.controller.remote.readiness.terminalBuild?.shell);
+    assert.ok(selected.launch.executable.startsWith("/")); assert.notEqual(selected.launch.executable, process.env.SHELL);
+    const opened = await sdk.terminal.open(f.sessionId), read = await output(sdk, opened.id!, "GENERATED_REMOTE_SDK_READY");
+    assert.equal(read.terminal.env, "Remote"); assert.equal(read.terminal.binding?.root, f.workspace);
+    assert.equal(f.requests.length, 0);
+  } finally { if (original === undefined) delete process.env.SHELL; else process.env.SHELL = original; sdk.disconnect(); await f.close(); }
 });
