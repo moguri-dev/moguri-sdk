@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Current source protocol/database version is 30; immutable event
+Current source protocol/database version is 31; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -70,6 +70,12 @@ holds release when their exact owner ends. Source ciphertext/grants/receipts
 stay unchanged and old entries retain absent plan links. See
 [planned capacity](budget-plans.md).
 
+Migration 31 adds artifact-owned generated-proposal records, a typed generation
+control turn and actual `draft` role. Immutable source/model/original-command
+bindings and observed output/usage survive source retention; deletion retains
+only the no-paid-replay intent. Existing ciphertext, keys, receipts and planned
+capacity stay unchanged. See [owned generation](candidate-generations.md).
+
 ## Implemented entities
 
 | Entity | Identity and authority |
@@ -79,7 +85,7 @@ stay unchanged and old entries retain absent plan links. See
 | Session | UUID/nullable project and managed-workspace binding, controls/revisions/lifecycle, agent/read-only mode, pending safe-boundary mode, explicit agent/side/model-subagent/metachat kind, pin/unread/group/parent metadata, PR/work-item binding, drafts/queue/messages/usage and exact approval. A null project never resolves to another root. |
 | Managed workspace | Project-owned Local root, exact canonical directory/device/inode, common Git directory, branch/base, revision, change set and creation/removal job. Partial intent never authorizes a base-root fallback. |
 | Change set | Stable project/workspace/branch/base association with optional local issue/PR context. It does not authorize publication or imply compound candidate orchestration. |
-| Turn | Admitted queue item or explicit typed compaction control purpose, UUID, immutable controls/policy/prompt snapshot and worker ownership. Normal admission claims one queued item; a control turn creates no fake user message or optional subagent. |
+| Turn | Admitted queue item or explicit typed compaction/generation/control purpose, UUID, immutable controls/policy/prompt snapshot and worker ownership. Normal admission claims one queued item; a control turn creates no fake user message or optional subagent. |
 | Step | One authorized provider request, normalized final context snapshot, usage quality, request wall time and declared tools. Worker completion requires durable acknowledgement before tools or the next step. |
 | Routing turn | Opt-in Single policy/task/revision snapshot, exact classifier/eligible solver IDs, untrusted typed plan and actual lifecycle. Uses the same owning turn, worker, approvals and ledger; classifier context is never solver history. |
 | Context compaction | Session-owned exact source/model/contract/prefix snapshot, revisioned running/proposed/applied/superseded/restored/discarded/stopped/failed/partial state, actual step/model role and retained input/result/context blobs. Explicit user application changes only effective context; original transcript and charges survive. |
@@ -89,7 +95,7 @@ stay unchanged and old entries retain absent plan links. See
 | Approval | UUID, exact tool ID/name/arguments, step, policy and permission revisions. Human answers are `user`, invalidations `policy`, explicit grants `delegation` with rule ID. |
 | Owned process | Tool-call ID, PID, process group, owning turn and actual outcome. Unknown cleanup remains unconfirmed. |
 | Attachment | Session-authorized project/client text, normalized image, exact folder/GitHub/session snapshot, SHA-256, bytes and source revision. Explicit selection grants captured content only, never arbitrary filesystem access. |
-| Usage | Actual router/solver/side/subagent/compaction model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
+| Usage | Actual router/solver/draft/side/subagent/compaction model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
 | Budget entry | Independent profile-owned step/actual-role/owning-session record: estimated reservation, actual reported total, held unknowns, explicit dated rate and request outcome. Source deletion never refunds it. |
 | Budget plan | Version-1 profile-owned held/consumed/released wind-down envelope with exact owner/turn/provider/model/scope, conservative bounds and captured price. Held capacity is not a call; consumption links one actual entry/start and source deletion cannot refund dispatched/unknown usage. |
 | Budget policy | Separate revision-bound profile/global hard caps, independent of resettable preferences/rates. Global admission counts every profile without exposing foreign task content. No billing guarantee is inferred from input estimates. |
@@ -104,6 +110,7 @@ stay unchanged and old entries retain absent plan links. See
 | Cache receipt | Project/workspace/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
 | Retained artifact | Independent project/profile text document with folder/same-project work-item associations: plan/decision/answer/research-note/report, immutable revisions, archive, origin-session/workspace/file and exact source actors. Per-artifact grants survive session retention; model content never becomes a user answer. |
 | Reviewed candidate | Version-1 independent report-backed Local source/staging Git/directory identities, proposal/document, exact stage/apply commands and current session owners, actual user acceptance, ordered effects and atomic verified/partial outcomes. Shared user preview/stage/apply/read/reject/stop never grants a model authority or implies quality tests. |
+| Candidate generation | Version-1 independent report-backed original Local source snapshots, clean stage/model/authority/command, actual single draft step/result/proposal and monotonic stop/terminal outcome. No file tools, automatic staging/application, fake user answer or paid replay. |
 | Artifact repository job | Exact source/history/root/policy and optional new local branch/base intent, durable receipt and verified copy/commit result. Partial effects are quarantined, never replayed or proof authorizing source deletion. |
 | User terminal | Session/project ownership, immutable Local/Remote env/peer/root/device/inode/launch/original-command, observed PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Independent profile/peer owners can retain pre-resource nullable intent. Ghostty owns VT rendering; input/output are bounded ephemeral data, never durable hashes or model context. |
 | Model options | Optional working window and supported thinking effort in revisioned session controls; the provider maximum is not changed. Step usage records effective window/effort and labeled estimated context separately from actual token telemetry. |

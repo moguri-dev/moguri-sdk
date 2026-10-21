@@ -34,6 +34,7 @@ export const CandidateJobIntentSchema = object({
 export type CandidateJobIntent = Static<typeof CandidateJobIntentSchema>;
 export const CandidateRecordSchema = object({
   version: Type.Literal(1), id, profileId: id, projectId: id, originSessionId: Type.Union([id, Type.Null()]),
+  generationId: Type.Optional(id),
   source: CandidateRootSchema, stage: CandidateRootSchema, documentDigest: hash, proposalDigest: hash,
   paths: Type.Array(path, { minItems: 1, maxItems: 20, uniqueItems: true }),
   revision: Type.Integer({ minimum: 0 }), status: Type.Union([
@@ -95,7 +96,7 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
     if (next.revision !== 0 || next.status !== "staging" || next.stagedPaths.length || next.stageAttemptedPaths?.length || next.stopRequested || next.stageResultDigest !== null || next.applyIntent !== null) corrupt("A candidate must begin with its original effect-free stage intent.");
   } else {
     const previousAcceptance = previous.acceptance, acceptance = next.acceptance;
-    const immutable = ["version", "id", "profileId", "projectId", "originSessionId", "documentDigest", "proposalDigest", "createdAt"] as const;
+    const immutable = ["version", "id", "profileId", "projectId", "originSessionId", "generationId", "documentDigest", "proposalDigest", "createdAt"] as const;
     if (next.revision !== previous.revision + 1 || immutable.some((key) => next[key] !== previous[key]) || !sameCandidateRoot(previous.source, source) || !sameCandidateRoot(previous.stage, stage) ||
       !sameIntent(previous.stageIntent, next.stageIntent) || JSON.stringify(previous.paths) !== JSON.stringify(next.paths) ||
       !transitions[previous.status].includes(next.status)) corrupt("Candidate revision, original ownership/base or lifecycle was changed/replayed.");
@@ -126,7 +127,7 @@ export const CandidateOperationResultSchema = object({
 export type CandidateOperationResult = Static<typeof CandidateOperationResultSchema>;
 const stageInput = { sessionId: id, stageWorkspaceId: id, patch: CandidatePatchSchema };
 export const CandidateCommandSchema = Type.Union([
-  object({ type: Type.Literal("candidate.stage"), ...stageInput, expectedDigest: hash, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("candidate.stage"), ...stageInput, expectedDigest: hash, generationId: Type.Optional(id), confirm: Type.Literal(true) }),
   object({ type: Type.Literal("candidate.apply"), candidateId: id, sessionId: id, expectedRevision: Type.Integer({ minimum: 0 }), expectedDigest: hash, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("candidate.reject"), candidateId: id, expectedRevision: Type.Integer({ minimum: 0 }), confirm: Type.Literal(true) }),
 ]);

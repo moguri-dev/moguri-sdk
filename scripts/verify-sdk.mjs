@@ -37,7 +37,7 @@ try {
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
-    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}} from "moguri";
+    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
@@ -54,6 +54,16 @@ try {
       const applyReview=(await sdk.candidates.applyPreview(stagedCandidate.id!,"generated-source")).preview;
       await sdk.candidates.apply(stagedCandidate.id!,"generated-source",candidateRead.candidate.revision,applyReview.digest);
       await sdk.candidates.stop(stagedCandidate.id!);await sdk.candidates.reject(stagedCandidate.id!,candidateRead.candidate.revision,true);
+      ` : ""}
+      ${installedProtocol >= 31 ? `
+      const generationInput:CandidateGenerationInput={task:"Generated typed proposal.",files:[{path:"generated.ts",baseDigest:"absent"}]};
+      const generationPreview=(await sdk.candidates.generatePreview("generated-source","generated-stage",generationInput)).preview;
+      const generated=await sdk.candidates.generate("generated-source","generated-stage",generationInput,generationPreview.digest,true);
+      const generationRead=await sdk.candidates.waitGeneration(generated.id!,{signal:new AbortController().signal,timeoutMs:1000});
+      const generation:CandidateGenerationRecord=generationRead.generation;void generation.inputDigest;
+      await sdk.candidates.generation(generation.id);await sdk.candidates.stopGeneration(generation.id);
+      await sdk.candidates.stage("generated-source","generated-stage",patch,candidatePreview.digest,generation.id);
+      void sdk.getState().snapshot?.candidateGenerations;
       ` : ""}
       const settings: UserSettings = snapshot.values;
       const project = await sdk.projects.configuration("generated-id");
@@ -645,6 +655,31 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
+    if(PROTOCOL_VERSION>=31&&process.platform==="darwin"){
+      const {qualifyCandidateGeneration}=await import(${JSON.stringify(new URL("./qualify-candidate-generation.mjs", import.meta.url).href)});
+      let reply="";const requests=[];
+      const server=createServer(async(request,response)=>{
+        const chunks=[];for await(const chunk of request)chunks.push(Buffer.from(chunk));
+        requests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));response.writeHead(200,{"Content-Type":"text/event-stream"});
+        const frame=(delta,finish_reason=null)=>response.write("data: "+JSON.stringify({id:"generated-installed-proposal",object:"chat.completion.chunk",model:"generated-installed-proposal",choices:[{index:0,delta,finish_reason}]})+"\\n\\n");
+        frame({role:"assistant",content:reply});frame({},"stop");
+        response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
+      });
+      let generationRuntime,generationSdk;
+      try{
+        await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+        const model={id:"generated-installed-proposal",name:"Generated installed proposal model",api:"openai-completions",provider:"github-copilot",baseUrl:"http://127.0.0.1:"+server.address().port,reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:16384,maxTokens:256};
+        const provider={...makeProvider(),state:{status:"connected",models:[{id:model.id,name:model.name,contextWindow:model.contextWindow,maxTokens:model.maxTokens,imageInput:false}],login:null,diagnostic:null},
+          prepare:async id=>{assert.equal(id,model.id);return{model,auth:{apiKey:"generated-installed-only",baseUrl:model.baseUrl}};}};
+        const options={stateDir:join(root,"generation-state"),retentionKey:Buffer.alloc(32,0x79),provider};
+        generationRuntime=await createRuntime(options);generationSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
+        const proof=await qualifyCandidateGeneration({sdk:generationSdk,node:process.execPath,cli:${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},
+          directory:join(root,"generated-installed-generation"),stateDir:options.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests});
+        generationSdk.disconnect();await generationRuntime.close();generationRuntime=await createRuntime(options);generationSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
+        await proof.verifyRecovery(generationSdk);
+        console.log("Installed protocol-31 SDK/CLI/shared generation used the actual owned worker/draft ledger, immutable model provenance/version-3 history, separate reviewed stage/apply and missing-receipt restart replay without another model request.");
+      }finally{generationSdk?.disconnect();await generationRuntime?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+    }
     if(PROTOCOL_VERSION>=26&&process.env.MOGURI_GENERATED_GITHUB){
       const observed=JSON.parse(process.env.MOGURI_GENERATED_GITHUB),state=join(root,"generated-metadata-state"),remoteRoot=await realpath(join(root,"generated-remote-workspace"));
       git(["remote","add","origin","https://github.com/generated/example.git"],remoteRoot);

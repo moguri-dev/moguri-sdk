@@ -44,6 +44,7 @@ import { RemoteMcpIntentSchema, remoteMcpPeer, remoteMcpPreview, requireRemoteMc
 import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./remote-mcp-runtime.ts";
 import { redactSecrets } from "./secret-redactor.ts";
 import { RemoteConsoles } from "./remote-terminals.ts";
+import { CandidateGenerations, candidateGenerationContext } from "./candidate-generations.ts";
 
 interface McpDispatch { id: string; scopeDigest: string; callDigest: string; hadAccess: boolean; access: string[] }
 
@@ -67,6 +68,7 @@ interface Run {
   root: string | null;
   mcpDispatches?: Map<string, McpDispatch>;
   compaction?: { id: string; context: Message[] };
+  generation?: { id: string; context: Message[]; current?: () => void };
   planSave?: {
     id: string; operation: UserPlanOperation; finish: WorkspaceFinish;
     resolve(result: CommandResult): void; reject(error: Error): void;
@@ -100,6 +102,7 @@ export class ControlPlane extends EventEmitter {
   private shuttingDown = false;
   private providerMetadata = "";
   readonly platform: PlatformRuntime;
+  readonly generations: CandidateGenerations;
   private externalRuns = new Map<string, ExternalRun>();
   private writerReservations = new Map<string, string>();
   private deletingSessions = new Set<string>();
@@ -192,6 +195,8 @@ export class ControlPlane extends EventEmitter {
       contextPreview: (session) => this.previewContext(session),
       compactionQuery: (query) => this.compactionQuery(query),
       compactionCommand: (command, finish) => this.compactionCommand(command, finish),
+      generationQuery: (query) => this.generations.query(query),
+      generationCommand: (command, finish) => this.generations.execute(command, finish),
       planSaveQuery: (query) => this.planSaveQuery(query),
       planSaveCommand: (command, finish) => this.planSaveCommand(command, finish),
       validateControls: (controls) => this.available(controls),
@@ -227,6 +232,24 @@ export class ControlPlane extends EventEmitter {
       localRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
       sharedGlobals: Boolean(this.profileHooks),
     }, platformOptions);
+    this.generations = new CandidateGenerations(store, {
+      snapshot: () => this.snapshot(), events: () => this.events(0), candidates: this.platform.candidates,
+      prompt: (session) => this.platform.prompt(session), idle: (session) => this.generationIdle(session),
+      record: (id) => this.projection.candidateGenerations.find((generation) => generation.id === id),
+      artifact: (session, text, task) => this.platform.artifacts.generation(session, text, task),
+      start: (record, artifact, document, finish) => {
+        const session = this.session(record.sessionId);
+        const result = finish([{ event_type: "artifact.revised", profile_id: this.profileId, project_id: record.projectId, payload: { artifact } },
+          this.generations.event(record), { ...this.event(session, "turn.control_started", { purpose: "candidate.generate", generationId: record.id,
+            controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest: this.store.putBlob(document.systemPrompt) }), turn_id: record.id }], { id: record.id, revision: 0 });
+        this.launchRun(this.session(session.id), record.id, { generation: { id: record.id, context: candidateGenerationContext(document) } }); return result;
+      },
+      stop: (sessionId, id) => {
+        const run = this.runs.get(sessionId);
+        if (run?.generation?.id !== id || this.session(sessionId).turnId !== id) return;
+        try { this.stop(sessionId); } finally { this.requestWorkerStop(run); }
+      },
+    });
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
       const signature = JSON.stringify(metadata);
@@ -256,12 +279,15 @@ export class ControlPlane extends EventEmitter {
           ...this.cancelledQuestions(session, "Service restarted. No answer or replacement question was invented."),
           ...this.routingFinished(session, session.turnId, "partial", "Service restarted. Routing advice and owned work were not replayed."),
           ...this.projection.compactions.filter((entry) => entry.sessionId === session.id && entry.status === "running").map((entry) => this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: "partial", completedAt: new Date().toISOString(), diagnostic: "Service restarted. Compaction was not replayed or applied; unknown usage remains held." })),
+          ...this.projection.candidateGenerations.filter((entry) => entry.sessionId === session.id && entry.status === "running").map((entry) => this.generations.event({ ...entry, revision: entry.revision + 1, status: "partial", updatedAt: new Date().toISOString(), diagnostic: "Service restarted. Generation was not replayed or staged; unknown model usage remains held." })),
           ...this.projection.planSaves.filter((save) => save.sessionId === session.id && save.status === "running").map((save) => this.recoveredPlanSave(session, save)),
           ...this.projection.remoteMcpCalls.filter((call) => call.sessionId === session.id && ["waiting_input", "running"].includes(call.status)).map((call) => this.recoveredMcp(call)),
           ...unfinished.map((call) => this.event(session, "tool.completed", { call, text: "Service restarted before a durable tool result. Execution and cleanup are unconfirmed; this tool was not replayed.", isError: true, outcome: "unconfirmed" })),
           this.event(session, "turn.finished", {
             outcome: "partial",
             diagnostic: "Moguri restarted during this turn. Provider usage and process cleanup may be incomplete. Inspect the workspace before continuing; no operation was retried.",
+            ...(this.projection.candidateGenerations.some((entry) => entry.sessionId === session.id && entry.id === session.turnId) &&
+              !this.history.some((event) => event.turn_id === session.turnId && (event.event_type === "tool.started" || event.event_type === "process.started")) ? { workspaceEffects: "none" as const } : {}),
           }),
         ]);
       }
@@ -277,6 +303,8 @@ export class ControlPlane extends EventEmitter {
     })));
     const unfinishedCompactions = this.projection.compactions.filter((entry) => entry.status === "running");
     if (unfinishedCompactions.length) this.commit(unfinishedCompactions.map((entry) => this.compactionEvent(this.session(entry.sessionId), { ...entry, revision: entry.revision + 1, status: "partial", completedAt: new Date().toISOString(), diagnostic: "Service restarted with unsettled compaction metadata. No call or context change was replayed." })));
+    const unfinishedGenerations = this.projection.candidateGenerations.filter((entry) => entry.status === "running");
+    if (unfinishedGenerations.length) this.commit(unfinishedGenerations.map((entry) => this.generations.event({ ...entry, revision: entry.revision + 1, status: "partial", updatedAt: new Date().toISOString(), diagnostic: "Service restarted with unsettled generation metadata. No model, root lookup or staging was replayed." })));
     const unfinishedPlanSaves = this.projection.planSaves.filter((save) => save.status === "running");
     if (unfinishedPlanSaves.length) this.commit(unfinishedPlanSaves.map((save) => this.recoveredPlanSave(this.session(save.sessionId), save)));
     const unfinishedMcp = this.projection.remoteMcpCalls.filter((call) => ["waiting_input", "running"].includes(call.status));
@@ -331,7 +359,8 @@ export class ControlPlane extends EventEmitter {
       const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
       const accounting = this.platform.budgets.derived(next, primary);
       const checkpoints = primary.some((event) => event.event_type === "budget.blocked") ? this.platform.artifacts.checkpointEvents(next, primary) : [];
-      return [...answers, ...accounting, ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...attentionEvents(next, primary)];
+      const proposals = primary.some((event) => event.event_type === "model.completed" && event.payload.usage.role === "draft") ? this.platform.artifacts.generationEvents(next, primary) : [];
+      return [...answers, ...accounting, ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
@@ -1059,6 +1088,13 @@ export class ControlPlane extends EventEmitter {
     if (session.status === "archived" || session.kind === "subagent") throw new MoguriError("compaction_session", "Use a restored, user-owned session for context compaction.", 409);
     if (session.turnId || session.queue.some((item) => !item.held)) throw new MoguriError("compaction_busy", "Finish or stop active work and hold/remove queued prompts before changing context.", 409);
   }
+  private generationIdle(session: Session): void {
+    session = this.session(session.id);
+    this.available(session.controls, true, session);
+    if (session.status === "archived" || session.kind !== "agent" || session.mode !== "agent") throw new MoguriError("candidate_generation_session", "Use a restored writable project session for code proposals.", 409);
+    if (session.turnId || session.queue.some((item) => !item.held)) throw new MoguriError("candidate_generation_busy", "Finish or stop owned work and hold/remove queued prompts before generating a separate proposal.", 409);
+    if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and explicitly resume this workspace before generating a proposal.", 409);
+  }
   private contextFingerprint(session: Session, entries = this.contextEntries(session.id)): string {
     return digest(JSON.stringify({
       entries, activeId: session.activeCompactionId ?? null, controls: session.controls, mode: session.mode, pendingMode: session.pendingMode,
@@ -1314,7 +1350,7 @@ export class ControlPlane extends EventEmitter {
         }
         if (!session.draft.text.trim() && !session.draft.attachments.length) throw new MoguriError("empty_message", "Write a prompt or attach a project file first.");
         if (session.queue.length >= 100) throw new MoguriError("queue_limit", "The queue is limited to 100 unclaimed messages.");
-        if (command.delivery === "steer" && (!session.turnId || session.status === "stopping" || this.runs.get(session.id)?.compaction)) throw new MoguriError("steer_unavailable", "Steer needs a running solver turn, not a read-only compaction. Use Queue for the next turn.");
+        if (command.delivery === "steer" && (!session.turnId || session.status === "stopping" || this.runs.get(session.id)?.compaction || this.runs.get(session.id)?.generation)) throw new MoguriError("steer_unavailable", "Steer needs a running solver turn, not a read-only compaction or code-generation operation. Use Queue for the next turn.");
         this.attachments(session, session.draft.attachments);
         const item = { id: randomUUID(), text: session.draft.text, attachments: session.draft.attachments, delivery: command.delivery,
           ...(command.delivery === "steer" ? { targetTurnId: session.turnId! } : {}), ...(command.held ? { held: true } : {}) };
@@ -1395,7 +1431,7 @@ export class ControlPlane extends EventEmitter {
         const context = contextMessages(JSON.parse(this.store.blob(event.payload.contextDigest)));
         entries.push(...context.map((message) => ({ seq: event.seq, turnId: null, message })));
       } else if (event.event_type === "turn.started" || event.event_type === "steer.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.contextItem(event.payload.item, Date.parse(event.timestamp)) });
-      else if (event.event_type === "model.completed" && event.payload.usage.role !== "router" && event.payload.usage.role !== "compaction") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
+      else if (event.event_type === "model.completed" && !["router", "compaction", "draft"].includes(event.payload.usage.role)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
       else if (event.event_type === "tool.completed" && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: event.payload.call.name,
@@ -1438,11 +1474,11 @@ export class ControlPlane extends EventEmitter {
       this.launchRun(this.session(session.id), turnId);
     }
   }
-  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "planSave" | "mcpControl"> = {}): void {
-      const { compaction, planSave, mcpControl } = control;
+  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "planSave" | "mcpControl"> = {}): void {
+      const { compaction, generation, planSave, mcpControl } = control;
       let owned: Run | undefined;
       try {
-        const context = planSave || mcpControl ? [] : compaction?.context ?? this.context(current.id); validateContextSize(context);
+        const context = planSave || mcpControl ? [] : generation?.context ?? compaction?.context ?? this.context(current.id); validateContextSize(context);
         const project = current.projectId ? this.platform.managed.project(current) : undefined;
         let execution: RemoteExecution | undefined;
         if (current.controls.env === "Remote") {
@@ -1456,7 +1492,7 @@ export class ControlPlane extends EventEmitter {
             ...(mcp ? [this.mcpEvent({ ...mcp, executionId: execution.id, status: "running", revision: mcp.revision + 1, updatedAt: new Date().toISOString() })] : [])]);
         }
         const child = execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
-        const run: Run = { sessionId: current.id, turnId, child, root: current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, planSave, mcpControl };
+        const run: Run = { sessionId: current.id, turnId, child, root: !generation && current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, planSave, mcpControl };
         owned = run;
         if (planSave) { if (!execution) throw new MoguriError("plan_env", "User Remote plan work has no exact SSH execution.", 409); run.stepId = planSave.operation.stepId; }
         if (mcpControl) {
@@ -1496,8 +1532,8 @@ export class ControlPlane extends EventEmitter {
             if (!run.done && !run.planSave?.terminal && !run.mcpControl?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
-          readOnly: current.kind === "subagent" || Boolean(compaction), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
+        this.reply(run, { kind: "start", root: generation ? null : execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
+          readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
         const diagnostic = error instanceof MoguriError ? error.message : "Agent worker launch failed. Rebuild Moguri and retry explicitly.";
@@ -1508,12 +1544,14 @@ export class ControlPlane extends EventEmitter {
           mcpControl.reject(new MoguriError("remote_mcp_launch", diagnostic, 409)); return;
         }
         const entry = compaction ? this.compaction(current.id, compaction.id) : null;
+        const proposal = generation ? this.generations.record(generation.id) : null;
         const save = planSave ? this.planSave(planSave.id, current.id) : null;
         const execution = this.projection.executions.find((execution) => execution.turnId === turnId);
         this.commit([...(entry ? [this.compactionEvent(current, { ...entry, revision: entry.revision + 1, status: "failed", completedAt: new Date().toISOString(), diagnostic })] : []),
+          ...(proposal ? [this.generations.event({ ...proposal, revision: proposal.revision + 1, status: "failed", updatedAt: new Date().toISOString(), diagnostic })] : []),
           ...(save ? [this.planSaveEvent(current, { ...save, revision: save.revision + 1, status: "failed", phase: "settled", updatedAt: new Date().toISOString(), diagnostic })] : []),
           ...(execution ? [this.event(current, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Worker launch was not confirmed. Inspect this exact remote execution; no replacement was started." })] : []),
-          this.event(current, "turn.finished", { outcome: "failed", diagnostic })]);
+          this.event(current, "turn.finished", { outcome: "failed", diagnostic, ...(generation ? { workspaceEffects: "none" as const } : {}) })]);
         planSave?.reject(new MoguriError("plan_save_failed", diagnostic, 409));
       }
   }
@@ -1599,6 +1637,37 @@ export class ControlPlane extends EventEmitter {
     this.questionWaits.delete(question.id);
     this.reply(waiting.run, { kind: "reply", requestId: waiting.requestId, value: { text: JSON.stringify({ questionId: question.id, answer: command.text, actor: "user", permissionGrant: false }), isError: false, outcome: "completed" } });
     return result;
+  }
+  private async generationBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>): Promise<void> {
+    const owned = run.generation;
+    if (!owned) throw new MoguriError("candidate_generation_owner", "Generation lost its exact owned worker.", 409);
+    const checked = await this.generations.check(owned.id, run.abort.signal), entry = checked.record;
+    if (entry.stepId) throw new MoguriError("candidate_generation_step", "Generation owns exactly one original model call. No retry or second request.", 409);
+    const prepared = await this.provider.prepare(entry.modelId, run.abort.signal);
+    if (run.done || run.abort.signal.aborted) return;
+    const current = await this.generations.check(entry.id, run.abort.signal);
+    if (prepared.model.id !== current.selected.model.apiModelId || prepared.model.contextWindow !== current.selected.model.contextWindow ||
+      prepared.model.maxTokens !== current.selected.model.maxTokens) throw new MoguriError("candidate_generation_model", "Prepared model identity/capacity changed after review. No request was sent.", 409);
+    const configured = modelRequest({ ...prepared.model, maxTokens: Math.min(current.document.maxOutputTokens, prepared.model.maxTokens) },
+      current.selected.session.controls.modelOptions, { systemPrompt: current.document.systemPrompt, messages: owned.context, tools: [] });
+    const attribution = await this.platform.repositories.capture(current.selected.session, run.abort.signal);
+    if (run.done || run.abort.signal.aborted) return;
+    const final = await this.generations.check(entry.id, run.abort.signal), session = final.selected.session;
+    const reservation = this.platform.budgets.reserve(session, {
+      stepId: request.stepId, turnId: run.turnId, providerId: final.selected.model.providerId ?? prepared.model.provider,
+      apiModelId: prepared.model.id, role: "draft", modelId: entry.modelId, inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens,
+      repositoryCapture: this.platform.repositories.finalize(session, attribution),
+    });
+    run.stepId = request.stepId; run.inFlight = true; run.calls.clear(); run.granted.clear(); run.declaredTools.clear(); owned.current = final.source.current;
+    this.commit([reservation.event, this.generations.event({ ...entry, revision: entry.revision + 1, updatedAt: new Date().toISOString(),
+      stepId: request.stepId, providerId: final.selected.model.providerId ?? prepared.model.provider, apiModelId: prepared.model.id }),
+      this.event(session, "turn.prompt_bound", { promptDigest: this.store.putBlob(final.document.systemPrompt) }, request.stepId),
+      this.event(session, "model.started", { modelId: entry.modelId, role: "draft", providerId: final.selected.model.providerId ?? prepared.model.provider,
+        apiModelId: prepared.model.id, source: final.selected.model.source ?? "copilot", contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens,
+        ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId)]);
+    this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: { ...configured.model, maxTokens: reservation.maxTokens },
+      maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, phase: "candidate", steers: [], tools: [], mode: "read-only",
+      folders: { denied: [], readOnly: [] }, systemPrompt: final.document.systemPrompt } });
   }
   private async compactionBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>): Promise<void> {
     const session = this.session(run.sessionId), entry = this.compaction(session.id, run.compaction!.id);
@@ -1723,6 +1792,7 @@ export class ControlPlane extends EventEmitter {
           const execution = this.projection.executions.find((value) => value.id === run.executionId);
           if (!execution || execution.workspace !== this.remoteWorkspace(session) || execution.configDigest !== frameDigest(this.projection.settings.values.remote)) throw new MoguriError("remote_changed", "The target/workspace changed during this turn. No new model access was sent to the old worker.", 409);
         }
+        if (run.generation) { await this.generationBoundary(run, request); return; }
         if (run.compaction) { await this.compactionBoundary(run, request); return; }
         let before = this.session(run.sessionId);
         if (before.controls.env === "Local" && before.projectId) await this.platform.managed.assert(before);
@@ -1816,8 +1886,8 @@ export class ControlPlane extends EventEmitter {
           const current = this.session(run.sessionId), status = this.platform.budgets.status(current.id);
           this.commit([{ event_type: "budget.blocked", profile_id: this.profileId, payload: { sessionId: current.id, ownerSessionId: status.ownerSessionId, stepId: request.stepId, diagnostic: error.message, remainingTokens: status.remainingTokens, remainingUsd: status.remainingUsd } }]);
         }
-        if (!(error instanceof MoguriError)) console.error("Moguri model preparation failed:", run.compaction ? "compaction_prepare" : "model_prepare");
-        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget || run.compaction || error instanceof MoguriError && error.code.startsWith("routing_") ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
+        if (!(error instanceof MoguriError)) console.error("Moguri model preparation failed:", run.generation ? "candidate_generation_prepare" : run.compaction ? "compaction_prepare" : "model_prepare");
+        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget || run.compaction || run.generation || error instanceof MoguriError && error.code.startsWith("routing_") ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       } finally { const key = this.platform.managed.leaseKey(session); if (key && this.writerReservations.get(key) === session.id) this.writerReservations.delete(key); }
       return;
     }
@@ -1837,6 +1907,28 @@ export class ControlPlane extends EventEmitter {
       const contextDigest = this.store.putBlob(JSON.stringify(safeMessage));
       let compactionError: string | null = null;
       const compactionEvents: EventInput[] = [];
+      let generationError: string | null = null;
+      const generationEvents: EventInput[] = [];
+      if (run.generation) {
+        let generation = this.generations.record(run.generation.id), proposalDocumentDigest: string | null = null;
+        try {
+          if (run.abort.signal.aborted) throw new MoguriError("candidate_generation_stopped", "Owned generation stopped. Actual result and charges remain retained; no file was staged.", 409);
+          if (!reportedModelUsage(usage)) throw new MoguriError("candidate_generation_usage", "Generation metering is missing/invalid. Its full hold remains; no successful proposal was inferred.", 409);
+          const reservation = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
+          if (!reservation || modelOutputExceeded(reservation, usage)) throw new MoguriError("candidate_generation_output_limit", "Generation exceeded or lost its actual output bound. Charges were retained; no file was staged.", 409);
+          const checked = await this.generations.check(generation.id, run.abort.signal);
+          generation = checked.record; run.generation.current = checked.source.current;
+          const proposal = this.generations.proposal(generation, message), text = JSON.stringify(proposal);
+          if (Buffer.byteLength(text) > 64 * 1024) throw new MoguriError("candidate_generation_limit", "The exact generated candidate document exceeds 64 KiB. No output was truncated or staged.", 409);
+          proposalDocumentDigest = this.store.putBlob(text);
+        } catch (error) {
+          if (!(error instanceof MoguriError) && !run.abort.signal.aborted) console.error("Moguri generation validation failed: candidate_generation_result");
+          generationError = error instanceof MoguriError ? error.message : run.abort.signal.aborted ? "Owned generation stopped. Its result and charges remain retained." : "Generation validation failed. Raw output and charges were preserved; no file was staged.";
+        }
+        generation = this.generations.record(generation.id);
+        generationEvents.push(this.generations.event({ ...generation, revision: generation.revision + 1, updatedAt: new Date().toISOString(),
+          resultDigest: contextDigest, proposalDocumentDigest, diagnostic: generationError }));
+      }
       if (run.compaction) {
         const entry = this.compaction(session.id, run.compaction.id);
         let replacementDigest: string | null = null, afterTokens: number | null = null;
@@ -1871,22 +1963,22 @@ export class ControlPlane extends EventEmitter {
           try { decoded = JSON.parse(text); } catch { throw new MoguriError("routing_plan", "Classifier output was not exact JSON. No solver or fallback was authorized.", 409); }
           plan = routingPlan(decoded, route.candidateModelIds, route.policy.minimumConfidence);
         } catch (error) { routingError = error instanceof MoguriError ? error.message : "Routing validation failed. No solver or fallback was authorized."; }
-      } else if (!run.compaction) for (const call of calls) run.calls.set(call.id, call);
+      } else if (!run.compaction && !run.generation) for (const call of calls) run.calls.set(call.id, call);
       this.commit([this.event(session, "model.completed", {
         contextDigest,
         message: {
-          id: request.stepId, turnId: run.turnId, role: router || run.compaction ? "notice" : "assistant",
-          text: run.compaction ? compactionError ?? "Context compaction proposal generated for review; it has not been applied." : router ? plan ? `kupo Single plan: ${this.provider.state.models.find((model) => model.id === plan.modelId)?.name ?? plan.modelId}.` : routingError ?? "The router returned no usable plan." : message.content.filter((block) => block.type === "text").map((block) => block.text).join(""),
-          reasoning: router || run.compaction ? undefined : message.content.filter((block) => block.type === "thinking" && !block.redacted).map((block) => block.type === "thinking" ? block.thinking : "").join(""),
-          toolCalls: router || run.compaction ? [] : calls, timestamp: new Date(message.timestamp).toISOString(), outcome: run.compaction ? compactionError ? "partial" : "proposed" : router ? plan ? "completed" : run.abort.signal.aborted ? "stopped" : "partial" : message.stopReason,
+          id: request.stepId, turnId: run.turnId, role: router || run.compaction || run.generation ? "notice" : "assistant",
+          text: run.generation ? generationError ?? "Unaccepted code proposal generated for separate review; no file was staged, applied or committed." : run.compaction ? compactionError ?? "Context compaction proposal generated for review; it has not been applied." : router ? plan ? `kupo Single plan: ${this.provider.state.models.find((model) => model.id === plan.modelId)?.name ?? plan.modelId}.` : routingError ?? "The router returned no usable plan." : message.content.filter((block) => block.type === "text").map((block) => block.text).join(""),
+          reasoning: router || run.compaction || run.generation ? undefined : message.content.filter((block) => block.type === "thinking" && !block.redacted).map((block) => block.type === "thinking" ? block.thinking : "").join(""),
+          toolCalls: router || run.compaction || run.generation ? [] : calls, timestamp: new Date(message.timestamp).toISOString(), outcome: run.generation ? generationError ? "partial" : "proposed" : run.compaction ? compactionError ? "partial" : "proposed" : router ? plan ? "completed" : run.abort.signal.aborted ? "stopped" : "partial" : message.stopReason,
         },
         usage,
-      }, request.stepId), ...compactionEvents, ...(router && route ? [plan ?
+      }, request.stepId), ...generationEvents, ...compactionEvents, ...(router && route ? [plan ?
         this.event(session, "routing.planned", { routingId: route.id, classifierStepId: request.stepId, plan }, request.stepId) :
         this.event(session, "routing.finished", { routingId: route.id, status: run.abort.signal.aborted ? "stopped" : "partial", diagnostic: routingError }, request.stepId)] : [])]);
       const metering = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
       this.reply(run, { kind: "reply", requestId: request.requestId, ...(metering?.outputLimitViolation ? { halt: true, error: "The provider exceeded its actual forwarded output limit. Reported usage was retained; finite admission for this model remains unqualified." } :
-        compactionError ? { halt: true, error: compactionError } : router ? plan ? { value: { accepted: true, continue: true } } : { halt: true, error: routingError ?? "The routing plan was not accepted." } : { value: { accepted: true } }) });
+        generationError ? { halt: true, error: generationError } : compactionError ? { halt: true, error: compactionError } : router ? plan ? { value: { accepted: true, continue: true } } : { halt: true, error: routingError ?? "The routing plan was not accepted." } : { value: { accepted: true } }) });
       return;
     }
     if (request.kind === "output") {
@@ -2001,9 +2093,8 @@ export class ControlPlane extends EventEmitter {
     }
     const run = this.runs.get(sessionId);
     if (!run || run.abort.signal.aborted) return;
-    this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), ...this.cancelledQuestions(this.session(sessionId), "Owning turn was stopped. No answer was supplied.")]);
-    this.releaseQuestionWaits(sessionId);
-    this.requestWorkerStop(run);
+    try { this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), ...this.cancelledQuestions(this.session(sessionId), "Owning turn was stopped. No answer was supplied.")]); }
+    finally { this.releaseQuestionWaits(sessionId); this.requestWorkerStop(run); }
   }
   private requestWorkerStop(run: Run): void {
     if (run.abort.signal.aborted || run.done) return;
@@ -2117,6 +2208,19 @@ export class ControlPlane extends EventEmitter {
     const execution = this.projection.executions.find((value) => value.id === run.executionId);
     if (run.granted.size) { outcome = "partial"; diagnostic = "A tool was approved but its execution result or cleanup was not confirmed. Inspect the workspace before continuing."; }
     const compactionEvents: EventInput[] = [];
+    const generationEvents: EventInput[] = [];
+    if (run.generation) {
+      const entry = this.generations.record(run.generation.id);
+      if (outcome === "completed") {
+        try {
+          if (entry.stopRequested || run.abort.signal.aborted) throw new MoguriError("candidate_generation_stopped", "Owned stop arrived before generation settlement. No proposal was accepted.", 409);
+          if (!entry.proposalDocumentDigest || !entry.resultDigest || entry.diagnostic || !run.generation.current) throw new MoguriError("candidate_generation_result", entry.diagnostic ?? "No complete observed proposal was retained.", 409);
+          run.generation.current();
+        } catch (error) { outcome = run.abort.signal.aborted || entry.stopRequested ? "stopped" : "partial"; diagnostic = error instanceof MoguriError ? error.message : "Generation authority changed before settlement. Raw output and charges remain retained."; }
+      }
+      if (outcome !== "completed" && !diagnostic) diagnostic = entry.diagnostic ?? `Generation ${outcome}. No proposal was accepted or file staged.`;
+      generationEvents.push(this.generations.event({ ...entry, revision: entry.revision + 1, status: outcome === "completed" ? "proposed" : outcome, updatedAt: new Date().toISOString(), diagnostic }));
+    }
     if (run.compaction) {
       const entry = this.compaction(session.id, run.compaction.id);
       if (outcome === "completed") {
@@ -2130,6 +2234,7 @@ export class ControlPlane extends EventEmitter {
     this.commit([
       ...this.cancelledQuestions(session, "Owning turn ended. No pending answer was invented."),
       ...this.routingFinished(session, run.turnId, outcome, diagnostic),
+      ...generationEvents,
       ...compactionEvents,
       ...[...(run.mcpDispatches?.values() ?? [])].map((dispatch) => {
         const call = this.mcpCall(dispatch.id, run.sessionId); dispatch.access = [];
@@ -2145,12 +2250,12 @@ export class ControlPlane extends EventEmitter {
         call, text: run.granted.has(call.id) ? "Tool execution or cleanup is unconfirmed; no automatic retry." : "Tool was not executed before the turn ended.",
         isError: true, outcome: run.granted.has(call.id) ? "unconfirmed" : "stopped",
       }, run.stepId)),
-      this.event(session, "turn.finished", { outcome, diagnostic }, run.stepId),
+      this.event(session, "turn.finished", { outcome, diagnostic, ...(run.generation && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
       ...(execution && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) ? [this.event(session, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Turn settled locally; remote worker/descendant cleanup awaits its actual terminal status or explicit reconciliation." })] : []),
     ]);
     this.runs.delete(run.sessionId);
     this.releaseQuestionWaits(run.sessionId);
-    if (outcome === "partial" || outcome === "failed") for (const current of this.projection.sessions) {
+    if ((!run.generation || run.granted.size) && (outcome === "partial" || outcome === "failed")) for (const current of this.projection.sessions) {
       if (session.projectId ? this.platform.managed.leaseKey(current) === this.platform.managed.leaseKey(session) : current.id === session.id) this.paused.add(current.id);
     }
     queueMicrotask(() => this.pumpAll());

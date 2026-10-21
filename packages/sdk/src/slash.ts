@@ -1,6 +1,6 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, CandidatePatchSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -37,7 +37,7 @@ export const slashCommands = [
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
   { name: "artifacts", description: "View independent retained documents" },
   { name: "candidates", description: "Review retained repository proposals and actual stage/apply outcomes" },
-  { name: "candidate", description: "Stage only into an explicit clean Local worktree; apply requires a separate exact review", argument: "[read ID|preview {stageWorkspaceId,patch}|stage {stageWorkspaceId,patch,expectedDigest} confirm-stage|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
+  { name: "candidate", description: "Generate unaccepted data or stage reviewed bytes; source application stays separate", argument: "[generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
@@ -88,21 +88,38 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "candidates": return client === "desktop" ? { kind: "panel", panel: "Candidates" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.candidates.filter((candidate) => !session.projectId || candidate.projectId === session.projectId), null, 2) };
     case "candidate": {
       const [action = "", ...parts] = command.argument.split(/\s+/).filter(Boolean), result = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+      if (action === "generate-preview" || action === "generate") {
+        let input = command.argument.slice(action.length).trim();
+        if (action === "generate") {
+          if (!input.endsWith(" confirm-cost")) throw new ClientError("candidate_generation_command", "Review selected source/model/cost and append confirm-cost. No model was called.");
+          input = input.slice(0, -" confirm-cost".length).trim();
+        }
+        const value: unknown = JSON.parse(input), allowed = action === "generate" ? ["stageWorkspaceId", "input", "expectedDigest"] : ["stageWorkspaceId", "input"];
+        if (!isRecord(value) || Object.keys(value).some((key) => !allowed.includes(key)) || typeof value.stageWorkspaceId !== "string") throw new ClientError("candidate_generation_command", "Use exact {stageWorkspaceId,input,expectedDigest?}; root/model/actor come from the selected session.");
+        const selected = parse(CandidateGenerationInputSchema, value.input);
+        if (action === "generate-preview") return result(await sdk.candidates.generatePreview(session.id, value.stageWorkspaceId, selected));
+        if (typeof value.expectedDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.expectedDigest)) throw new ClientError("candidate_generation_command", "Pass the exact reviewed generation preview digest.");
+        const created = await sdk.candidates.generate(session.id, value.stageWorkspaceId, selected, value.expectedDigest, true);
+        return result(await sdk.candidates.waitGeneration(created.id!));
+      }
       if (action === "preview" || action === "stage") {
         let input = command.argument.slice(action.length).trim();
         if (action === "stage") {
           if (!input.endsWith(" confirm-stage")) throw new ClientError("candidate_command", "Review exact candidate roots/bases/bytes and append confirm-stage.");
           input = input.slice(0, -" confirm-stage".length).trim();
         }
-        const value: unknown = JSON.parse(input), allowed = action === "stage" ? ["stageWorkspaceId", "patch", "expectedDigest"] : ["stageWorkspaceId", "patch"];
+        const value: unknown = JSON.parse(input), allowed = action === "stage" ? ["stageWorkspaceId", "patch", "expectedDigest", "generationId"] : ["stageWorkspaceId", "patch"];
         if (!isRecord(value) || Object.keys(value).some((key) => !allowed.includes(key)) || typeof value.stageWorkspaceId !== "string") throw new ClientError("candidate_command", "Use exact {stageWorkspaceId,patch,expectedDigest?} data; session/actor come from this command, never a model.");
         const patch = parse(CandidatePatchSchema, value.patch);
         if (action === "preview") return result(await sdk.candidates.preview(session.id, value.stageWorkspaceId, patch));
         if (typeof value.expectedDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.expectedDigest)) throw new ClientError("candidate_command", "Stage requires the exact reviewed preview digest.");
-        const created = await sdk.candidates.stage(session.id, value.stageWorkspaceId, patch, value.expectedDigest);
+        if (value.generationId !== undefined && typeof value.generationId !== "string") throw new ClientError("candidate_generation_command", "A model-origin stage needs its exact retained generation ID.");
+        const created = await sdk.candidates.stage(session.id, value.stageWorkspaceId, patch, value.expectedDigest, value.generationId);
         return result(await sdk.candidates.wait(created.id!));
       }
       const [id, revision, digest, confirmation] = parts;
+      if (action === "generation" && id && parts.length === 1) return result(await sdk.candidates.generation(id));
+      if (action === "generation-stop" && id && parts.length === 1) { await sdk.candidates.stopGeneration(id); return result(await sdk.candidates.generation(id)); }
       if (action === "read" && id && parts.length === 1) return result(await sdk.candidates.read(id));
       if (action === "apply-preview" && id && parts.length === 1) return result(await sdk.candidates.applyPreview(id, session.id));
       if (action === "apply" && id && revision && /^\d+$/.test(revision) && Number.isSafeInteger(Number(revision)) && digest && /^[a-f0-9]{64}$/.test(digest) && confirmation === "confirm-apply" && parts.length === 4) {
@@ -112,7 +129,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "stop" && id && parts.length === 1) {
         await sdk.candidates.stop(id); return { kind: "ok", message: "Stop requested only for the captured active candidate job. Inspect its actual cancelled/partial outcome; no rollback or later job was inferred." };
       }
-      throw new ClientError("candidate_command", "Use /candidates, /candidate preview JSON, stage JSON confirm-stage, read ID, apply-preview ID, apply ID REV SHA confirm-apply, reject ID REV confirm-reject or stop ID.");
+      throw new ClientError("candidate_command", "Use generate-preview JSON, generate JSON confirm-cost, generation/generation-stop ID; or preview/stage/read/apply-preview/apply/reject/stop for separately reviewed candidate files.");
     }
     case "mcp-remote": {
       const parts = command.argument.trim().split(/\s+/).filter(Boolean), [action = "calls", id, value, revision, confirmation, access] = parts;

@@ -5,12 +5,7 @@ import { performance } from "node:perf_hooks";
 import { EventStore } from "../apps/service/src/store.ts";
 import { projectEvents, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { budgetPlanFixture } from "./fixtures/budget-plan-api.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
-
-function retained(db: DatabaseSync) {
-  return ["events", "retention_keys", "retention_forgotten", "blob_payloads", "receipts", "memory_scopes", "memory_files", "memory_chunks", "memory_graph_nodes", "memory_graph_edges"]
-    .map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]);
-}
+import { retainedCiphertextRows as retained, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema-29-to-30 planning marker preserves raw ciphertext/keys/receipts and rolls back an actual marker failure", async () => {
   const f = await budgetPlanFixture(); let opened: EventStore | undefined;

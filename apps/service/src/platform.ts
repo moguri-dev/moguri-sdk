@@ -12,6 +12,7 @@ import {
   isManagedWorkspaceCommand, isManagedWorkspaceQuery,
   isArtifactCommand, isArtifactQuery, isQuestionCommand,
   isCandidateCommand, isCandidateQuery,
+  isCandidateGenerationCommand, isCandidateGenerationQuery, type CandidateGenerationCommand, type CandidateGenerationQuery, type CandidateGenerationResponse,
   isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
@@ -87,6 +88,8 @@ export interface PlatformHost {
   contextPreview: SessionWorkspaceHost["contextPreview"];
   compactionQuery(query: CompactionQuery): CompactionResponse;
   compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult;
+  generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
+  generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   planSaveQuery(query: PlanSaveQuery): PlanSaveResponse;
   planSaveCommand(command: PlanSaveCommand, finish: WorkspaceFinish): CommandResult;
   validateControls(controls: Controls): void;
@@ -169,7 +172,7 @@ export class PlatformRuntime {
     }, stateDir, { ...options, terminal: { ...options.terminal, vault: options.terminal?.vault ?? options.vault } });
     this.candidates = new CandidateRuntime(store, {
       snapshot: () => this.snapshot(), managed: this.managed, projects: () => this.sessions.projects,
-      commit: (events) => this.host.commit(events), artifact: (session, text, summary, patch) => this.artifacts.candidate(session, text, summary, patch),
+      commit: (events) => this.host.commit(events),       artifact: (session, text, summary, patch, sources) => this.artifacts.candidate(session, text, summary, patch, sources),
       localRootBusy: host.localRootBusy, closingProject: host.closingProject, wake: host.wake,
       job: (kind, projectId, sessionId, workspaceId, execute, start, settled, lifecycle) => this.job(kind, projectId, sessionId, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
@@ -447,6 +450,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isCandidateGenerationQuery(query)) return this.host.generationQuery(query);
     if (isCandidateQuery(query)) return this.candidates.query(query);
     if (isRemoteMcpQuery(query)) return this.mcpRemoteQuery(query);
     if (isRepositoryQuery(query)) return this.repositories.query(query);
@@ -620,6 +624,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isCandidateGenerationCommand(command)) return this.host.generationCommand(command, finish);
     if (isCandidateCommand(command)) return this.candidates.execute(command, finish);
     if (isRemoteMcpCommand(command)) return this.mcpRemoteCommand(command, finish);
     if (isRepositoryCommand(command)) return this.repositories.execute(command, finish);

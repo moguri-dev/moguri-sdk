@@ -31,7 +31,7 @@ export const UserMcpOperationSchema = Type.Object({
 }, { additionalProperties: false });
 export type UserMcpOperation = Static<typeof UserMcpOperationSchema>;
 export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; operation?: UserPlanOperation | UserMcpOperation }
-export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction"; context?: Message[] }
+export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate"; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
 export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean; continue?: true } | DelegatedResult | RemoteMcpAuthorization; error?: string; halt?: true };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" };

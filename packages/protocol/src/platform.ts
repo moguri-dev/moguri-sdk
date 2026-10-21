@@ -24,7 +24,9 @@ import type { TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
 import { CandidateCommandSchema, CandidateQuerySchema, type CandidateJobIntent, type CandidateRecord, type CandidateResponse } from "./candidates.ts";
+import { CandidateGenerationCommandSchema, CandidateGenerationQuerySchema, type CandidateGenerationRecord, type CandidateGenerationResponse } from "./candidate-generations.ts";
 export * from "./candidates.ts";
+export * from "./candidate-generations.ts";
 export * from "./mcp.ts";
 export * from "./repositories.ts";
 export * from "./telemetry.ts";
@@ -116,6 +118,7 @@ const section = Type.Union([
 ]);
 export const PlatformCommandSchema = Type.Union([
   CandidateCommandSchema,
+  CandidateGenerationCommandSchema,
   RemoteMcpCommandSchema,
   RepositoryCommandSchema,
   PlanSaveCommandSchema,
@@ -187,6 +190,7 @@ export const QuerySchema = Type.Union([
   ManagedWorkspaceQuerySchema,
   ArtifactQuerySchema,
   CandidateQuerySchema,
+  CandidateGenerationQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -225,6 +229,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   questions: UserQuestion[];
   budgetEntries: BudgetEntry[];
   budgetPlans: BudgetPlan[];
+  candidateGenerations: CandidateGenerationRecord[];
   budgetPolicy: { revision: number; limit: BudgetLimit | null };
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
@@ -244,6 +249,7 @@ export interface VoiceStatus {
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
   | CandidateResponse
+  | CandidateGenerationResponse
   | RemoteMcpResponse
   | RepositoryResponse
   | TelemetryResponse

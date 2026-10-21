@@ -95,7 +95,7 @@ async function run(start: WorkerStart): Promise<void> {
       try {
         const stream = models.streamSimple(model, {
           systemPrompt: boundary.systemPrompt,
-          messages: boundary.context ?? context, tools: start.readOnly || boundary.phase === "router" || boundary.phase === "compaction" ? [] : boundary.tools,
+          messages: boundary.context ?? context, tools: start.readOnly || boundary.phase === "router" || boundary.phase === "compaction" || boundary.phase === "candidate" ? [] : boundary.tools,
         }, {
           apiKey: boundary.auth.apiKey, headers: boundary.auth.headers, signal: abort.signal,
           maxTokens: boundary.maxTokens, maxRetries: 0, timeoutMs: 120_000,

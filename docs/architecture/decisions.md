@@ -275,6 +275,13 @@ provably undispatched after the exact owner ends. The actual SIGKILL case
 preserves interrupted model usage while releasing only its unused plan.
 Production compound/checkpoint ownership and live quality remain unqualified.
 
+Protocol 31 adds [owned reviewed generation](candidate-generations.md): one
+explicit fixed-model Local draft reuses the production worker and ledger with
+zero tools, exact selected source, independent input/result/provenance and
+canonical no-paid-replay intent. Staging/application remain separate real-user
+reviews. This is an integrated first model role, not completion of compound
+patterns, finite kupo wind-down, calibrated quality or D11.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.

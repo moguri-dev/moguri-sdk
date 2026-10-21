@@ -9,7 +9,7 @@ const id = Type.String({ minLength: 1, maxLength: 128 });
 const revision = Type.Integer({ minimum: 0 });
 export const BUDGET_WARNING = "Budgets can interrupt a session mid-task. Usage reporting can lag, and a clean final commit is not guaranteed.";
 export const ModelRoleSchema = Type.Union([
-  Type.Literal("solver"), Type.Literal("side"), Type.Literal("subagent"), Type.Literal("router"), Type.Literal("critic"),
+  Type.Literal("solver"), Type.Literal("draft"), Type.Literal("side"), Type.Literal("subagent"), Type.Literal("router"), Type.Literal("critic"),
   Type.Literal("revision"), Type.Literal("escalation"), Type.Literal("decision"), Type.Literal("steering"), Type.Literal("checkpoint"), Type.Literal("compaction"), Type.Literal("unknown"),
 ]);
 export type ModelRole = Static<typeof ModelRoleSchema>;

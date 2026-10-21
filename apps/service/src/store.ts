@@ -27,6 +27,7 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "candidate.generation_recorded" ? input.payload.generation.id :
   input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
   input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? null :
   input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? null : null;
@@ -44,7 +45,7 @@ function references(input: EventInput): string[] {
     case "session.created": return input.payload.contextDigest ? [input.payload.contextDigest] : [];
     case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.map((entry) => entry.digest)];
     case "turn.prompt_bound": return [input.payload.promptDigest];
-    case "turn.control_started": return [input.payload.purpose === "compaction" ? input.payload.promptDigest : input.payload.intentDigest];
+    case "turn.control_started": return [input.payload.purpose === "plan.save" ? input.payload.intentDigest : input.payload.promptDigest];
     case "plan.save_recorded": return [input.payload.save.inputDigest, input.payload.save.resultDigest].filter((hash): hash is string => hash !== null);
     case "mcp.remote_recorded": return [input.payload.call.intentDigest, input.payload.call.resultDigest].filter((hash): hash is string => hash !== null);
     case "compaction.saved": return [input.payload.compaction.inputDigest, input.payload.compaction.resultDigest, input.payload.compaction.replacementDigest].filter((hash): hash is string => hash !== null);
@@ -56,6 +57,7 @@ function references(input: EventInput): string[] {
     case "artifact.saved": return [input.payload.artifact.contentDigest];
     case "artifact.revised": return [input.payload.artifact.contentDigest];
     case "candidate.saved": return [input.payload.candidate.documentDigest, input.payload.candidate.stageResultDigest, input.payload.candidate.applyResultDigest].filter((hash): hash is string => hash !== null);
+    case "candidate.generation_recorded": return [input.payload.generation.inputDigest, input.payload.generation.resultDigest, input.payload.generation.proposalDocumentDigest].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
     case "job.finished": return input.payload.resultDigest ? [input.payload.resultDigest] : [];
@@ -178,6 +180,9 @@ export class EventStore {
       if (version < 30) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('budget_planning_schema','1');
         PRAGMA user_version=30; COMMIT;`);
+      if (version < 31) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('candidate_generation_schema','1');
+        PRAGMA user_version=31; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

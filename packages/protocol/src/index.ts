@@ -30,10 +30,11 @@ import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 import { MemoryIndexIntentSchema } from "./memory.ts";
 import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord, type CandidateRecord } from "./candidates.ts";
+import { CandidateGenerationRecordSchema, projectCandidateGeneration, type CandidateGenerationRecord } from "./candidate-generations.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 30;
+export const PROTOCOL_VERSION = 31;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -221,6 +222,7 @@ export interface EventPayloads {
   "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string; repositoryCapture?: RepositoryCapture };
   "turn.control_started":
     | { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string }
+    | { purpose: "candidate.generate"; generationId: string; controls: Controls; policyRevision: number; promptDigest: string }
     | { purpose: "plan.save"; saveId: string; controls: Controls; policyRevision: number; intentDigest: string };
   "plan.save_recorded": { save: RemotePlanSave };
   "compaction.saved": { compaction: ContextCompaction };
@@ -275,8 +277,9 @@ export interface EventPayloads {
   "session.group_saved": { group: SessionGroup };
   "artifact.saved": { artifact: LegacyRetainedArtifact };
   "artifact.revised": { artifact: LegacyVersionedArtifact };
-  "artifact.deleted": { artifactId: string };
+  "artifact.deleted": { artifactId: string; generationIntent?: { commandId: string; commandDigest: string } };
   "candidate.saved": { candidate: CandidateRecord };
+  "candidate.generation_recorded": { generation: CandidateGenerationRecord };
   "budget.recorded": { entry: BudgetEntry };
   "budget.plan_recorded": { plan: BudgetPlan };
   "operation.recorded": { entry: OperationEntry };
@@ -331,7 +334,7 @@ export const eventTypes: readonly EventType[] = [
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
-  "candidate.saved",
+  "candidate.saved", "candidate.generation_recorded",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -362,6 +365,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const planSaves = new Map<string, RemotePlanSave>();
   const budgetEntries = new Map<string, BudgetEntry>();
   const budgetPlans = new Map<string, BudgetPlan>();
+  const candidateGenerations = new Map<string, CandidateGenerationRecord>();
   const operationEntries = new Map<string, OperationEntry>();
   let operationCoverage: OperationCoverage | null = null;
   const repositoryObservations = new Map<string, RepositoryObservation>();
@@ -472,6 +476,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       artifacts.set(artifact.id, artifact);
     }
     if (event.event_type === "artifact.deleted") { artifacts.delete(event.payload.artifactId); candidates.delete(event.payload.artifactId); }
+    if (event.event_type === "candidate.generation_recorded") {
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(CandidateGenerationRecordSchema, event.payload.generation) ||
+        event.payload.generation.profileId !== profileId || event.artifact_id !== event.payload.generation.id) throw new MoguriError("candidate_generation_corrupt", "Generation must retain its original exact profile/artifact compartment. State was preserved.", 409);
+      const generation = projectCandidateGeneration(candidateGenerations.get(event.payload.generation.id), event.payload.generation);
+      candidateGenerations.set(generation.id, generation);
+    }
     if (event.event_type === "candidate.saved") {
       const candidate = event.payload.candidate;
       if (!Value.Check(CandidateRecordSchema, candidate)) throw new MoguriError("candidate_corrupt", "Candidate metadata has an unsupported shape/version. State was preserved.", 409);
@@ -722,8 +732,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       case "model.started":
         for (const routing of routings.values()) if (routing.turnId === event.turn_id && routing.status === "ready" && event.payload.role !== "router") routing.status = "running";
-        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: event.payload.role === "router" || event.payload.role === "compaction" ? "notice" : "assistant",
-          text: event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : "", timestamp: event.timestamp });
+        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: event.payload.role === "router" || event.payload.role === "compaction" || event.payload.role === "draft" ? "notice" : "assistant",
+          text: event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : "", timestamp: event.timestamp });
         session.usage.push({
           stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: event.payload.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
@@ -790,5 +800,5 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), candidateGenerations: [...candidateGenerations.values()].filter((generation) => artifacts.has(generation.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

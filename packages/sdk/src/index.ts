@@ -1,6 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -137,8 +137,27 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly candidates = {
+    generatePreview: (sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput) => this.query({ type: "candidate.generation.preview", sessionId, stageWorkspaceId, input }),
+    generate: (sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput, expectedDigest: string, confirmCost: true) =>
+      this.command({ type: "candidate.generate", sessionId, stageWorkspaceId, input, expectedDigest, confirmCost }),
+    generation: (generationId: string) => this.query({ type: "candidate.generation.read", generationId }),
+    stopGeneration: (generationId: string) => this.command({ type: "candidate.generation.stop", generationId }),
+    waitGeneration: async (generationId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Extract<CandidateGenerationResponse, { type: "candidate.generation.read" }>> => {
+      const deadline = Date.now() + (options.timeoutMs ?? 180_000);
+      while (Date.now() < deadline) {
+        options.signal?.throwIfAborted();
+        const current = this.getState().snapshot?.candidateGenerations.find((record) => record.id === generationId);
+        if (this.getState().status !== "connected") throw new ClientError("disconnected", "Generation remains owned by its service. Reconnect and inspect the same record; it was not retried.");
+        if (!current || current.status !== "running") {
+          const result = await this.candidates.generation(generationId); options.signal?.throwIfAborted();
+          if (result.generation.status !== "running") return result;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new ClientError("candidate_generation_timeout", "Generation has not settled. Inspect or explicitly stop its original owned operation; no success was inferred.");
+    },
     preview: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch) => this.query({ type: "candidate.preview", sessionId, stageWorkspaceId, patch }),
-    stage: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch, expectedDigest: string) => this.command({ type: "candidate.stage", sessionId, stageWorkspaceId, patch, expectedDigest, confirm: true }),
+    stage: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch, expectedDigest: string, generationId?: string) => this.command({ type: "candidate.stage", sessionId, stageWorkspaceId, patch, expectedDigest, ...(generationId === undefined ? {} : { generationId }), confirm: true }),
     read: (candidateId: string) => this.query({ type: "candidate.read", candidateId }),
     applyPreview: (candidateId: string, sessionId: string) => this.query({ type: "candidate.apply.preview", candidateId, sessionId }),
     apply: (candidateId: string, sessionId: string, expectedRevision: number, expectedDigest: string) => this.command({ type: "candidate.apply", candidateId, sessionId, expectedRevision, expectedDigest, confirm: true }),

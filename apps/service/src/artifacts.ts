@@ -63,10 +63,29 @@ export class ArtifactRuntime {
   capture(session: Session, path: string, text: string, source?: ArtifactSource): RetainedArtifact {
     return this.create(session, "plan", basename(path), text, "file", [source ?? { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: null, contentDigest: digest(text) }], path);
   }
-  candidate(session: Session, text: string, summary: string, patch: CandidatePatch): RetainedArtifact {
-    return this.create(session, "report", `Candidate: ${summary.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
+  candidate(session: Session, text: string, summary: string, patch: CandidatePatch, sources?: ArtifactSource[]): RetainedArtifact {
+    return this.create(session, "report", `Candidate: ${summary.replace(/\s+/g, " ").slice(0, 140)}`, text, sources ? "message" : "manual", sources ? structuredClone(sources) : [
       { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "user-imported-proposal", contentDigest: digest(JSON.stringify(patch)) },
     ]);
+  }
+  generation(session: Session, text: string, task: string): RetainedArtifact {
+    return this.create(session, "report", `Generation: ${task.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
+      { eventId: null, sessionId: session.id, messageId: null, actor: "user", modelId: null, outcome: "generation-request", contentDigest: digest(task) },
+      { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "reviewed-source-snapshot", contentDigest: digest(text) },
+    ]);
+  }
+  generationEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
+    return events.flatMap((event) => {
+      if (event.event_type !== "model.completed" || event.payload.usage.role !== "draft") return [];
+      const generation = snapshot.candidateGenerations.find((generation) => generation.stepId === event.step_id && generation.proposalDocumentDigest !== null);
+      const proposed = generation?.proposalDocumentDigest;
+      if (!generation || !proposed) return [];
+      const artifact = snapshot.artifacts.find((artifact) => artifact.id === generation.id);
+      if (!artifact || generation.resultDigest !== event.payload.contextDigest || generation.modelId !== event.payload.usage.modelId) throw new MoguriError("candidate_generation_corrupt", "A model proposal lost its exact independent source artifact or owning model result.", 409);
+      return [this.event({ ...artifact, revision: artifact.revision + 1, updatedAt: event.timestamp, contentDigest: proposed,
+        origin: "message", sources: [...artifact.sources, { eventId: event.id, sessionId: generation.sessionId, messageId: event.step_id ?? null,
+          actor: "model", modelId: generation.modelId, outcome: "unaccepted-proposal", contentDigest: generation.resultDigest }] })];
+    });
   }
   answerEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
     if (!snapshot.settings.values.artifacts.retainAnswers) return [];
@@ -106,6 +125,14 @@ export class ArtifactRuntime {
     return this.host.events().filter((event) => event.artifact_id === id &&
       (event.event_type === "candidate.saved" || event.event_type === "job.started" || event.event_type === "job.progress" || event.event_type === "job.finished"));
   }
+  private generationHistory(id: string): StoredEvent[] {
+    return this.host.events().filter((event) => event.artifact_id === id && event.event_type === "candidate.generation_recorded");
+  }
+  private deleted(id: string): EventInput {
+    const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === id);
+    return { event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: id,
+      ...(generation ? { generationIntent: { commandId: generation.commandId, commandDigest: generation.commandDigest } } : {}) } };
+  }
   private source(sessionId: string, kind: "message" | "tool", id: string): ArtifactSourcePreview {
     this.session(sessionId);
     const event = this.host.events().find((event) => event.session_id === sessionId && (kind === "tool" ?
@@ -128,8 +155,9 @@ export class ArtifactRuntime {
     const records = artifacts.map(({ id, name, kind, revision, status }) => ({ id, name, kind, revision, status }));
     return { projectId, artifacts: records, digest: digest(JSON.stringify({ projectId, artifacts: artifacts.map((artifact) => {
       const candidateEvents = this.candidateEvents(artifact.id);
+      const generationEvents = this.generationHistory(artifact.id);
       return { ...artifact, revisions: this.revisions(artifact.id).map(({ revision, contentDigest }) => ({ revision, contentDigest })),
-        ...(candidateEvents.length ? { candidateEvents } : {}) };
+        ...(candidateEvents.length ? { candidateEvents } : {}), ...(generationEvents.length ? { generationEvents } : {}) };
     }) })) };
   }
   private export(artifacts: RetainedArtifact[], filename: string): ArtifactExport {
@@ -153,13 +181,23 @@ export class ArtifactRuntime {
       }
       const results = [...hashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
       if (events.length) account(JSON.stringify(events));
-      return { artifact, revisions, ...(events.length ? { candidate: { events, results } } : {}) };
+      const generationEvents = this.generationHistory(artifact.id), generationHashes = new Set<string>();
+      for (const event of generationEvents) if (event.event_type === "candidate.generation_recorded") {
+        generationHashes.add(event.payload.generation.inputDigest);
+        if (event.payload.generation.resultDigest) generationHashes.add(event.payload.generation.resultDigest);
+        if (event.payload.generation.proposalDocumentDigest) generationHashes.add(event.payload.generation.proposalDocumentDigest);
+      }
+      const generationResults = [...generationHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
+      if (generationEvents.length) account(JSON.stringify(generationEvents));
+      return { artifact, revisions, ...(events.length ? { candidate: { events, results } } : {}),
+        ...(generationEvents.length ? { generation: { events: generationEvents, results: generationResults } } : {}) };
     });
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
   async removal(projectId: string, choice?: ProjectArtifactChoice): Promise<{ events: EventInput[]; forget: string[] }> {
+    if (this.host.snapshot().candidateGenerations.some((generation) => generation.projectId === projectId && generation.status === "running")) throw new MoguriError("candidate_generation_busy", "Stop active generation before reviewing its independent report retention.", 409);
     if (this.host.snapshot().jobs.some((job) => job.projectId === projectId && job.candidate && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("candidate_busy", "Stop the project's active candidate work before reviewing retention or removal. Its independent grants were preserved.", 409);
     const preview = this.preview(projectId);
     if (!choice && preview.artifacts.length) throw new MoguriError("artifact_choice", "Preview this project's artifacts and explicitly choose retain, export/materialize then delete, or delete before removal.", 409);
@@ -177,7 +215,7 @@ export class ArtifactRuntime {
       if (this.preview(projectId).digest !== preview.digest) throw new MoguriError("artifact_conflict", "The artifact set changed during copy verification. Stored copies were preserved.", 409);
     }
     if (choice?.action === "retain") return { events: preview.artifacts.map(({ id }) => { const artifact = this.artifact(id); return this.event({ ...artifact, projectId: null, workItemId: null, revision: artifact.revision + 1, updatedAt: new Date().toISOString() }); }), forget: [] };
-    return { events: preview.artifacts.map(({ id }): EventInput => ({ event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: id } })), forget: preview.artifacts.map(({ id }) => id) };
+    return { events: preview.artifacts.map(({ id }) => this.deleted(id)), forget: preview.artifacts.map(({ id }) => id) };
   }
   private async destination(projectId: string, workspaceId: string | null): Promise<{ project: Project; rootIdentity: string }> {
     const project = this.host.root(projectId, workspaceId), settings = this.host.projects().configuration(projectId).values;
@@ -312,13 +350,17 @@ export class ArtifactRuntime {
     this.writable(artifact.projectId);
     if (artifact.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "Artifact changed. Reload before editing, archiving or deleting it.", 409);
     const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === artifact.id);
+    const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === artifact.id);
     const activeCandidate = candidate && (["staging", "applying"].includes(candidate.status) ||
       this.host.snapshot().jobs.some((job) => job.candidate?.candidateId === candidate.id && ["running", "waiting_input"].includes(job.status)));
     if (command.type === "artifact.delete") {
+      if (generation?.status === "running") throw new MoguriError("candidate_generation_busy", "Stop generation before deleting its independently retained input/result report.", 409);
       if (activeCandidate) throw new MoguriError("candidate_busy", "Stop the candidate's active owned job before deleting its independent document/history.", 409);
-      return finish([{ event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: artifact.id } }], { id: artifact.id }, { artifacts: [artifact.id] });
+      return finish([this.deleted(artifact.id)], { id: artifact.id }, { artifacts: [artifact.id] });
     }
     if (candidate && command.changes.text !== undefined) throw new MoguriError("candidate_document", "A candidate's exact proposal document is immutable. Export it or create a separately reviewed new proposal; renaming/organizing does not change its bytes.", 409);
+    if (generation && command.changes.text !== undefined) throw new MoguriError("candidate_generation_document", "Generation input/result documents are immutable. Export them or generate a separately reviewed proposal; metadata changes do not rewrite model provenance.", 409);
+    if (generation?.status === "running" && command.changes.status === "archived") throw new MoguriError("candidate_generation_busy", "Stop generation before archiving its independent report.", 409);
     if (activeCandidate && command.changes.status === "archived") throw new MoguriError("candidate_busy", "Stop the candidate's active owned job before archiving its document.", 409);
     if (!Object.keys(command.changes).length) throw new MoguriError("artifact_changes", "Choose an actual title, text or archive change.");
     const updated: RetainedArtifact = { ...artifact, revision: artifact.revision + 1, updatedAt: new Date().toISOString(),

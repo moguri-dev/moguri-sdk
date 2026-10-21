@@ -14,7 +14,7 @@ process.once("message", (raw: unknown) => {
     if (!base) throw new Error("Generated provider model is absent.");
     const model = { ...base, baseUrl: raw.baseUrl };
     const provider: ProviderAdapter = {
-      state: { status: "connected", models: [{ id: model.id, name: "Generated crash-recovery solver", contextWindow: model.contextWindow, imageInput: false }], login: null, diagnostic: null },
+      state: { status: "connected", models: [{ id: model.id, name: "Generated crash-recovery solver", contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: false }], login: null, diagnostic: null },
       onChange: () => {}, refresh: async () => {}, cancel: async () => {}, logout: async () => {},
       login: () => { throw new Error("Personal authorization is forbidden in generated recovery fixtures."); },
       prepare: async (id, signal) => { signal.throwIfAborted(); if (id !== model.id) throw new Error("Generated model mismatch."); return { model, auth: { apiKey: "generated-test-only", baseUrl: model.baseUrl } }; },
@@ -77,6 +77,16 @@ process.once("message", (raw: unknown) => {
             (phase === "staging" ? candidate.stageAttemptedPaths?.length ?? 0 : candidate.attemptedPaths.length) === 0));
         if (!held && candidate) { held = true; process.send?.({ kind: "held-candidate", candidateId: candidate.id }); await new Promise<void>(() => {}); }
         return assert(...args);
+      };
+    }
+    if (raw.holdGeneration === "before-admission" || raw.holdGeneration === "before-result") {
+      const check = service.controller.generations.check.bind(service.controller.generations); let held = false;
+      service.controller.generations.check = async (...args) => {
+        const result = await check(...args);
+        if (!held && (raw.holdGeneration === "before-admission" ? result.record.stepId === null : result.record.stepId !== null)) {
+          held = true; process.send?.({ kind: "held-generation", generationId: result.record.id }); await new Promise<void>(() => {});
+        }
+        return result;
       };
     }
     if (raw.planBudgetOnStart === true) {

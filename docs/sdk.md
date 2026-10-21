@@ -18,9 +18,10 @@ following the protocol-28 event/retention foundation and private compound/file
 prerequisites. Its exact SDK and actual packaged app are independently
 qualified; [setup](setup.md#current-qualified-0220-alpha1-checkpoint) preserves
 immutable delivery identities. Public kupo remains the qualified Single subset.
-Current 0.23 development uses protocol/database **30** for independent planned
-capacity and shared inspection, without enabling public finite kupo.
-Current state migrations preserve schema-1 through schema-29 history, sessions, drafts,
+Current 0.23 development uses protocol/database **31** for independent planned
+capacity and one bounded Local [owned draft](architecture/candidate-generations.md)
+with shared generation/review/stop inspection, without enabling public finite kupo.
+Current state migrations preserve schema-1 through schema-30 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -156,7 +157,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
 | `plans` | Digest-checked Local/Remote plan read/save and independent snapshots. Remote writes require the reviewed binding and an owned no-model operation; actual saves/info/exact-stop expose partial/recovery outcomes without replay. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
-| `candidates` | Explicit Local preview/stage/read/wait, fresh separate apply review/application, reject and exact-job stop. Independent immutable proposals, actual user acceptance, base/index/HEAD preservation and partial/restart outcomes. No model or automatic Git publication. |
+| `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
@@ -778,6 +779,60 @@ with `--session`, observed `--revision`, fresh `--digest` and
 expose the same SDK data. Shared `/candidate` JSON commands and the desktop
 Candidates panel perform the same two separate reviews. Source Env/mode/policy
 changes invalidate stale results; no Remote/Sandbox-to-Local fallback.
+
+### Owned fixed-model proposal generation
+
+Protocol 31 additionally supports one bounded, tool-less Local draft from
+original selected source files, not unsaved client edits. Select an available
+fixed model in the source session first. The stage remains an explicitly
+created clean managed worktree at the same HEAD.
+
+```ts
+const file = await sdk.workspaces.file(sourceSessionId, "src/example.ts");
+const input = { task: "Describe the requested change", files: [{ path: file.path, baseDigest: file.digest }] };
+const preview = (await sdk.candidates.generatePreview(sourceSessionId, stageWorkspaceId, input)).preview;
+// The user reviews source/model/cost and independent retention before this call.
+const started = await sdk.candidates.generate(sourceSessionId, stageWorkspaceId, input, preview.digest, true);
+const generated = await sdk.candidates.waitGeneration(started.id!);
+if (generated.generation.status !== "proposed" || !generated.proposal) throw new Error("Inspect the retained partial/stopped/failed outcome.");
+const staging = (await sdk.candidates.preview(sourceSessionId, stageWorkspaceId, generated.proposal.patch)).preview;
+const staged = await sdk.candidates.stage(sourceSessionId, stageWorkspaceId, generated.proposal.patch, staging.digest, generated.generation.id);
+```
+
+Application is still the separate review/application shown above. Inspect
+`generation(id)` and stop the owned call with `stopGeneration(id)`.
+Wait abort/timeout never cancels inference. Missing usage remains held and
+raw invalid/stale output/actual charges remain inspectable. No retries or model
+fallbacks. A changed patch cannot retain the `generationId` assertion.
+
+The report independently retains original input, raw output, canonical model
+provenance and version-3 export/history after source deletion. Its bytes are
+immutable; metadata edits remain available. Deleting the report prevents its
+original command from calling a model again, even without its old receipt.
+These retained data are not automatically promoted to solver context.
+
+CLI: `candidate generate-preview INPUT.json --session SOURCE --workspace STAGE`,
+then `generate INPUT.json` with the same selectors, `--digest` and
+`--confirm-cost`. `generated|generation-wait|generation-stop ID` inspect the
+same record. Stage accepts `--generation ID` only for unchanged verified model
+output. SIGINT stops the exact generation and exits unsuccessfully for a
+non-proposed outcome.
+
+Shared examples:
+
+```text
+/candidate generate-preview {"stageWorkspaceId":"STAGE","input":{"task":"Requested change","files":[{"path":"src/example.ts","baseDigest":"FILE_SHA"}]}}
+/candidate generate {"stageWorkspaceId":"STAGE","input":{"task":"Requested change","files":[{"path":"src/example.ts","baseDigest":"FILE_SHA"}]},"expectedDigest":"REVIEW_SHA"} confirm-cost
+/candidate generation GENERATION_ID
+/candidate generation-stop GENERATION_ID
+```
+
+Use actual IDs/digests. Desktop Candidates exposes source/model review,
+independent-retention/cost confirmation, actual usage/stop and local proposal
+loading before the two file reviews. TUI uses the same commands and
+metadata-only artifact editor. Limits and actual recovery/migration semantics
+are in [the generation contract](architecture/candidate-generations.md).
+No compound kupo, quality calibration, Remote generation or Sandbox is enabled.
 
 ### Model context and thinking
 
