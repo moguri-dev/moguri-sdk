@@ -5,10 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Qualified 0.18 uses protocol 24; current 0.19 source
-uses protocol 25. Both deliberately reject incompatible running
-services and requires the matching SSH worker for exact user plan operations,
-reviewed compaction, model telemetry and explicitly granted Remote MCP.
+This is an alpha API. Qualified **0.19.0-alpha.1 uses protocol 25** and
+deliberately rejects incompatible running services. Remote execution requires
+the matching SSH worker for exact user plan operations, reviewed compaction,
+model telemetry, explicitly granted MCP and owned user consoles.
 Current state migrations preserve schema-1 through schema-24 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
@@ -21,11 +21,11 @@ intent/result retention and no-replay crash reconciliation; shared native
 clients share the same review and inspection APIs. Exact archive identities
 and qualification are recorded in [setup](setup.md); older immutable
 deliveries are not repacked.
-The current 0.19 development source extends this with protocol-25 Remote
-owner/binding and migration foundations. Development service/SDK Remote
-console execution, recovery and native clients are implemented and pass the
-complete source/native checks. Exact-package qualification remains
-unfinished. There is no qualified 0.19 archive yet.
+The qualified 0.19 delivery extends this with protocol-25 immutable Remote
+owner/binding state, schema-preserving migration and original-PTY recovery
+across service/SDK/CLI/OpenTUI/Ghostty. Its exact independently installed SDK
+and actual packaged runtime pass the same Remote lifecycle, no-replay and
+ordinary-stop contracts. Prior qualified archives remain immutable.
 
 ## Build and consume
 

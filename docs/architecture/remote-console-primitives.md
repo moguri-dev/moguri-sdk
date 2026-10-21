@@ -1,11 +1,14 @@
 # Remote console ownership prerequisites
 
-The 0.19 development source privately tests Remote user-console transport and
-now adds protocol-25 ownership/schema foundations.
-The current qualified delivery remains immutable **0.18.0-alpha.2 /
-protocol 24**. The private proof alone did not enable a Remote terminal API
-or qualify complete public recovery. The later schema foundation below does
-not enable that API either.
+This records the chronological 0.19 private transport proof, protocol-25
+ownership/schema foundation and subsequent public integration. The private
+proof and schema foundation alone did not enable a Remote terminal API or
+qualify complete public recovery. The complete **0.19.0-alpha.1** slice is
+now independently qualified through installed SDK and actual packaged app;
+see [the operational contract](remote-user-consoles.md) and
+[immutable artifact identities](../setup.md#current-qualified-0190-alpha1-checkpoint).
+Earlier qualification statements below describe their recorded stage, not
+the current delivered capability.
 Sandbox work remains explicitly paused.
 
 Reuse Node 26 (MIT), Node-PTY 1.1 (MIT), OpenSSH (BSD) and the existing
@@ -229,10 +232,21 @@ console/core-MCP/plan cases pass in 12,530.99 ms**, including a deliberately
 invalid Local shell with valid Remote admission. Console unavailability
 remains explicit and cannot authorize a fallback.
 
-## Required public acceptance
+The corrected full source gate passes **548/548 in 416.23 s**, both type
+checks/build, zero-vulnerability source audit and **37/37 hidden source
+desktop workflows in 1.3 min**. The exact SDK then passes a fresh
+approved/rebuilt install, zero-vulnerability consumer audit, all four
+external types and actual installed Local/Remote owner/input/restart/
+CLI/TUI/no-replay/cleanup. All **37 actual packaged workflows pass in
+1.4 min**, with bundled Node/SSH Remote console original-owner/PID restart
+and ordinary stop verified independently. Local one/four-console RSS remains
+below the original Electron-only 600-MiB budget; combined runtime and user
+programs are reported separately in setup. All earlier artifacts stay frozen.
 
-Before advertising Remote user consoles, the authoritative service/SDK must
-add versioned immutable pinned-peer/owner/root/launch identities and a
+## Public acceptance contract
+
+Advertising Remote user consoles requires the authoritative service/SDK's
+versioned immutable pinned-peer/owner/root/launch identities and a
 schema-preserving migration, with intent before remote broker and PTY
 admission. Keys stay in the explicit profile backend, never journals. Local
 ownership must remain compatible and never accept Remote metadata as a Local

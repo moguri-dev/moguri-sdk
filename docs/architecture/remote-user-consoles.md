@@ -3,9 +3,11 @@
 Protocol/database 25 extends the existing Local console contract to explicitly
 mapped Remote projects. This is a user-controlled host console, not an agent
 tool, MCP grant, SendBox boundary or proof of detached-descendant containment.
-The 0.19 source is complete across service/SDK/CLI/OpenTUI/Ghostty; exact
-installed SDK and packaged-delivery acceptance remains separate until setup
-records its artifact identities.
+The qualified **0.19.0-alpha.1** delivery spans service/SDK/CLI/OpenTUI/Ghostty.
+Its exact independently installed SDK and actual packaged application are
+qualified; [setup](../setup.md#current-qualified-0190-alpha1-checkpoint)
+records immutable artifact identities and separate source/consumer/package
+evidence.
 
 Reuse Node 26 (MIT), Node-PTY (MIT), OpenSSH (BSD), TypeBox (MIT), the existing
 broker/engine/HMAC/framer, SDK generations and process-group stop helper.
@@ -116,4 +118,10 @@ unreopened-profile cleanup, admission cancellation, policy changes and exact
 partial cleanup retry, plus existing Local and core SSH/MCP/plan behavior.
 These use generated same-host SSH fixtures, not personal authorization,
 microphone, model weights, a VM probe or Linux release acceptance.
-No exact archive or notarization is implied by source checks alone.
+The exact installed SDK additionally passes approved install/rebuild, audit,
+all four external entrypoint types and actual Local/Remote terminal restart/
+input/CLI/TUI/no-replay/private cleanup. All **37 actual packaged workflows
+pass in 1.4 min**. Bundled-runtime qualification independently verifies the
+Remote owner/PID/restart/ordinary-stop boundary before the separate Local
+console memory cohort. Exact archives and DMG integrity are recorded in
+setup; ad-hoc signing is not notarization.
