@@ -81,6 +81,8 @@ test("reserved output binds its original session, actual role, canonical model a
       { ...f.checkpoint, role: "critic" as const },
       { ...f.checkpoint, modelId: "generated-different-selected-model" },
       { ...f.checkpoint, apiModelId: "generated-different-canonical-model" },
+      { ...f.checkpoint, providerId: "generated-different-provider" },
+      { ...f.checkpoint, turnId: "generated-different-owning-turn" },
       { ...f.checkpoint, inputEstimate: 11 },
       { ...f.checkpoint, maxOutputTokens: 19 },
     ]) assert.throws(() => f.budget.reservedOutput(f.session(), changed), { code: "budget_reservation" });

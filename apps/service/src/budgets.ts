@@ -210,11 +210,12 @@ export class BudgetRuntime {
     };
     return { event: recorded(entry, snapshot.profileId), maxTokens: low };
   }
-  reservedOutput(session: Session, input: { stepId: string; modelId: string; apiModelId: string; role: ModelRole; inputEstimate: number; maxOutputTokens: number }): number {
+  reservedOutput(session: Session, input: { stepId: string; turnId: string; modelId: string; providerId: string | null; apiModelId: string; role: ModelRole; inputEstimate: number; maxOutputTokens: number }): number {
     session = this.session(session.id);
     const snapshot = this.host.snapshot(), owner = this.owner(session), entry = snapshot.budgetEntries.find((entry) => entry.id === input.stepId);
     if (!entry || entry.sessionId !== session.id || entry.ownerSessionId !== owner.id || entry.env !== session.controls.env ||
-      input.role === "unknown" || entry.role !== input.role || entry.modelId !== input.modelId || entry.apiModelId !== input.apiModelId ||
+      input.role === "unknown" || entry.turnId !== input.turnId || entry.role !== input.role || entry.modelId !== input.modelId ||
+      entry.providerId !== input.providerId || entry.apiModelId !== input.apiModelId ||
       !integer(input.inputEstimate) || !integer(input.maxOutputTokens) || input.maxOutputTokens < 1 ||
       !integer(entry.inputEstimate) || !integer(entry.outputLimit) || entry.outputLimit < 1 ||
       input.inputEstimate > entry.inputEstimate || entry.outputLimit > input.maxOutputTokens ||

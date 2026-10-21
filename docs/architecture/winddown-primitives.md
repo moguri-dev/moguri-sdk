@@ -19,8 +19,8 @@ The private planner refuses a reduced envelope before recording it. All
 session/profile/global units include that hold; other roles/profiles cannot
 spend it again. Unknown usage/price and actual overages never become zero.
 
-`reservedOutput` verifies the original session/owner, role, selected/canonical
-model, env, input estimate and actual output capability. It resolves the
+`reservedOutput` verifies the original session/owner/turn, role, provider,
+selected/canonical model, env, input estimate and actual output capability. It resolves the
 **current authoritative session**, not an old caller snapshot. Exact cap
 equality can consume already held capacity without another reservation; a
 newly stricter cap below actual/held usage blocks that dispatch. Changed USD
@@ -74,15 +74,29 @@ This does not establish hostile external-writer or descendant containment.
 
 ## Qualification
 
-Run `node scripts/checkpoint-spike.mjs`. Full combined qualification and
-compatibility measurements are pending. The real generated three-role path
-already reports **126 tokens from three calls**, with billed USD unknown,
-inside a **279-token captured cap**. It proves bounded mechanics, not live
-provider pricing, quality, empirical model independence or production routing.
+Run `node scripts/checkpoint-spike.mjs`. The combined gate passes **42/42 in
+5.01 s**: 22 new checkpoint/budget/actual-transport checks plus the preserved
+20 Single/Cascade/Critique transport checks. Both type checks/build pass.
+The final expanded budget/profile/candidate/artifact/routing gate passes
+**93/93 in 16.25 s**, including explicit provider/owning-turn rebinding denial.
+Six hidden source desktop artifact/budget/candidate workflows pass
+in **12.1 s**.
+
+The real generated three-role path reports **126 tokens from three calls**,
+with billed USD unknown, inside a **279-token captured cap**. In the spike its
+complete accepted-work/checkpoint/restart path takes **1.42 s**. This proves
+bounded mechanics, not live provider pricing, quality, empirical model
+independence or production routing.
+
+A temporary packed 0.23 SDK independently installs with explicit script
+approval/rebuild, four entrypoint types, actual existing Local/SSH/runtime
+contracts and zero audit findings. Source audit is also zero. This is
+compatibility, not a new immutable SDK archive or actual 0.23 packaged app.
+The qualified 0.22 artifacts were not rebuilt or repacked.
 
 Retained red evidence includes a fixture selecting the wrong project-service
 property, stale SDK revision assumptions, mutable caller project retargeting,
-trusting an old session cap, and a fixture supplying an unretained context
+trusting an old session cap, provider/turn reassignment, and a fixture supplying an unretained context
 digest. Those failures are not passes; no production policy was weakened.
 
 Production compound worker ownership, a durable wind-down lifecycle and

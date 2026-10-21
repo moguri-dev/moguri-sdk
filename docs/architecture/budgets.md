@@ -151,8 +151,14 @@ denied, unavailable or failed checkpoint commits are not successes.
 
 The future kupo scheduler must reserve wind-down capacity before dispatching
 normal legs and use the same role-aware admission for final validation and
-revision. This contract does not claim kupo or delegated decision providers
+revision. This contract does not claim compound kupo or delegated decision providers
 implemented. Native Sandbox and Remote side-panel qualification are independent.
+
+The 0.23 [private checkpoint prerequisite](winddown-primitives.md) now proves
+exact pre-reserved dispatch through this same ledger and actual reviewed
+multi-file Git mechanics. Its generated three-role path stays within the
+captured cap and cannot replay a recorded start. This is not the production
+compound scheduler, a durable unused-envelope outcome or public finite kupo.
 
 ## Current executable scope
 

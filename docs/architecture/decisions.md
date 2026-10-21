@@ -261,6 +261,14 @@ Cascade, independent critique/revision and their candidate/ledger integration,
 calibrated thresholds and reserved wind-down remain incomplete; this is not
 completion of D11 or its full Phase 0 quality evaluation.
 
+The 0.23 [private checkpoint gate](winddown-primitives.md) additionally proves
+pre-reserved role dispatch at exact current caps, stale-session/price rejection,
+no borrowed profile capacity and real accepted-work Git mechanics. It passes
+42 generated checks, with 93 expanded compatibility cases. The actual
+three-role path reports 126 tokens inside its captured 279-token cap.
+Production compound ownership/wind-down recovery and public admission remain
+gated; these are not live quality, pricing or automatic-approval results.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.

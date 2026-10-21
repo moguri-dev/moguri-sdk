@@ -43,7 +43,7 @@ export function windDownBudgetProbe(control: ControlPlane, sessionId: string) {
     if (!entry || entry.turnId === null) throw new MoguriError("winddown_probe_reservation", "Choose this exact generated role's original reservation.");
     const role = entry.role, owningTurn = entry.turnId;
     if (role !== "router" && role !== "solver" && role !== "critic" && role !== "revision" && role !== "checkpoint") throw new MoguriError("winddown_probe_role", "That role has no generated transport.");
-    const output = control.platform.budgets.reservedOutput(current, { stepId, role, modelId: entry.modelId, apiModelId: prepared.model.id,
+    const output = control.platform.budgets.reservedOutput(current, { stepId, turnId: owningTurn, role, modelId: entry.modelId, providerId: prepared.model.provider, apiModelId: prepared.model.id,
       inputEstimate: spec.estimatedTokens, maxOutputTokens: request.maxOutputTokens });
     if (role === "checkpoint" && control.snapshot().budgetEntries.some((other) => other.id !== stepId && other.turnId === entry.turnId && other.status !== "settled")) throw new MoguriError("winddown_probe_unsettled", "Normal work has unconfirmed usage. Its hold was preserved; no extra finishing model was dispatched.");
     signal.throwIfAborted();
