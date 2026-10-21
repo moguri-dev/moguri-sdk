@@ -1,8 +1,8 @@
 import {
-  CandidateDocumentSchema, CandidateOperationResultSchema, MoguriError, parse, sameCandidateRoot,
+  CandidateDocumentSchema, CandidateOperationResultSchema, MoguriError, parse, sameCandidateRoot, sameCandidatePatch,
   type CandidateApplyPreview, type CandidateCommand, type CandidateDocument, type CandidateOperationResult, type CandidatePatch,
   type CandidateQuery, type CandidateRecord, type CandidateResponse, type CandidateRoot, type CandidateStagePreview,
-  type ArtifactSource, type CapabilityJob, type CommandResult, type EventInput, type RetainedArtifact, type Session, type Snapshot,
+  type ArtifactSource, type CapabilityJob, type CommandResult, type EventInput, type RetainedArtifact, type Session, type Snapshot, type CandidateRoleProposalRead,
 } from "../../../packages/protocol/src/index.ts";
 import { candidateBases, candidateBytes, candidateDigest, candidateDocument, candidateFileBase, candidatePatch } from "./candidate-files.ts";
 import { digest, EventStore } from "./store.ts";
@@ -27,6 +27,7 @@ interface Host {
   artifact(session: Session, text: string, summary: string, patch: CandidatePatch, sources?: ArtifactSource[]): RetainedArtifact;
   localRootBusy(root: string, exceptJobId?: string): boolean;
   closingProject(id: string): boolean;
+  roleProposal(id: string): CandidateRoleProposalRead;
   wake(): void;
   job(kind: string, projectId: string, sessionId: string, workspaceId: string | null,
     execute: (signal: AbortSignal, progress: (text: string) => void, jobId: string) => Promise<CandidateOperationResult>,
@@ -114,15 +115,21 @@ export class CandidateRuntime {
     current();
     return { session, source, stage, authorityDigest, current, assert };
   }
-  private async preview(sessionId: string, stageWorkspaceId: string, value: CandidatePatch, signal: AbortSignal): Promise<{ preview: CandidateStagePreview; context: CandidateContext }> {
-    const patch = candidatePatch(value), context = await this.context(sessionId, stageWorkspaceId, patch.edits.map(({ path }) => path), signal, true);
+  private async preview(sessionId: string, stageWorkspaceId: string, value: CandidatePatch, signal: AbortSignal, roleSequenceId?: string): Promise<{ preview: CandidateStagePreview; context: CandidateContext; roleProposal?: CandidateRoleProposalRead }> {
+    const roleProposal = roleSequenceId ? this.host.roleProposal(roleSequenceId) : undefined, patch = candidatePatch(value);
+    if (roleProposal && !sameCandidatePatch(roleProposal.document.patch, patch)) throw new MoguriError("role_proposal_source", "The summary or ordered patch changed from the exact final role. Use an explicitly unverified import; no model attribution was adopted.", 409);
+    const context = await this.context(sessionId, stageWorkspaceId, patch.edits.map(({ path }) => path), signal, true);
+    if (roleProposal && (!sameCandidateRoot(roleProposal.document.source, context.source) || !sameCandidateRoot(roleProposal.document.stage, context.stage))) throw new MoguriError("role_proposal_source", "This final role belongs to different original source/staging roots. No compatible root was invented.", 409);
     await candidateBases(context.source.root, patch);
     for (const edit of patch.edits) await candidateFileBase(context.stage.root, edit.path);
     await context.assert();
-    const document: CandidateDocument = { format: "moguri-candidate", version: 1, source: context.source, stage: context.stage, authorityDigest: context.authorityDigest, patch };
+    const document: CandidateDocument = { format: "moguri-candidate", version: 1, source: context.source, stage: context.stage, authorityDigest: context.authorityDigest, patch,
+      ...(roleProposal ? { roleOrigin: roleProposal.document.roleOrigin } : {}) };
     const text = JSON.stringify(document);
     if (Buffer.byteLength(text) > 64 * 1024) throw new MoguriError("candidate_limit", "The exact versioned candidate document exceeds 64 KiB. No content was truncated.", 409);
-    return { context, preview: { document, documentDigest: digest(text), digest: candidateDigest(text) } };
+    return { context, preview: { document, documentDigest: digest(text), digest: candidateDigest(text),
+      ...(roleProposal ? { warning: "Staging retains a separate copy of this role's origin, original input and raw result. Deleting the source role report will not erase this candidate copy. Provenance is not quality or acceptance; source application needs its own fresh review." } : {}) },
+      ...(roleProposal ? { roleProposal } : {}) };
   }
   async generationSource(sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput, signal: AbortSignal): Promise<CandidateContext & { files: Array<{ path: string; baseDigest: string; text: string | null }> }> {
     input = structuredClone(input);
@@ -150,7 +157,8 @@ export class CandidateRuntime {
     return { preview: { ...body, digest: digest(JSON.stringify(body)) }, context, document };
   }
   async query(query: CandidateQuery): Promise<CandidateResponse> {
-    if (query.type === "candidate.preview") return { type: query.type, preview: (await this.preview(query.sessionId, query.stageWorkspaceId, query.patch, AbortSignal.timeout(15_000))).preview };
+    if (query.type === "candidate.role.proposal") return this.host.roleProposal(query.sequenceId);
+    if (query.type === "candidate.preview") return { type: query.type, preview: (await this.preview(query.sessionId, query.stageWorkspaceId, query.patch, AbortSignal.timeout(15_000), query.roleSequenceId)).preview };
     if (query.type === "candidate.apply.preview") return { type: query.type, preview: (await this.applyPreview(query.candidateId, query.sessionId, AbortSignal.timeout(15_000))).preview };
     const candidate = this.record(query.candidateId), jobs = this.host.snapshot().jobs;
     return { type: "candidate.read", candidate, document: this.document(candidate), stageJob: jobs.find((job) => job.id === candidate.stageIntent.jobId) ?? null,
@@ -227,28 +235,28 @@ export class CandidateRuntime {
     }
     let result: CommandResult | undefined;
     if (command.type === "candidate.stage") {
-      const { preview, context } = await this.preview(command.sessionId, command.stageWorkspaceId, command.patch, AbortSignal.timeout(15_000));
+      const generationId = "generationId" in command ? command.generationId : undefined, roleSequenceId = "roleSequenceId" in command ? command.roleSequenceId : undefined;
+      const { preview, context, roleProposal } = await this.preview(command.sessionId, command.stageWorkspaceId, command.patch, AbortSignal.timeout(15_000), roleSequenceId);
       if (preview.digest !== command.expectedDigest) throw new MoguriError("candidate_review", "Candidate preview changed. Review exact roots, bases and proposed bytes again.", 409);
       let sources: ArtifactSource[] | undefined;
-      if (command.generationId) {
-        const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === command.generationId);
-        const origin = this.host.snapshot().artifacts.find((artifact) => artifact.id === command.generationId);
+      if (generationId) {
+        const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === generationId);
+        const origin = this.host.snapshot().artifacts.find((artifact) => artifact.id === generationId);
         if (!generation || generation.status !== "proposed" || !generation.proposalDocumentDigest || !origin || origin.contentDigest !== generation.proposalDocumentDigest ||
           !sameCandidateRoot(generation.source, preview.document.source) || !sameCandidateRoot(generation.stage, preview.document.stage)) throw new MoguriError("candidate_generation_source", "Choose the retained proposed generation for these exact captured roots. No model provenance was invented.", 409);
         const generated = parse(CandidateDocumentSchema, JSON.parse(this.store.blob(generation.proposalDocumentDigest)));
-        const patch = preview.document.patch, same = generated.patch.summary === patch.summary && generated.patch.edits.length === patch.edits.length &&
-          generated.patch.edits.every((edit, index) => { const actual = patch.edits[index]; return actual && actual.path === edit.path && actual.baseDigest === edit.baseDigest && actual.text === edit.text; });
-        if (!same ||
+        if (!sameCandidatePatch(generated.patch, preview.document.patch) ||
           !origin.sources.some((source) => source.actor === "model" && source.modelId === generation.modelId && source.messageId === generation.stepId)) throw new MoguriError("candidate_generation_source", "The patch changed from its canonical model result. Stage it as an explicitly unverified import, not another model's output.", 409);
         sources = origin.sources;
       }
+      if (roleProposal) sources = [roleProposal.modelSource];
       const text = JSON.stringify(preview.document), artifact = this.host.artifact(context.session, text, preview.document.patch.summary, preview.document.patch, sources), id = artifact.id;
       const now = new Date().toISOString(); context.current();
       this.host.job("candidate.stage", artifact.projectId!, command.sessionId, command.stageWorkspaceId,
         (signal, progress, jobId) => this.files(id, "stage", command.sessionId, signal, progress, jobId),
         (job) => {
           const candidate: CandidateRecord = { version: 1, id, profileId: this.host.snapshot().profileId, projectId: artifact.projectId!, originSessionId: command.sessionId,
-            ...(command.generationId ? { generationId: command.generationId } : {}),
+            ...(generationId ? { generationId } : {}), ...(preview.document.roleOrigin ? { roleOrigin: preview.document.roleOrigin } : {}),
             source: preview.document.source, stage: preview.document.stage, documentDigest: artifact.contentDigest, proposalDigest: preview.digest, paths: preview.document.patch.edits.map(({ path }) => path),
             revision: 0, status: "staging", createdAt: now, updatedAt: now, stageIntent: { commandId: intent.id, commandDigest: intent.digest, jobId: job.id, sessionId: command.sessionId },
             applyIntent: null, acceptance: null, stagedPaths: [], stageAttemptedPaths: [], attemptedPaths: [], appliedPaths: [], stopRequested: false, stageResultDigest: null, applyResultDigest: null, diagnostic: null };

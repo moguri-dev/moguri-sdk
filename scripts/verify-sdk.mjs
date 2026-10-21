@@ -24,7 +24,7 @@ try {
   const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
-  const retainedRoles = installedProtocol >= 32 ? JSON.parse(execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/role-sequence-export.ts"), join(temporary, "generated-retained-role-state")], { encoding: "utf8" })) : null;
+  const retainedRoles = installedProtocol >= 32 ? JSON.parse(execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/role-sequence-export.ts"), join(temporary, "generated-retained-role-state"), String(installedProtocol)], { encoding: "utf8" })) : null;
   if (process.platform === "darwin") {
     const { createSshTarget } = await import("../tests/fixtures/ssh-target.ts");
     const directory = join(temporary, "generated-ssh"); await mkdir(directory, { mode: 0o700 });
@@ -72,6 +72,12 @@ try {
       const roleRead=await sdk.roleSequences.read("generated-sequence",1);
       const roleSequence:RoleSequenceRecord=roleRead.sequence;void roleSequence.steps[0]?.planId;void roleRead.step?.result;
       void sdk.roleSequences.list();void sdk.getState().snapshot?.roleSequences;
+      ` : ""}
+      ${installedProtocol >= 33 ? `
+      const roleProposal=await sdk.candidates.roleProposal("generated-sequence");void roleProposal.document.roleOrigin.roleInputDigest;
+      const roleReference={roleSequenceId:"generated-sequence"};
+      const rolePreview=(await sdk.candidates.preview("generated-source","generated-stage",patch,roleReference)).preview;void rolePreview.warning;
+      await sdk.candidates.stage("generated-source","generated-stage",patch,rolePreview.digest,roleReference);
       ` : ""}
       ${installedMajor > 0 || installedMinor >= 26 ? `
       const embedded=await createRuntime({stateDir:"/generated/explicit-embedding"});
@@ -715,11 +721,12 @@ try {
         const {qualifyOwnedSequence}=await import(${JSON.stringify(new URL("./qualify-owned-sequence.mjs", import.meta.url).href)});
         const ownedProof=await qualifyOwnedSequence({sdk:generationSdk,controller:generationRuntime.controller,node:process.execPath,
           cli:${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},directory:join(root,"generated-installed-owned-roles"),
-          stateDir:ownedOptions.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests});
+          stateDir:ownedOptions.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests,proposalOrigin:PROTOCOL_VERSION>=33});
         generationSdk.disconnect();await generationRuntime.close();generationRuntime=await createRuntime(ownedOptions);
         generationSdk=await connectMoguri({stateDir:ownedOptions.stateDir,autoStart:false});
         await ownedProof.verifyRecovery(generationSdk,generationRuntime.controller);
         console.log("Actual installed controller/worker owns three fully planned, bounded, independently retained roles with explicit untrusted prior-result context, shared CLI/TUI/SDK reads, source deletion/reopen and lost-receipt/deletion-intent replay refusal. No public compound or family-quality readiness.");
+        if(PROTOCOL_VERSION>=33)console.log("Actual installed SDK/CLI/shared final-role proposals preserve exact review-bound origin, separate staging/application, source-role deletion, independent raw-copy/export5/reopen and actual-user acceptance without another model.");
         ` : ""}
       }finally{generationSdk?.disconnect();await generationRuntime?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
     }

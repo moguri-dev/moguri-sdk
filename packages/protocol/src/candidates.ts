@@ -16,6 +16,14 @@ export const CandidatePatchSchema = object({
   edits: Type.Array(object({ path, baseDigest: Type.Union([hash, Type.Literal("absent")]), text: Type.String({ maxLength: 128 * 1024 }) }), { minItems: 1, maxItems: 20 }),
 });
 export type CandidatePatch = Static<typeof CandidatePatchSchema>;
+export const CandidateRoleOriginSchema = object({
+  sequenceId: id, sequenceInputDigest: hash, roleInputDigest: hash, resultDigest: hash, observationEventId: id,
+  roleIndex: Type.Integer({ minimum: 0, maximum: 31 }),
+  role: Type.Union([Type.Literal("draft"), Type.Literal("revision"), Type.Literal("escalation")]),
+  stepId: id, modelId: id, providerId: id, apiModelId: id,
+});
+export type CandidateRoleOrigin = Static<typeof CandidateRoleOriginSchema>;
+export interface CandidateRoleReference { roleSequenceId: string }
 export const CandidateRootSchema = object({
   env: Type.Literal("Local"), projectId: id, workspaceId: Type.Union([id, Type.Null()]),
   root: path, device: unsigned, inode: unsigned, gitCommonDir: path, branch: Type.String({ minLength: 1, maxLength: 200 }),
@@ -25,6 +33,7 @@ export type CandidateRoot = Static<typeof CandidateRootSchema>;
 export const CandidateDocumentSchema = object({
   format: Type.Literal("moguri-candidate"), version: Type.Literal(1),
   source: CandidateRootSchema, stage: CandidateRootSchema, authorityDigest: hash, patch: CandidatePatchSchema,
+  roleOrigin: Type.Optional(CandidateRoleOriginSchema),
 });
 export type CandidateDocument = Static<typeof CandidateDocumentSchema>;
 const intent = object({ commandId: id, commandDigest: hash, jobId: id, sessionId: Type.Optional(id) });
@@ -34,7 +43,7 @@ export const CandidateJobIntentSchema = object({
 export type CandidateJobIntent = Static<typeof CandidateJobIntentSchema>;
 export const CandidateRecordSchema = object({
   version: Type.Literal(1), id, profileId: id, projectId: id, originSessionId: Type.Union([id, Type.Null()]),
-  generationId: Type.Optional(id),
+  generationId: Type.Optional(id), roleOrigin: Type.Optional(CandidateRoleOriginSchema),
   source: CandidateRootSchema, stage: CandidateRootSchema, documentDigest: hash, proposalDigest: hash,
   paths: Type.Array(path, { minItems: 1, maxItems: 20, uniqueItems: true }),
   revision: Type.Integer({ minimum: 0 }), status: Type.Union([
@@ -56,6 +65,10 @@ const prefix = (before: readonly string[], after: readonly string[]) => before.l
 const sameIntent = (a: CandidateRecord["stageIntent"], b: CandidateRecord["stageIntent"]) =>
   a.commandId === b.commandId && a.commandDigest === b.commandDigest && a.jobId === b.jobId && (a.sessionId ?? null) === (b.sessionId ?? null);
 export const sameCandidateRoot = (a: CandidateRoot, b: CandidateRoot) => (["env", "projectId", "workspaceId", "root", "device", "inode", "gitCommonDir", "branch", "head"] as const).every((key) => a[key] === b[key]);
+export const sameCandidatePatch = (a: CandidatePatch, b: CandidatePatch) => a.summary === b.summary && a.edits.length === b.edits.length &&
+  a.edits.every((edit, index) => { const actual = b.edits[index]; return actual && actual.path === edit.path && actual.baseDigest === edit.baseDigest && actual.text === edit.text; });
+export const sameCandidateRoleOrigin = (a: CandidateRoleOrigin | undefined, b: CandidateRoleOrigin | undefined) => a === undefined ? b === undefined :
+  b !== undefined && (["sequenceId", "sequenceInputDigest", "roleInputDigest", "resultDigest", "observationEventId", "roleIndex", "role", "stepId", "modelId", "providerId", "apiModelId"] as const).every((key) => a[key] === b[key]);
 const validTime = (value: string) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 const relativePath = (value: string) => value.isWellFormed() && !value.startsWith("/") && !/[\\\u0000-\u001f\u007f]/.test(value) && !value.split("/").some((part) => !part || part === "." || part === "..");
 const transitions: Readonly<Record<CandidateRecord["status"], readonly CandidateRecord["status"][]>> = {
@@ -76,6 +89,7 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
     !prefix(next.stagedPaths, next.paths) || !prefix(next.attemptedPaths, next.paths) || !prefix(next.appliedPaths, next.attemptedPaths) ||
     next.stageAttemptedPaths && (!prefix(next.stageAttemptedPaths, next.paths) || !prefix(next.stagedPaths, next.stageAttemptedPaths))) corrupt("Candidate path/effect ordering is invalid or contains aliases.");
   if (next.stageIntent.sessionId && next.stageIntent.sessionId !== next.originSessionId) corrupt("Candidate staging lost its actual origin-session owner.");
+  if (next.generationId && next.roleOrigin || next.roleOrigin?.sequenceId === next.id) corrupt("Candidate model origin must be one exact independent source, not itself or conflicting assertions.");
   if (!validTime(next.createdAt) || !validTime(next.updatedAt) || next.acceptance && !validTime(next.acceptance.at)) corrupt("Candidate timestamps are not exact valid UTC observations.");
   if (["staged", "applying", "applied", "rejected"].includes(next.status) && (next.stagedPaths.length !== next.paths.length || next.stageResultDigest === null)) corrupt("Candidate readiness requires the complete retained stage result.");
   if (next.status === "staging" && next.stageResultDigest !== null ||
@@ -99,6 +113,7 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
     const immutable = ["version", "id", "profileId", "projectId", "originSessionId", "generationId", "documentDigest", "proposalDigest", "createdAt"] as const;
     if (next.revision !== previous.revision + 1 || immutable.some((key) => next[key] !== previous[key]) || !sameCandidateRoot(previous.source, source) || !sameCandidateRoot(previous.stage, stage) ||
       !sameIntent(previous.stageIntent, next.stageIntent) || JSON.stringify(previous.paths) !== JSON.stringify(next.paths) ||
+      !sameCandidateRoleOrigin(previous.roleOrigin, next.roleOrigin) ||
       !transitions[previous.status].includes(next.status)) corrupt("Candidate revision, original ownership/base or lifecycle was changed/replayed.");
     if (!prefix(previous.stagedPaths, next.stagedPaths) || !prefix(previous.attemptedPaths, next.attemptedPaths) || !prefix(previous.appliedPaths, next.appliedPaths) ||
       previous.stageAttemptedPaths && (!next.stageAttemptedPaths || !prefix(previous.stageAttemptedPaths, next.stageAttemptedPaths)) ||
@@ -112,7 +127,7 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
   return structuredClone(next);
 }
 
-export const CandidateStagePreviewSchema = object({ document: CandidateDocumentSchema, documentDigest: hash, digest: hash });
+export const CandidateStagePreviewSchema = object({ document: CandidateDocumentSchema, documentDigest: hash, digest: hash, warning: Type.Optional(Type.String({ minLength: 1, maxLength: 1000 })) });
 export type CandidateStagePreview = Static<typeof CandidateStagePreviewSchema>;
 export const CandidateApplyPreviewSchema = object({
   candidateId: id, sessionId: id, revision: Type.Integer({ minimum: 0 }), source: CandidateRootSchema, stage: CandidateRootSchema,
@@ -128,12 +143,14 @@ export type CandidateOperationResult = Static<typeof CandidateOperationResultSch
 const stageInput = { sessionId: id, stageWorkspaceId: id, patch: CandidatePatchSchema };
 export const CandidateCommandSchema = Type.Union([
   object({ type: Type.Literal("candidate.stage"), ...stageInput, expectedDigest: hash, generationId: Type.Optional(id), confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("candidate.stage"), ...stageInput, roleSequenceId: id, expectedDigest: hash, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("candidate.apply"), candidateId: id, sessionId: id, expectedRevision: Type.Integer({ minimum: 0 }), expectedDigest: hash, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("candidate.reject"), candidateId: id, expectedRevision: Type.Integer({ minimum: 0 }), confirm: Type.Literal(true) }),
 ]);
 export type CandidateCommand = Static<typeof CandidateCommandSchema>;
 export const CandidateQuerySchema = Type.Union([
-  object({ type: Type.Literal("candidate.preview"), ...stageInput }),
+  object({ type: Type.Literal("candidate.preview"), ...stageInput, roleSequenceId: Type.Optional(id) }),
+  object({ type: Type.Literal("candidate.role.proposal"), sequenceId: id }),
   object({ type: Type.Literal("candidate.apply.preview"), candidateId: id, sessionId: id }),
   object({ type: Type.Literal("candidate.read"), candidateId: id }),
 ]);
@@ -141,7 +158,13 @@ export type CandidateQuery = Static<typeof CandidateQuerySchema>;
 export const isCandidateCommand = (value: unknown): value is CandidateCommand => Value.Check(CandidateCommandSchema, value);
 export const isCandidateQuery = (value: unknown): value is CandidateQuery => Value.Check(CandidateQuerySchema, value);
 export type CandidateRead = { type: "candidate.read"; candidate: CandidateRecord; document: CandidateDocument; stageJob: CapabilityJob | null; applyJob: CapabilityJob | null };
+export interface CandidateRoleProposalRead {
+  type: "candidate.role.proposal"; document: CandidateDocument & { roleOrigin: CandidateRoleOrigin };
+  sourceFiles: Array<{ path: string; baseDigest: string; text: string | null }>;
+  modelSource: import("./artifacts.ts").ArtifactSource;
+}
 export type CandidateResponse =
   | { type: "candidate.preview"; preview: CandidateStagePreview }
   | { type: "candidate.apply.preview"; preview: CandidateApplyPreview }
+  | CandidateRoleProposalRead
   | CandidateRead;

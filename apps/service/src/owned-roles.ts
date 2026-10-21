@@ -2,9 +2,9 @@ import type { Message } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import {
   CandidateGenerationDocumentSchema, CandidateGenerationInputSchema, MoguriError, parse, RoleSequenceStepSchema, sameCandidateRoot, successfulRoleEntry,
-  type ModelInfo, type RoleSequenceRecord, type Session, type Snapshot, type RetainedArtifact,
+  type ModelInfo, type RoleSequenceRecord, type Session, type Snapshot, type RetainedArtifact, type StoredEvent, type CandidateRoleProposalRead,
 } from "../../../packages/protocol/src/index.ts";
-import type { CandidateGenerations } from "./candidate-generations.ts";
+import { candidateProposalDocument, type CandidateGenerations } from "./candidate-generations.ts";
 import type { CandidateRuntime } from "./candidates.ts";
 import { estimateModelContext, validateContextSize } from "./model-controls.ts";
 import type { RoleSequences } from "./role-sequences.ts";
@@ -48,6 +48,7 @@ The controller alone chooses the concrete model and next boundary. Your response
 
 interface Host {
   snapshot(): Snapshot;
+  events(): StoredEvent[];
   generations: CandidateGenerations; candidates: CandidateRuntime; roles: RoleSequences;
   prompt(session: Session): string;
   globalLimit(): unknown;
@@ -170,5 +171,22 @@ export class OwnedRoles {
       return message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
     });
     return ownedRoleContext(document, index, results);
+  }
+  proposal(id: string): CandidateRoleProposalRead {
+    const record = this.record(id);
+    if (record.status !== "completed" || record.stopRequested) throw new MoguriError("role_proposal_unready", "Only a completed retained role sequence can supply a code proposal. No partial/stopped output or acceptance was inferred.", 409);
+    const index = record.steps.findLastIndex((step) => step.state === "recorded"), step = record.steps[index];
+    if (!step || step.role !== "draft" && step.role !== "revision" && step.role !== "escalation") throw new MoguriError("role_proposal_role", "The final actual role is not a draft, revision or escalation. Critic/router data cannot become a code proposer.", 409);
+    if (!step.stepId || !step.inputDigest || !step.resultDigest || !step.providerId ||
+      !successfulRoleEntry(this.host.snapshot().budgetEntries.find((entry) => entry.id === step.stepId))) throw new MoguriError("role_proposal_usage", "The exact final model/context/result lacks successful known bounded accounting. No code proposal was inferred.", 409);
+    const input = this.document(record), raw = assistantMessage(JSON.parse(this.store.blob(step.resultDigest)));
+    const observation = this.host.events().find((event) => event.event_type === "role.sequence_recorded" && event.payload.sequence.id === id &&
+      event.payload.sequence.steps[index]?.resultDigest === step.resultDigest && event.payload.sequence.steps[index]?.state === "recorded");
+    if (!observation) throw new MoguriError("role_proposal_source", "The original retained role observation is missing. No source event or model provenance was invented.", 409);
+    const roleOrigin = { sequenceId: record.id, sequenceInputDigest: record.inputDigest, roleInputDigest: step.inputDigest, resultDigest: step.resultDigest,
+      observationEventId: observation.id, roleIndex: index, role: step.role, stepId: step.stepId, modelId: step.modelId, providerId: step.providerId, apiModelId: step.apiModelId };
+    return { type: "candidate.role.proposal", document: { ...candidateProposalDocument(input.base, raw, "role_proposal"), roleOrigin },
+      sourceFiles: structuredClone(input.base.files),
+      modelSource: { eventId: observation.id, sessionId: record.sessionId, messageId: step.stepId, actor: "model", modelId: step.modelId, outcome: "unaccepted-role-proposal", contentDigest: step.resultDigest } };
   }
 }

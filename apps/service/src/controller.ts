@@ -201,6 +201,7 @@ export class ControlPlane extends EventEmitter {
       compactionCommand: (command, finish) => this.compactionCommand(command, finish),
       generationQuery: (query) => this.generations.query(query),
       generationCommand: (command, finish) => this.generations.execute(command, finish),
+      roleProposal: (id) => this.ownedRoles.proposal(id),
       planSaveQuery: (query) => this.planSaveQuery(query),
       planSaveCommand: (command, finish) => this.planSaveCommand(command, finish),
       validateControls: (controls) => this.available(controls),
@@ -255,7 +256,7 @@ export class ControlPlane extends EventEmitter {
       },
     });
     this.ownedRoles = new OwnedRoles(store, {
-      snapshot: () => this.snapshot(), generations: this.generations, candidates: this.platform.candidates, roles: this.platform.roles,
+      snapshot: () => this.snapshot(), events: () => this.events(0), generations: this.generations, candidates: this.platform.candidates, roles: this.platform.roles,
       prompt: (session) => this.platform.prompt(session), globalLimit: () => this.profileHooks?.globalBudget().limit ?? null,
       idle: (session) => this.generationIdle(session),
       artifact: (session, text, task) => this.platform.artifacts.generation(session, text, task, "roles"),

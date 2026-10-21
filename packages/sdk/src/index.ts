@@ -1,6 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -164,8 +164,10 @@ export class MoguriSdk extends TransportClient {
       }
       throw new ClientError("candidate_generation_timeout", "Generation has not settled. Inspect or explicitly stop its original owned operation; no success was inferred.");
     },
-    preview: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch) => this.query({ type: "candidate.preview", sessionId, stageWorkspaceId, patch }),
-    stage: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch, expectedDigest: string, generationId?: string) => this.command({ type: "candidate.stage", sessionId, stageWorkspaceId, patch, expectedDigest, ...(generationId === undefined ? {} : { generationId }), confirm: true }),
+    roleProposal: (sequenceId: string) => this.query({ type: "candidate.role.proposal", sequenceId }),
+    preview: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch, origin?: CandidateRoleReference) => this.query({ type: "candidate.preview", sessionId, stageWorkspaceId, patch, ...(origin ?? {}) }),
+    stage: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch, expectedDigest: string, origin?: string | CandidateRoleReference) => this.command({ type: "candidate.stage", sessionId, stageWorkspaceId, patch, expectedDigest,
+      ...(typeof origin === "string" ? { generationId: origin } : origin ?? {}), confirm: true }),
     read: (candidateId: string) => this.query({ type: "candidate.read", candidateId }),
     applyPreview: (candidateId: string, sessionId: string) => this.query({ type: "candidate.apply.preview", candidateId, sessionId }),
     apply: (candidateId: string, sessionId: string, expectedRevision: number, expectedDigest: string) => this.command({ type: "candidate.apply", candidateId, sessionId, expectedRevision, expectedDigest, confirm: true }),

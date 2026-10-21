@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  CandidateDocumentSchema, CandidatePatchSchema, MoguriError, parse, sameCandidateRoot,
+  CandidateDocumentSchema, CandidatePatchSchema, MoguriError, parse, sameCandidateRoot, sameCandidateRoleOrigin,
   type CandidateDocument, type CandidatePatch, type CandidateRecord,
 } from "../../../packages/protocol/src/index.ts";
 import { isProtectedProjectPath, readProjectFile, scopedPath } from "./files.ts";
@@ -39,7 +39,7 @@ export function candidateDocument(text: string, record: CandidateRecord): Candid
   let value: unknown;
   try { value = JSON.parse(text); } catch (error) { if (error instanceof SyntaxError) throw new MoguriError("candidate_document", "The retained candidate document is not valid versioned JSON.", 409); throw error; }
   const document = parse(CandidateDocumentSchema, value), patch = candidatePatch(document.patch);
-  if (!sameCandidateRoot(document.source, record.source) || !sameCandidateRoot(document.stage, record.stage) ||
+  if (!sameCandidateRoot(document.source, record.source) || !sameCandidateRoot(document.stage, record.stage) || !sameCandidateRoleOrigin(document.roleOrigin, record.roleOrigin) ||
     JSON.stringify(patch.edits.map(({ path }) => path)) !== JSON.stringify(record.paths)) throw new MoguriError("candidate_document", "Retained candidate roots or ordered paths disagree with their original record.", 409);
   return { ...document, patch };
 }

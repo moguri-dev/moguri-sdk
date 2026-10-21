@@ -306,6 +306,14 @@ database, model loop or outward SDK creator is introduced. Pattern/pool
 selection, genuine family/quality, candidate decisions and actually authorized
 accepted-work wind-down remain separate gates; finite kupo stays blocked.
 
+Source 0.27/protocol 33 adds [canonical final-role proposal origin](role-proposals.md),
+not public pattern admission. Read-only resolution verifies the actual final
+proposer/input/result/known ledger, while exact staging preview binds its
+self-contained origin. Independent candidate grants retain the original raw
+inputs/results through source-role deletion; source application still records
+separate actual-user acceptance. The additive marker preserves old state and
+version-5 exports disclose the new copy. No quality or Git authority follows.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.

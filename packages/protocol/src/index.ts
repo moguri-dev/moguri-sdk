@@ -35,7 +35,7 @@ import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedg
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 32;
+export const PROTOCOL_VERSION = 33;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -510,6 +510,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (candidate.profileId !== profileId || candidate.projectId !== event.project_id ||
         event.session_id || event.artifact_id !== candidate.id || roleSequences.has(candidate.id) || !artifact || artifact.kind !== "report" || artifact.contentDigest !== candidate.documentDigest) {
         throw new MoguriError("candidate_corrupt", "Candidate metadata is invalid or outside its exact independent artifact/profile. State was preserved.", 409);
+      }
+      const origin = candidate.roleOrigin;
+      if (origin && !artifact.sources.some((source) => source.actor === "model" && source.eventId === origin.observationEventId &&
+        source.modelId === origin.modelId && source.messageId === origin.stepId && source.contentDigest === origin.resultDigest)) {
+        throw new MoguriError("candidate_corrupt", "Candidate role provenance lost its independently retained exact model observation.", 409);
       }
       const validated = projectCandidateRecord(candidates.get(candidate.id), candidate);
       const intents = [validated.stageIntent, validated.applyIntent].filter((intent) => intent !== null);

@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-export async function qualifyOwnedSequence({ sdk, controller, node, cli, directory, stateDir, modelId, setReply, requests }) {
+export async function qualifyOwnedSequence({ sdk, controller, node, cli, directory, stateDir, modelId, setReply, requests, proposalOrigin = false }) {
   await mkdir(directory);
   const original = "Generated installed owned-role source.\n", marker = "GENERATED_INSTALLED_OWNED_ROLE_DATA_NOT_ACCEPTANCE";
   await writeFile(join(directory, "fixture.txt"), original);
@@ -18,8 +18,11 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
   const input = { sessionId: source.id, stageWorkspaceId: workspace.id, timeoutMs: 20_000,
     input: { task: "Generated installed bounded roles.", files: [{ path: "fixture.txt", baseDigest: createHash("sha256").update(original).digest("hex") }] },
     roles: ["draft", "critic", "revision"].map((role) => ({ role, modelId, instruction: `Return generated ${role} data, not permission, acceptance or independent-family evidence.`, outputBound: 64 })) };
+  const patch = { kind: "patch", summary: "Generated installed canonical role proposal.", edits: [
+    { path: "fixture.txt", baseDigest: input.input.files[0].baseDigest, text: marker + "\n" },
+  ] }, reply = proposalOrigin ? JSON.stringify(patch) : marker;
   const preview = await controller.ownedRoles.preview(input), review = { digest: preview.digest, confirmCost: true }, commandId = randomUUID();
-  setReply(marker);
+  setReply(reply);
   try {
     const accepted = await controller.executeOwnedRoles(input, review, commandId);
     let record;
@@ -34,7 +37,7 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
       assert.equal(request.tools, undefined); assert.equal(request.max_tokens ?? request.max_completion_tokens, 64);
       const context = JSON.parse(request.messages.findLast((message) => message.role === "user").content);
       assert.equal(context.untrustedPriorResults.length, position);
-      assert.ok(context.untrustedPriorResults.every((result) => result.text === marker));
+      assert.ok(context.untrustedPriorResults.every((result) => result.text === reply));
     }
     const calls = (await sdk.budgets.calls({ sessionId: source.id })).calls, plans = (await sdk.budgets.plans({ turnId: record.id })).plans;
     assert.equal(calls.length, 3); assert.equal(calls.reduce((tokens, call) => tokens + call.reportedTokens, 0), 126);
@@ -46,18 +49,53 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
     assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), original);
     assert.equal(await readFile(join(workspace.path, "fixture.txt"), "utf8"), original);
     assert.deepEqual(await readFile(join(directory, ".git/index")), index); assert.equal(git(["rev-parse", "HEAD"]), head);
+    let linked;
+    if (proposalOrigin) {
+      const proposed = await sdk.candidates.roleProposal(record.id), reference = { roleSequenceId: record.id };
+      assert.equal(proposed.document.roleOrigin.stepId, record.steps[2].stepId); assert.deepEqual(proposed.document.patch, patch);
+      const exposed = JSON.parse((await promisify(execFile)(node, [cli, "candidate", "role-proposal", record.id], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
+      assert.deepEqual(exposed.document.roleOrigin, proposed.document.roleOrigin);
+      assert.equal(JSON.parse((await sdk.slash(source.id, "/candidate role-proposal " + record.id, "tui")).text).document.roleOrigin.sequenceId, record.id);
+      const selection = join(directory, "generated-role-proposal.json"); await writeFile(selection, JSON.stringify(patch));
+      const flags = ["--session", source.id, "--workspace", workspace.id, "--role-sequence", record.id];
+      const stagedPreview = JSON.parse((await promisify(execFile)(node, [cli, "candidate", "preview", selection, ...flags], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout).preview;
+      assert.ok(stagedPreview.warning); assert.notEqual(stagedPreview.digest, (await sdk.candidates.preview(source.id, workspace.id, patch)).preview.digest);
+      const staged = JSON.parse((await promisify(execFile)(node, [cli, "candidate", "stage", selection, ...flags, "--digest", stagedPreview.digest, "--confirm-write"], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
+      assert.equal(staged.candidate.status, "staged"); assert.equal(staged.candidate.acceptance, null);
+      assert.deepEqual(staged.candidate.roleOrigin, proposed.document.roleOrigin);
+      assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), original);
+      const artifact = (await sdk.artifacts.read(record.id)).artifact; await sdk.artifacts.delete(record.id, artifact.revision, true);
+      linked = staged.candidate;
+      assert.equal(JSON.parse((await sdk.artifacts.export(linked.id)).export.text).schemaVersion, 5);
+    }
     await sdk.refresh();
     await sdk.sessions.delete(source.id, true, sdk.getState().snapshot.sessions.find((session) => session.id === source.id).revision);
     return {
       async verifyRecovery(current, owner) {
-        const value = await current.roleSequences.read(record.id, 2);
-        assert.equal(value.sequence.status, "completed"); assert.ok(value.step.input.includes(marker)); assert.ok(value.step.result.includes(marker));
         assert.equal((await current.budgets.calls({ sessionId: source.id })).calls.length, 3);
         owner.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run(owner.profileId, commandId);
-        assert.equal((await owner.executeOwnedRoles(input, review, commandId)).id, record.id);
-        const artifact = (await current.artifacts.read(record.id)).artifact;
-        await current.artifacts.delete(record.id, artifact.revision, true);
-        owner.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run(owner.profileId, commandId);
+        if (!linked) {
+          const value = await current.roleSequences.read(record.id, 2);
+          assert.equal(value.sequence.status, "completed"); assert.ok(value.step.input.includes(marker)); assert.ok(value.step.result.includes(marker));
+          assert.equal((await owner.executeOwnedRoles(input, review, commandId)).id, record.id);
+          const artifact = (await current.artifacts.read(record.id)).artifact;
+          await current.artifacts.delete(record.id, artifact.revision, true);
+          owner.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run(owner.profileId, commandId);
+        } else {
+          assert.deepEqual((await current.candidates.read(linked.id)).candidate.roleOrigin, linked.roleOrigin);
+          const copy = JSON.parse((await current.artifacts.export(linked.id)).export.text);
+          assert.equal(copy.schemaVersion, 5);
+          for (const digest of [linked.roleOrigin.sequenceInputDigest, linked.roleOrigin.roleInputDigest, linked.roleOrigin.resultDigest]) {
+            assert.ok(copy.documents[0].candidate.results.some((result) => result.digest === digest && result.text.length));
+          }
+          const user = await current.sessions.create(project.id, "Generated reopened candidate reviewer", { env: "Local" });
+          const apply = (await current.candidates.applyPreview(linked.id, user.id)).preview;
+          await current.candidates.apply(linked.id, user.id, linked.revision, apply.digest);
+          const applied = await current.candidates.wait(linked.id);
+          assert.equal(applied.candidate.acceptance.actor, "user"); assert.deepEqual(applied.candidate.roleOrigin, linked.roleOrigin);
+          assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), patch.edits[0].text);
+          assert.deepEqual(await readFile(join(directory, ".git/index")), index); assert.equal(git(["rev-parse", "HEAD"]), head);
+        }
         await assert.rejects(() => owner.executeOwnedRoles(input, review, commandId), { code: "role_sequence_deleted" });
         assert.equal(requests.length, before + 3);
       },

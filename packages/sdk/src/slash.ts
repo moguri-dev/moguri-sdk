@@ -37,7 +37,7 @@ export const slashCommands = [
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
   { name: "artifacts", description: "View independent retained documents" },
   { name: "candidates", description: "Review retained repository proposals and actual stage/apply outcomes" },
-  { name: "candidate", description: "Generate unaccepted data or stage reviewed bytes; source application stays separate", argument: "[generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
+  { name: "candidate", description: "Read retained role proposals, generate unaccepted data or stage reviewed bytes; application stays separate", argument: "[role-proposal ID|generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
   { name: "roles", description: "Inspect independently retained role intent, actual calls and raw data; never dispatch", argument: "[SEQUENCE_ID [ROLE_INDEX]]" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
@@ -109,16 +109,20 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
           if (!input.endsWith(" confirm-stage")) throw new ClientError("candidate_command", "Review exact candidate roots/bases/bytes and append confirm-stage.");
           input = input.slice(0, -" confirm-stage".length).trim();
         }
-        const value: unknown = JSON.parse(input), allowed = action === "stage" ? ["stageWorkspaceId", "patch", "expectedDigest", "generationId"] : ["stageWorkspaceId", "patch"];
+        const value: unknown = JSON.parse(input), allowed = action === "stage" ? ["stageWorkspaceId", "patch", "expectedDigest", "generationId", "roleSequenceId"] : ["stageWorkspaceId", "patch", "roleSequenceId"];
         if (!isRecord(value) || Object.keys(value).some((key) => !allowed.includes(key)) || typeof value.stageWorkspaceId !== "string") throw new ClientError("candidate_command", "Use exact {stageWorkspaceId,patch,expectedDigest?} data; session/actor come from this command, never a model.");
+        if (value.roleSequenceId !== undefined && (typeof value.roleSequenceId !== "string" || !value.roleSequenceId) ||
+          value.roleSequenceId !== undefined && value.generationId !== undefined) throw new ClientError("role_proposal_source", "Use one exact retained role sequence ID or generation origin, never both.");
+        const origin = typeof value.roleSequenceId === "string" ? { roleSequenceId: value.roleSequenceId } : undefined;
         const patch = parse(CandidatePatchSchema, value.patch);
-        if (action === "preview") return result(await sdk.candidates.preview(session.id, value.stageWorkspaceId, patch));
+        if (action === "preview") return result(await sdk.candidates.preview(session.id, value.stageWorkspaceId, patch, origin));
         if (typeof value.expectedDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.expectedDigest)) throw new ClientError("candidate_command", "Stage requires the exact reviewed preview digest.");
         if (value.generationId !== undefined && typeof value.generationId !== "string") throw new ClientError("candidate_generation_command", "A model-origin stage needs its exact retained generation ID.");
-        const created = await sdk.candidates.stage(session.id, value.stageWorkspaceId, patch, value.expectedDigest, value.generationId);
+        const created = await sdk.candidates.stage(session.id, value.stageWorkspaceId, patch, value.expectedDigest, origin ?? value.generationId);
         return result(await sdk.candidates.wait(created.id!));
       }
       const [id, revision, digest, confirmation] = parts;
+      if (action === "role-proposal" && id && parts.length === 1) return result(await sdk.candidates.roleProposal(id));
       if (action === "generation" && id && parts.length === 1) return result(await sdk.candidates.generation(id));
       if (action === "generation-stop" && id && parts.length === 1) { await sdk.candidates.stopGeneration(id); return result(await sdk.candidates.generation(id)); }
       if (action === "read" && id && parts.length === 1) return result(await sdk.candidates.read(id));
@@ -130,7 +134,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "stop" && id && parts.length === 1) {
         await sdk.candidates.stop(id); return { kind: "ok", message: "Stop requested only for the captured active candidate job. Inspect its actual cancelled/partial outcome; no rollback or later job was inferred." };
       }
-      throw new ClientError("candidate_command", "Use generate-preview JSON, generate JSON confirm-cost, generation/generation-stop ID; or preview/stage/read/apply-preview/apply/reject/stop for separately reviewed candidate files.");
+      throw new ClientError("candidate_command", "Use role-proposal ID; generate-preview JSON, generate JSON confirm-cost, generation/generation-stop ID; or preview/stage/read/apply-preview/apply/reject/stop for separately reviewed candidate files.");
     }
     case "mcp-remote": {
       const parts = command.argument.trim().split(/\s+/).filter(Boolean), [action = "calls", id, value, revision, confirmation, access] = parts;

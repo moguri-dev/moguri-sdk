@@ -34,6 +34,18 @@ interface BoundedGenerationModel extends ModelInfo { maxTokens: number; apiModel
 export const candidateGenerationContext = (document: CandidateGenerationDocument): Message[] => [{
   role: "user", timestamp: 0, content: JSON.stringify({ task: document.task, untrustedSelectedFiles: document.files }),
 }];
+export function candidateProposalDocument(input: Pick<CandidateGenerationDocument, "source" | "stage" | "authorityDigest" | "files">, message: AssistantMessage,
+  code: "candidate_generation" | "role_proposal" = "candidate_generation"): CandidateDocument {
+  if (message.stopReason !== "stop" || message.content.some((block) => block.type === "toolCall")) throw new MoguriError(`${code}_result`, "The model did not return one complete tool-less proposal. No file was staged.", 409);
+  const text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+  if (!text.isWellFormed() || Buffer.byteLength(text) > 32 * 1024) throw new MoguriError(`${code}_limit`, "Model proposal exceeds lossless 32-KiB text. No output was truncated or staged.", 409);
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch (error) { if (error instanceof SyntaxError) throw new MoguriError(`${code}_json`, "Model output was not the exact JSON patch contract. Raw output and charges were retained; no file was staged.", 409); throw error; }
+  const patch = candidatePatch(value);
+  for (const edit of patch.edits) if (!input.files.some((file) => file.path === edit.path && file.baseDigest === edit.baseDigest)) throw new MoguriError(`${code}_path`, "Model edits must use only the exact reviewed paths and original bases. No new file authority was inferred.", 409);
+  return { format: "moguri-candidate", version: 1, source: input.source, stage: input.stage, authorityDigest: input.authorityDigest, patch };
+}
 
 export class CandidateGenerations {
   constructor(private readonly store: EventStore, private readonly host: Host) {}
@@ -128,13 +140,6 @@ export class CandidateGenerations {
     return { record, document, selected, source };
   }
   proposal(record: CandidateGenerationRecord, message: AssistantMessage): CandidateDocument {
-    if (message.stopReason !== "stop" || message.content.some((block) => block.type === "toolCall")) throw new MoguriError("candidate_generation_result", "Generation did not return one complete tool-less proposal. No file was staged.", 409);
-    const text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
-    if (Buffer.byteLength(text) > 32 * 1024) throw new MoguriError("candidate_generation_limit", "Model proposal exceeds 32 KiB. No output was truncated or staged.", 409);
-    let value: unknown;
-    try { value = JSON.parse(text); } catch { throw new MoguriError("candidate_generation_json", "Model output was not the exact JSON patch contract. Raw output and charges were retained; no file was staged.", 409); }
-    const patch = candidatePatch(value), input = this.document(record);
-    for (const edit of patch.edits) if (!input.files.some((file) => file.path === edit.path && file.baseDigest === edit.baseDigest)) throw new MoguriError("candidate_generation_path", "Model edits must use only the exact reviewed paths and original bases. No new file authority was inferred.", 409);
-    return { format: "moguri-candidate", version: 1, source: record.source, stage: record.stage, authorityDigest: record.authorityDigest, patch };
+    return candidateProposalDocument(this.document(record), message);
   }
 }

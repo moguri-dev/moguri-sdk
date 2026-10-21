@@ -92,6 +92,7 @@ export interface PlatformHost {
   compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult;
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
   generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
+  roleProposal(id: string): import("../../../packages/protocol/src/index.ts").CandidateRoleProposalRead;
   planSaveQuery(query: PlanSaveQuery): PlanSaveResponse;
   planSaveCommand(command: PlanSaveCommand, finish: WorkspaceFinish): CommandResult;
   validateControls(controls: Controls): void;
@@ -178,6 +179,7 @@ export class PlatformRuntime {
       snapshot: () => this.snapshot(), managed: this.managed, projects: () => this.sessions.projects,
       commit: (events) => this.host.commit(events),       artifact: (session, text, summary, patch, sources) => this.artifacts.candidate(session, text, summary, patch, sources),
       localRootBusy: host.localRootBusy, closingProject: host.closingProject, wake: host.wake,
+      roleProposal: host.roleProposal,
       job: (kind, projectId, sessionId, workspaceId, execute, start, settled, lifecycle) => this.job(kind, projectId, sessionId, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
     this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);

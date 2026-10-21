@@ -182,6 +182,8 @@ export class ArtifactRuntime {
         if (event.event_type === "candidate.saved") {
           if (event.payload.candidate.stageResultDigest) hashes.add(event.payload.candidate.stageResultDigest);
           if (event.payload.candidate.applyResultDigest) hashes.add(event.payload.candidate.applyResultDigest);
+          const origin = event.payload.candidate.roleOrigin;
+          if (origin) { hashes.add(origin.sequenceInputDigest); hashes.add(origin.roleInputDigest); hashes.add(origin.resultDigest); }
         }
         if (event.event_type === "job.finished" && event.payload.resultDigest) hashes.add(event.payload.resultDigest);
       }
@@ -209,7 +211,8 @@ export class ArtifactRuntime {
         ...(generationEvents.length ? { generation: { events: generationEvents, results: generationResults } } : {}),
         ...(roleEvents.length ? { roles: { events: roleEvents, results: roleResults } } : {}) };
     });
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const roleLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.roleOrigin));
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }

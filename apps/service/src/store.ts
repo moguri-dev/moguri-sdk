@@ -57,7 +57,11 @@ function references(input: EventInput): string[] {
     case "capability.proposed": return [input.payload.proposal.contentDigest];
     case "artifact.saved": return [input.payload.artifact.contentDigest];
     case "artifact.revised": return [input.payload.artifact.contentDigest];
-    case "candidate.saved": return [input.payload.candidate.documentDigest, input.payload.candidate.stageResultDigest, input.payload.candidate.applyResultDigest].filter((hash): hash is string => hash !== null);
+    case "candidate.saved": {
+      const candidate = input.payload.candidate, origin = candidate.roleOrigin;
+      return [candidate.documentDigest, candidate.stageResultDigest, candidate.applyResultDigest,
+        ...(origin ? [origin.sequenceInputDigest, origin.roleInputDigest, origin.resultDigest] : [])].filter((hash): hash is string => hash !== null);
+    }
     case "candidate.generation_recorded": return [input.payload.generation.inputDigest, input.payload.generation.resultDigest, input.payload.generation.proposalDocumentDigest].filter((hash): hash is string => hash !== null);
     case "role.sequence_recorded": return [input.payload.sequence.inputDigest, ...input.payload.sequence.steps.flatMap((step) => [step.inputDigest, step.resultDigest])].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
@@ -188,6 +192,9 @@ export class EventStore {
       if (version < 32) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('role_sequence_schema','1');
         PRAGMA user_version=32; COMMIT;`);
+      if (version < 33) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('candidate_role_schema','1');
+        PRAGMA user_version=33; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {
