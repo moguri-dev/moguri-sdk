@@ -75,7 +75,7 @@ still use their existing control-plane boundary; they are not silently moved.
 Tests deny a controller `gh` executable as well as public fetch, and use a
 separate generated SSH HOME/PATH, so regressions cannot read personal accounts.
 
-The initial backend gate passes **19/19 in 16,102.54 ms**, including the six
+The initial backend gate passes **19/19 in 16,102.54 ms**, including
 existing repository/model/retention contracts and generated Remote failure
 paths. The expanded crash/migration gate initially had one fixture setup
 failure because its Git helper requires `fixture.txt`; the missing generated
@@ -87,3 +87,10 @@ Remote/telemetry workflows pass in **12.8 s**, including stale-env rejection.
 Both type checks and the complete build pass. These are source results, not
 qualification of an uninstalled 0.20 archive. The qualified 0.19 delivery
 remains frozen; Sandbox and Remote repository memory remain unavailable.
+
+The complete corrected source gate passes **558/558 in 394.59 s** and all
+**39 hidden source desktop workflows in 1.4 min**. Source audit reports zero
+vulnerabilities. The new compiled console broker and bridge are byte-identical
+to qualified 0.19, preserving that independent version-1 ownership wire while
+the agent bridge/database move to protocol 26. This byte comparison is not a
+claim that arbitrary future helper builds are interchangeable.
