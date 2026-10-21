@@ -68,9 +68,9 @@ export class ArtifactRuntime {
       { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "user-imported-proposal", contentDigest: digest(JSON.stringify(patch)) },
     ]);
   }
-  generation(session: Session, text: string, task: string): RetainedArtifact {
-    return this.create(session, "report", `Generation: ${task.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
-      { eventId: null, sessionId: session.id, messageId: null, actor: "user", modelId: null, outcome: "generation-request", contentDigest: digest(task) },
+  generation(session: Session, text: string, task: string, purpose: "generation" | "roles" = "generation"): RetainedArtifact {
+    return this.create(session, "report", `${purpose === "roles" ? "Roles" : "Generation"}: ${task.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
+      { eventId: null, sessionId: session.id, messageId: null, actor: "user", modelId: null, outcome: purpose === "roles" ? "owned-role-request" : "generation-request", contentDigest: digest(task) },
       { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "reviewed-source-snapshot", contentDigest: digest(text) },
     ]);
   }

@@ -92,6 +92,11 @@ export function projectRoleSequence(previous: RoleSequenceRecord | undefined, va
   return structuredClone(next);
 }
 
+export const successfulRoleEntry = (entry: BudgetEntry | undefined): boolean => entry !== undefined && entry.status === "settled" &&
+  entry.reportedTokens !== null && Number.isSafeInteger(entry.reportedTokens) && entry.reportedTokens >= 0 &&
+  typeof entry.outputTokens === "number" && Number.isSafeInteger(entry.outputTokens) && entry.outputTokens >= 0 &&
+  entry.outputTokens <= entry.reportedTokens && entry.outputTokens <= entry.outputLimit && entry.outcome === "stop" && !entry.outputLimitViolation;
+
 export function validateRoleSequenceLedger(records: RoleSequenceRecord[], plans: BudgetPlan[], entries: BudgetEntry[]): void {
   const usedPlans = new Set<string>(), usedSteps = new Set<string>(), commands = new Set<string>();
   const planned = new Map(plans.map((plan) => [plan.id, plan])), started = new Map(entries.map((entry) => [entry.id, entry]));
@@ -116,9 +121,7 @@ export function validateRoleSequenceLedger(records: RoleSequenceRecord[], plans:
         entry.modelId !== step.modelId || entry.providerId !== step.providerId || entry.apiModelId !== step.apiModelId || entry.role !== step.role ||
         entry.inputEstimate === null || entry.inputEstimate > step.inputBound || entry.outputLimit !== step.outputBound) corrupt("An observed role has no matching actual started ledger entry.");
       usedSteps.add(step.stepId);
-      const success = entry.status === "settled" && entry.reportedTokens !== null && Number.isSafeInteger(entry.reportedTokens) && entry.reportedTokens >= 0 &&
-        typeof entry.outputTokens === "number" && Number.isSafeInteger(entry.outputTokens) && entry.outputTokens >= 0 &&
-        entry.outputTokens <= entry.reportedTokens && entry.outputTokens <= entry.outputLimit && entry.outcome === "stop" && !entry.outputLimitViolation;
+      const success = successfulRoleEntry(entry);
       // Raw observations can precede derived settlement, but never authorize the next role by themselves.
       if (step.state === "recorded" && entry.status === "settled" && step.outcome !== entry.outcome || record.steps.slice(index + 1).some((later) => later.stepId !== null) && !success ||
         record.status === "completed" && !success) corrupt("Unknown/failed model accounting cannot authorize a later role or successful sequence.");

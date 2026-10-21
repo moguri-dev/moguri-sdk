@@ -125,6 +125,67 @@ metadata contract without model preparation. [Setup](../setup.md#current-qualifi
 records immutable native/SDK identities and honest Electron-only versus
 combined footprint measurements. No earlier archive was repacked.
 
+## Internal owned execution, 0.26 source
+
+Source **0.26.0-alpha.1 / protocol and database 32** connects these records to
+the actual `ControlPlane` and worker, rather than a fixture host or another
+model loop. It is an internal
+Node-authority operation, not a new public compound creator, family claim,
+quality gate, acceptance action or finite-kupo setting.
+
+Reuse the maintained MIT pi-ai/TypeBox and Node helpers, reviewed generation
+source capture, exact Local roots, current profile/pool policy, complete
+planned holds and the existing artifact/role exporter. Capture the whole
+original source, relevant policy/control snapshot, every concrete model's
+metadata/instruction, complete future context/output bounds and duration
+before admission. Alternate models must already belong to the approved,
+privacy-eligible pool. No model chooses an endpoint or receives tools/root.
+
+Future contexts explicitly wrap earlier bounded text as untrusted JSON data.
+Their complete admission envelope uses the maximum JSON escaping of every
+earlier allowed result, not the initially empty context or a token-to-byte
+guess. Recheck the actual prepared context, model, source, policy and held
+capacity at every boundary. Commit complete plans and original intent
+atomically; commit each exact actual start before access and raw result/
+accounting before acknowledgement or continuation.
+
+`moguri-owned-role-input` version 1 is an independently retained blob over the
+existing protocol-32 records, plans and control events, not changed event
+shapes or a new database/migration. The privileged Node controller's internal
+`executeOwnedRoles` shares original-command concurrency, receipts, removal
+guards and the ordinary commit/derivation path. It is not an outward SDK/HTTP/
+MCP creator. Existing SDK/CLI/TUI/desktop readers observe real live records
+without another client state machine. Original/deleted intent remains a
+pre-root/pre-model guard. Recovery never resumes the sequence or replays work.
+Deadline/stop, failed journals, unknown usage, over-limit output and changed
+authority stop continuation and retain actual charges/raw data; no filesystem
+effect or successful cleanup is fabricated.
+
+The same browser-safe settled-role predicate gates projection, completion and
+later context before model preparation. Raw `stop` output without valid known
+accounting is not a continuation. Caller input/review/receipt identity is
+captured before yielding; mutation cannot redirect the original operation.
+No tools, write lease, staged candidate, acceptance or Git authority is added.
+
+The coupled source gate passes **38/38 in 95.50 s**, including unchanged
+generation behavior and actual four-phase controller SIGKILL in **9.18 s**.
+The isolated SIGKILL gate takes **6.46 s**: pending dispatch, actual in-flight
+inference, retained first result and completed sequence retain 0, 1, 1 and 3
+original requests; every restarted request count is zero. Unknown work stays
+held, known first/all output retains 42/126 tokens, and unused plans release.
+Recovery mocks model preparation and checkout resolution to fail if invoked.
+Both type checks/declaration build pass. Whole-source, external-consumer and
+desktop compatibility are still pending; the qualified 0.25 SDK/native records
+above remain the delivery baseline, not a claimed immutable 0.26 release.
+
+Generated tests cover maximum JSON escaping, exact finite capacity versus one
+token less, whole initial transaction rollback, failed actual start/result
+inserts, concurrent/deduplicated ownership, revoked source/model/pool authority,
+unknown/over-limit/incomplete/tool/empty results, deadline, stop and both failed
+stop-intent journals, caller mutation, source deletion/reopen and minimal
+deleted-intent refusal. None of the generated role labels attests independence
+or live model quality.
+
 Production compound policy, complete unknown-future context bounds, eligible
 family/privacy validation, candidate/critic/revision decisions, actual-policy
 accepted-work wind-down and live quality remain separate admission gates.

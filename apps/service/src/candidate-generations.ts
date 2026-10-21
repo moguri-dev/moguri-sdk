@@ -54,7 +54,7 @@ export class CandidateGenerations {
       document.files.some((file) => !file.path.isWellFormed() || (file.baseDigest === "absent" ? file.text !== null : file.text === null || !file.text.isWellFormed() || digest(file.text) !== file.baseDigest))) throw new MoguriError("candidate_generation_corrupt", "Retained generation source text/base, prompt or portable selection changed. No substitute was read.", 409);
     return document;
   }
-  private selected(sessionId: string): { session: Session; model: BoundedGenerationModel; binding: string; prompt: string } {
+  selected(sessionId: string): { session: Session; model: BoundedGenerationModel; binding: string; prompt: string } {
     const snapshot = this.host.snapshot(), session = snapshot.sessions.find((session) => session.id === sessionId);
     if (!session || !session.projectId || session.controls.env !== "Local" || session.mode !== "agent" || session.kind !== "agent" ||
       session.pendingMode === "read-only" || !snapshot.policy.allowedEnvs.includes("Local")) throw new MoguriError("candidate_generation_scope", "Use an explicitly Local writable project session allowed by current policy. No Remote/Sandbox fallback.", 409);
@@ -65,7 +65,7 @@ export class CandidateGenerations {
     const binding = digest(JSON.stringify({ model, options: session.controls.modelOptions ?? null, prompt }));
     return { session, model: { ...model, maxTokens: model.maxTokens, apiModelId: model.apiModelId, providerId: model.providerId }, binding, prompt };
   }
-  private async preview(sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput, signal: AbortSignal) {
+  async preview(sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput, signal: AbortSignal) {
     input = structuredClone(input);
     if (!input.task.isWellFormed()) throw new MoguriError("candidate_generation_text", "Generation task must be lossless Unicode. No model was called.");
     const selected = this.selected(sessionId); this.host.idle(selected.session);

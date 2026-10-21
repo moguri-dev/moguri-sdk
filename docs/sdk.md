@@ -33,6 +33,11 @@ bundled runtime pass role inspection, source deletion/reopen, version-4 export
 and deletion-intent qualification without inference;
 [setup](setup.md#current-qualified-0250-alpha1-checkpoint) records immutable
 identities. Restart old running services explicitly; do not delete their state.
+The 0.26 source reuses protocol 32 for an internal actual owned-role executor
+over complete source/model/policy/input envelopes. Its Node controller primitive
+is privileged and not a public SDK/HTTP/MCP workflow creator. Client
+`roleSequences` remains read-only; family/quality/acceptance and finite kupo
+stay separately gated. Qualification status is recorded in setup.
 Current state migrations preserve schema-1 through schema-31 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project

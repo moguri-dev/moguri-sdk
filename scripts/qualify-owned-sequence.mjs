@@ -1,0 +1,66 @@
+import assert from "node:assert/strict";
+import { execFile, execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+export async function qualifyOwnedSequence({ sdk, controller, node, cli, directory, stateDir, modelId, setReply, requests }) {
+  await mkdir(directory);
+  const original = "Generated installed owned-role source.\n", marker = "GENERATED_INSTALLED_OWNED_ROLE_DATA_NOT_ACCEPTANCE";
+  await writeFile(join(directory, "fixture.txt"), original);
+  const git = (args) => execFileSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { cwd: directory, encoding: "utf8" });
+  git(["init", "--initial-branch=main"]); git(["add", "--", "fixture.txt"]);
+  git(["-c", "user.name=Generated fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-m", "Generated owned-role qualification base"]);
+  const project = await sdk.command({ type: "project.add", path: directory }), source = await sdk.sessions.create(project.id, "Generated installed role owner", { env: "Local", modelId });
+  const workspace = await sdk.workspaces.wait((await sdk.workspaces.create(project.id, "moguri/generated-installed-role-stage")).id);
+  const index = await readFile(join(directory, ".git/index")), head = git(["rev-parse", "HEAD"]), before = requests.length;
+  const input = { sessionId: source.id, stageWorkspaceId: workspace.id, timeoutMs: 20_000,
+    input: { task: "Generated installed bounded roles.", files: [{ path: "fixture.txt", baseDigest: createHash("sha256").update(original).digest("hex") }] },
+    roles: ["draft", "critic", "revision"].map((role) => ({ role, modelId, instruction: `Return generated ${role} data, not permission, acceptance or independent-family evidence.`, outputBound: 64 })) };
+  const preview = await controller.ownedRoles.preview(input), review = { digest: preview.digest, confirmCost: true }, commandId = randomUUID();
+  setReply(marker);
+  try {
+    const accepted = await controller.executeOwnedRoles(input, review, commandId);
+    let record;
+    for (let attempt = 0; attempt < 600; attempt++) {
+      record = (await sdk.roleSequences.read(accepted.id)).sequence;
+      if (record.status !== "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(record.status, "completed"); assert.equal(requests.length, before + 3);
+    assert.deepEqual(record.steps.map((step) => step.role), ["draft", "critic", "revision"]);
+    for (const [position, request] of requests.slice(before).entries()) {
+      assert.equal(request.tools, undefined); assert.equal(request.max_tokens ?? request.max_completion_tokens, 64);
+      const context = JSON.parse(request.messages.findLast((message) => message.role === "user").content);
+      assert.equal(context.untrustedPriorResults.length, position);
+      assert.ok(context.untrustedPriorResults.every((result) => result.text === marker));
+    }
+    const calls = (await sdk.budgets.calls({ sessionId: source.id })).calls, plans = (await sdk.budgets.plans({ turnId: record.id })).plans;
+    assert.equal(calls.length, 3); assert.equal(calls.reduce((tokens, call) => tokens + call.reportedTokens, 0), 126);
+    assert.equal(plans.length, 3); assert.ok(plans.every((plan) => plan.status === "consumed"));
+    const inspected = JSON.parse((await promisify(execFile)(node, [cli, "roles", record.id, "2"], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
+    assert.ok(inspected.step.input.includes(marker)); assert.ok(inspected.step.result.includes(marker));
+    assert.equal(JSON.parse((await sdk.slash(source.id, "/roles " + record.id + " 2", "tui")).text).sequence.id, record.id);
+    assert.equal(JSON.parse((await sdk.artifacts.export(record.id)).export.text).schemaVersion, 4);
+    assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), original);
+    assert.equal(await readFile(join(workspace.path, "fixture.txt"), "utf8"), original);
+    assert.deepEqual(await readFile(join(directory, ".git/index")), index); assert.equal(git(["rev-parse", "HEAD"]), head);
+    await sdk.refresh();
+    await sdk.sessions.delete(source.id, true, sdk.getState().snapshot.sessions.find((session) => session.id === source.id).revision);
+    return {
+      async verifyRecovery(current, owner) {
+        const value = await current.roleSequences.read(record.id, 2);
+        assert.equal(value.sequence.status, "completed"); assert.ok(value.step.input.includes(marker)); assert.ok(value.step.result.includes(marker));
+        assert.equal((await current.budgets.calls({ sessionId: source.id })).calls.length, 3);
+        owner.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run(owner.profileId, commandId);
+        assert.equal((await owner.executeOwnedRoles(input, review, commandId)).id, record.id);
+        const artifact = (await current.artifacts.read(record.id)).artifact;
+        await current.artifacts.delete(record.id, artifact.revision, true);
+        owner.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run(owner.profileId, commandId);
+        await assert.rejects(() => owner.executeOwnedRoles(input, review, commandId), { code: "role_sequence_deleted" });
+        assert.equal(requests.length, before + 3);
+      },
+    };
+  } finally { setReply(null); }
+}

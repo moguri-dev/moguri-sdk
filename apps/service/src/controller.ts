@@ -17,6 +17,7 @@ import {
   PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions, type McpServerConfig, type RemoteMcpCall,
   type RepositoryRemoteBoundary,
   type MemoryTarget,
+  type RoleSequenceRecord, projectRoleSequence, successfulRoleEntry,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -45,6 +46,7 @@ import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./r
 import { redactSecrets } from "./secret-redactor.ts";
 import { RemoteConsoles } from "./remote-terminals.ts";
 import { CandidateGenerations, candidateGenerationContext } from "./candidate-generations.ts";
+import { OwnedRoles, OwnedRoleInputSchema, OwnedRoleReviewSchema, type OwnedRoleDocument, type OwnedRoleInput, type OwnedRoleReview } from "./owned-roles.ts";
 
 interface McpDispatch { id: string; scopeDigest: string; callDigest: string; hadAccess: boolean; access: string[] }
 
@@ -69,6 +71,7 @@ interface Run {
   mcpDispatches?: Map<string, McpDispatch>;
   compaction?: { id: string; context: Message[] };
   generation?: { id: string; context: Message[]; current?: () => void };
+  roleSequence?: { id: string; current?: () => void; deadline?: ReturnType<typeof setTimeout>; expired?: boolean };
   planSave?: {
     id: string; operation: UserPlanOperation; finish: WorkspaceFinish;
     resolve(result: CommandResult): void; reject(error: Error): void;
@@ -103,6 +106,7 @@ export class ControlPlane extends EventEmitter {
   private providerMetadata = "";
   readonly platform: PlatformRuntime;
   readonly generations: CandidateGenerations;
+  readonly ownedRoles: OwnedRoles;
   private externalRuns = new Map<string, ExternalRun>();
   private writerReservations = new Map<string, string>();
   private deletingSessions = new Set<string>();
@@ -250,6 +254,13 @@ export class ControlPlane extends EventEmitter {
         try { this.stop(sessionId); } finally { this.requestWorkerStop(run); }
       },
     });
+    this.ownedRoles = new OwnedRoles(store, {
+      snapshot: () => this.snapshot(), generations: this.generations, candidates: this.platform.candidates, roles: this.platform.roles,
+      prompt: (session) => this.platform.prompt(session), globalLimit: () => this.profileHooks?.globalBudget().limit ?? null,
+      idle: (session) => this.generationIdle(session),
+      artifact: (session, text, task) => this.platform.artifacts.generation(session, text, task, "roles"),
+      start: (document, artifact, finish) => this.startOwnedRoles(document, artifact, finish),
+    });
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
       const signature = JSON.stringify(metadata);
@@ -373,6 +384,13 @@ export class ControlPlane extends EventEmitter {
     this.emit("change", appended);
     this.remote.synchronize();
     this.provider.synchronize();
+  }
+  private commandFinish(id: string, commandDigest: string): WorkspaceFinish {
+    return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {
+      if (!forget && events.some((event) => event.project_id && this.deletingProjects.has(event.project_id) || event.session_id && this.deletingSessions.has(event.session_id))) throw new MoguriError("workspace_removing", "This workspace is being removed. No late state was resurrected.", 409);
+      this.commit(events, { id, digest: commandDigest, result }, forget);
+      return result;
+    }, { intent: { id, digest: commandDigest } });
   }
   refreshProfile(policyChanged = false): void {
     this.history = this.store.events(); this.projection = projectEvents(this.history, this.profileId);
@@ -1099,6 +1117,29 @@ export class ControlPlane extends EventEmitter {
     if (session.turnId || session.queue.some((item) => !item.held)) throw new MoguriError("candidate_generation_busy", "Finish or stop owned work and hold/remove queued prompts before generating a separate proposal.", 409);
     if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and explicitly resume this workspace before generating a proposal.", 409);
   }
+  private startOwnedRoles(document: OwnedRoleDocument, artifact: RetainedArtifact, finish: WorkspaceFinish): CommandResult {
+    const session = this.session(artifact.originSessionId!), intent = finish.intent;
+    if (!intent) throw new MoguriError("owned_role_intent", "No original role command was retained. No model was launched.", 409);
+    this.generationIdle(session);
+    const planned = this.platform.budgets.planBatch(session, document.roles.map((role) => ({
+      id: randomUUID(), turnId: artifact.id, role: role.role, modelId: role.modelId, providerId: role.providerId, apiModelId: role.apiModelId,
+      authorityDigest: document.base.authorityDigest, inputEstimate: role.inputBound, maxOutputTokens: role.outputBound,
+    })));
+    const first = planned.plans[0]!, now = new Date().toISOString();
+    const record: RoleSequenceRecord = { version: 1, id: artifact.id, profileId: this.profileId, sessionId: session.id,
+      ownerSessionId: first.ownerSessionId, ownerTurnId: first.ownerTurnId, projectId: session.projectId, workspaceId: session.workspaceId,
+      folderId: first.folderId, env: session.controls.env, commandId: intent.id, commandDigest: intent.digest, inputDigest: artifact.contentDigest,
+      authorityDigest: document.base.authorityDigest, policyDigest: document.policyDigest, revision: 0, createdAt: now, updatedAt: now,
+      status: "running", stopRequested: false, diagnostic: null, steps: planned.plans.map((plan, index) => ({
+        planId: plan.id, role: document.roles[index]!.role, modelId: plan.modelId, providerId: plan.providerId, apiModelId: plan.apiModelId,
+        inputBound: plan.inputBound, outputBound: plan.outputBound, state: "pending", stepId: null, inputDigest: null, resultDigest: null, outcome: null, diagnostic: null,
+      })) };
+    const result = finish([{ event_type: "artifact.revised", profile_id: this.profileId, project_id: session.projectId, payload: { artifact } },
+      ...planned.events, this.platform.roles.event(record), { ...this.event(session, "turn.control_started", { purpose: "role.sequence", sequenceId: record.id,
+        controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest: record.inputDigest }), turn_id: record.id }], { id: record.id, revision: 0 });
+    this.launchRun(this.session(session.id), record.id, { roleSequence: { id: record.id } });
+    return result;
+  }
   private contextFingerprint(session: Session, entries = this.contextEntries(session.id)): string {
     return digest(JSON.stringify({
       entries, activeId: session.activeCompactionId ?? null, controls: session.controls, mode: session.mode, pendingMode: session.pendingMode,
@@ -1227,6 +1268,25 @@ export class ControlPlane extends EventEmitter {
     const model = this.snapshot().provider.models.find((model) => model.id === session.controls.modelId);
     if (!model?.imageInput && (attachments.some((attachment) => attachment.kind === "image") || contextHasImages(this.context(session.id)))) throw new MoguriError("model_images", "Select an image-capable model before admitting this complete context. The draft/queue was preserved; no image was dropped.", 409);
   }
+  /** @internal Privileged Node executor, not a public compound workflow or transport command. */
+  executeOwnedRoles(value: OwnedRoleInput, approval: OwnedRoleReview, commandId: string = randomUUID()): Promise<CommandResult> {
+    const input = structuredClone(parse(OwnedRoleInputSchema, value)), review = structuredClone(parse(OwnedRoleReviewSchema, approval));
+    if (!commandId || commandId.length > 128 || !commandId.isWellFormed() || commandId.includes("\0")) return Promise.reject(new MoguriError("owned_role_intent", "Use one exact bounded original command ID.", 409));
+    const hash = digest(`moguri-owned-role-command-v1\0${JSON.stringify({ input, review })}`), pending = this.dispatching.get(commandId);
+    if (pending) {
+      if (pending.digest !== hash) return Promise.reject(new MoguriError("idempotency_conflict", "A command ID was reused with different arguments.", 409));
+      return pending.result;
+    }
+    const result = (async () => {
+      if (this.shuttingDown) throw new MoguriError("shutting_down", "Moguri is shutting down. No new owned role was admitted.", 503);
+      const finish = this.commandFinish(commandId, hash), original = this.platform.roles.original(commandId, hash);
+      if (original) return finish([], original);
+      if (this.store.receipt(commandId, hash)) throw new MoguriError("owned_role_intent", "The original receipt lost its exact independent role intent. No paid replay or substitute was admitted.", 409);
+      return this.ownedRoles.execute(input, review, finish);
+    })().finally(() => this.dispatching.delete(commandId));
+    this.dispatching.set(commandId, { digest: hash, result });
+    return result;
+  }
   dispatch(raw: unknown): Promise<CommandResult> {
     const envelope = parse(CommandSchema, raw);
     if (envelope.profileId !== this.store.profileId) return Promise.reject(new MoguriError("profile_scope", "This command belongs to another profile. No Default fallback or cross-profile receipt was used.", 403));
@@ -1251,12 +1311,7 @@ export class ControlPlane extends EventEmitter {
     const projectId = "projectId" in command ? command.projectId : "sessionId" in command ? this.projection.sessions.find((session) => session.id === command.sessionId)?.projectId : undefined;
     if (projectId && this.deletingProjects.has(projectId) || "sessionId" in command && typeof command.sessionId === "string" && this.deletingSessions.has(command.sessionId)) throw new MoguriError("workspace_removing", "Owned work is settling for removal. No new mutation was admitted.", 409);
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
-    const finish: WorkspaceFinish = (events, result = {}, forget) => {
-      if (!forget && events.some((event) => event.project_id && this.deletingProjects.has(event.project_id) || event.session_id && this.deletingSessions.has(event.session_id))) throw new MoguriError("workspace_removing", "This workspace is being removed. No late state was resurrected.", 409);
-      this.commit(events, { id: envelope.id, digest: commandDigest, result }, forget);
-      return result;
-    };
-    finish.intent = { id: envelope.id, digest: commandDigest };
+    const finish = this.commandFinish(envelope.id, commandDigest);
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
@@ -1479,11 +1534,11 @@ export class ControlPlane extends EventEmitter {
       this.launchRun(this.session(session.id), turnId);
     }
   }
-  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "planSave" | "mcpControl"> = {}): void {
-      const { compaction, generation, planSave, mcpControl } = control;
+  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "planSave" | "mcpControl"> = {}): void {
+      const { compaction, generation, roleSequence, planSave, mcpControl } = control;
       let owned: Run | undefined;
       try {
-        const context = planSave || mcpControl ? [] : generation?.context ?? compaction?.context ?? this.context(current.id); validateContextSize(context);
+        const context = planSave || mcpControl || roleSequence ? [] : generation?.context ?? compaction?.context ?? this.context(current.id); validateContextSize(context);
         const project = current.projectId ? this.platform.managed.project(current) : undefined;
         let execution: RemoteExecution | undefined;
         if (current.controls.env === "Remote") {
@@ -1497,7 +1552,7 @@ export class ControlPlane extends EventEmitter {
             ...(mcp ? [this.mcpEvent({ ...mcp, executionId: execution.id, status: "running", revision: mcp.revision + 1, updatedAt: new Date().toISOString() })] : [])]);
         }
         const child = execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
-        const run: Run = { sessionId: current.id, turnId, child, root: !generation && current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, planSave, mcpControl };
+        const run: Run = { sessionId: current.id, turnId, child, root: !generation && !roleSequence && current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, roleSequence, planSave, mcpControl };
         owned = run;
         if (planSave) { if (!execution) throw new MoguriError("plan_env", "User Remote plan work has no exact SSH execution.", 409); run.stepId = planSave.operation.stepId; }
         if (mcpControl) {
@@ -1506,6 +1561,16 @@ export class ControlPlane extends EventEmitter {
           run.granted.add(mcpControl.operation.call.id); run.declaredTools.add("mcp_gateway");
         }
         this.runs.set(current.id, run);
+        if (roleSequence) {
+          const timeout = this.ownedRoles.document(this.ownedRoles.record(roleSequence.id)).timeoutMs;
+          roleSequence.deadline = setTimeout(() => {
+            if (run.done) return;
+            roleSequence.expired = true;
+            try { this.stop(run.sessionId); }
+            catch (error) { console.error("Owned role deadline stop persistence failed:", error instanceof MoguriError ? error.code : "owned_role_deadline"); }
+            finally { this.requestWorkerStop(run); }
+          }, timeout);
+        }
         child.events.on("stderr", (data) => { run.stderr = (run.stderr + data).slice(-4096); });
         child.events.on("message", (message: unknown, frame) => {
           run.chain = run.chain.then(async () => {
@@ -1537,8 +1602,8 @@ export class ControlPlane extends EventEmitter {
             if (!run.done && !run.planSave?.terminal && !run.mcpControl?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: generation ? null : execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
-          readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
+        this.reply(run, { kind: "start", root: generation || roleSequence ? null : execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
+          readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation) || Boolean(roleSequence), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
         const diagnostic = error instanceof MoguriError ? error.message : "Agent worker launch failed. Rebuild Moguri and retry explicitly.";
@@ -1556,7 +1621,7 @@ export class ControlPlane extends EventEmitter {
           ...(proposal ? [this.generations.event({ ...proposal, revision: proposal.revision + 1, status: "failed", updatedAt: new Date().toISOString(), diagnostic })] : []),
           ...(save ? [this.planSaveEvent(current, { ...save, revision: save.revision + 1, status: "failed", phase: "settled", updatedAt: new Date().toISOString(), diagnostic })] : []),
           ...(execution ? [this.event(current, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Worker launch was not confirmed. Inspect this exact remote execution; no replacement was started." })] : []),
-          this.event(current, "turn.finished", { outcome: "failed", diagnostic, ...(generation ? { workspaceEffects: "none" as const } : {}) })]);
+          this.event(current, "turn.finished", { outcome: "failed", diagnostic, ...(generation || roleSequence ? { workspaceEffects: "none" as const } : {}) })]);
         planSave?.reject(new MoguriError("plan_save_failed", diagnostic, 409));
       }
   }
@@ -1642,6 +1707,77 @@ export class ControlPlane extends EventEmitter {
     this.questionWaits.delete(question.id);
     this.reply(waiting.run, { kind: "reply", requestId: waiting.requestId, value: { text: JSON.stringify({ questionId: question.id, answer: command.text, actor: "user", permissionGrant: false }), isError: false, outcome: "completed" } });
     return result;
+  }
+  private async ownedRoleBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>): Promise<void> {
+    const owned = run.roleSequence;
+    if (!owned) throw new MoguriError("owned_role_owner", "No exact role sequence owns this worker.", 409);
+    const before = await this.ownedRoles.check(owned.id, run.abort.signal), index = before.record.steps.findIndex((step) => step.state === "pending");
+    if (index < 0 || before.record.steps.some((step) => step.state === "started" || step.state === "unconfirmed")) throw new MoguriError("owned_role_step", "No serial undispatched role is available. No call was retried.", 409);
+    this.ownedRoles.context(before.record, before.document, index);
+    const role = before.document.roles[index]!, prepared = await this.provider.prepare(role.modelId, run.abort.signal);
+    if (run.done || run.abort.signal.aborted) return;
+    const checked = await this.ownedRoles.check(owned.id, run.abort.signal);
+    const model = this.ownedRoles.model(run.sessionId, role.modelId, role.role);
+    if (prepared.model.id !== role.apiModelId || prepared.model.contextWindow !== model.contextWindow ||
+      prepared.model.maxTokens !== model.maxTokens) throw new MoguriError("owned_role_model", "Prepared role identity/capacity changed after review. No request was sent.", 409);
+    const context = this.ownedRoles.context(checked.record, checked.document, index);
+    const configured = modelRequest({ ...prepared.model, maxTokens: role.outputBound },
+      role.modelId === checked.session.controls.modelId ? checked.session.controls.modelOptions : undefined,
+      { systemPrompt: role.systemPrompt, messages: context, tools: [] });
+    if (configured.estimatedTokens > role.inputBound || configured.maxTokens < role.outputBound) throw new MoguriError("owned_role_bound", "Actual prepared context/output exceeds the complete original envelope. No partial bound was substituted.", 409);
+    const attribution = await this.platform.repositories.capture(checked.session, run.abort.signal);
+    if (run.done || run.abort.signal.aborted) return;
+    const final = await this.ownedRoles.check(owned.id, run.abort.signal), session = final.session, step = final.record.steps[index]!;
+    if (step.state !== "pending") throw new MoguriError("owned_role_step", "The original role was already dispatched or skipped. No retry.", 409);
+    const transfer = this.platform.budgets.consumePlan(session, step.planId, { stepId: request.stepId, turnId: run.turnId,
+      role: role.role, modelId: role.modelId, providerId: role.providerId, apiModelId: role.apiModelId, authorityDigest: final.record.authorityDigest,
+      inputEstimate: configured.estimatedTokens, maxOutputTokens: role.outputBound, repositoryCapture: this.platform.repositories.finalize(session, attribution) });
+    const next = structuredClone(final.record); next.revision++; next.updatedAt = new Date().toISOString();
+    next.steps[index] = { ...step, state: "started", stepId: request.stepId, inputDigest: this.store.putBlob(JSON.stringify({ systemPrompt: role.systemPrompt, messages: context })) };
+    run.stepId = request.stepId; run.inFlight = false; run.calls.clear(); run.granted.clear(); run.declaredTools.clear();
+    this.commit([...transfer.events, this.platform.roles.event(projectRoleSequence(final.record, next)),
+      this.event(session, "turn.prompt_bound", { promptDigest: this.store.putBlob(role.systemPrompt) }, request.stepId),
+      this.event(session, "model.started", { modelId: role.modelId, providerId: role.providerId, apiModelId: role.apiModelId, role: role.role,
+        source: model.source ?? "copilot", contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens,
+        ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId)]);
+    run.inFlight = true; owned.current = final.current;
+    this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: { ...configured.model, maxTokens: transfer.maxTokens },
+      maxTokens: transfer.maxTokens, thinkingEffort: configured.thinkingEffort, context, phase: "candidate", steers: [], tools: [], mode: "read-only",
+      folders: { denied: [], readOnly: [] }, systemPrompt: role.systemPrompt } });
+  }
+  private async ownedRoleCompletion(run: Run, request: Extract<WorkerRequest, { kind: "model.complete" }>): Promise<void> {
+    const owned = run.roleSequence;
+    if (!owned) throw new MoguriError("owned_role_owner", "No exact role sequence owns this result.", 409);
+    const session = this.session(run.sessionId), message = assistantMessage(request.message), usage = this.modelUsage(session, request);
+    const safeMessage = { ...message, errorMessage: message.errorMessage ? "Provider request failed." : undefined, diagnostics: undefined };
+    const resultDigest = this.store.putBlob(JSON.stringify(safeMessage));
+    let diagnostic: string | null = null;
+    try {
+      if (run.abort.signal.aborted) throw new MoguriError("owned_role_stopped", "Owned roles stopped. Raw output and actual/unknown usage remain retained; no continuation.", 409);
+      if (message.stopReason !== "stop" || toolCalls(message).length) throw new MoguriError("owned_role_result", "Role output is incomplete or requests tools. No continuation or file effect was accepted.", 409);
+      const text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+      if (!text.trim() || !text.isWellFormed() || Buffer.byteLength(text) > 32 * 1024) throw new MoguriError("owned_role_result_limit", "Role text is empty or exceeds its exact lossless 32-KiB result envelope. No truncation or continuation.", 409);
+      if (!reportedModelUsage(usage)) throw new MoguriError("owned_role_usage", "Role metering is missing/invalid. Its full hold remains; no successful continuation was inferred.", 409);
+      const reservation = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
+      if (!reservation || modelOutputExceeded(reservation, usage)) throw new MoguriError("owned_role_output", "The actual role output bound was lost/exceeded. Charges remain retained; no continuation.", 409);
+      const checked = await this.ownedRoles.check(owned.id, run.abort.signal); owned.current = checked.current;
+    } catch (error) {
+      if (!(error instanceof MoguriError) && !run.abort.signal.aborted) console.error("Owned role validation failed: owned_role_result");
+      diagnostic = error instanceof MoguriError ? error.message : run.abort.signal.aborted ? "Owned roles stopped. Actual output and charges remain retained." :
+        "Role validation failed. Raw output and charges remain retained; no continuation.";
+    }
+    const record = this.ownedRoles.record(owned.id), index = record.steps.findIndex((step) => step.stepId === request.stepId && step.state === "started");
+    if (index < 0) throw new MoguriError("owned_role_result", "This result has no exact originally started role. No replacement was adopted.", 409);
+    const next = structuredClone(record); next.revision++; next.updatedAt = new Date().toISOString();
+    next.steps[index] = { ...record.steps[index]!, state: "recorded", resultDigest, outcome: message.stopReason };
+    this.commit([this.event(session, "model.completed", { contextDigest: resultDigest, usage, message: {
+      id: request.stepId, turnId: run.turnId, role: "notice", text: diagnostic ?? "Unaccepted role data retained. No file was staged, applied, validated or approved.",
+      timestamp: new Date(message.timestamp).toISOString(), outcome: message.stopReason, toolCalls: [],
+    } }, request.stepId), this.platform.roles.event(projectRoleSequence(record, next))]);
+    const metering = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
+    if (!successfulRoleEntry(metering)) diagnostic ??= "The actual role accounting is not settled and bounded. No next request was authorized.";
+    this.reply(run, { kind: "reply", requestId: request.requestId, ...(diagnostic ? { halt: true, error: diagnostic } :
+      { value: next.steps.some((step) => step.state === "pending") ? { accepted: true, continue: true } : { accepted: true } }) });
   }
   private async generationBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>): Promise<void> {
     const owned = run.generation;
@@ -1797,6 +1933,7 @@ export class ControlPlane extends EventEmitter {
           const execution = this.projection.executions.find((value) => value.id === run.executionId);
           if (!execution || execution.workspace !== this.remoteWorkspace(session) || execution.configDigest !== frameDigest(this.projection.settings.values.remote)) throw new MoguriError("remote_changed", "The target/workspace changed during this turn. No new model access was sent to the old worker.", 409);
         }
+        if (run.roleSequence) { await this.ownedRoleBoundary(run, request); return; }
         if (run.generation) { await this.generationBoundary(run, request); return; }
         if (run.compaction) { await this.compactionBoundary(run, request); return; }
         let before = this.session(run.sessionId);
@@ -1891,8 +2028,8 @@ export class ControlPlane extends EventEmitter {
           const current = this.session(run.sessionId), status = this.platform.budgets.status(current.id);
           this.commit([{ event_type: "budget.blocked", profile_id: this.profileId, payload: { sessionId: current.id, ownerSessionId: status.ownerSessionId, stepId: request.stepId, diagnostic: error.message, remainingTokens: status.remainingTokens, remainingUsd: status.remainingUsd } }]);
         }
-        if (!(error instanceof MoguriError)) console.error("Moguri model preparation failed:", run.generation ? "candidate_generation_prepare" : run.compaction ? "compaction_prepare" : "model_prepare");
-        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget || run.compaction || run.generation || error instanceof MoguriError && error.code.startsWith("routing_") ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
+        if (!(error instanceof MoguriError) && !run.abort.signal.aborted) console.error("Moguri model preparation failed:", run.roleSequence ? "owned_role_prepare" : run.generation ? "candidate_generation_prepare" : run.compaction ? "compaction_prepare" : "model_prepare");
+        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget || run.roleSequence || run.compaction || run.generation || error instanceof MoguriError && error.code.startsWith("routing_") ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       } finally { const key = this.platform.managed.leaseKey(session); if (key && this.writerReservations.get(key) === session.id) this.writerReservations.delete(key); }
       return;
     }
@@ -1905,6 +2042,7 @@ export class ControlPlane extends EventEmitter {
     if (request.kind === "model.complete") {
       if (!run.inFlight) throw new Error("Duplicate model completion.");
       run.inFlight = false;
+      if (run.roleSequence) { await this.ownedRoleCompletion(run, request); return; }
       const message = assistantMessage(request.message);
       const safeMessage = { ...message, errorMessage: message.errorMessage ? "Provider request failed." : undefined, diagnostics: undefined };
       const calls = toolCalls(message);
@@ -2108,7 +2246,14 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     if (run.abort.signal.aborted) return;
-    try { this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), ...this.cancelledQuestions(this.session(sessionId), "Owning turn was stopped. No answer was supplied.")]); }
+    try {
+      const sequence = run.roleSequence ? this.ownedRoles.record(run.roleSequence.id) : null;
+      this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}),
+        ...(sequence && !sequence.stopRequested ? [this.platform.roles.event(projectRoleSequence(sequence, {
+          ...sequence, revision: sequence.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true,
+        }))] : []),
+        ...this.cancelledQuestions(this.session(sessionId), "Owning turn was stopped. No answer was supplied.")]);
+    }
     finally { this.releaseQuestionWaits(sessionId); this.requestWorkerStop(run); }
   }
   private requestWorkerStop(run: Run): void {
@@ -2127,6 +2272,7 @@ export class ControlPlane extends EventEmitter {
     if (run.mcpControl) { this.finishMcpControl(run, outcome, diagnostic); return; }
     run.done = true;
     clearTimeout(run.stopTimer);
+    clearTimeout(run.roleSequence?.deadline);
     if (run.abort.signal.aborted && outcome === "completed") { outcome = "stopped"; diagnostic = "Stop was requested before the turn settled."; }
     if (run.inFlight) {
       outcome = outcome === "completed" ? "partial" : outcome;
@@ -2224,6 +2370,25 @@ export class ControlPlane extends EventEmitter {
     if (run.granted.size) { outcome = "partial"; diagnostic = "A tool was approved but its execution result or cleanup was not confirmed. Inspect the workspace before continuing."; }
     const compactionEvents: EventInput[] = [];
     const generationEvents: EventInput[] = [];
+    const roleEvents: EventInput[] = [];
+    if (run.roleSequence) {
+      const entry = this.ownedRoles.record(run.roleSequence.id);
+      if (outcome === "completed") {
+        try {
+          if (entry.stopRequested || run.abort.signal.aborted) throw new MoguriError("owned_role_stopped", "Stop arrived before the owned role sequence settled. No successful sequence was inferred.", 409);
+          if (!run.roleSequence.current || entry.steps.some((step) => step.state !== "recorded" || step.outcome !== "stop")) throw new MoguriError("owned_role_result", "The original role sequence has incomplete/failed observations. No successful sequence was inferred.", 409);
+          run.roleSequence.current();
+        } catch (error) {
+          outcome = run.abort.signal.aborted || entry.stopRequested ? "stopped" : "partial";
+          diagnostic = error instanceof MoguriError ? error.message : "Original role authority changed before settlement. Raw data and charges remain retained.";
+        }
+      }
+      if (run.roleSequence.expired) diagnostic = "The bounded role-sequence deadline expired. Actual output/charges remain retained; no call or effect was retried.";
+      if (outcome !== "completed" && !diagnostic) diagnostic = `Owned role sequence ${outcome}. Raw data and actual/unknown charges remain retained; no continuation.`;
+      const next = projectRoleSequence(entry, { ...entry, revision: entry.revision + 1, updatedAt: new Date().toISOString(), status: outcome, diagnostic,
+        steps: entry.steps.map((step) => step.state === "started" ? { ...step, state: "unconfirmed", diagnostic } : step) });
+      roleEvents.push(this.platform.roles.event(next));
+    }
     if (run.generation) {
       const entry = this.generations.record(run.generation.id);
       if (outcome === "completed") {
@@ -2250,6 +2415,7 @@ export class ControlPlane extends EventEmitter {
       ...this.cancelledQuestions(session, "Owning turn ended. No pending answer was invented."),
       ...this.routingFinished(session, run.turnId, outcome, diagnostic),
       ...generationEvents,
+      ...roleEvents,
       ...compactionEvents,
       ...[...(run.mcpDispatches?.values() ?? [])].map((dispatch) => {
         const call = this.mcpCall(dispatch.id, run.sessionId); dispatch.access = [];
@@ -2265,12 +2431,12 @@ export class ControlPlane extends EventEmitter {
         call, text: run.granted.has(call.id) ? "Tool execution or cleanup is unconfirmed; no automatic retry." : "Tool was not executed before the turn ended.",
         isError: true, outcome: run.granted.has(call.id) ? "unconfirmed" : "stopped",
       }, run.stepId)),
-      this.event(session, "turn.finished", { outcome, diagnostic, ...(run.generation && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
+      this.event(session, "turn.finished", { outcome, diagnostic, ...((run.generation || run.roleSequence) && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
       ...(execution && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) ? [this.event(session, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Turn settled locally; remote worker/descendant cleanup awaits its actual terminal status or explicit reconciliation." })] : []),
     ]);
     this.runs.delete(run.sessionId);
     this.releaseQuestionWaits(run.sessionId);
-    if ((!run.generation || run.granted.size) && (outcome === "partial" || outcome === "failed")) for (const current of this.projection.sessions) {
+    if ((!run.generation && !run.roleSequence || run.granted.size) && (outcome === "partial" || outcome === "failed")) for (const current of this.projection.sessions) {
       if (session.projectId ? this.platform.managed.leaseKey(current) === this.platform.managed.leaseKey(session) : current.id === session.id) this.paused.add(current.id);
     }
     queueMicrotask(() => this.pumpAll());

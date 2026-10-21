@@ -73,6 +73,15 @@ try {
       const roleSequence:RoleSequenceRecord=roleRead.sequence;void roleSequence.steps[0]?.planId;void roleRead.step?.result;
       void sdk.roleSequences.list();void sdk.getState().snapshot?.roleSequences;
       ` : ""}
+      ${installedMajor > 0 || installedMinor >= 26 ? `
+      const embedded=await createRuntime({stateDir:"/generated/explicit-embedding"});
+      const owned:Parameters<typeof embedded.controller.executeOwnedRoles>[0]={sessionId:"generated-source",stageWorkspaceId:"generated-stage",
+        input:{task:"Generated typed owned role.",files:[{path:"generated.ts",baseDigest:"absent"}]},
+        roles:[{role:"draft",modelId:"generated-model",instruction:"Return unaccepted generated data.",outputBound:64}],timeoutMs:1000};
+      const ownedReview=await embedded.controller.ownedRoles.preview(owned);void ownedReview.document.roles[0]?.inputBound;
+      await embedded.controller.executeOwnedRoles(owned,{digest:ownedReview.digest,confirmCost:true},"generated-original-owned-role");
+      await embedded.close();
+      ` : ""}
       const settings: UserSettings = snapshot.values;
       const project = await sdk.projects.configuration("generated-id");
       await sdk.projects.configure("generated-id",project.configuration.values,project.configuration.revision);
@@ -698,6 +707,20 @@ try {
         generationSdk.disconnect();await generationRuntime.close();generationRuntime=await createRuntime(options);generationSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
         await proof.verifyRecovery(generationSdk);
         console.log("Installed protocol-31 SDK/CLI/shared generation used the actual owned worker/draft ledger, immutable model provenance/version-3 history, separate reviewed stage/apply and missing-receipt restart replay without another model request.");
+        ${installedMajor > 0 || installedMinor >= 26 ? `
+        generationSdk.disconnect();await generationRuntime.close();
+        model.contextWindow=262144;provider.state.models[0].contextWindow=model.contextWindow;
+        const ownedOptions={...options,stateDir:join(root,"owned-role-state")};
+        generationRuntime=await createRuntime(ownedOptions);generationSdk=await connectMoguri({stateDir:ownedOptions.stateDir,autoStart:false});
+        const {qualifyOwnedSequence}=await import(${JSON.stringify(new URL("./qualify-owned-sequence.mjs", import.meta.url).href)});
+        const ownedProof=await qualifyOwnedSequence({sdk:generationSdk,controller:generationRuntime.controller,node:process.execPath,
+          cli:${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},directory:join(root,"generated-installed-owned-roles"),
+          stateDir:ownedOptions.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests});
+        generationSdk.disconnect();await generationRuntime.close();generationRuntime=await createRuntime(ownedOptions);
+        generationSdk=await connectMoguri({stateDir:ownedOptions.stateDir,autoStart:false});
+        await ownedProof.verifyRecovery(generationSdk,generationRuntime.controller);
+        console.log("Actual installed controller/worker owns three fully planned, bounded, independently retained roles with explicit untrusted prior-result context, shared CLI/TUI/SDK reads, source deletion/reopen and lost-receipt/deletion-intent replay refusal. No public compound or family-quality readiness.");
+        ` : ""}
       }finally{generationSdk?.disconnect();await generationRuntime?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
     }
     if(PROTOCOL_VERSION>=32){
