@@ -1,3 +1,3 @@
 import { execFileSync } from "node:child_process";
 
-execFileSync(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "tests/routing-primitives.test.ts", "tests/compound-routing-primitives.test.ts", "tests/owned-role-worker.test.ts", "tests/owned-role-ledger.test.ts", "tests/role-sequences.test.ts", "tests/owned-sequence.test.ts", "tests/owned-sequence-recovery.test.ts"], { stdio: "inherit" });
+execFileSync(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "tests/routing-primitives.test.ts", "tests/compound-routing-primitives.test.ts", "tests/owned-role-worker.test.ts", "tests/owned-role-ledger.test.ts", "tests/role-sequences.test.ts", "tests/owned-sequence.test.ts", "tests/owned-sequence-recovery.test.ts", "tests/role-proposals.test.ts", "tests/role-proposal-state.test.ts"], { stdio: "inherit" });
