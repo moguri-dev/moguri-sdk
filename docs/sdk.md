@@ -637,6 +637,10 @@ Only still-held plans release on the canonical owner's termination; consumed
 or unknown calls stay charged/held through source deletion/restart.
 Creation/transfer remain internal prerequisites, not a public finite kupo
 feature or client-side refund authority. See [the contract](architecture/budget-plans.md).
+The 0.24 internal planner can calculate a complete same-turn batch before one
+atomic append, so future roles cannot independently reserve overlapping
+capacity. This adds no client write API or finite kupo readiness; existing
+inspection still returns the individual version-1 plans.
 
 ### Tool outcomes and retained size
 

@@ -1,8 +1,11 @@
 # Planned wind-down capacity
 
-Status: **0.23 development / protocol and database 30**. This adds durable
+Initial foundation: **0.23 development / protocol and database 30**. This adds durable
 planned holds and shared inspection, not public finite kupo, compound worker
-orchestration or automatic Git approval. The immutable 0.22 delivery is unchanged.
+orchestration or automatic Git approval. The qualified immutable
+[0.23 delivery](../setup.md#current-qualified-0230-alpha1-checkpoint) includes
+these primitives at protocol 31. Current **0.24 development** adds complete
+batch calculation below, without changing the protocol or repacking 0.23.
 Sandbox remains paused.
 
 Reuse Node, TypeBox and maintained pi-ai (MIT), the existing profile-owned
@@ -46,6 +49,42 @@ The policy record retains its actual source event and reason. Consumed plans
 cannot release the associated call; interrupted/unknown model charges stay held.
 This is deterministic accounting, not a user answer, model decision or new
 approval. No client/script refund or plan-creation command is exposed.
+
+## Complete planned batches
+
+Internal `planBatch(session, inputs)` calculates one to 32 distinct future
+role holds for the same exact owning turn. It captures request values and
+resolves the current authoritative session rather than trusting an old caller
+snapshot. Each subsequent role sees all preceding prospective holds in the
+same session/profile/global units, including root capacity already charged
+by other profiles. Only the newly calculated plans are added to the captured
+global total; recorded local/foreign charges are not counted twice.
+
+Every role needs its complete bounds and captured price. If any role cannot
+fit, has unknown/stale pricing under a USD cap, repeats an ID, changes owning
+turn or overflows safe aggregate precision, the calculation returns no usable
+prefix and writes no state. It creates no model call, provider report or
+permission. Single-plan `plan` delegates to this same path, preserving the
+existing contract rather than keeping a separate calculation.
+
+The caller must append **all returned events with the original owning intent
+in one transaction before yielding or dispatching**. This synchronous helper
+does not itself append, lock another database or make a partial event subset
+safe. Failed final-event insertion rolls back all plans and the command
+receipt. Subsequent consumption and canonical-owner unused release still use
+the existing independently retained version-1 lifecycle.
+
+Reuse Node, the same TypeBox/MIT contract and budget calculations. There is no
+new event/schema/migration, client write API, dependency or automatic Git/model
+authority. Existing SDK/CLI/TUI/desktop inspection already sees the resulting
+individual holds. A batch does not forecast unknown future candidate context,
+prove a model family/quality gate or enable finite kupo by itself.
+
+The reservation binary search now uses `low + ceil((high - low) / 2)`;
+summing large safe bounds first could round its midpoint back to `low` and
+fail to terminate. The exact maximum-safe-integer regression runs in an owned
+deadline-bounded subprocess, so a future numeric regression cannot hang the
+test controller.
 
 ## Retention and migration
 
@@ -102,8 +141,24 @@ A fresh temporary packed protocol-30 SDK independently passes explicit script
 approval/rebuild, zero audit findings, all four entrypoint types and actual
 installed SDK/CLI/shared planned-hold/source-deletion/restart behavior, alongside
 all earlier Local/SSH/runtime contracts. Source audit is also zero.
-No new immutable 0.23 archive/app is qualified; 0.22 and older artifacts remain
+That source-only foundation did not qualify a new immutable archive/app;
+later exact 0.23 qualification is recorded in setup. Earlier artifacts remain
 unchanged.
+
+The 0.24 complete-batch spike passes **26/26 in 1.13 s**, including nine new
+batch cases and the prior actual stop/SIGKILL/transfer/retention/migration
+cases. The expanded accounting/profile/routing/generation/compaction gate
+passes **135/135 in 137.08 s**, with both type checks/build. Tests cover
+exact token/USD boundaries in all scopes, foreign-profile capacity, current
+controls, no failed prefix or receipt, simultaneous admission, source
+deletion/reopen and safe aggregate precision.
+
+Retained red evidence includes the initially missing batch API, stale fixture
+SDK revisions, assuming a synthetic unreported reservation had an observed
+terminal lifecycle, and relying on a query page's order instead of stable plan
+IDs. The maximum-integer test also exposed the real unsafe midpoint; that
+owned run was stopped, the search fixed and its regression moved into a
+deadline-bounded child. None of those failures is counted as qualification.
 
 Production compound ownership, bounded input planning for unknown future
 candidates, unused-plan scheduling/review, real-family quality and actually

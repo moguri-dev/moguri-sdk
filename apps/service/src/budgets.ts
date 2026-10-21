@@ -9,6 +9,7 @@ interface ModelReservationInput {
   stepId: string; turnId: string; providerId: string | null; apiModelId: string; role: ModelRole;
   inputEstimate: number; maxOutputTokens: number; modelId?: string; repositoryCapture?: RepositoryCapture;
 }
+type PlannedReservationInput = Omit<ModelReservationInput, "stepId"> & { id: string; authorityDigest: string };
 const integer = (value: number | null | undefined): value is number => value !== null && value !== undefined && Number.isSafeInteger(value) && value >= 0;
 export const reportedModelUsage = (usage: Usage): usage is Usage & { totalTokens: number; outputTokens: number } =>
   usage.quality === "provider-reported" && integer(usage.totalTokens) && integer(usage.outputTokens) && usage.outputTokens <= usage.totalTokens;
@@ -222,7 +223,7 @@ export class BudgetRuntime {
     };
     if (!fits(1)) throw new MoguriError("budget_exhausted", "The cumulative token/USD budget cannot reserve this request and one output token. No new model request was authorized; inspect the checkpoint or explicitly change the applicable cap.", 409);
     let low = 1, high = input.maxOutputTokens;
-    while (low < high) { const middle = Math.ceil((low + high) / 2); if (fits(middle)) low = middle; else high = middle - 1; }
+    while (low < high) { const middle = low + Math.ceil((high - low) / 2); if (fits(middle)) low = middle; else high = middle - 1; }
     const entry: BudgetEntry = {
       id: input.stepId, sessionId: session.id, ownerSessionId: owner.id, projectId: session.projectId, folderId: snapshot.projectConfigurations.find((configuration) => configuration.projectId === session.projectId)?.folderId ?? null,
       turnId: input.turnId, modelId: selectedModelId, providerId: input.providerId, apiModelId: input.apiModelId, role: input.role,
@@ -235,7 +236,33 @@ export class BudgetRuntime {
     };
     return { event: recorded(entry, snapshot.profileId), maxTokens: low };
   }
-  plan(session: Session, input: Omit<ModelReservationInput, "stepId"> & { id: string; authorityDigest: string }): { event: EventInput; plan: BudgetPlan } {
+  plan(session: Session, input: PlannedReservationInput): { event: EventInput; plan: BudgetPlan } {
+    const result = this.planBatch(session, [input]);
+    return { event: result.events[0]!, plan: result.plans[0]! };
+  }
+  planBatch(session: Session, requested: PlannedReservationInput[]): { events: EventInput[]; plans: BudgetPlan[] } {
+    if (!Array.isArray(requested) || !requested.length || requested.length > 32) throw new MoguriError("budget_plan_batch", "Plan between one and 32 complete role envelopes for one exact owning turn. No prefix was retained.", 409);
+    const inputs = structuredClone(requested);
+    if (new Set(inputs.map((input) => input.id)).size !== inputs.length || inputs.some((input) => input.turnId !== inputs[0]!.turnId)) throw new MoguriError("budget_plan_batch", "Each planned role needs a distinct original ID in the same owning turn. No prefix was retained.", 409);
+    const original = this.host.snapshot(), snapshot = { ...original, budgetPlans: [...original.budgetPlans] }, global = this.host.global?.();
+    const plans: BudgetPlan[] = [], events: EventInput[] = [];
+    const prospective = new BudgetRuntime({
+      snapshot: () => snapshot, events: () => this.host.events(),
+      ...(global ? { global: () => {
+        const added = budgetCharges([], plans);
+        return { limit: global.limit, chargedTokens: sum([global.chargedTokens, added.tokens], (value) => value),
+          chargedUsdMicros: sum([global.chargedUsdMicros, added.usdMicros], (value) => value) };
+      } } : {}),
+    });
+    for (const input of inputs) {
+      const next = prospective.planned(session, input);
+      plans.push(next.plan); events.push(next.event); snapshot.budgetPlans.push(next.plan);
+      const added = budgetCharges([], plans);
+      if (added.tokens === null || added.usdMicros === null && plans.every((plan) => plan.usdMicros !== null)) throw new MoguriError("budget_overflow", "The complete planned batch exceeds safe token/price precision. No prefix or rounded capacity was retained.", 409);
+    }
+    return { plans, events };
+  }
+  private planned(session: Session, input: PlannedReservationInput): { event: EventInput; plan: BudgetPlan } {
     session = this.session(session.id);
     if (this.host.snapshot().budgetPlans.some((plan) => plan.id === input.id)) throw new MoguriError("budget_plan_duplicate", "This original planned reservation already exists. No new hold or replay was created.", 409);
     const reserved = this.reservation(session, { ...input, stepId: input.id });

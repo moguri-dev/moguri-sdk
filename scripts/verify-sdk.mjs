@@ -268,6 +268,16 @@ try {
             const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},env={...process.env,MOGURI_STATE_DIR:options.stateDir};
             const read=JSON.parse((await promisify(execFile)(process.execPath,[cli,"budget","plans","--session",owner.id],{env})).stdout);assert.equal(read.plans[0].id,planned.plan.id);
             const shared=await candidateSdk.slash(owner.id,"/dashboard plans "+JSON.stringify({sessionId:owner.id}),"tui");assert.equal(JSON.parse(shared.text).plans[0].id,planned.plan.id);
+            if(typeof control.platform.budgets.planBatch==="function"){
+              const turnId=randomUUID(),requests=["critic","checkpoint"].map(role=>({id:randomUUID(),turnId,modelId:"generated-planned-model",providerId:"generated-provider",apiModelId:"generated-canonical",role,inputEstimate:10,maxOutputTokens:20,authorityDigest:"b".repeat(64)}));
+              await candidateSdk.budgets.policy({basis:"estimate",tokens:89},0,true);
+              assert.throws(()=>control.platform.budgets.planBatch(current,requests),{code:"budget_plan_capacity"});assert.equal(control.snapshot().budgetPlans.length,1);
+              await candidateSdk.budgets.policy({basis:"estimate",tokens:90},1,true);
+              const batch=control.platform.budgets.planBatch(current,requests);control.store.commit(batch.events);control.refreshProfile();
+              assert.equal((await candidateSdk.budgets.status(owner.id)).status.totals.plannedHeldTokens,90);
+              assert.equal((await candidateSdk.budgets.calls({sessionId:owner.id})).calls.length,0);
+              console.log("Installed complete planned-capacity batches honor cumulative finite limits, retain no failed prefix and create no model calls.");
+            }
             await candidateSdk.sessions.delete(owner.id,true,control.snapshot().sessions.find(session=>session.id===owner.id).revision);
             assert.equal((await candidateSdk.budgets.plans({sessionId:owner.id})).plans[0].status,"released");
             assert.equal((await candidateSdk.budgets.calls({sessionId:owner.id})).calls.length,0);
