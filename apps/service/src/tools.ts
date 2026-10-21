@@ -62,8 +62,19 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
     case "read_file": return { text: JSON.stringify(await readProjectFile(root!, String(args.path))), isError: false, outcome: "completed" };
     case "write_file": {
       signal.throwIfAborted();
-      const hash = await writeProjectFile(root!, String(args.path), String(args.text), String(args.expectedDigest));
-      return { text: `File written. sha256=${hash}`, isError: false, outcome: "completed" };
+      const effects = { attempted: false, written: false };
+      try {
+        const hash = await writeProjectFile(root!, String(args.path), String(args.text), String(args.expectedDigest), {
+          signal, beforeCommit: () => { effects.attempted = true; }, committed: () => { effects.written = true; },
+        });
+        signal.throwIfAborted();
+        return { text: `File written. sha256=${hash}`, isError: false, outcome: "completed" };
+      } catch (error) {
+        if (!effects.attempted && !effects.written) throw error;
+        if (!signal.aborted) console.error("File publication is unconfirmed:", error instanceof MoguriError ? error.code : error instanceof Error && "code" in error ? String(error.code) : "file_write");
+        return { text: `${effects.written ? "The file was published, but its final persistence/owned acknowledgement is unconfirmed." : "File publication is unconfirmed and may already have occurred."} Inspect ${String(args.path)} before retrying; no rollback or successful cancellation was inferred.`,
+          isError: true, outcome: "partial" };
+      }
     }
     case "run_command": return runCommand(root!, String(args.command), Number(args.timeoutMs), signal, output, started);
     default:

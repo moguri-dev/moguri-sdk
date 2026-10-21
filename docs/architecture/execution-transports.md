@@ -154,6 +154,38 @@ configuration races, duplicate frames, reconnect, disconnect cancellation,
 late usage, restart and no Local fallback. A capability becomes ready only
 after the installed worker/runtime and target pass those checks.
 
+## Owned file-tool publication
+
+The shared Local/SSH file tool uses Node filesystem/abort primitives (MIT)
+and the existing `tool.completed` partial outcome, without another schema,
+permission or runtime. Its owned signal reaches asynchronous file preparation
+and the pre-rename check. A stop before publication preserves the source and
+removes the temporary candidate.
+
+Record the publication attempt and actual rename separately. An unacknowledged
+rename, later directory-sync failure or stop after the real effect is
+explicitly partial, never a completed/effect-free stopped tool. Non-cancelled
+I/O failures log a safe code; the retained tool result explains possible or
+confirmed publication without claiming rollback. The existing owned worker
+retains that result and stops before another model request.
+
+Generated filesystem mocks exercise those exact boundaries, not personal
+files or a native VM. Base conflicts remain ordinary effect-free errors.
+This does not establish hostile external-writer races or complete detached/
+reparented-process containment; Sandbox remains paused.
+
+The focused gate passes five cases in **699.56 ms**. Its actual Moguri-owned
+worker carries a generated post-publication directory-sync fault through the
+normal two approved model/tool steps in **333.23 ms**: the real file remains
+inspectable, the tool and turn are partial, the root is quarantined and no
+third model leg runs. The ledger retains both actual calls (**84** reported
+tokens), not a refund or successful stop. No separate agent loop is used.
+The final directly related Local/SSH/routing/plan/supervision gate passes
+**60/60 in 29.84 s**, type checks/build and a fresh approved/audited packed SDK
+compatibility install. Four hidden desktop/SSH workflows pass in **13.6 s**.
+This reuses protocol 28's existing outcome contract, not another durable
+schema or a claim of complete descendant containment.
+
 ## Read-only Remote workspace views
 
 Protocol/database **17** reuses OpenSSH (BSD), Node filesystem/process/crypto

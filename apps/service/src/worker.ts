@@ -160,7 +160,7 @@ async function run(start: WorkerStart): Promise<void> {
           incompleteCleanup ||= result.outcome === "partial";
           await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call, ...result });
           context.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: result.text }], isError: result.isError, timestamp: Date.now() });
-          if (incompleteCleanup) throw new Error("Owned process cleanup is unconfirmed. Inspect the partial tool result before continuing.");
+          if (incompleteCleanup) throw new Error("Tool side effects are partial or cleanup is unconfirmed. Inspect the partial tool result before continuing.");
         }
       } finally { clearInterval(timer); flush(); }
     }
