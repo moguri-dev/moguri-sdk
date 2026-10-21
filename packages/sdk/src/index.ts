@@ -66,6 +66,7 @@ export class MoguriSdk extends TransportClient {
   };
   readonly models = {
     refresh: () => this.command({ type: "provider.refresh" }),
+    evidence: (modelId: string) => this.query({ type: "model.evidence", modelId }),
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
     clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
   };

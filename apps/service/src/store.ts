@@ -195,6 +195,9 @@ export class EventStore {
       if (version < 33) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('candidate_role_schema','1');
         PRAGMA user_version=33; COMMIT;`);
+      if (version < 34) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('model_evidence_schema','1');
+        PRAGMA user_version=34; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

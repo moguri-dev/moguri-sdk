@@ -202,6 +202,7 @@ export class ControlPlane extends EventEmitter {
       generationQuery: (query) => this.generations.query(query),
       generationCommand: (command, finish) => this.generations.execute(command, finish),
       roleProposal: (id) => this.ownedRoles.proposal(id),
+      modelEvidence: (id) => this.provider.evidence(id, AbortSignal.timeout(10_000)),
       planSaveQuery: (query) => this.planSaveQuery(query),
       planSaveCommand: (command, finish) => this.planSaveCommand(command, finish),
       validateControls: (controls) => this.available(controls),

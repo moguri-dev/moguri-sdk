@@ -314,6 +314,17 @@ inputs/results through source-role deletion; source application still records
 separate actual-user acceptance. The additive marker preserves old state and
 version-5 exports disclose the new copy. No quality or Git authority follows.
 
+Source 0.28/protocol 34 adds
+[explicit provider-declared model inspection](model-evidence.md).
+Normal Copilot login/discovery/inference is unchanged. One exact available
+model can expose bounded family/vendor/version declarations from the
+authenticated catalogue without project content, inference, a durable cache
+or inferred aliases. The report's digest binds its observation, not independent
+training or quality. Unknown/local/synthetic lineage remains unknown; neither
+this report nor its metadata labels can enable compound routing, finite kupo,
+Max or acceptance. The additive compatibility marker preserves schema-33
+candidate origin and independent raw-copy history.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.

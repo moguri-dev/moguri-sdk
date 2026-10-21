@@ -93,6 +93,7 @@ export interface PlatformHost {
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
   generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleProposal(id: string): import("../../../packages/protocol/src/index.ts").CandidateRoleProposalRead;
+  modelEvidence(id: string): Promise<import("../../../packages/protocol/src/index.ts").ModelEvidenceReport>;
   planSaveQuery(query: PlanSaveQuery): PlanSaveResponse;
   planSaveCommand(command: PlanSaveCommand, finish: WorkspaceFinish): CommandResult;
   validateControls(controls: Controls): void;
@@ -459,6 +460,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (isRoleSequenceQuery(query)) return this.roles.query(query);
     if (isCandidateGenerationQuery(query)) return this.host.generationQuery(query);
     if (isCandidateQuery(query)) return this.candidates.query(query);
+    if (query.type === "model.evidence") return { type: query.type, evidence: await this.host.modelEvidence(query.modelId) };
     if (isRemoteMcpQuery(query)) return this.mcpRemoteQuery(query);
     if (isRepositoryQuery(query)) return this.repositories.query(query);
     if (isTelemetryQuery(query)) return this.telemetry.query(query);

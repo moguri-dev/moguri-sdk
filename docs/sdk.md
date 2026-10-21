@@ -5,8 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Qualified **0.27.0-alpha.1 uses protocol 33** and
-deliberately rejects incompatible running services. Remote execution requires
+This is an alpha API. Development **0.28 uses protocol 34**; the frozen qualified
+**0.27.0-alpha.1 uses protocol 33**. Both deliberately reject incompatible
+running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
 The 0.21 delivery implements session-bound Local/SSH memory through the same
@@ -51,7 +52,11 @@ compound workflow creator. Restart incompatible services explicitly, never
 delete their state. Its exact installed SDK and bundled runtime are independently
 qualified; [setup](setup.md#current-qualified-0270-alpha1-checkpoint) records
 immutable identities. Frozen qualified 0.25 remains protocol 32.
-Current state migrations preserve schema-1 through schema-31 history, sessions, drafts,
+The 0.28 source adds explicit `models.evidence(modelId)` inspection. Its
+version-1 provider-declared report is ephemeral and does not rewrite ModelInfo,
+select a model or grant lineage/quality/approval. The additive schema-34 marker
+preserves actual schema-33 candidate origins and independent raw-copy grants.
+Current state migrations preserve schema-1 through schema-33 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -201,7 +206,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
-| `models` | Explicit Copilot/local catalog refresh, synthetic Single availability and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download or automatic model substitution. |
+| `models` | Explicit Copilot/local catalog refresh, informational `evidence(modelId)`, synthetic Single availability and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download, automatic evidence read or model substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
 
@@ -287,6 +292,35 @@ paid calls. Restore with the current state's `activeId` and `sourceDigest`:
 `sdk.compactions.restore(sessionId, activeId, sourceDigest, true)`.
 Restoring may exceed the working window; normal admission still fails closed.
 See [the compaction contract](architecture/context-compaction.md).
+
+### Explicit provider-declared metadata
+
+`(await sdk.models.evidence(actualModelId)).evidence` returns a
+`ModelEvidenceReport` for one currently available concrete Copilot API ID.
+It copies only explicit `capabilities.family`, optional vendor/version, exact
+provider/model/source field, observation time, digest and the limitations.
+`status:"unknown"` and null claims mean the provider did not declare a family;
+no name prefix, model alias or local endpoint is treated as lineage.
+
+CLI `moguri models evidence MODEL_ID`, shared/native TUI
+`/model-evidence [MODEL_ID]` and desktop **Model / Provider-declared model
+metadata / Read Copilot model declarations** use this same read. Omitting the
+slash argument requires the current fixed model; unset/kupo selection is an
+explicit error. This never selects/configures a model or changes the draft.
+
+The service uses current profile-scoped short-lived request access and an exact
+HTTPS Copilot API root, with no redirect, alternate URL or ambient credential.
+Reads are bounded to four concurrent requests, ten seconds, 256 KiB and 512
+distinct model IDs. Invalid fields, credential echoes, stale account/model
+bindings, logout and cancellation cannot return a successful old report.
+Remote sessions disclose that this metadata read is on the local control plane,
+not evidence about a different SSH account's model implementation.
+
+Reports are not signed attestations, independent-family proof, cost/quality
+measurements, user answers or permission. They add no model call, durable
+evidence event, automatic cache, pool widening, compound mode or Max.
+Ordinary Copilot login/discovery/inference is unchanged. See
+[the exact source/digest and qualification contract](architecture/model-evidence.md).
 
 ### Opt-in Single routing
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { isRecord, MoguriError, type Controls, type LocalEndpoint, type ModelInfo, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import type { PreparedModel, ProviderAdapter } from "./provider.ts";
 
@@ -131,6 +131,20 @@ export class ModelRegistry implements ProviderAdapter {
   login(): void { this.copilot.login(); }
   async cancel(): Promise<void> { await this.copilot.cancel(); }
   async logout(): Promise<void> { await this.copilot.logout(); }
+  async evidence(id: string, signal: AbortSignal): Promise<import("../../../packages/protocol/src/index.ts").ModelEvidenceReport> {
+    signal.throwIfAborted();
+    const selected = this.state.models.find((model) => model.id === id);
+    if (this.closed || !selected || selected.synthetic || selected.source !== "copilot" || selected.providerId !== "github-copilot" ||
+      (selected.apiModelId ?? selected.id) !== selected.id || !this.copilot.evidence) {
+      throw new MoguriError("model_evidence_unavailable", "This model has no supported authenticated Copilot evidence reader. Local/Remote family declarations stay unknown; no name prefix, endpoint or account was guessed.", 409);
+    }
+    const binding = JSON.stringify(selected), report = parse(ModelEvidenceReportSchema, await this.copilot.evidence(selected.id, signal));
+    signal.throwIfAborted();
+    if (this.closed || JSON.stringify(this.state.models.find((model) => model.id === id)) !== binding || report.modelId !== selected.id || report.apiModelId !== selected.id) {
+      throw new MoguriError("model_evidence_stale", "Exact model/provider scope changed during inspection or the report names another model. No evidence was adopted.", 409);
+    }
+    return report;
+  }
   async token(id: string, token?: string): Promise<void> {
     const endpoint = this.endpoint(id);
     if (endpoint.auth !== "bearer") throw new MoguriError("local_model_auth", "Set this endpoint's explicit authentication method before storing a credential.");

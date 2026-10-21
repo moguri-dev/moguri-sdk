@@ -26,9 +26,11 @@ import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from
 import { CandidateCommandSchema, CandidateQuerySchema, type CandidateJobIntent, type CandidateRecord, type CandidateResponse } from "./candidates.ts";
 import { CandidateGenerationCommandSchema, CandidateGenerationQuerySchema, type CandidateGenerationRecord, type CandidateGenerationResponse } from "./candidate-generations.ts";
 import { RoleSequenceQuerySchema, type RoleSequenceRecord, type RoleSequenceResponse } from "./role-sequences.ts";
+import { ModelEvidenceQuerySchema, type ModelEvidenceResponse } from "./model-evidence.ts";
 export * from "./candidates.ts";
 export * from "./candidate-generations.ts";
 export * from "./role-sequences.ts";
+export * from "./model-evidence.ts";
 export * from "./mcp.ts";
 export * from "./repositories.ts";
 export * from "./telemetry.ts";
@@ -194,6 +196,7 @@ export const QuerySchema = Type.Union([
   CandidateQuerySchema,
   CandidateGenerationQuerySchema,
   RoleSequenceQuerySchema,
+  ModelEvidenceQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -255,6 +258,7 @@ export type PlatformResponse =
   | CandidateResponse
   | CandidateGenerationResponse
   | RoleSequenceResponse
+  | ModelEvidenceResponse
   | RemoteMcpResponse
   | RepositoryResponse
   | TelemetryResponse

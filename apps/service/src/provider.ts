@@ -1,8 +1,9 @@
 import { AsyncEntry } from "@napi-rs/keyring";
 import { createModels, type AuthOperationOptions, type Credential, type CredentialStore, type Model, type Api, type ModelAuth } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { isRecord, MoguriError, PROFILE_ID, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, PROFILE_ID, type ProviderState, type ModelEvidenceReport } from "../../../packages/protocol/src/index.ts";
 import { supportedThinking } from "./model-controls.ts";
+import { readCopilotModelEvidence } from "./model-evidence.ts";
 
 export interface PreparedModel { model: Model<Api>; auth: ModelAuth }
 export interface ProviderAdapter {
@@ -13,6 +14,7 @@ export interface ProviderAdapter {
   cancel(): Promise<void>;
   logout(): Promise<void>;
   prepare(modelId: string, signal: AbortSignal): Promise<PreparedModel>;
+  evidence?(modelId: string, signal: AbortSignal): Promise<ModelEvidenceReport>;
 }
 export class KeyringCredentials implements CredentialStore {
   constructor(private readonly profileId: string = PROFILE_ID) {}
@@ -68,6 +70,7 @@ export class CopilotAdapter implements ProviderAdapter {
   private loginTask?: Promise<void>;
   private epoch = 0;
   private signingOut = false;
+  private readonly evidenceReads = new Set<AbortController>();
   constructor(credentials: CredentialStore = new KeyringCredentials()) {
     this.models = createModels({
       credentials,
@@ -96,8 +99,39 @@ export class CopilotAdapter implements ProviderAdapter {
       this.update({ status: "error", models: [], login: null, diagnostic: "Copilot access or OS keychain access failed. Unlock the keychain, check your network/account policy, then reconnect." });
     }
   }
+  async evidence(modelId: string, caller: AbortSignal): Promise<ModelEvidenceReport> {
+    if (this.signingOut || this.loginTask || this.state.status !== "connected" || !this.state.models.some((model) => model.id === modelId)) {
+      throw new MoguriError("model_evidence_unavailable", "Explicitly connect and select an actual current Copilot model before inspecting its declared metadata. No model or account was substituted.", 409);
+    }
+    if (this.evidenceReads.size >= 4) throw new MoguriError("model_evidence_busy", "Four owned catalogue reads are already active. Wait for one to settle; no extra request was sent.", 429);
+    const abort = new AbortController(), deadline = AbortSignal.timeout(10_000), signal = AbortSignal.any([caller, abort.signal, deadline]), epoch = this.epoch;
+    this.evidenceReads.add(abort);
+    try {
+      signal.throwIfAborted();
+      const auth = await this.models.getAuth("github-copilot", { signal }), available = await this.models.getAvailable("github-copilot", { signal });
+      signal.throwIfAborted();
+      if (!auth || !available.some((model) => model.id === modelId)) throw new MoguriError("model_evidence_unavailable", "This exact Copilot account no longer advertises the selected supported model. Refresh models; no fallback was used.", 409);
+      const report = await readCopilotModelEvidence(modelId, auth.auth.baseUrl, auth.auth.apiKey, signal);
+      signal.throwIfAborted();
+      if (epoch !== this.epoch || this.signingOut || this.state.status !== "connected" || !this.state.models.some((model) => model.id === modelId)) {
+        throw new MoguriError("model_evidence_stale", "Copilot account/model scope changed during inspection. No old-account report was published.", 409);
+      }
+      return report;
+    } catch (error) {
+      if (signal.aborted) {
+        const timedOut = !abort.signal.aborted && (deadline.aborted || caller.aborted && caller.reason instanceof Error && caller.reason.name === "TimeoutError");
+        throw new MoguriError(timedOut ? "model_evidence_timeout" : "model_evidence_cancelled",
+          "The owned catalogue read stopped or exceeded its deadline. No report, inference or approval was published.", timedOut ? 408 : 409);
+      }
+      if (error instanceof MoguriError) throw error;
+      console.error("Copilot declared model inspection failed: model_evidence_network");
+      throw new MoguriError("model_evidence_network", "The exact Copilot catalogue could not be read. Check access/network and inspect explicitly again; no fallback or raw diagnostics were exposed.", 502);
+    } finally { this.evidenceReads.delete(abort); }
+  }
+  private abortEvidence(): void { for (const read of this.evidenceReads) read.abort(); }
   login(): void {
     if (this.loginTask || this.signingOut) throw new MoguriError("login_pending", "A Copilot account change is already in progress.", 409);
+    this.abortEvidence();
     const abort = new AbortController();
     const epoch = ++this.epoch;
     const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(15 * 60_000)]);
@@ -135,6 +169,7 @@ export class CopilotAdapter implements ProviderAdapter {
     })();
   }
   async cancel(): Promise<void> {
+    this.abortEvidence();
     if (!this.loginTask) return;
     this.epoch++;
     this.loginAbort?.abort();
