@@ -1,8 +1,8 @@
 # Canonical proposals from retained roles
 
-Current development: **0.27.0-alpha.1 / protocol and database 33**.
-The qualified 0.26 internal executor and frozen 0.25 SDK/native delivery remain
-the baseline. Sandbox stays paused and live personal inference stays off.
+Status: **qualified 0.27.0-alpha.1 / protocol and database 33**.
+The qualified 0.26 source and frozen 0.25 SDK/native delivery remain preserved.
+Sandbox stays paused and live personal inference stays off.
 
 Reuse Node, maintained pi-ai, TypeBox, React/Electron/OpenTUI (MIT), existing
 source capture and patch validation, the actual role ledger, independent
@@ -63,7 +63,7 @@ and role index, known/unknown accounting, unavailable/foreign/deleted reports,
 origin swapping and editing, fresh preview consent, separate stage/apply,
 source-role deletion/reopen, immutable origin and raw migration rollback.
 Shared SDK/compiled CLI/native TUI/hidden desktop and packed-consumer checks
-must prove the same behavior. No public compound/family/quality or finite-kupo
+prove the same behavior. No public compound/family/quality or finite-kupo
 readiness follows from this link.
 
 The backend/candidate-state gate passes **21/21 in 25.62 s**, including raw
@@ -78,5 +78,31 @@ The first desktop attempt completed its functional assertions but closed the
 fixture before the UI's pending/dirty protection settled, causing teardown to
 time out. The fixture now explicitly observes its cleared summary and
 `beforeunload` state before closing; it never disables production protection.
-That failed run is retained, not counted as a pass. Complete source,
-installed-consumer and exact native delivery are still pending.
+That failed run is retained, not counted as a pass.
+
+Complete source passes **793/793 in 704.73 s**, with no failed/cancelled/skipped
+cases, both type checks/declaration build and zero source audit findings.
+All **51 hidden source desktop flows pass in 1.9 min**, and all **51 from the
+exact packaged app in 2.0 min**. The expanded compound spike passes **69/69 in
+86.42 s**, including the immutable-origin regression and raw schema-32 rollback.
+
+Fresh temporary and exact delivered SDK archives independently install with
+explicit script approval/rebuild, zero consumer findings and all four strict
+external entrypoint types. Actual installed controller/worker roles, CLI/
+shared final-role reads, origin-bound preview, separate stage/apply, deletion
+of original role/session, raw-copy/version-5 reopen and actual-user acceptance
+pass without another model. The exact archive's actual worker additionally
+passes **12/12 private transport/ledger probes in 3.76 s**.
+
+The exact app's bundled Node/runtime/SDK/CLI independently resolves the final
+role, verifies origin-bound review, stages separately, deletes the source role/
+session, reopens the raw-copy/version-5 report and applies only a fresh user
+review. Model preparation is forbidden throughout that native publication
+probe. Its initial source-only seeder selected nonexistent `worker.mjs` under
+the namespaced TypeScript loader and honestly became partial with zero model
+requests. The fixture now explicitly names the actual maintained `worker.ts`
+and requires completed roles. No application/provider/policy or archived bytes
+changed to make that seeder pass.
+
+[Setup](../setup.md#current-qualified-0270-alpha1-checkpoint) records immutable
+SDK/native identities and separately scoped Electron/runtime footprint.

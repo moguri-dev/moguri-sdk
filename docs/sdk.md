@@ -5,7 +5,7 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Qualified **0.25.0-alpha.1 uses protocol 32** and
+This is an alpha API. Qualified **0.27.0-alpha.1 uses protocol 33** and
 deliberately rejects incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
@@ -38,7 +38,7 @@ over complete source/model/policy/input envelopes. Its Node controller primitive
 is privileged and not a public SDK/HTTP/MCP workflow creator. Client
 `roleSequences` remains read-only; family/quality/acceptance and finite kupo
 stay separately gated. Qualification status is recorded in setup.
-Current **0.27 source uses protocol 33** for canonical final-role proposal
+Qualified **0.27 uses protocol 33** for canonical final-role proposal
 inspection and review-bound candidate origin. `candidates.roleProposal(id)`
 reads the exact final proposer without a model/root lookup.
 `candidates.preview(session, stage, patch, {roleSequenceId:id})` binds its
@@ -48,7 +48,9 @@ Candidate copies retain sequence/role input and raw-result grants independently;
 their exports use version 5. Editing loses verified attribution, and applying
 still needs a separate actual-user review. This does not expose a public
 compound workflow creator. Restart incompatible services explicitly, never
-delete their state. Frozen qualified 0.25 remains protocol 32.
+delete their state. Its exact installed SDK and bundled runtime are independently
+qualified; [setup](setup.md#current-qualified-0270-alpha1-checkpoint) records
+immutable identities. Frozen qualified 0.25 remains protocol 32.
 Current state migrations preserve schema-1 through schema-31 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
