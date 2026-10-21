@@ -203,3 +203,11 @@ memory flag. Tests are now independent and scope is checked before optional
 enablement. Initial UI cases selected nonexistent `Memory` rather than actual
 `Repository memory`; the trace-backed locators were corrected, not the policy.
 These targeted passes alone do not qualify full source or an exact archive.
+
+The complete corrected source gate passes **590/590 in 430.34 s**, both
+type checks/full build, zero-vulnerability audit and **41/41 hidden source
+desktop workflows in 1.5 min**. The first full run completed 590 cases with
+589 passing; its sole failure expected the obsolete phrase `Enable local`
+after the cross-env guidance was corrected. The test now verifies the
+unchanged typed `memory_disabled` guard, with no product or policy relaxation.
+Exact installed SDK and actual packaged 0.21 acceptance remain separate.

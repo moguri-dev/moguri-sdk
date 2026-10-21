@@ -10,8 +10,8 @@ deliberately rejects incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
 The 0.21 development source uses protocol 27 and implements session-bound
-Local/SSH memory through the same SDK. Its full/exact-artifact qualification
-remains separate from the current immutable 0.20 delivery.
+Local/SSH memory through the same SDK. Full source/native checks pass;
+exact-artifact qualification remains separate from immutable 0.20.
 Current state migrations preserve schema-1 through schema-25 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
