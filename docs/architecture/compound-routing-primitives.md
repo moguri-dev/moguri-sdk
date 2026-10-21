@@ -80,3 +80,9 @@ The subsequent [owned candidate file probe](candidate-primitives.md) connects
 generated Cascade/Critique proposals to one actual SDK worktree stage and a
 separate exact-review application. It qualifies bounded file mechanics, not
 the production worker/lease/actor/ledger, durable recovery or public workflows.
+
+The later 0.24 [owned-role protocol probe](owned-role-protocol.md) uses the
+existing actual worker and real budget start/result transactions rather than
+this foreground transport prototype. Production durable workflow ownership,
+actual eligible-family/quality gates and public compound admission remain
+separate; the earlier generated timings are not relabeled as live quality.

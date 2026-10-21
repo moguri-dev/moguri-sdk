@@ -120,8 +120,16 @@ async function run(start: WorkerStart): Promise<void> {
         });
         if (accepted.halt && accepted.error) { await finish(abort.signal.aborted ? "stopped" : "partial", accepted.error); return; }
         if (accepted.error) throw new Error(accepted.error);
-        if (accepted.value && "accepted" in accepted.value && "continue" in accepted.value && accepted.value.continue === true) {
-          if (boundary.phase !== "router") throw new Error("Only an owned router stage may request a solver continuation.");
+        if (!accepted.value || !("accepted" in accepted.value) || accepted.value.accepted !== true) throw new Error("Model completion was not durably acknowledged. No success or next role was inferred.");
+        if ("continue" in accepted.value && accepted.value.continue === true) {
+          abort.signal.throwIfAborted();
+          if (boundary.phase !== "router" && boundary.phase !== "candidate") throw new Error("Only an owned router or tool-less candidate stage may request a continuation.");
+          if (boundary.phase === "candidate") {
+            if (start.readOnly !== true || start.root !== null || message.stopReason !== "stop" || toolCalls(message).length) throw new Error("Candidate continuation requires a root-less read-only owner and a complete tool-less result. No next role was authorized.");
+            if (!usageReported || !Number.isSafeInteger(boundary.maxTokens) || boundary.maxTokens < 1 || boundary.maxTokens > model.maxTokens ||
+              !Number.isSafeInteger(message.usage.totalTokens) || !Number.isSafeInteger(message.usage.output) ||
+              message.usage.output < 0 || message.usage.output > message.usage.totalTokens || message.usage.output > boundary.maxTokens) throw new Error("Candidate continuation requires valid reported usage within its actual output bound. No unknown/free next role was authorized.");
+          }
           continue;
         }
         context.push(message);

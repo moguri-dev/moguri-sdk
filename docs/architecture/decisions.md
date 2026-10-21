@@ -282,6 +282,13 @@ canonical no-paid-replay intent. Staging/application remain separate real-user
 reviews. This is an integrated first model role, not completion of compound
 patterns, finite kupo wind-down, calibrated quality or D11.
 
+The 0.24 [private owned-role protocol](owned-role-protocol.md) now exercises
+acknowledged candidate-stage continuation in that same actual worker, with
+complete planned-capacity transfer and retained results before another role.
+It keeps model/host advice separate from acceptance and halts on unknown
+usage, failed receipts, stop or control loss. This is not a durable compound
+workflow, real-family quality gate or public routing configuration.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.
