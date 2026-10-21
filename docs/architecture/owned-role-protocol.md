@@ -85,3 +85,19 @@ acknowledgement and complete-result stop/control-loss races.
 worker for 0.24 and newer. Older immutable SDK archives retain their previous
 supported scope; source fixtures are not a substitute for installed-worker
 qualification.
+
+Complete source compatibility passes **741/741 in 603.96 s**, with no failed
+or skipped cases, both type checks/build and zero audit findings. All
+**47 hidden source desktop workflows** pass in **1.8 min**. The fresh temporary
+0.24 SDK independently installs with explicit script approval/rebuild, passes
+all four external entrypoint types and the existing Local/SSH/generation/batch
+contracts with zero consumer vulnerabilities.
+
+The actual installed `dist/worker.mjs` additionally passes all **12 private
+owned-role/ledger probes in 3.84 s**, including three real loopback requests,
+exact 32-step stopping, failed/missing acknowledgements and control loss.
+Its successful ledger/reopen path takes **302.42 ms**; injected receipt failure
+takes **204.16 ms** while preserving the unknown 99-token hold and zero next-role
+requests. No source worker was substituted for that installed-worker gate.
+No immutable 0.24 SDK/app is created by these source/consumer prerequisites;
+the qualified 0.23 archives remain frozen.
