@@ -13,6 +13,7 @@ import { repositoryContext } from "./project-policy.ts";
 import { foregroundWorker } from "./foreground-bridge.ts";
 import { workerCatalog } from "./worker-queries.ts";
 import { readWorkspace } from "./workspace-reads.ts";
+import { discoverRemoteMcp } from "./remote-mcp-runtime.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -159,7 +160,7 @@ async function supervise(init: BridgeInit): Promise<void> {
         const message = parentMessage(raw.message);
         if (message.kind === "stop") { await stop("Explicit owned cancellation requested."); return; }
         if (message.kind === "start") {
-          if (started || message.root !== info.root || typeof message.readOnly !== "boolean") throw new Error("A run cannot start twice or change its approved workspace.");
+          if (started || message.root !== info.root || typeof message.readOnly !== "boolean" || message.env !== undefined && message.env !== "Remote") throw new Error("A run cannot start twice or change its approved SSH environment/workspace.");
           started = true;
           worker = fork(workerPath, [], {
             execPath: process.execPath, execArgv: workerPath.endsWith(".ts") ? process.execArgv : [],
@@ -250,6 +251,15 @@ async function frontend(): Promise<void> {
         if (!init.workspace || !info.root) throw new MoguriError("remote_workspace_read", "Remote workspace reads need the exact approved root and read policy.");
         const result = await readWorkspace(info.root, init.workspace, abort.signal);
         outer.send({ kind: "workspace", info, result }, () => outer.end()); return;
+      }
+      if (init.action === "mcp-tools") {
+        if (!info.root || !init.mcpTools) throw new MoguriError("remote_mcp_context", "MCP discovery needs the exact approved Remote root and helper request.", 409);
+        const stopped = () => abort.abort(new Error("Remote MCP discovery control stopped; effects and cleanup may be partial."));
+        process.once("SIGTERM", stopped); process.once("SIGHUP", stopped);
+        try {
+          const tools = await discoverRemoteMcp(init.mcpTools, info.root, abort.signal);
+          outer.send({ kind: "mcp-tools", info, tools, helperDigest: init.mcpTools.helperDigest }, () => outer.end()); return;
+        } finally { process.off("SIGTERM", stopped); process.off("SIGHUP", stopped); }
       }
       if (process.argv.includes("--foreground")) {
         if (init.action !== "start") throw new MoguriError("foreground_ephemeral", "Foreground native runs cannot inspect/reattach another execution. No replay or second worker was started.");

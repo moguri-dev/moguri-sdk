@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { LocalEndpointSchema } from "./providers.ts";
 import { Value } from "typebox/value";
+import { RemoteMcpGrantSchema } from "./mcp.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -16,6 +17,7 @@ export const RemoteTargetSchema = object({
   stateDir: path,
   command: Type.Array(path, { minItems: 1, maxItems: 8 }),
   allowCopilot: Type.Boolean(),
+  mcpGrants: Type.Optional(Type.Array(RemoteMcpGrantSchema, { maxItems: 32 })),
   models: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
 });
 export type RemoteTarget = Static<typeof RemoteTargetSchema>;

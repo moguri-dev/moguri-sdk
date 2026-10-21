@@ -1,0 +1,42 @@
+import { MoguriError, type McpServerConfig, type RemoteMcpPreview, type RemoteTarget } from "../../../packages/protocol/src/index.ts";
+import { frameDigest } from "./worker-wire.ts";
+import { remoteFingerprint } from "./remote.ts";
+
+export interface RemoteMcpScope {
+  profileId: string; sessionId: string; projectId: string; root: string; target: RemoteTarget; workerDigest: string;
+  settingsRevision: number; permissionRevision: number; policyRevision: number; projectRevision: number;
+  mode: "agent" | "read-only"; pendingMode: "agent" | "read-only" | null;
+}
+export const remoteMcpPeer = (target: Pick<RemoteTarget, "host" | "port" | "user" | "hostKey">) => frameDigest(["moguri-remote-mcp-peer-v1", target.host, target.port, target.user, target.hostKey]);
+export function mcpResource(server: McpServerConfig | null) {
+  if (!server) return { id: "builtin", name: "Moguri foundational tools", transport: "builtin" as const, auth: "none" as const,
+    resource: "Remote grep_logs and fetch_page only. No Local script, repository-memory or implicit host path transfer.",
+    digest: frameDigest(["moguri-mcp-resource-v1", "builtin", ["grep_logs", "fetch_page"]]) };
+  const transport = server.transport;
+  let resource: string;
+  if (transport.type === "http") {
+    const url = new URL(transport.url);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash) throw new MoguriError("mcp_resource", "Remote MCP requires an exact credential-free HTTP(S) resource URL without a fragment.", 409);
+    resource = url.href;
+  } else resource = `${transport.command} ${JSON.stringify(transport.args)}`;
+  if (resource.length > 16384) throw new MoguriError("mcp_resource_limit", "This Remote MCP resource is too large for exact bounded review. Reduce its configured argv before granting access.", 409);
+  return { id: server.id, name: server.name, transport: transport.type, auth: transport.type === "http" ? transport.auth : "none" as const,
+    resource, digest: frameDigest(["moguri-mcp-resource-v1", server.id, transport]) };
+}
+export function remoteMcpPreview(scope: RemoteMcpScope, server: McpServerConfig | null, helperDigest: string): RemoteMcpPreview {
+  const resource = mcpResource(server), peerDigest = remoteMcpPeer(scope.target), resourceDigest = resource.digest;
+  const grant = scope.target.mcpGrants?.find((grant) => grant.serverId === resource.id && grant.peerDigest === peerDigest && grant.resourceDigest === resourceDigest);
+  return {
+    sessionId: scope.sessionId, projectId: scope.projectId, root: scope.root, peerDigest, resourceDigest,
+    digest: frameDigest(["moguri-remote-mcp-scope-v1", scope, resourceDigest, helperDigest]),
+    settingsRevision: scope.settingsRevision, permissionRevision: scope.permissionRevision, policyRevision: scope.policyRevision, projectRevision: scope.projectRevision,
+    host: { name: scope.target.name, host: scope.target.host, user: scope.target.user, fingerprint: remoteFingerprint(scope.target) },
+    server: { id: resource.id, name: resource.name, transport: resource.transport, resource: resource.resource, auth: resource.auth },
+    granted: Boolean(grant), forwardAccess: grant?.forwardAccess === true,
+    warning: "This is execution on the selected SSH host, not SendBox isolation. Remote stdio uses that host's command/cwd and may have its own account. Access forwarding is a separate peer/resource/profile grant; bearer values may be long-lived API keys and the host can retain received access. Refresh credentials never leave their backend. No Local or anonymous fallback.",
+  };
+}
+export function requireRemoteMcpGrant(preview: RemoteMcpPreview): void {
+  if (!preview.granted) throw new MoguriError("remote_mcp_grant", "Review and explicitly grant this exact MCP resource on the pinned SSH peer first. Selecting Remote or a Local server is not authorization.", 403);
+  if (preview.server.auth !== "none" && !preview.forwardAccess) throw new MoguriError("remote_mcp_credential", "This authenticated MCP resource has no explicit peer-bound access-token forwarding grant. No Local token or anonymous fallback was used.", 403);
+}

@@ -13,6 +13,11 @@ receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
 `node bin/moguri.mjs service restart`; do not delete its state.
+The unqualified 0.18 development source adds protocol-24
+[Remote MCP grant/state foundations](architecture/remote-mcp.md), preserving
+schema-23 history. Explicit peer/resource grants are deny-by-default;
+Remote MCP worker/client execution is still being integrated. This does not
+promote an 0.18 archive or change the recorded 0.17 delivery.
 
 ## Build and consume
 

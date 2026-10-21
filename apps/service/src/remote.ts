@@ -5,7 +5,8 @@ import { mkdir, lstat, readFile, writeFile, realpath } from "node:fs/promises";
 import { isIP } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { Value } from "typebox/value";
-import { isRecord, MoguriError, PROTOCOL_VERSION, type ProjectSettings, type RemoteTarget, type RemoteIdentity, type RemoteReadiness, type RemoteExecution, type Snapshot } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, PROTOCOL_VERSION, type ProjectSettings, type RemoteTarget, type RemoteIdentity, type RemoteReadiness, type RemoteExecution, type Snapshot, type McpToolInfo } from "../../../packages/protocol/src/index.ts";
+import type { RemoteMcpToolsRequest } from "./remote-mcp-runtime.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { BridgeEnvelopeSchema, type BridgeEnvelope, type BridgeInit, type BridgeStatus, type WorkspaceReadRequest, type WorkspaceReadResult } from "./remote-protocol.ts";
@@ -55,6 +56,11 @@ export class RemoteRuntime {
     validateRemoteTarget(target); return structuredClone(target);
   }
   async workerDigest(): Promise<string> { return createHash("sha256").update(await readFile(this.workerPath)).digest("hex"); }
+  async mcpTools(target: RemoteIdentity, root: string, workerDigest: string, request: RemoteMcpToolsRequest, signal: AbortSignal): Promise<McpToolInfo[]> {
+    const result = await this.query(target, { action: "mcp-tools", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir, root, mcpTools: request }, signal);
+    if (result.kind !== "mcp-tools" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.helperDigest !== request.helperDigest) throw new MoguriError("remote_mcp_response", "Remote MCP metadata did not match its exact helper/root request. No alternative catalog was used.", 409);
+    return result.tools;
+  }
   private async connect(target: RemoteIdentity, signal: AbortSignal): Promise<SshConnection> {
     signal.throwIfAborted();
     const identity = await lstat(target.identityFile);
@@ -111,7 +117,7 @@ export class RemoteRuntime {
         connection.wire.on("message", (raw) => {
           if (!Value.Check(BridgeEnvelopeSchema, raw)) { settle(undefined, new MoguriError("remote_protocol", "Remote worker protocol/build is incompatible.", 409)); return; }
           if (raw.kind === "error") settle(undefined, new MoguriError(raw.code ?? "remote_bootstrap", raw.message, 409));
-          else if (["probe", "catalog", "context", "workspace", "inspection"].includes(raw.kind)) settle(raw);
+          else if (["probe", "catalog", "context", "workspace", "mcp-tools", "inspection"].includes(raw.kind)) settle(raw);
         });
         signal.throwIfAborted();
         connection.wire.send(init);

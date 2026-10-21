@@ -20,6 +20,8 @@ import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type
 import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
 import type { TerminalOwner } from "./terminals.ts";
+import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
+export * from "./mcp.ts";
 export * from "./repositories.ts";
 export * from "./telemetry.ts";
 export * from "./plan-saves.ts";
@@ -108,6 +110,7 @@ const section = Type.Union([
   Type.Literal("kupo"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  RemoteMcpCommandSchema,
   RepositoryCommandSchema,
   PlanSaveCommandSchema,
   CompactionCommandSchema,
@@ -147,6 +150,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  RemoteMcpQuerySchema,
   RepositoryQuerySchema,
   TelemetryQuerySchema,
   PlanSaveQuerySchema,
@@ -176,7 +180,6 @@ export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
 export interface GraphNode { id: string; path: string; label: string; kind: "file" | "symbol" }
 export interface GraphEdge { source: string; target: string; kind: "imports" | "declares" }
-export interface McpToolInfo { serverId: string; name: string; description: string; inputSchema: Record<string, unknown>; digest: string }
 export interface CapabilityEntry {
   id: string; projectId: string | null; kind: "skill" | "script" | "plugin" | "memory";
   name: string; description: string; contentDigest: string; enabled: boolean; revision: number;
@@ -196,6 +199,7 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
+  remoteMcpCalls: RemoteMcpCall[];
   terminalOwners: TerminalOwner[];
   repositoryObservations: RepositoryObservation[];
   operationEntries: OperationEntry[];
@@ -223,6 +227,7 @@ export interface VoiceStatus {
 }
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
+  | RemoteMcpResponse
   | RepositoryResponse
   | TelemetryResponse
   | PlanSaveResponse
@@ -241,7 +246,8 @@ export type PlatformResponse =
   | { type: "memory.search"; items: MemoryHit[] }
   | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }
   | { type: "mcp.tools"; tools: McpToolInfo[]; nextOffset: number | null }
-  | { type: "mcp.auth"; state: "not-required" | "configured" | "required"; method: "none" | "bearer" | "oauth"; diagnostic: string; expiresAt?: number | null }
+  | { type: "mcp.auth"; state: "not-required" | "configured" | "required"; method: "none" | "bearer" | "oauth"; diagnostic: string; expiresAt?: number | null;
+      remote?: { granted: boolean; forwardAccess: boolean; root: string; hostFingerprint: string } }
   | { type: "result.read"; text: string; nextOffset: number | null }
   | { type: "voice.status"; voice: VoiceStatus }
   | { type: "sandbox.status"; sandbox: SandboxStatus }

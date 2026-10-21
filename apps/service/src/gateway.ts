@@ -1,4 +1,6 @@
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { AsyncEntry } from "@napi-rs/keyring";
 import { isRecord, MoguriError, type McpToolInfo, type McpServerConfig } from "../../../packages/protocol/src/index.ts";
 import type { McpOperation } from "./mcp-worker.ts";
@@ -26,6 +28,16 @@ export class McpGateway {
     this.oauth = new McpOAuth(vault, options.changed ?? (() => {}), options.oauth, options.authorized);
   }
   get busy(): boolean { return this.active.size > 0; }
+  async workerDigest(): Promise<string> { return createHash("sha256").update(await readFile(this.workerPath)).digest("hex"); }
+  async accessToken(server: McpServerConfig | null, signal: AbortSignal): Promise<string | null> {
+    signal.throwIfAborted();
+    const bounded = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
+    const token = server?.transport.type === "http" && server.transport.auth === "bearer" ? await this.vault.read(server.id, bounded) :
+      server?.transport.type === "http" && server.transport.auth === "oauth" ? await this.oauth.access(server, signal) : null;
+    signal.throwIfAborted();
+    if (server?.transport.type === "http" && server.transport.auth === "bearer" && !token) throw new MoguriError("mcp_auth_required", "Configure this server's bearer credential in the OS keychain. No unauthenticated fallback was attempted.", 401);
+    return token;
+  }
   async operate(operation: Omit<McpOperation, "token">, requested: AbortSignal, owner?: string): Promise<unknown> {
     const abort = new AbortController();
     const signal = AbortSignal.any([requested, abort.signal]);
@@ -38,9 +50,8 @@ export class McpGateway {
   }
   private async execute(operation: Omit<McpOperation, "token">, signal: AbortSignal): Promise<unknown> {
     signal.throwIfAborted();
-    const token = operation.server?.transport.type === "http" && operation.server.transport.auth === "bearer" ? await this.vault.read(operation.server.id, AbortSignal.any([signal, AbortSignal.timeout(15_000)])) : operation.server?.transport.type === "http" && operation.server.transport.auth === "oauth" ? await this.oauth.access(operation.server, signal) : null;
+    const token = await this.accessToken(operation.server, signal);
     signal.throwIfAborted();
-    if (operation.server?.transport.type === "http" && operation.server.transport.auth === "bearer" && !token) throw new MoguriError("mcp_auth_required", "Configure this server's bearer credential in the OS keychain. No unauthenticated fallback was attempted.", 401);
     return runMcpConnector({ ...operation, ...(token ? { token } : {}) }, this.workerPath, signal);
   }
   async tools(server: McpServerConfig | null, root: string, signal: AbortSignal, scripts?: McpOperation["scripts"], owner?: string): Promise<McpToolInfo[]> {

@@ -14,7 +14,8 @@ import {
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   isPlanSaveCommand, isPlanSaveQuery, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse,
-  type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig,
+  isRemoteMcpCommand, isRemoteMcpQuery, type RemoteMcpCommand, type RemoteMcpQuery, type RemoteMcpResponse,
+  type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig, type McpToolInfo,
   type RuntimeCloseOptions,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
@@ -37,6 +38,7 @@ import { ArtifactRuntime } from "./artifacts.ts";
 import { BudgetRuntime } from "./budgets.ts";
 import { OperationTelemetry } from "./operation-telemetry.ts";
 import { RepositoryTelemetry } from "./repository-telemetry.ts";
+import { remoteMcpPreview, type RemoteMcpScope } from "./remote-mcp.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
@@ -70,6 +72,8 @@ export interface PlatformHost {
   repositoryContext(session: Session): Promise<string>;
   remoteRead: SessionWorkspaceHost["remoteRead"];
   remotePlanBinding: SessionWorkspaceHost["remotePlanBinding"];
+  remoteMcpScope(session: Session): RemoteMcpScope;
+  remoteMcpTools(session: Session, server: McpServerConfig | null): Promise<McpToolInfo[]>;
   globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
   foreignRootBusy(root: string): boolean;
   sharedGlobals: boolean;
@@ -150,6 +154,44 @@ export class PlatformRuntime {
     });
   }
   private snapshot() { return this.host.snapshot(); }
+  private async mcpRemotePreview(sessionId: string, serverId: string) {
+    const session = this.session(sessionId), scope = this.host.remoteMcpScope(session), server = this.server(serverId, session.projectId);
+    const helper = await this.gateway.workerDigest();
+    const captured = remoteMcpPreview(scope, server, helper);
+    const current = this.session(sessionId), fresh = remoteMcpPreview(this.host.remoteMcpScope(current), this.server(serverId, current.projectId), helper);
+    if (fresh.digest !== captured.digest) throw new MoguriError("remote_mcp_scope", "Remote MCP target, resource, root or policy changed while its helper identity was read. Review the current scope.", 409);
+    return fresh;
+  }
+  private async mcpRemoteQuery(query: RemoteMcpQuery): Promise<RemoteMcpResponse> {
+    this.session(query.sessionId);
+    if (query.type === "mcp.remote.preview") return { type: query.type, preview: await this.mcpRemotePreview(query.sessionId, query.serverId) };
+    const calls = this.snapshot().remoteMcpCalls.filter((call) => call.sessionId === query.sessionId);
+    if (query.type === "mcp.remote.calls") return { type: query.type, calls };
+    const call = calls.find((call) => call.id === query.operationId);
+    if (!call) throw new MoguriError("remote_mcp_missing", "This MCP operation is outside the selected session/profile.", 404);
+    return { type: query.type, call, result: call.resultDigest ? JSON.parse(this.store.blob(call.resultDigest)) : null };
+  }
+  private async mcpRemoteCommand(command: RemoteMcpCommand, finish: WorkspaceFinish): Promise<CommandResult> {
+    this.session(command.sessionId);
+    const preview = command.type === "mcp.remote.grant" ? await this.mcpRemotePreview(command.sessionId, command.serverId) : null;
+    const snapshot = this.snapshot(), settings = structuredClone(snapshot.settings.values), target = settings.remote;
+    if (!target) throw new MoguriError("remote_missing", "No configured SSH target owns this MCP grant. No previous target was substituted.", 409);
+    const grants = target.mcpGrants ?? [];
+    if (command.type === "mcp.remote.grant") {
+      if (!preview || preview.digest !== command.expectedDigest) throw new MoguriError("remote_mcp_scope", "The reviewed peer, MCP resource or authority changed. No grant was saved.", 409);
+      if (command.forwardAccess && preview.server.auth === "none") throw new MoguriError("remote_mcp_credential", "This resource does not use a forwarded gateway credential. Grant its execution without access-token forwarding.", 409);
+      target.mcpGrants = [...grants.filter((grant) => grant.serverId !== command.serverId), {
+        serverId: command.serverId, peerDigest: preview.peerDigest, resourceDigest: preview.resourceDigest, forwardAccess: command.forwardAccess,
+      }];
+    } else {
+      if (!grants.some((grant) => grant.serverId === command.serverId)) throw new MoguriError("remote_mcp_grant", "This target has no retained grant for that MCP server. Nothing was silently changed.", 409);
+      target.mcpGrants = grants.filter((grant) => grant.serverId !== command.serverId);
+    }
+    const event = this.settingsEvent(settings, command.expectedRevision, false);
+    const result = finish([event], { revision: event.payload.revision });
+    this.host.invalidateApprovals(); this.host.wake();
+    return result;
+  }
   private project(id: string | null): Project {
     const project = this.snapshot().projects.find((project) => project.id === id);
     if (!project) throw new MoguriError("project_not_found", "Project is outside this profile.", 404);
@@ -196,7 +238,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
   private memoryEnabled(): void {
     if (!this.snapshot().settings.values.memory.enabled) throw new MoguriError("memory_disabled", "Enable local repository memory explicitly before indexing or searching.", 409);
   }
-  private server(id: string, projectId?: string | null): McpServerConfig | null {
+  server(id: string, projectId?: string | null): McpServerConfig | null {
     if (id === "builtin") return null;
     const servers = [...this.snapshot().settings.values.mcpServers, ...(projectId ? this.sessions.projects.configuration(projectId).values.mcpServers : [])];
     const server = servers.find((server) => server.id === id && server.enabled);
@@ -216,6 +258,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isRemoteMcpQuery(query)) return this.mcpRemoteQuery(query);
     if (isRepositoryQuery(query)) return this.repositories.query(query);
     if (isTelemetryQuery(query)) return this.telemetry.query(query);
     if (isPlanSaveQuery(query)) return this.host.planSaveQuery(query);
@@ -246,6 +289,10 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "mcp.tools": {
         const session = query.sessionId ? this.session(query.sessionId) : undefined;
         const server = this.server(query.serverId, session?.projectId);
+        if (session?.controls.env === "Remote") {
+          const tools = (await this.host.remoteMcpTools(session, server)).filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
+          return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
+        }
         if (!this.snapshot().policy.allowedEnvs.includes("Local") || session && (session.controls.env !== "Local" || server && (session.mode !== "agent" || session.kind !== "agent"))) throw new MoguriError("mcp_env", "MCP discovery has no qualified transport under this environment/read-only policy. No Local fallback.", 403);
         const root = session?.projectId ? this.managed.project(session).path : join(this.stateDir, "gateway-workspace");
         await mkdir(root, { recursive: true, mode: 0o700 });
@@ -255,16 +302,23 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
       }
       case "mcp.auth": {
-        const server = this.server(query.serverId, query.sessionId ? this.session(query.sessionId).projectId : undefined);
+        const session = query.sessionId ? this.session(query.sessionId) : undefined, server = this.server(query.serverId, session?.projectId);
+        const preview = session?.controls.env === "Remote" ? await this.mcpRemotePreview(session.id, query.serverId) : null;
+        const remote = preview ? { granted: preview.granted, forwardAccess: preview.forwardAccess, root: preview.root, hostFingerprint: preview.host.fingerprint } : undefined;
+        if (preview && (!preview.granted || preview.server.auth !== "none" && !preview.forwardAccess)) return {
+          type: query.type, state: "required", method: preview.server.auth, remote,
+          diagnostic: !preview.granted ? "This exact MCP peer/resource has no Remote execution grant. No Local credential was queried or forwarded." :
+            "The resource has no explicit access-token forwarding grant. A Local OAuth/bearer account is not authorization to send it to this SSH host.",
+        };
         if (server?.transport.type === "http" && server.transport.auth === "oauth") {
           const state = await this.gateway.oauth.status(server);
-          return { type: query.type, state: state.configured ? "configured" : "required", method: "oauth", expiresAt: state.expiresAt, diagnostic: "OAuth credentials are issuer/resource-bound in the configured secret backend. Start login explicitly; a model cannot authorize itself." };
+          return { type: query.type, state: state.configured ? "configured" : "required", method: "oauth", expiresAt: state.expiresAt, ...(remote ? { remote } : {}), diagnostic: "OAuth credentials are issuer/resource-bound in the configured secret backend. Start login explicitly; a model cannot authorize itself." };
         }
         const bearer = server?.transport.type === "http" && server.transport.auth === "bearer";
         let exists = false;
         try { exists = bearer && Boolean(await this.gateway.vault.read(query.serverId, AbortSignal.timeout(15_000))); }
         catch { throw new MoguriError("secret_store", "MCP keychain access failed. Unlock the OS keychain; no plaintext fallback exists.", 503); }
-        return { type: query.type, state: bearer ? exists ? "configured" : "required" : "not-required", method: bearer ? "bearer" : "none", diagnostic: bearer ? "Bearer credentials are stored in this profile's OS keychain. A stored credential is not proof of server entitlement." : "No gateway credential is forwarded. A stdio server may manage its own authorized account." };
+        return { type: query.type, state: bearer ? exists ? "configured" : "required" : "not-required", method: bearer ? "bearer" : "none", ...(remote ? { remote } : {}), diagnostic: bearer ? "Bearer credentials are stored in this profile's OS keychain. A stored credential is not proof of server entitlement." : "No gateway credential is forwarded. A stdio server may manage its own authorized account." };
       }
       case "mcp.oauth.status": {
         const saved = this.snapshot().oauthAuthorizations.find((value) => value.id === query.authorizationId);
@@ -359,6 +413,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isRemoteMcpCommand(command)) return this.mcpRemoteCommand(command, finish);
     if (isRepositoryCommand(command)) return this.repositories.execute(command, finish);
     if (isPlanSaveCommand(command)) return this.host.planSaveCommand(command, finish);
     if (isCompactionCommand(command)) return this.host.compactionCommand(command, finish);

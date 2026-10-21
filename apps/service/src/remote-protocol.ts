@@ -1,6 +1,8 @@
 import { Type, type Static } from "typebox";
 import { MAX_TEXT, PROTOCOL_VERSION, ProjectSettingsSchema } from "../../../packages/protocol/src/index.ts";
 import { WorkerRequestSchema } from "./worker-protocol.ts";
+import { RemoteMcpToolsRequestSchema } from "./remote-mcp-runtime.ts";
+import { McpToolInfoSchema } from "../../../packages/protocol/src/mcp.ts";
 
 const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -42,13 +44,14 @@ export const ForegroundQuerySchema = Type.Object({
 }, { additionalProperties: false });
 export type ForegroundQuery = Static<typeof ForegroundQuerySchema>;
 export const BridgeInitSchema = Type.Object({
-  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
+  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
   protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
   stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
   runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
   catalog: Type.Optional(catalog),
   context: Type.Optional(ProjectSettingsSchema),
   workspace: Type.Optional(WorkspaceReadRequestSchema),
+  mcpTools: Type.Optional(RemoteMcpToolsRequestSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText }, { additionalProperties: false });
 const SavedBridgeInfoSchema = Type.Object({
@@ -76,6 +79,7 @@ export const BridgeEnvelopeSchema = Type.Union([
   Type.Object({ kind: Type.Literal("catalog"), status: Type.Integer({ minimum: 100, maximum: 599 }), body: Type.String({ maxLength: 512 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("context"), text: Type.String({ maxLength: 256 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("workspace"), result: WorkspaceReadResultSchema, info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("mcp-tools"), tools: Type.Array(McpToolInfoSchema, { maxItems: 512 }), helperDigest: hash, info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("inspection"), ...SavedStatusSchema.properties, frames: Type.Array(BridgeFrameSchema, { maxItems: 128 }), nextSequence: sequence }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("error"), message: Type.String({ maxLength: 4096 }), code: Type.Optional(Type.String({ maxLength: 128 })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("stderr"), text: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }),

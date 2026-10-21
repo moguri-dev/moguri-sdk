@@ -26,9 +26,10 @@ import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
 import { TerminalOwnerSchema, type TerminalOwner } from "./terminals.ts";
+import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 23;
+export const PROTOCOL_VERSION = 24;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -282,6 +283,7 @@ export interface EventPayloads {
   "global.budget_changed": GlobalBudgetPolicy;
   "terminal.changed": { terminal: TerminalState };
   "terminal.owner_changed": { owner: TerminalOwner };
+  "mcp.remote_recorded": { call: RemoteMcpCall };
   "turn.prompt_bound": { promptDigest: string };
   "queue.released": { messageId: string };
   "queue.held": { messageIds: string[] };
@@ -321,7 +323,7 @@ export const eventTypes: readonly EventType[] = [
   "budget.recorded", "budget.policy_changed", "budget.blocked", "operation.recorded", "operation.coverage_started",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
-  "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded",
+  "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -356,11 +358,28 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   let budgetPolicy: PlatformSnapshot["budgetPolicy"] = { revision: 0, limit: null };
   const terminals = new Map<string, TerminalState>();
   const terminalOwners = new Map<string, TerminalOwner>();
+  const remoteMcpCalls = new Map<string, RemoteMcpCall>();
   const executions = new Map<string, RemoteExecution>();
   const managedWorkspaces = new Map<string, ManagedWorkspace>();
   const changeSets = new Map<string, ChangeSet>();
   for (const event of events) {
     if (event.profile_id !== profileId) continue;
+    if (event.event_type === "mcp.remote_recorded") {
+      const call = event.payload.call;
+      if (!Value.Check(RemoteMcpCallSchema, call) || call.profileId !== profileId || call.sessionId !== event.session_id ||
+        call.projectId !== event.project_id || call.turnId !== event.turn_id || call.stepId !== event.step_id) throw new MoguriError("remote_mcp_corrupt", "Remote MCP intent/result metadata is invalid or outside its exact owning scope. State was preserved.", 409);
+      const previous = remoteMcpCalls.get(call.id);
+      const immutable: readonly (keyof RemoteMcpCall)[] = ["id", "profileId", "sessionId", "projectId", "turnId", "stepId", "callId", "actor",
+        "commandId", "commandDigest", "env", "root", "hostFingerprint", "peerDigest", "resourceDigest", "scopeDigest", "helperDigest", "serverId", "tool", "argumentsDigest", "intentDigest", "createdAt"];
+      if (!previous && (call.revision !== 0 || call.phase !== "intent" || call.resultDigest !== null || call.accessForwarded !== false) ||
+        previous && (call.revision !== previous.revision + 1 || immutable.some((key) => call[key] !== previous[key]) ||
+          previous.resultDigest !== null && call.resultDigest !== previous.resultDigest ||
+          previous.executionId !== null && call.executionId !== previous.executionId ||
+          previous.jobId !== null && call.jobId !== previous.jobId || previous.accessForwarded && !call.accessForwarded)) {
+        throw new MoguriError("remote_mcp_corrupt", "Remote MCP revision, original scope or retained result changed. No effect or result was adopted.", 409);
+      }
+      remoteMcpCalls.set(call.id, structuredClone(call));
+    }
     if (event.event_type === "terminal.owner_changed") {
       if (event.project_id || event.session_id || !Value.Check(TerminalOwnerSchema, event.payload.owner) || event.payload.owner.profileId !== profileId) throw new MoguriError("terminal_owner_corrupt", "Terminal owner metadata is invalid or outside its independent profile. State was preserved.", 409);
       terminalOwners.set(event.payload.owner.id, structuredClone(event.payload.owner));
@@ -400,12 +419,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       for (const [id, routing] of routings) if (routing.sessionId === event.payload.deletedSessionId) routings.delete(id);
       for (const [id, compaction] of compactions) if (compaction.sessionId === event.payload.deletedSessionId) compactions.delete(id);
       for (const [id, save] of planSaves) if (save.sessionId === event.payload.deletedSessionId) planSaves.delete(id);
+      for (const [id, call] of remoteMcpCalls) if (call.sessionId === event.payload.deletedSessionId) remoteMcpCalls.delete(id);
     }
     if (event.event_type === "project.removed") {
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
-      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings, compactions, planSaves]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings, compactions, planSaves, remoteMcpCalls]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -659,5 +679,5 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

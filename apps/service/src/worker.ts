@@ -3,11 +3,13 @@ import { performance } from "node:perf_hooks";
 import { createModels, type Message } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { executeTool } from "./tools.ts";
-import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
+import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
+import type { ToolCall } from "../../../packages/protocol/src/index.ts";
 import { localProvider, localModelFetch } from "./local-provider.ts";
 import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 import { streamMetrics } from "./stream-metrics.ts";
 import { executeUserPlan } from "./user-plan.ts";
+import { executeRemoteMcp } from "./remote-mcp-runtime.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -27,9 +29,33 @@ async function finish(outcome: "completed" | "stopped" | "failed" | "partial", d
 }
 async function run(start: WorkerStart): Promise<void> {
   const context: Message[] = start.context;
-  let incompleteCleanup = false;
+  let incompleteCleanup = false, mcpDispatched = false;
+  const delegate = async (stepId: string, call: ToolCall): Promise<DelegatedResult> => {
+    const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call });
+    if (reply.error || !reply.value) throw new Error(reply.error ?? "Missing delegated authorization.");
+    if ("kind" in reply.value && reply.value.kind === "remote-mcp") {
+      const result = await executeRemoteMcp(reply.value, { call, stepId, root: start.root, env: start.env }, abort.signal,
+        (pid) => send({ kind: "process", stepId, callId: call.id, pid }));
+      mcpDispatched ||= result.dispatched;
+      try {
+        const retained = await request({ kind: "mcp.complete", requestId: randomUUID(), stepId, call, result });
+        if (retained.error || !retained.value || !("text" in retained.value)) throw new Error(retained.error ?? "Remote MCP result retention was not acknowledged.");
+        incompleteCleanup ||= result.outcome === "partial";
+        return retained.value;
+      } catch (error) { incompleteCleanup ||= result.dispatched; throw error; }
+    }
+    if (!("text" in reply.value)) throw new Error("Missing delegated result.");
+    return reply.value;
+  };
   try {
-    if (start.operation) {
+    if (start.operation?.kind === "mcp.call") {
+      const result = await delegate(start.operation.stepId, start.operation.call);
+      incompleteCleanup ||= result.outcome === "partial" || abort.signal.aborted && mcpDispatched;
+      await finish(incompleteCleanup ? "partial" : abort.signal.aborted ? "stopped" : result.isError ? "failed" : "completed",
+        incompleteCleanup ? "Remote MCP may already have external effects. Actual results were retained; stop/control loss is not rollback." : result.isError ? result.text : null);
+      return;
+    }
+    if (start.operation?.kind === "plan.save") {
       const operation = start.operation;
       if (!start.root) throw new Error("Owned user plan operation has no exact workspace.");
       const call = { id: operation.callId, name: "write_file", arguments: operation.input };
@@ -126,13 +152,9 @@ async function run(start: WorkerStart): Promise<void> {
             try {
               result = await executeTool(start.root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
                 (pid) => send({ kind: "process", stepId, callId: call.id, pid }),
-                async (call) => {
-                  const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call });
-                  if (reply.error || !reply.value || !("text" in reply.value)) throw new Error(reply.error ?? "Missing delegated result.");
-                  return reply.value;
-                }, { mode: approval.value.mode, folders: approval.value.folders });
+                (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders });
             } catch (error) {
-              result = { text: error instanceof Error ? error.message : "Tool execution failed.", isError: true, outcome: abort.signal.aborted ? "stopped" : "failed" };
+              result = { text: error instanceof Error ? error.message : "Tool execution failed.", isError: true, outcome: incompleteCleanup ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
             }
           }
           incompleteCleanup ||= result.outcome === "partial";

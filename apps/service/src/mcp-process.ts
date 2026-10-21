@@ -1,4 +1,5 @@
 import { fork } from "node:child_process";
+import { createRequire } from "node:module";
 import { isRecord, MoguriError } from "../../../packages/protocol/src/core.ts";
 import type { McpOperation } from "./mcp-worker.ts";
 
@@ -7,7 +8,7 @@ export async function runMcpConnector(operation: McpOperation, workerPath: strin
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = fork(workerPath, [], {
-      execPath: process.execPath, execArgv: [...(workerPath.endsWith(".ts") ? ["--import", "tsx"] : []), "--max-old-space-size=128"],
+      execPath: process.execPath, execArgv: [...(workerPath.endsWith(".ts") ? ["--import", createRequire(import.meta.url).resolve("tsx")] : []), "--max-old-space-size=128"],
       detached: true, stdio: ["ignore", "ignore", "pipe", "ipc"],
       env: { PATH: process.env.PATH, HOME: process.env.HOME },
     });

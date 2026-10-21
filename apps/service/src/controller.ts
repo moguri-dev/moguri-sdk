@@ -14,7 +14,7 @@ import {
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   type RemotePlanSave, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse, type PlanFileResult, type SessionWorkspaceCommand,
-  PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions,
+  PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions, type McpServerConfig,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -38,6 +38,7 @@ import { frameDigest } from "./worker-wire.ts";
 import type { BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { normalizeStreamObservation } from "./stream-metrics.ts";
 import { COMPACTION_PROMPT, COMPACTION_OUTPUT_LIMIT, compactionInput, compactionProposal, estimateConversationTokens, selectCompactionPrefix, type ContextEntry } from "./compaction-context.ts";
+import { remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant } from "./remote-mcp.ts";
 
 interface Run {
   sessionId: string;
@@ -181,6 +182,14 @@ export class ControlPlane extends EventEmitter {
       remoteCommand: (command, finish) => this.remoteCommand(command, finish),
       repositoryContext: (session) => this.repositoryContext(session),
       remoteRead: (session, query) => this.remoteRead(session, query),
+      remoteMcpScope: (session) => this.remoteMcpScope(session),
+      remoteMcpTools: async (session, server) => {
+        const catalog = await this.remoteMcpCatalog(session, server, AbortSignal.timeout(20_000));
+        return catalog.tools.filter((tool) => server !== null || ["grep_logs", "fetch_page"].includes(tool.name)).map((tool) => ({
+          ...tool, digest: frameDigest(["moguri-scoped-mcp-tool-v1", tool.digest, catalog.preview.digest]),
+          scope: { env: "Remote" as const, root: catalog.scope.root, peerDigest: catalog.preview.peerDigest, resourceDigest: catalog.preview.resourceDigest, helperDigest: catalog.helperDigest },
+        }));
+      },
       remotePlanBinding: (session) => {
         const scope = this.planIdentity(session);
         return { bindingDigest: frameDigest(scope), boundary: { env: "Remote", root: scope.root, hostFingerprint: remoteFingerprint(scope.target), workerDigest: scope.workerDigest } };
@@ -728,6 +737,37 @@ export class ControlPlane extends EventEmitter {
     return { profileId: this.profileId, sessionId: session.id, projectId: session.projectId, root: this.remoteWorkspace(session)!, target, workerDigest,
       configuration, mode: session.mode, pendingMode: session.pendingMode, permissionRevision: this.projection.settings.permissionRevision, policy: this.projection.policy };
   }
+  private remoteMcpScope(session: Session) {
+    if (session.controls.env !== "Remote" || !session.projectId || session.workspaceId) throw new MoguriError("remote_mcp_context", "Select an explicitly mapped Remote project for this MCP capability. No Local, project-free or previous root was substituted.", 409);
+    if (session.status === "archived" || !this.projection.policy.allowedEnvs.includes("Remote")) throw new MoguriError("remote_mcp_policy", "Restore this session and allow Remote before reviewing a new MCP grant.", 403);
+    const target = this.remote.assertReady(), workerDigest = this.remote.readiness.workerDigest, root = this.remoteWorkspace(session);
+    if (!workerDigest || !root) throw new MoguriError("remote_unready", "Probe the exact installed worker and explicit Remote project before MCP access.", 409);
+    const configuration = this.platform.sessions.projects.configuration(session.projectId);
+    return { profileId: this.profileId, sessionId: session.id, projectId: session.projectId, root, target, workerDigest,
+      settingsRevision: this.projection.settings.revision, permissionRevision: this.projection.settings.permissionRevision,
+      policyRevision: this.projection.policy.revision, projectRevision: configuration.revision, mode: session.mode, pendingMode: session.pendingMode ?? null };
+  }
+  private async remoteMcpCatalog(session: Session, server: McpServerConfig | null, signal: AbortSignal) {
+    const scope = this.remoteMcpScope(session), helperDigest = await this.platform.gateway.workerDigest(), preview = remoteMcpPreview(scope, server, helperDigest);
+    requireRemoteMcpGrant(preview);
+    const project = this.platform.sessions.projects.configuration(scope.projectId);
+    const queryCall: ToolCall = { id: "remote-mcp-catalog", name: "mcp_gateway", arguments: { action: "tools", serverId: server?.id ?? "builtin" } };
+    await assertSessionTool(this.session(session.id), scope.root, project.values, queryCall, false);
+    const authorization = authorizeTool(this.projection.settings.values, queryCall, scope.root);
+    if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
+    const check = () => {
+      const current = this.session(session.id), fresh = remoteMcpPreview(this.remoteMcpScope(current), this.platform.server(server?.id ?? "builtin", current.projectId), helperDigest);
+      if (fresh.digest !== preview.digest) throw new MoguriError("remote_mcp_scope", "The MCP peer, resource, root, grant or authority changed during admission. No credential/catalog fallback.", 409);
+      requireRemoteMcpGrant(fresh);
+      const active = this.runs.get(session.id);
+      const execution = active?.executionId ? this.projection.executions.find((execution) => execution.id === active.executionId) : undefined;
+      if (execution && (execution.workspace !== scope.root || remoteMcpPeer(execution.target) !== preview.peerDigest)) throw new MoguriError("remote_mcp_scope", "This MCP request no longer owns the existing worker's pinned peer/root. No new target was substituted.", 409);
+    };
+    check();
+    const token = await this.platform.gateway.accessToken(server, signal); check();
+    const tools = await this.remote.mcpTools(scope.target, scope.root, scope.workerDigest, { server, helperDigest, ...(token ? { accessToken: token } : {}) }, signal);
+    check(); return { scope, server, preview, helperDigest, tools, token };
+  }
   private planScope(session: Session) {
     if (!this.projection.policy.allowedEnvs.includes("Remote")) throw new MoguriError("env_denied", "Remote is excluded by the current allowed-env policy.", 403);
     if (session.status === "archived" || session.mode !== "agent" || session.pendingMode === "read-only" || session.kind === "side" || session.kind === "subagent") throw new MoguriError("read_only", "This session cannot edit a plan.", 403);
@@ -1211,7 +1251,8 @@ export class ControlPlane extends EventEmitter {
             if (!run.done && !run.planSave?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: execution ? execution.workspace : project?.path ?? null, context, readOnly: current.kind === "subagent" || Boolean(compaction), ...(planSave ? { operation: planSave.operation } : {}) });
+        this.reply(run, { kind: "start", root: execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
+          readOnly: current.kind === "subagent" || Boolean(compaction), ...(planSave ? { operation: planSave.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
         const diagnostic = error instanceof MoguriError ? error.message : "Agent worker launch failed. Rebuild Moguri and retry explicitly.";
