@@ -5,22 +5,22 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Qualified **0.21.0-alpha.1 uses protocol 27** and
+This is an alpha API. Qualified **0.22.0-alpha.1 uses protocol 29** and
 deliberately rejects incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
 The 0.21 delivery implements session-bound Local/SSH memory through the same
 SDK. Its exact independently installed archive and actual packaged runtime
 pass index/search/MCP/original-intent/restart/CLI/TUI qualification.
-Current 0.22 development uses protocol/database **29** for the shared
+The qualified 0.22 delivery uses protocol/database **29** for the shared
 [Local reviewed-candidate workflow](architecture/candidate-workflows.md),
 following the protocol-28 event/retention foundation and private compound/file
-prerequisites. Public kupo remains the qualified Single subset.
-The foundation passes 631 complete local cases, 41 hidden source desktop
-workflows and an independently installed temporary protocol-28 package across
-all four entrypoints and existing Local/SSH contracts. This does not qualify
-a new immutable delivery; the later candidate execution slice is recorded separately.
-Current state migrations preserve schema-1 through schema-28 history, sessions, drafts,
+prerequisites. Its exact SDK and actual packaged app are independently
+qualified; [setup](setup.md#current-qualified-0220-alpha1-checkpoint) preserves
+immutable delivery identities. Public kupo remains the qualified Single subset.
+Current 0.23 development uses protocol/database **30** for independent planned
+capacity and shared inspection, without enabling public finite kupo.
+Current state migrations preserve schema-1 through schema-29 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -158,7 +158,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `candidates` | Explicit Local preview/stage/read/wait, fresh separate apply review/application, reject and exact-job stop. Independent immutable proposals, actual user acceptance, base/index/HEAD preservation and partial/restart outcomes. No model or automatic Git publication. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
-| `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
+| `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
@@ -620,6 +620,18 @@ A provider exceeding its forwarded output bound is partial/unqualified for
 finite retry. A blocked request creates a deterministic retained checkpoint,
 not a model answer or successful commit. Kupo wind-down and committed checkpoints
 remain separate scheduler/Git qualification.
+
+Protocol 30 additionally exposes `budgets.plans({sessionId?,projectId?,folderId?,
+turnId?,modelId?,providerId?,role?,env?,range?,status?,offset?,limit?})`.
+Read-only held/consumed/released pages are distinct from actual calls:
+`plannedHolds`, `plannedHeldTokens` and `plannedHeldUsd` disclose reserved future
+capacity in status/dashboard totals. Use `/dashboard plans JSON` or CLI
+`budget plans --filters JSON`. Plans have no call-time repository attribution,
+so that query rejects repository filters rather than silently ignoring them.
+Only still-held plans release on the canonical owner's termination; consumed
+or unknown calls stay charged/held through source deletion/restart.
+Creation/transfer remain internal prerequisites, not a public finite kupo
+feature or client-side refund authority. See [the contract](architecture/budget-plans.md).
 
 ### Tool outcomes and retained size
 

@@ -269,6 +269,12 @@ three-role path reports 126 tokens inside its captured 279-token cap.
 Production compound ownership/wind-down recovery and public admission remain
 gated; these are not live quality, pricing or automatic-approval results.
 
+Protocol 30 adds the [planned-budget foundation](budget-plans.md): future holds
+are distinct from model calls, atomically transfer once, and release only while
+provably undispatched after the exact owner ends. The actual SIGKILL case
+preserves interrupted model usage while releasing only its unused plan.
+Production compound/checkpoint ownership and live quality remain unqualified.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.

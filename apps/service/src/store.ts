@@ -33,6 +33,7 @@ const artifactIdentity = (input: EventInput): string | null => input.event_type 
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
   if (artifactId) return artifactScope(input.profile_id, artifactId);
+  if (input.event_type === "budget.plan_recorded") return { scope: `profile/${input.profile_id}`, projectId: null, sessionId: null };
   const projectId = input.project_id ?? null;
   const sessionId = input.session_id ?? null;
   return { scope: `profile/${input.profile_id}${projectId ? `/project/${projectId}` : ""}${sessionId ? `/session/${sessionId}` : ""}`, projectId, sessionId };
@@ -174,6 +175,9 @@ export class EventStore {
       if (version < 29) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('candidate_execution_schema','1');
         PRAGMA user_version=29; COMMIT;`);
+      if (version < 30) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('budget_planning_schema','1');
+        PRAGMA user_version=30; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

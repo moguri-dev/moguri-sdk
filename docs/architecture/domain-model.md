@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Current source protocol/database version is 29; immutable event
+Current source protocol/database version is 30; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -63,6 +63,13 @@ current session cancellation tree while all record/result grants remain
 artifact-owned. Source operations bind a fresh actual-user review, current
 policy and both physical root leases; terminal candidate/job state is atomic.
 
+Migration 30 adds independent planned wind-down holds through
+`budget.plan_recorded`, not fabricated model calls. A unique atomic transfer
+links one actual entry/start to its consumed plan; only canonically undispatched
+holds release when their exact owner ends. Source ciphertext/grants/receipts
+stay unchanged and old entries retain absent plan links. See
+[planned capacity](budget-plans.md).
+
 ## Implemented entities
 
 | Entity | Identity and authority |
@@ -84,6 +91,7 @@ policy and both physical root leases; terminal candidate/job state is atomic.
 | Attachment | Session-authorized project/client text, normalized image, exact folder/GitHub/session snapshot, SHA-256, bytes and source revision. Explicit selection grants captured content only, never arbitrary filesystem access. |
 | Usage | Actual router/solver/side/subagent/compaction model/step, nullable provider token fields, request wall time, outcome and distinct nullable estimated/provider-reported/billed amounts. |
 | Budget entry | Independent profile-owned step/actual-role/owning-session record: estimated reservation, actual reported total, held unknowns, explicit dated rate and request outcome. Source deletion never refunds it. |
+| Budget plan | Version-1 profile-owned held/consumed/released wind-down envelope with exact owner/turn/provider/model/scope, conservative bounds and captured price. Held capacity is not a call; consumption links one actual entry/start and source deletion cannot refund dispatched/unknown usage. |
 | Budget policy | Separate revision-bound profile/global hard caps, independent of resettable preferences/rates. Global admission counts every profile without exposing foreign task content. No billing guarantee is inferred from input estimates. |
 | Settings | Profile-owned revisioned values and factory defaults, with intentionally shared root startup preferences. A separate permission revision invalidates stale approvals. Prompt text is not policy. |
 | Capability | Project-scoped skill/script/plugin/style knowledge, immutable content digest, source, enablement revision and optional owning plugin. |

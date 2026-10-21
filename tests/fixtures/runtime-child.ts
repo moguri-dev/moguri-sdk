@@ -1,10 +1,11 @@
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { startService } from "../../apps/service/src/server.ts";
 import type { ProviderAdapter } from "../../apps/service/src/provider.ts";
-import { isRecord } from "../../packages/protocol/src/index.ts";
+import { isRecord, type StoredEvent } from "../../packages/protocol/src/index.ts";
 import { GeneratedFileVault } from "./generated-vault.ts";
 import { GENERATED_RETENTION_KEY } from "../fixture.ts";
 import { createRemoteFrameGate } from "./remote-frame-gate.ts";
+import { randomUUID } from "node:crypto";
 
 process.once("message", (raw: unknown) => {
   void (async () => {
@@ -77,6 +78,21 @@ process.once("message", (raw: unknown) => {
         if (!held && candidate) { held = true; process.send?.({ kind: "held-candidate", candidateId: candidate.id }); await new Promise<void>(() => {}); }
         return assert(...args);
       };
+    }
+    if (raw.planBudgetOnStart === true) {
+      let saved = false;
+      service.controller.on("change", (events: StoredEvent[]) => {
+        if (saved) return;
+        const started = events.find((event) => event.event_type === "model.started" && event.session_id && event.turn_id);
+        if (!started || !started.session_id || !started.turn_id) return;
+        const session = service.controller.snapshot().sessions.find((session) => session.id === started.session_id);
+        if (!session) throw new Error("Generated budget owner disappeared before reservation.");
+        saved = true;
+        const planned = service.controller.platform.budgets.plan(session, { id: randomUUID(), turnId: started.turn_id, modelId: model.id, providerId: model.provider, apiModelId: model.id,
+          role: "checkpoint", inputEstimate: 10, maxOutputTokens: 20, authorityDigest: "a".repeat(64) });
+        service.store.commit([planned.event]); service.controller.refreshProfile();
+        process.send?.({ kind: "planned-budget", planId: planned.plan.id });
+      });
     }
     process.send?.({ kind: "connection", connection: service.connection });
   })().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Generated runtime bootstrap failed."); process.exitCode = 1; process.disconnect?.(); });

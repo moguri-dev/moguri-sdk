@@ -37,7 +37,7 @@ try {
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
-    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}} from "moguri";
+    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
@@ -82,6 +82,10 @@ try {
       await sdk.compactions.discard("generated-id",compaction.id!,summary.compaction.revision);
       await sdk.compactions.stop("generated-id",compaction.id!);
       const budget=await sdk.budgets.status("generated-id");void budget.status.totals.heldTokens;
+      ${installedProtocol >= 30 ? `
+      const planned:BudgetPlan[]=(await sdk.budgets.plans({sessionId:"generated-id",status:"held",limit:20})).plans;
+      void planned[0]?.consumedStepId;void budget.status.totals.plannedHeldTokens;void sdk.getState().snapshot?.budgetPlans;
+      ` : ""}
       await sdk.budgets.policy({basis:"estimate",tokens:100000},0,true);
       const dashboard=await sdk.budgets.dashboard({role:"solver",limit:50});void dashboard.nextOffset;
       const dated=await sdk.budgets.dashboard({range:{kind:"custom",from:"2024-02-28",to:"2024-02-29"},bucket:"day"});
@@ -242,6 +246,22 @@ try {
         const options={stateDir:join(root,"candidate-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x68)};
         let candidateRuntime=await createRuntime(options),candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
         try{
+          let budgetOwnerId=null;
+          if(PROTOCOL_VERSION>=30){
+            const owner=await candidateSdk.sessions.create(null,"Generated installed planned hold",{env:"Local",modelId:null});budgetOwnerId=owner.id;
+            const control=candidateRuntime.controller,current=control.snapshot().sessions.find(session=>session.id===owner.id);
+            const planned=control.platform.budgets.plan(current,{id:randomUUID(),turnId:randomUUID(),modelId:"generated-planned-model",providerId:"generated-provider",apiModelId:"generated-canonical",
+              role:"checkpoint",inputEstimate:10,maxOutputTokens:20,authorityDigest:"a".repeat(64)});
+            control.store.commit([planned.event]);control.refreshProfile();
+            const page=await candidateSdk.budgets.plans({sessionId:owner.id,status:"held"});assert.equal(page.plans[0].id,planned.plan.id);
+            const status=(await candidateSdk.budgets.status(owner.id)).status;assert.equal(status.totals.calls,0);assert.equal(status.totals.plannedHeldTokens,30);
+            const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},env={...process.env,MOGURI_STATE_DIR:options.stateDir};
+            const read=JSON.parse((await promisify(execFile)(process.execPath,[cli,"budget","plans","--session",owner.id],{env})).stdout);assert.equal(read.plans[0].id,planned.plan.id);
+            const shared=await candidateSdk.slash(owner.id,"/dashboard plans "+JSON.stringify({sessionId:owner.id}),"tui");assert.equal(JSON.parse(shared.text).plans[0].id,planned.plan.id);
+            await candidateSdk.sessions.delete(owner.id,true,control.snapshot().sessions.find(session=>session.id===owner.id).revision);
+            assert.equal((await candidateSdk.budgets.plans({sessionId:owner.id})).plans[0].status,"released");
+            assert.equal((await candidateSdk.budgets.calls({sessionId:owner.id})).calls.length,0);
+          }
           const project=await candidateSdk.command({type:"project.add",path:directory}),source=await candidateSdk.sessions.create(project.id);
           const created=await candidateSdk.workspaces.create(project.id,"moguri/generated-installed-candidate"),stage=await candidateSdk.workspaces.wait(created.id);
           const index=await readFile(join(directory,".git/index")),head=git(["rev-parse","HEAD"],directory);
@@ -259,6 +279,7 @@ try {
           const shared=await candidateSdk.slash(source.id,"/candidate read "+staged.candidate.id,"tui");assert.equal(shared.kind,"text");
           candidateSdk.disconnect();await candidateRuntime.close();candidateRuntime=await createRuntime(options);candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
           assert.equal((await candidateSdk.candidates.read(staged.candidate.id)).candidate.acceptance.actor,"user");
+          if(PROTOCOL_VERSION>=30){assert.equal((await candidateSdk.budgets.plans({sessionId:budgetOwnerId})).plans[0].status,"released");console.log("Installed protocol-30 planned holds, SDK/CLI/shared queries and source-deletion/restart release remain distinct from actual model calls.");}
           await writeFile(join(directory,"candidate.txt"),"Generated newer installed user edit.\\n");
           assert.equal((await candidateSdk.command(command,commandId)).id,staged.candidate.id);
           assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");

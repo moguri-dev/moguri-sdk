@@ -13,6 +13,7 @@ import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type Manage
 import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type ArtifactMaterializationPreview } from "./artifacts.ts";
 import { QuestionCommandSchema, type UserQuestion } from "./questions.ts";
 import { BudgetCommandSchema, BudgetQuerySchema, BudgetSettingsSchema, type BudgetResponse, type BudgetEntry, type BudgetLimit } from "./budgets.ts";
+import type { BudgetPlan } from "./budget-plans.ts";
 import { ProfileCommandSchema, ProfileQuerySchema, type ProfileResponse } from "./profiles.ts";
 import { KupoSettingsSchema, defaultKupoSettings, type RoutingTurn } from "./routing.ts";
 import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
@@ -32,6 +33,7 @@ export * from "./compaction.ts";
 export * from "./routing.ts";
 export * from "./profiles.ts";
 export * from "./budgets.ts";
+export * from "./budget-plans.ts";
 export * from "./questions.ts";
 export * from "./artifacts.ts";
 export * from "./execution.ts";
@@ -222,6 +224,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   routings: RoutingTurn[];
   questions: UserQuestion[];
   budgetEntries: BudgetEntry[];
+  budgetPlans: BudgetPlan[];
   budgetPolicy: { revision: number; limit: BudgetLimit | null };
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];

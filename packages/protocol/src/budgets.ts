@@ -2,6 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import type { ModelStreamObservation } from "./model.ts";
 import { RepositoryFiltersSchema, type RepositoryAttribution, type RepositoryDiagnostic, type RepositoryCoverage } from "./repositories.ts";
+import type { BudgetPlan } from "./budget-plans.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -25,9 +26,12 @@ export const BudgetRateSchema = object({
   effectiveAt: Type.String({ minLength: 10, maxLength: 32 }), source: Type.Literal("user-estimate"),
 });
 export type BudgetRate = Static<typeof BudgetRateSchema>;
+export const sameBudgetRate = (a: BudgetRate | null, b: BudgetRate | null): boolean => a === null || b === null ? a === b :
+  (["modelId", "inputUsdPerMillion", "outputUsdPerMillion", "effectiveAt", "source"] as const).every((key) => a[key] === b[key]);
 export const BudgetSettingsSchema = object({ rates: Type.Array(BudgetRateSchema, { maxItems: 100 }), maxPriceAgeDays: Type.Integer({ minimum: 1, maximum: 365 }) });
 export interface BudgetEntry {
   id: string; sessionId: string | null; ownerSessionId: string | null; projectId: string | null; folderId: string | null;
+  planId?: string;
   turnId: string | null; modelId: string; providerId: string | null; apiModelId: string | null; role: ModelRole;
   env: "Local" | "Sandbox" | "Remote" | "unknown"; createdAt: string; imported: boolean;
   status: "reserved" | "settled" | "unknown"; inputEstimate: number | null; outputLimit: number | null;
@@ -43,6 +47,7 @@ export interface BudgetEntry {
 }
 export interface BudgetTotals {
   calls: number; reportedTokens: number | null; knownReportedTokens: number; unknownTokenCalls: number;
+  plannedHolds: number; plannedHeldTokens: number | null; plannedHeldUsd: number | null;
   heldTokens: number | null; unboundedTokenCalls: number; estimatedUsd: number | null; knownEstimatedUsd: number;
   heldUsd: number | null; unpricedCalls: number; providerReportedUsd: null; billedUsd: null; requestMs: number;
   inputTokens: number | null; outputTokens: number | null; cacheReadTokens: number | null; cacheWriteTokens: number | null;
@@ -72,18 +77,19 @@ export const BudgetRangeSchema = Type.Union([
 export type BudgetRange = Static<typeof BudgetRangeSchema>;
 export const BudgetBucketSchema = Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("all")]);
 export type BudgetBucket = Static<typeof BudgetBucketSchema>;
-const dashboardFilters = {
-  ...RepositoryFiltersSchema.properties,
+const planFilters = {
   projectId: Type.Optional(id), folderId: Type.Optional(id), sessionId: Type.Optional(id), turnId: Type.Optional(id),
   modelId: Type.Optional(id), providerId: Type.Optional(id), role: Type.Optional(ModelRoleSchema),
   env: Type.Optional(Type.Union([Type.Literal("Local"), Type.Literal("Remote"), Type.Literal("Sandbox"), Type.Literal("unknown")])),
   range: Type.Optional(BudgetRangeSchema),
 };
+const dashboardFilters = { ...RepositoryFiltersSchema.properties, ...planFilters };
 export const UsageFiltersSchema = object(dashboardFilters);
 export type UsageFilters = Static<typeof UsageFiltersSchema>;
 const page = { offset: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) };
 export const BudgetQuerySchema = Type.Union([
   object({ type: Type.Literal("budget.status"), sessionId: id }),
+  object({ type: Type.Literal("budget.plans"), ...planFilters, ...page, status: Type.Optional(Type.Union([Type.Literal("held"), Type.Literal("consumed"), Type.Literal("released")])) }),
   object({ type: Type.Literal("budget.dashboard"), ...dashboardFilters, ...page, bucket: Type.Optional(BudgetBucketSchema) }),
   object({ type: Type.Literal("budget.calls"), ...dashboardFilters, ...page }),
 ]);
@@ -94,6 +100,7 @@ export interface BudgetWindow {
 }
 export type BudgetResponse =
   | { type: "budget.status"; status: BudgetStatus }
+  | { type: "budget.plans"; plans: BudgetPlan[]; nextOffset: number | null; window: BudgetWindow }
   | { type: "budget.dashboard"; totals: BudgetTotals; groups: Array<{ role: ModelRole; modelId: string; providerId: string | null; totals: BudgetTotals }>; policy: { revision: number; limit: BudgetLimit | null }; nextOffset: number | null;
       window: BudgetWindow; bucket: BudgetBucket; periods: Array<{ from: string | null; to: string | null; totals: BudgetTotals }>;
       pricing: Array<{ rate: BudgetRate; calls: number; estimatedUsd: number | null }>; currency: "USD"; repositoryCoverage: RepositoryCoverage }

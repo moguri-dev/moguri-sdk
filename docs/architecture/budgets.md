@@ -160,6 +160,13 @@ multi-file Git mechanics. Its generated three-role path stays within the
 captured cap and cannot replay a recorded start. This is not the production
 compound scheduler, a durable unused-envelope outcome or public finite kupo.
 
+Protocol 30 then adds [durable planned capacity](budget-plans.md): held plans
+charge the same scopes without becoming calls/reports, transfer exactly once
+with actual model admission, and release only while provably undispatched
+after their canonical owner ends. Read-only SDK/CLI/TUI/desktop inspection
+discloses those states. Production finite kupo and checkpoint authority remain
+separate gates; source deletion never refunds consumed or unknown calls.
+
 ## Current executable scope
 
 Explicit estimate-based session token/USD limits, separate revisioned

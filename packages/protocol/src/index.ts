@@ -19,6 +19,7 @@ import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
+import { BudgetPlanSchema, projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 import type { RoutingTurn, SingleRoutingPlan } from "./routing.ts";
 import type { ContextCompaction } from "./compaction.ts";
@@ -32,7 +33,7 @@ import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 29;
+export const PROTOCOL_VERSION = 30;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -277,6 +278,7 @@ export interface EventPayloads {
   "artifact.deleted": { artifactId: string };
   "candidate.saved": { candidate: CandidateRecord };
   "budget.recorded": { entry: BudgetEntry };
+  "budget.plan_recorded": { plan: BudgetPlan };
   "operation.recorded": { entry: OperationEntry };
   "operation.coverage_started": { version: 1; priorHistory: "retained-events-only" };
   "repository.recorded": { observation: RepositoryObservation };
@@ -325,7 +327,7 @@ export const eventTypes: readonly EventType[] = [
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
-  "budget.recorded", "budget.policy_changed", "budget.blocked", "operation.recorded", "operation.coverage_started",
+  "budget.recorded", "budget.plan_recorded", "budget.policy_changed", "budget.blocked", "operation.recorded", "operation.coverage_started",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
@@ -359,6 +361,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const compactions = new Map<string, ContextCompaction>();
   const planSaves = new Map<string, RemotePlanSave>();
   const budgetEntries = new Map<string, BudgetEntry>();
+  const budgetPlans = new Map<string, BudgetPlan>();
   const operationEntries = new Map<string, OperationEntry>();
   let operationCoverage: OperationCoverage | null = null;
   const repositoryObservations = new Map<string, RepositoryObservation>();
@@ -418,6 +421,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       operationCoverage ??= { ...event.payload, since: event.timestamp, sourceSeq: event.seq };
     }
     if (event.event_type === "budget.recorded") budgetEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
+    if (event.event_type === "budget.plan_recorded") {
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(BudgetPlanSchema, event.payload.plan) || event.payload.plan.profileId !== profileId) throw new MoguriError("budget_plan_corrupt", "Planned accounting must remain independently retained in its exact profile. State was preserved.", 409);
+      const plan = projectBudgetPlan(budgetPlans.get(event.payload.plan.id), event.payload.plan);
+      budgetPlans.set(plan.id, plan);
+    }
     if (event.event_type === "budget.policy_changed") budgetPolicy = structuredClone(event.payload);
     if (event.event_type === "compaction.saved") compactions.set(event.payload.compaction.id, structuredClone(event.payload.compaction));
     if (event.event_type === "plan.save_recorded") planSaves.set(event.payload.save.id, structuredClone(event.payload.save));
@@ -776,10 +784,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
     }
   }
+  validateBudgetPlanEntries([...budgetPlans.values()], [...budgetEntries.values()]);
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
     settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

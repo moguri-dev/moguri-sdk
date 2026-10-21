@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  GLOBAL_PROFILE_ID, PROFILE_ID, MoguriError, projectEvents, type BudgetEntry, type CommandEnvelope, type CommandResult, type ControlDefaults,
+  GLOBAL_PROFILE_ID, PROFILE_ID, MoguriError, projectEvents, type BudgetEntry, type BudgetPlan, type CommandEnvelope, type CommandResult, type ControlDefaults,
   type EventInput, type GlobalBudgetCapacity, type Profile, type ProfileCatalog, type ProfileCommand, type StoredEvent,
   type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
@@ -48,7 +48,7 @@ export class ProfileRuntime {
   }
   async snapshot(id: string) {
     const control = await this.control(id);
-    const sequence = this.initial.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE json_extract(data,'$.event_type')='budget.recorded'").get();
+    const sequence = this.initial.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE json_extract(data,'$.event_type') IN ('budget.recorded','budget.plan_recorded')").get();
     return { ...control.snapshot(), profile: this.profile(id), profileCatalogRevision: this.global.events().at(-1)?.seq ?? 0, globalBudgetPolicy: this.catalog().globalBudget, globalBudgetSequence: Number(sequence?.seq ?? 0) };
   }
   async initialize(): Promise<ControlPlane> {
@@ -152,7 +152,7 @@ export class ProfileRuntime {
   private committed(id: string, events: StoredEvent[]): void {
     const globalChanged = events.some((event) => event.profile_id === GLOBAL_PROFILE_ID), policyChanged = events.some((event) => event.event_type === "global.policy_changed");
     if (globalChanged) for (const [other, control] of this.controllers) if (other !== id) control.refreshProfile(policyChanged);
-    if (globalChanged || this.catalog().globalBudget.limit && events.some((event) => event.event_type === "budget.recorded")) this.options.changed(GLOBAL_PROFILE_ID, []);
+    if (globalChanged || this.catalog().globalBudget.limit && events.some((event) => event.event_type === "budget.recorded" || event.event_type === "budget.plan_recorded")) this.options.changed(GLOBAL_PROFILE_ID, []);
     if (events.some((event) => ["turn.finished", "job.finished", "session.resumed", "session.mode_changed", "workspace.saved"].includes(event.event_type))) {
       for (const [other, control] of this.controllers) if (other !== id) control.wake();
     }
@@ -160,13 +160,18 @@ export class ProfileRuntime {
   private globalBudget(): GlobalBudgetCapacity {
     const limit = this.catalog().globalBudget.limit;
     if (!limit) return { limit: null, chargedTokens: 0, chargedUsdMicros: 0 };
-    const entries: BudgetEntry[] = [];
+    const entries: BudgetEntry[] = [], plans: BudgetPlan[] = [];
     for (const profile of this.catalog().profiles) {
+      const events = this.store(profile.id).events();
+      if (events.some((event) => event.event_type === "budget.plan_recorded")) {
+        const accounting = projectEvents(events, profile.id);
+        entries.push(...accounting.budgetEntries); plans.push(...accounting.budgetPlans); continue;
+      }
       const latest = new Map<string, BudgetEntry>();
-      for (const event of this.store(profile.id).events()) if (event.event_type === "budget.recorded") latest.set(event.payload.entry.id, event.payload.entry);
+      for (const event of events) if (event.event_type === "budget.recorded") latest.set(event.payload.entry.id, event.payload.entry);
       entries.push(...latest.values());
     }
-    const charges = budgetCharges(entries);
+    const charges = budgetCharges(entries, plans);
     return { limit, chargedTokens: charges.tokens, chargedUsdMicros: charges.usdMicros };
   }
   private foreignRootBusy(id: string, root: string): boolean {

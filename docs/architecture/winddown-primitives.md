@@ -1,6 +1,7 @@
 # Reserved checkpoint prerequisites
 
-Status: **0.23 development**, protocol/database **29**. These are private D11
+Measured at **0.23 development**, protocol/database **29**, before the
+[protocol-30 planned-hold foundation](budget-plans.md). These are private D11
 mechanical prerequisites, not public finite kupo budgets, a compound scheduler
 or an automatic checkpoint feature. The immutable 0.22 SDK/app remain unchanged.
 Sandbox stays paused.

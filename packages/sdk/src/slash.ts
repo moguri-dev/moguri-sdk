@@ -41,7 +41,7 @@ export const slashCommands = [
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
-  { name: "dashboard", description: "Inspect model accounting, tool/MCP outcomes and retained profile storage", argument: "[FILTERS_JSON|calls FILTERS_JSON|operations FILTERS_JSON|storage]" },
+  { name: "dashboard", description: "Inspect model accounting, planned holds, tool/MCP outcomes and retained storage", argument: "[FILTERS_JSON|calls FILTERS_JSON|plans FILTERS_JSON|operations FILTERS_JSON|storage]" },
   { name: "repository", description: "Review explicit root-bound metadata; no automatic GitHub or model request", argument: "[preview|state|refresh BINDING REV confirm-lookup|clear REV confirm-clear|stop JOB_ID]" },
   { name: "memory", description: "Index/search the session's actual Local or pinned SSH repository; no model request", argument: "[state|index|search TEXT|graph [PATH]|remember CONVENTION|stop JOB_ID]" },
   { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
@@ -223,11 +223,12 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         return { kind: "text", text: JSON.stringify(await sdk.query(query), null, 2) };
       }
       const calls = command.argument === "calls" || command.argument.startsWith("calls ");
-      const argument = calls ? command.argument.slice(5).trim() : command.argument;
+      const plans = command.argument === "plans" || command.argument.startsWith("plans ");
+      const argument = calls || plans ? command.argument.slice(5).trim() : command.argument;
       const filters: unknown = argument ? JSON.parse(argument) : {};
       if (!isRecord(filters) || Object.hasOwn(filters, "type")) throw new ClientError("budget_query", "Use an object of dashboard filter fields, without a query type.");
-      const query = parse(BudgetQuerySchema, { ...filters, type: calls ? "budget.calls" : "budget.dashboard" });
-      if (query.type === "budget.status") throw new ClientError("budget_query", "Use dashboard/calls filter fields, not another query type.");
+      const query = parse(BudgetQuerySchema, { ...filters, type: calls ? "budget.calls" : plans ? "budget.plans" : "budget.dashboard" });
+      if (query.type === "budget.status") throw new ClientError("budget_query", "Use dashboard/calls/plans filter fields, not another query type.");
       return { kind: "text", text: JSON.stringify(await sdk.query(query), null, 2) };
     }
     case "compact": {

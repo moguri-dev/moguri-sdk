@@ -24,7 +24,7 @@ test("schema-23 marker failure preserves exact schema-22 ciphertext and restarts
   try {
     store.commit([{ event_type: "job.progress", profile_id: "default", payload: { jobId: "generated-source", progress: "Generated encrypted terminal migration source." } }]);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
-    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema'); PRAGMA user_version=22;
+    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema'); PRAGMA user_version=22;
       CREATE TRIGGER generated_terminal_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='terminal_ownership_schema'
       BEGIN SELECT RAISE(ABORT,'Generated terminal marker failure'); END; COMMIT;`);
     store.close(); store = undefined;
