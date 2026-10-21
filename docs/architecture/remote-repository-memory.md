@@ -103,3 +103,37 @@ markers instead of pretending a newer cache was present in an older schema.
 No writer, session memory API, Remote index/query or model/MCP memory support
 is enabled by this foundation. Current source is protocol/database 27; the
 qualified immutable 0.20 SDK/app remain protocol 26.
+
+## Atomic cache and production carrier foundation
+
+The Node cache now publishes validated records, lexical vectors, graph and
+typed scope metadata in one SQLite transaction. The locator binds profile/
+project/workspace/env/root/actual peer/build; the Remote dataset ID also binds
+lossless device/inode. Replacement removes only its prior owned dataset.
+Failed metadata insertion or a final synchronous authority check rolls back
+all rows, keeping the previous exact cache. No Remote root is statted Locally.
+Corrupt or foreign metadata is rejected, not repaired into another owner.
+
+Project relocation/removal and worktree removal enumerate owned metadata
+scopes so Remote rows do not escape the existing derived-cache deletion path.
+Other profiles' caches remain. Optional original job IDs allow truthful
+post-publication partial outcomes; cached candidates/graph metadata can be
+validated remotely before use. Existing project-only Local APIs retain their
+reuse behavior. Graph construction has explicit 100,000-node/250,000-edge
+limits rather than unbounded memory growth or silent truncation.
+
+The production bridge now supports bounded capture/validation frames through
+the existing pinned connector and tracked query shutdown. Capture has a
+120-second ceiling and a 2-MiB framer; validation uses the same bounded query.
+Shared awaited writes observe abort even while backpressure holds a callback.
+An initial carrier edit accidentally nested methods inside the repository
+reader, causing compile/loader failures; method placement was corrected and
+the unchanged GitHub reader preserved. No failed run was called qualified.
+
+The corrected memory/MCP/plan carrier gate passes **26/26 in 12,287.83 ms**.
+The final combined cache/production transport/source/Local recovery/framing
+gate passes **32/32 in 4,065.00 ms**, with both type checks/full build.
+These cover exact metadata/vector rollback, last-moment revocation, restart,
+profile-only deletion, real Remote source/ignore/deny checks, admitted/pre-abort
+and held-write cancellation. Session SDK/service admission, model/context/MCP
+wiring, native clients and exact 0.21 artifacts remain unfinished and blocked.

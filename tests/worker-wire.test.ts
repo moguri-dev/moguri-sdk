@@ -1,7 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PassThrough } from "node:stream";
-import { JsonLineChannel, MAX_WORKER_FRAME, TTY_FRAME_PREFIX } from "../apps/service/src/worker-wire.ts";
+import { PassThrough, Writable } from "node:stream";
+import { JsonLineChannel, MAX_WORKER_FRAME, TTY_FRAME_PREFIX, sendFrame } from "../apps/service/src/worker-wire.ts";
+
+test("awaited framed writes propagate pre-abort and cancellation while backpressure holds their callback", async () => {
+  const input = new PassThrough();
+  let finish: (error?: Error | null) => void = () => {};
+  const output = new Writable({ write: (_chunk, _encoding, callback) => { finish = callback; } });
+  const channel = new JsonLineChannel(input, output), abort = new AbortController();
+  channel.on("error", () => {});
+  try {
+    const stopped = new AbortController(); stopped.abort(new Error("Generated pre-write stop"));
+    await assert.rejects(() => sendFrame(channel, { generated: true }, stopped.signal), /pre-write stop/);
+    const pending = sendFrame(channel, { generated: "Bounded held source frame" }, abort.signal);
+    abort.abort(new Error("Generated backpressure stop"));
+    await assert.rejects(() => pending, /backpressure stop/); finish();
+    const circular: { value?: unknown } = {}; circular.value = circular;
+    await assert.rejects(() => sendFrame(channel, circular, new AbortController().signal), /circular/i);
+  } finally { input.destroy(); channel.end(); output.destroy(); }
+});
 
 test("worker frames retain split UTF-8 and close both halves after peer EOF", async () => {
   const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output);

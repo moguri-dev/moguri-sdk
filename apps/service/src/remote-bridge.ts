@@ -6,7 +6,7 @@ import { join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Value } from "typebox/value";
 import { isRecord, MoguriError, PROTOCOL_VERSION } from "../../../packages/protocol/src/index.ts";
-import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME } from "./worker-wire.ts";
+import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME, sendFrame } from "./worker-wire.ts";
 import { parentMessage, WorkerRequestSchema, type WorkerRequest } from "./worker-protocol.ts";
 import { BridgeInitSchema, SavedStatusSchema, BridgeEnvelopeSchema, type BridgeInit, type BridgeInfo, type BridgeStatus, type BridgeFrame, type SavedStatus } from "./remote-protocol.ts";
 import { repositoryContext } from "./project-policy.ts";
@@ -16,6 +16,7 @@ import { readWorkspace } from "./workspace-reads.ts";
 import { discoverRemoteMcp } from "./remote-mcp-runtime.ts";
 import { probeTerminalBuild } from "./terminal-build.ts";
 import { readRepositoryCli } from "./repository-metadata.ts";
+import { captureRepositorySource, SourceRequestSchema, validateRepositorySource } from "./repository-source.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -262,6 +263,22 @@ async function frontend(): Promise<void> {
         try {
           const metadata = await readRepositoryCli(info.root, init.repository, abort.signal);
           outer.send({ kind: "repository", repository: init.repository, metadata, info }, () => outer.end()); return;
+        } finally { process.off("SIGTERM", stopped); process.off("SIGHUP", stopped); }
+      }
+      if (init.action === "memory") {
+        if (!info.root || !init.memory) throw new MoguriError("memory_binding", "Repository memory needs its exact approved Remote root and bounded request.", 409);
+        const stopped = () => abort.abort(new Error("Remote repository source control stopped."));
+        process.once("SIGTERM", stopped); process.once("SIGHUP", stopped);
+        try {
+          if (Value.Check(SourceRequestSchema, init.memory)) {
+            if (init.memory.root !== info.root) throw new MoguriError("memory_binding", "Repository capture request changed its original Remote root.");
+            await captureRepositorySource(info.root, init.memory.maxFiles, init.memory.denied, abort.signal, (frame) =>
+              sendFrame(outer, { kind: "memory", frame, info }, abort.signal));
+            outer.end(); return;
+          }
+          if (init.memory.binding.root !== info.root) throw new MoguriError("memory_binding", "Repository validation request changed its original Remote root.");
+          const result = await validateRepositorySource(init.memory, abort.signal);
+          outer.send({ kind: "memory-validation", result, info }, () => outer.end()); return;
         } finally { process.off("SIGTERM", stopped); process.off("SIGHUP", stopped); }
       }
       if (init.action === "mcp-tools") {

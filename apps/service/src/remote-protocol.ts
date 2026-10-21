@@ -4,6 +4,7 @@ import { WorkerRequestSchema } from "./worker-protocol.ts";
 import { RemoteMcpToolsRequestSchema } from "./remote-mcp-runtime.ts";
 import { McpToolInfoSchema } from "../../../packages/protocol/src/mcp.ts";
 import { RemoteTerminalBuildSchema } from "../../../packages/protocol/src/terminals.ts";
+import { SourceFrameSchema, SourceRequestSchema, SourceValidationRequestSchema, SourceValidationResultSchema } from "./repository-source.ts";
 
 const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -52,7 +53,7 @@ export const ForegroundQuerySchema = Type.Object({
 }, { additionalProperties: false });
 export type ForegroundQuery = Static<typeof ForegroundQuerySchema>;
 export const BridgeInitSchema = Type.Object({
-  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("repository"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
+  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("repository"), Type.Literal("memory"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
   protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
   stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
   runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
@@ -60,6 +61,7 @@ export const BridgeInitSchema = Type.Object({
   context: Type.Optional(ProjectSettingsSchema),
   workspace: Type.Optional(WorkspaceReadRequestSchema),
   repository: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  memory: Type.Optional(Type.Union([SourceRequestSchema, SourceValidationRequestSchema])),
   mcpTools: Type.Optional(RemoteMcpToolsRequestSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,
@@ -90,6 +92,8 @@ export const BridgeEnvelopeSchema = Type.Union([
   Type.Object({ kind: Type.Literal("context"), text: Type.String({ maxLength: 256 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("workspace"), result: WorkspaceReadResultSchema, info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("repository"), repository: Type.String({ minLength: 1, maxLength: 512 }), metadata: RepositoryApiMetadataSchema, info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("memory"), frame: SourceFrameSchema, info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("memory-validation"), result: SourceValidationResultSchema, info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("mcp-tools"), tools: Type.Array(McpToolInfoSchema, { maxItems: 512 }), helperDigest: hash, info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("inspection"), ...SavedStatusSchema.properties, frames: Type.Array(BridgeFrameSchema, { maxItems: 128 }), nextSequence: sequence }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("error"), message: Type.String({ maxLength: 4096 }), code: Type.Optional(Type.String({ maxLength: 128 })) }, { additionalProperties: false }),

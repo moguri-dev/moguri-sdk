@@ -19,6 +19,7 @@ import type { RemoteTerminalOwner } from "../../../packages/protocol/src/termina
 import { remoteTerminalPeer, terminalOwnerScope } from "./terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES } from "./terminal-protocol.ts";
 import { repositoryIdentity, type RepositoryApiMetadata } from "./repository-metadata.ts";
+import { RepositorySourceCapture, SOURCE_FRAME_BYTES, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
 
 export function validateRemoteTarget(target: RemoteTarget | null): void {
   if (!target) return;
@@ -45,7 +46,7 @@ export class RemoteRuntime {
   private signature: string;
   private probeAbort?: AbortController;
   private probes = new Set<Promise<unknown>>();
-  private queries = new Map<AbortController, Promise<BridgeEnvelope>>();
+  private queries = new Map<AbortController, Promise<unknown>>();
   private active = new Set<RemoteWorker>();
   private readonly sshChildren = new Set<ChildProcessWithoutNullStreams>();
   private closed = false;
@@ -126,7 +127,7 @@ export class RemoteRuntime {
     try { return await task; } finally { this.queries.delete(abort); }
   }
   private async queryOnce(target: RemoteIdentity, init: BridgeInit, signal: AbortSignal): Promise<BridgeEnvelope> {
-    const connection = await this.connect(target, signal);
+    const connection = await this.connect(target, signal, init.action === "memory" ? SOURCE_FRAME_BYTES : MAX_WORKER_FRAME);
     try {
       return await new Promise<BridgeEnvelope>((resolve, reject) => {
         const deadline = setTimeout(() => reject(new MoguriError("remote_timeout", "Remote qualification/query timed out. No fallback or duplicate worker was started.", 409)), 15_000);
@@ -137,7 +138,7 @@ export class RemoteRuntime {
         connection.wire.on("message", (raw) => {
           if (!Value.Check(BridgeEnvelopeSchema, raw)) { settle(undefined, new MoguriError("remote_protocol", "Remote worker protocol/build is incompatible.", 409)); return; }
           if (raw.kind === "error") settle(undefined, new MoguriError(raw.code ?? "remote_bootstrap", raw.message, 409));
-          else if (["probe", "catalog", "context", "workspace", "repository", "mcp-tools", "inspection"].includes(raw.kind)) settle(raw);
+          else if (["probe", "catalog", "context", "workspace", "repository", "memory-validation", "mcp-tools", "inspection"].includes(raw.kind)) settle(raw);
         });
         signal.throwIfAborted();
         connection.wire.send(init);
@@ -220,6 +221,53 @@ export class RemoteRuntime {
       if (error instanceof MoguriError && ["repository_cli_unavailable", "repository_cli_failed", "repository_cli_response", "repository_response", "repository_identity", "repository_license", "program_partial"].includes(error.code)) throw error;
       throw new MoguriError("program_partial", "Remote repository read or process cleanup is unconfirmed after control, scope or connection loss. No observation, retry or Local/account fallback was applied.", 409);
     }
+  }
+  async captureMemory(root: string, maxFiles: number, denied: string[], signal: AbortSignal, progress: (files: number) => void) {
+    signal.throwIfAborted();
+    const target = this.assertReady(), workerDigest = this.readiness.workerDigest!, abort = new AbortController();
+    const operation = this.captureMemoryOnce(target, workerDigest, root, maxFiles, denied, AbortSignal.any([signal, abort.signal]), progress);
+    this.queries.set(abort, operation);
+    try {
+      const result = await operation;
+      signal.throwIfAborted();
+      if (this.closed || frameDigest(this.target()) !== frameDigest(target) || !this.readiness.ready) throw new MoguriError("memory_scope_changed", "Remote memory target/build changed during capture. No cache was published.", 409);
+      return result;
+    } finally { this.queries.delete(abort); }
+  }
+  private async captureMemoryOnce(target: RemoteIdentity, workerDigest: string, root: string, maxFiles: number, denied: string[], signal: AbortSignal, progress: (files: number) => void) {
+    const connection = await this.connect(target, signal, SOURCE_FRAME_BYTES), capture = new RepositorySourceCapture(root, maxFiles, denied);
+    let timer: ReturnType<typeof setTimeout> | undefined, files = 0;
+    try {
+      return await new Promise<ReturnType<RepositorySourceCapture["complete"]>>((resolve, reject) => {
+        timer = setTimeout(() => reject(new MoguriError("program_partial", "Remote memory capture timed out; source/cleanup is unconfirmed and no partial cache was published.", 409)), 120_000);
+        connection.child.once("close", () => reject(new MoguriError("program_partial", "Remote source stream ended before completion. No partial index or Local fallback was used.", 409)));
+        connection.wire.on("error", () => reject(new MoguriError("program_partial", "Remote source framing failed. No partial index was published.", 409)));
+        connection.wire.on("message", (raw) => {
+          try {
+            if (!Value.Check(BridgeEnvelopeSchema, raw)) throw new MoguriError("memory_protocol", "Remote memory framing does not match this exact build.");
+            if (raw.kind === "error") throw new MoguriError(raw.code ?? "memory_capture", raw.message, 409);
+            if (raw.kind !== "memory" || raw.info.root !== root || raw.info.workerDigest !== workerDigest) throw new MoguriError("memory_protocol", "Remote memory stream changed its root, build or response kind.");
+            if (capture.accept(raw.frame)) resolve(capture.complete());
+            else if (raw.frame.kind === "source.file" && ++files % 25 === 0) progress(files);
+          } catch (error) { reject(error); }
+        });
+        signal.throwIfAborted();
+        connection.wire.send({ action: "memory", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir, root, memory: { root, maxFiles, denied } });
+      });
+    } finally { clearTimeout(timer); connection.wire.end(); connection.child.kill("SIGTERM"); }
+  }
+  async validateMemory(request: SourceValidationRequest, signal: AbortSignal): Promise<SourceValidationResult> {
+    signal.throwIfAborted();
+    const target = this.assertReady(), workerDigest = this.readiness.workerDigest!;
+    const result = await this.query(target, { action: "memory", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir, root: request.binding.root, memory: request }, signal);
+    signal.throwIfAborted();
+    if (this.closed || frameDigest(this.target()) !== frameDigest(target) || !this.readiness.ready ||
+      result.kind !== "memory-validation" || result.info.workerDigest !== workerDigest || result.info.root !== request.binding.root ||
+      result.result.binding.root !== request.binding.root || result.result.binding.device !== request.binding.device || result.result.binding.inode !== request.binding.inode ||
+      result.result.files.length !== request.files.length || result.result.files.some((file, index) => file.path !== request.files[index]?.path)) {
+      throw new MoguriError("memory_scope_changed", "Remote source validation changed its exact peer/root/build/path set. No Local validation was substituted.", 409);
+    }
+    return result.result;
   }
   async forget(execution: RemoteExecution): Promise<void> {
     try { await this.vault.remove(execution.id, AbortSignal.timeout(15_000)); }

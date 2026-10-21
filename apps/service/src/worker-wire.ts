@@ -6,6 +6,15 @@ import { stripVTControlCharacters } from "node:util";
 export const MAX_WORKER_FRAME = 32 * 1024 * 1024;
 export const TTY_FRAME_PREFIX = "MOGURI_PTY_V1:";
 export const frameDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+export function sendFrame(channel: JsonLineChannel, value: unknown, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const stopped = () => { signal.removeEventListener("abort", stopped); reject(signal.reason); };
+    signal.addEventListener("abort", stopped, { once: true });
+    try { channel.send(value, (error) => { signal.removeEventListener("abort", stopped); if (error) reject(error); else resolve(); }); }
+    catch (error) { signal.removeEventListener("abort", stopped); reject(error); }
+  });
+}
 export class JsonLineChannel extends EventEmitter<{ message: [unknown]; error: [Error]; close: []; diagnostic: [string] }> {
   private text = "";
   private bytes = 0;

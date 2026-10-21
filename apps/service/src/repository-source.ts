@@ -31,6 +31,10 @@ export const SourceValidationRequestSchema = object({
   denied: Type.Array(path, { maxItems: 100 }),
 });
 export type SourceValidationRequest = Static<typeof SourceValidationRequestSchema>;
+export const SourceValidationResultSchema = object({
+  binding: SourceRootSchema, files: Type.Array(object({ path, stale: Type.Boolean() }), { maxItems: 1000 }),
+});
+export type SourceValidationResult = Static<typeof SourceValidationResultSchema>;
 const relativeSourcePath = (path: string) => !path.startsWith("/") && !path.includes("\0") &&
   !path.split(/[\\/]/).some((part) => !part || part === "." || part === "..") && Buffer.from(path).toString("utf8") === path;
 export const SourceFrameSchema = Type.Union([
@@ -42,6 +46,11 @@ export type SourceFrame = Static<typeof SourceFrameSchema>;
 const sourceHash = () => createHash("sha256").update("moguri-repository-source-v1\0");
 const recordHash = (hash: ReturnType<typeof sourceHash>, record: SourceRecord) =>
   hash.update(JSON.stringify([record.path, record.digest, record.mtime, record.size])).update("\n");
+export function repositorySourceDigest(records: SourceRecord[]): string {
+  const hash = sourceHash();
+  for (const record of records) recordHash(hash, record);
+  return hash.digest("hex");
+}
 export async function sourceRoot(root: string): Promise<SourceRoot> {
   const [canonical, metadata] = await Promise.all([realpath(root), lstat(root, { bigint: true })]);
   if (canonical !== root || !metadata.isDirectory() || metadata.isSymbolicLink()) throw new MoguriError("memory_root", "Repository memory needs its exact canonical directory, not an alias or replacement.");

@@ -347,9 +347,15 @@ export class EventStore {
     }
   }
   private clearProjectIndex(id: string): void {
-    id = profileIndexId(this.profileId, id);
-    if (this.db.prepare("SELECT name FROM sqlite_master WHERE name='memory_vectors'").get()) { vec.load(this.db); this.db.prepare("DELETE FROM memory_vectors WHERE project_id=?").run(id); }
-    for (const table of ["memory_files", "memory_chunks", "memory_graph_nodes", "memory_graph_edges"]) this.db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(id);
+    const scoped = this.db.prepare("SELECT locator,scope_id FROM memory_scopes WHERE profile_id=? AND (project_id=? OR workspace_id=?)").all(this.profileId, id, id);
+    const ids = new Set([profileIndexId(this.profileId, id), ...scoped.map((row) => String(row.scope_id))]);
+    const vectors = this.db.prepare("SELECT name FROM sqlite_master WHERE name='memory_vectors'").get();
+    if (vectors) vec.load(this.db);
+    for (const scope of ids) {
+      if (vectors) this.db.prepare("DELETE FROM memory_vectors WHERE project_id=?").run(scope);
+      for (const table of ["memory_files", "memory_chunks", "memory_graph_nodes", "memory_graph_edges"]) this.db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(scope);
+    }
+    this.db.prepare("DELETE FROM memory_scopes WHERE profile_id=? AND (project_id=? OR workspace_id=?)").run(this.profileId, id, id);
   }
   close(): void { this.keys.clear(); this.pending.clear(); this.db.close(); }
 }
