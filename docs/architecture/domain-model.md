@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Current source protocol/database version is 27; immutable event
+Current source protocol/database version is 28; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -48,6 +48,14 @@ without rewriting old ciphertext/keys/receipts or Local vector/chunk rows.
 Index jobs retain immutable original command/authority/target intent before
 capture; the optional cache is not another domain or permission authority.
 
+Migration 28 adds the internal reviewed-candidate foundation without rewriting
+schema-27 ciphertext, keys, receipts or derived memory. Versioned candidate
+records and their original job lifecycle/results share the independent report
+artifact compartment. Exact root/base/content/actor/intent and ordered effects
+cannot change across revisions. Interrupted metadata becomes partial without
+filesystem lookup/replay. This is not a public candidate API or compound
+scheduler; see [the staged workflow contract](candidate-workflows.md).
+
 ## Implemented entities
 
 | Entity | Identity and authority |
@@ -80,6 +88,7 @@ capture; the optional cache is not another domain or permission authority.
 | Dependency plan | Exact project/manager/manifest/lock digest, unique public package versions and SHA-512 artifacts. Branch names are not mutable cache identities. |
 | Cache receipt | Project/workspace/manager plan digest, actual advisory-check time, package/reuse/download counts and blocked-script boundary. Never a permanent security guarantee. |
 | Retained artifact | Independent project/profile text document with folder/same-project work-item associations: plan/decision/answer/research-note/report, immutable revisions, archive, origin-session/workspace/file and exact source actors. Per-artifact grants survive session retention; model content never becomes a user answer. |
+| Reviewed candidate foundation | Version-1 internal record bound to an independent report artifact: immutable Local source/staging Git/directory identities, proposal/document, original stage/apply commands/jobs, real-user acceptance, ordered effects and verified/partial outcomes. No public staging/apply endpoint or model authority is enabled yet. |
 | Artifact repository job | Exact source/history/root/policy and optional new local branch/base intent, durable receipt and verified copy/commit result. Partial effects are quarantined, never replayed or proof authorizing source deletion. |
 | User terminal | Session/project ownership, immutable Local/Remote env/peer/root/device/inode/launch/original-command, observed PID, dimensions and actual/unconfirmed/acknowledged lifecycle. Independent profile/peer owners can retain pre-resource nullable intent. Ghostty owns VT rendering; input/output are bounded ephemeral data, never durable hashes or model context. |
 | Model options | Optional working window and supported thinking effort in revisioned session controls; the provider maximum is not changed. Step usage records effective window/effort and labeled estimated context separately from actual token telemetry. |

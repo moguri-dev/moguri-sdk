@@ -28,10 +28,11 @@ import { RepositoryObservationSchema, type RepositoryObservation, type Repositor
 import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 import { MemoryIndexIntentSchema } from "./memory.ts";
+import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord, type CandidateRecord } from "./candidates.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 27;
+export const PROTOCOL_VERSION = 28;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -256,8 +257,8 @@ export interface EventPayloads {
   "capability.proposed": { proposal: Proposal };
   "proposal.decided": { proposalId: string; approve: boolean; actor: "user" };
   "job.started": { job: CapabilityJob };
-  "job.progress": { jobId: string; progress: string; status?: "running" };
-  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null };
+  "job.progress": { jobId: string; progress: string; status?: "running"; candidateId?: string };
+  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null; candidateId?: string };
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
@@ -274,6 +275,7 @@ export interface EventPayloads {
   "artifact.saved": { artifact: LegacyRetainedArtifact };
   "artifact.revised": { artifact: LegacyVersionedArtifact };
   "artifact.deleted": { artifactId: string };
+  "candidate.saved": { candidate: CandidateRecord };
   "budget.recorded": { entry: BudgetEntry };
   "operation.recorded": { entry: OperationEntry };
   "operation.coverage_started": { version: 1; priorHistory: "retained-events-only" };
@@ -327,6 +329,7 @@ export const eventTypes: readonly EventType[] = [
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
+  "candidate.saved",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -350,6 +353,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const projectFolders = new Map<string, NavigationFolder>();
   const sessionGroups = new Map<string, SessionGroup>();
   const artifacts = new Map<string, RetainedArtifact>();
+  const candidates = new Map<string, CandidateRecord>();
   const questions = new Map<string, UserQuestion>();
   const routings = new Map<string, RoutingTurn>();
   const compactions = new Map<string, ContextCompaction>();
@@ -453,9 +457,29 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "attention.cleared") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.active = false; }
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
     if (event.event_type === "session.group_saved") sessionGroups.set(event.payload.group.id, { ...event.payload.group });
-    if (event.event_type === "artifact.saved") artifacts.set(event.payload.artifact.id, legacyArtifact(event.payload.artifact, event.id));
-    if (event.event_type === "artifact.revised") artifacts.set(event.payload.artifact.id, normalizeArtifact(structuredClone(event.payload.artifact)));
-    if (event.event_type === "artifact.deleted") artifacts.delete(event.payload.artifactId);
+    if (event.event_type === "artifact.saved" || event.event_type === "artifact.revised") {
+      const artifact = event.event_type === "artifact.saved" ? legacyArtifact(event.payload.artifact, event.id) : normalizeArtifact(structuredClone(event.payload.artifact));
+      const candidate = candidates.get(artifact.id);
+      if (candidate && (artifact.kind !== "report" || artifact.contentDigest !== candidate.documentDigest)) throw new MoguriError("candidate_corrupt", "A bound candidate artifact cannot replace its immutable proposal document.", 409);
+      artifacts.set(artifact.id, artifact);
+    }
+    if (event.event_type === "artifact.deleted") { artifacts.delete(event.payload.artifactId); candidates.delete(event.payload.artifactId); }
+    if (event.event_type === "candidate.saved") {
+      const candidate = event.payload.candidate;
+      if (!Value.Check(CandidateRecordSchema, candidate)) throw new MoguriError("candidate_corrupt", "Candidate metadata has an unsupported shape/version. State was preserved.", 409);
+      const artifact = artifacts.get(candidate.id);
+      if (candidate.profileId !== profileId || candidate.projectId !== event.project_id ||
+        event.session_id || event.artifact_id !== candidate.id || !artifact || artifact.kind !== "report" || artifact.contentDigest !== candidate.documentDigest) {
+        throw new MoguriError("candidate_corrupt", "Candidate metadata is invalid or outside its exact independent artifact/profile. State was preserved.", 409);
+      }
+      const validated = projectCandidateRecord(candidates.get(candidate.id), candidate);
+      const intents = [validated.stageIntent, validated.applyIntent].filter((intent) => intent !== null);
+      if ([...candidates.values()].some((other) => other.id !== candidate.id && [other.stageIntent, other.applyIntent].some((owned) =>
+        owned && intents.some((intent) => intent.commandId === owned.commandId || intent.jobId === owned.jobId)))) {
+        throw new MoguriError("candidate_corrupt", "Original candidate command/job intent was duplicated across independent records.", 409);
+      }
+      candidates.set(candidate.id, validated);
+    }
     if (event.event_type === "question.asked") questions.set(event.payload.question.id, { ...structuredClone(event.payload.question), recommendation: structuredClone(event.payload.question.recommendation ?? null), sourceEventId: event.id });
     if (event.event_type === "question.answered") {
       const question = questions.get(event.payload.questionId);
@@ -515,6 +539,20 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "job.started") {
       const job = event.payload.job;
+      if (job.candidate || ["candidate.stage", "candidate.apply"].includes(job.kind)) {
+        const reference = job.candidate;
+        if (!reference || !Value.Check(CandidateJobIntentSchema, reference)) throw new MoguriError("candidate_corrupt", "Candidate job has no exact typed original intent.", 409);
+        const candidate = candidates.get(reference.candidateId), intent = reference.phase === "stage" ? candidate?.stageIntent : candidate?.applyIntent;
+        const workspaceId = reference.phase === "stage" ? candidate?.stage.workspaceId : candidate?.source.workspaceId;
+        if (!candidate || !intent || job.memory || jobs.has(job.id) || job.kind !== `candidate.${reference.phase}` ||
+          job.id !== intent.jobId || reference.commandId !== intent.commandId || reference.commandDigest !== intent.commandDigest ||
+          job.projectId !== candidate.projectId || event.project_id !== job.projectId || job.sessionId !== null || event.session_id ||
+          (job.workspaceId ?? null) !== workspaceId || event.artifact_id !== candidate.id ||
+          job.status !== "running" || job.resultDigest !== null || job.error !== null ||
+          [...jobs.values()].some((other) => other.candidate?.commandId === reference.commandId || other.memory?.commandId === reference.commandId)) {
+          throw new MoguriError("candidate_corrupt", "Candidate job changed its original artifact/command/root/phase or replayed admission.", 409);
+        }
+      }
       if (job.memory && (!Value.Check(MemoryIndexIntentSchema, job.memory) || job.kind !== "memory.index" ||
         job.memory.target.profileId !== profileId || job.memory.target.projectId !== job.projectId || job.sessionId !== event.session_id ||
         job.projectId !== event.project_id || (job.workspaceId ?? null) !== job.memory.target.workspaceId)) {
@@ -526,6 +564,25 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       jobs.set(job.id, { ...job });
     }
+    if (event.event_type === "job.progress" || event.event_type === "job.finished") {
+      const job = jobs.get(event.payload.jobId);
+      if ((event.payload.candidateId ?? null) !== (job?.candidate?.candidateId ?? null) ||
+        job?.candidate && ((event.artifact_id ?? null) !== job.candidate.candidateId || event.project_id !== job.projectId || event.session_id)) {
+        throw new MoguriError("candidate_corrupt", "Candidate job lifecycle lost its independent artifact owner.", 409);
+      }
+      if (job?.candidate) {
+        const candidate = candidates.get(job.candidate.candidateId);
+        if (job.status !== "running" || !candidate) throw new MoguriError("candidate_corrupt", "Candidate job progress/outcome cannot replay or upgrade terminal work.", 409);
+        if (event.event_type === "job.finished") {
+          const stage = job.candidate.phase === "stage", digest = stage ? candidate.stageResultDigest : candidate.applyResultDigest;
+          if (!["completed", "failed", "cancelled", "partial"].includes(event.payload.status) ||
+            event.payload.status === "completed" && (candidate.status !== (stage ? "staged" : "applied") || digest === null || event.payload.resultDigest !== digest || event.payload.error !== null) ||
+            ["failed", "cancelled"].includes(event.payload.status) && (candidate.status === "partial" || (stage ? candidate.stagedPaths.length : candidate.attemptedPaths.length) > 0)) {
+            throw new MoguriError("candidate_corrupt", "Candidate job outcome is not its actual verified result or hides possible effects.", 409);
+          }
+        }
+      }
+    }
     if (event.event_type === "job.progress") {
       const job = jobs.get(event.payload.jobId);
       if (job) { job.progress = event.payload.progress; if (event.payload.status) job.status = event.payload.status; }
@@ -533,7 +590,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
-      if (job && ["cache.install", "project.defaults", "project.artifacts.materialize"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
+      if (job && ["cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
         if (job.workspaceId) blockedWorkspaces.add(job.workspaceId); else blockedProjects.add(job.projectId);
       }
     }
@@ -724,5 +781,5 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

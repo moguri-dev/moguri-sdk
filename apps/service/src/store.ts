@@ -26,10 +26,13 @@ function initialKey(path: string): Buffer {
   if (path !== ":memory:") throw new Error("Persistent EventStore requires an explicit retention key. Use the Moguri service/Node SDK to resolve its OS-keychain backend.");
   return randomBytes(32);
 }
-const artifactIdentity = (input: EventInput): string | null => input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id : null;
+const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
+  input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? null :
+  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? null : null;
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
-  if (artifactId && (input.event_type === "artifact.saved" || input.event_type === "artifact.revised")) return artifactScope(input.profile_id, artifactId);
+  if (artifactId) return artifactScope(input.profile_id, artifactId);
   const projectId = input.project_id ?? null;
   const sessionId = input.session_id ?? null;
   return { scope: `profile/${input.profile_id}${projectId ? `/project/${projectId}` : ""}${sessionId ? `/session/${sessionId}` : ""}`, projectId, sessionId };
@@ -51,6 +54,7 @@ function references(input: EventInput): string[] {
     case "capability.proposed": return [input.payload.proposal.contentDigest];
     case "artifact.saved": return [input.payload.artifact.contentDigest];
     case "artifact.revised": return [input.payload.artifact.contentDigest];
+    case "candidate.saved": return [input.payload.candidate.documentDigest, input.payload.candidate.stageResultDigest, input.payload.candidate.applyResultDigest].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
     case "job.finished": return input.payload.resultDigest ? [input.payload.resultDigest] : [];
@@ -164,6 +168,9 @@ export class EventStore {
         CREATE INDEX memory_scopes_owner ON memory_scopes(profile_id,project_id,workspace_id);
         INSERT INTO retention_metadata(id,value) VALUES ('remote_memory_schema','1');
         PRAGMA user_version=27; COMMIT;`);
+      if (version < 28) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('candidate_workflow_schema','1');
+        PRAGMA user_version=28; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

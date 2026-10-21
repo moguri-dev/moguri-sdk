@@ -22,6 +22,8 @@ import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse
 import type { TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
+import type { CandidateJobIntent, CandidateRecord } from "./candidates.ts";
+export * from "./candidates.ts";
 export * from "./mcp.ts";
 export * from "./repositories.ts";
 export * from "./telemetry.ts";
@@ -201,11 +203,13 @@ export interface CapabilityJob {
   workspaceId?: string | null;
   materialization?: ArtifactMaterializationPreview;
   memory?: MemoryIndexIntent;
+  candidate?: CandidateJobIntent;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
+  candidates: CandidateRecord[];
   remoteMcpCalls: RemoteMcpCall[];
   terminalOwners: TerminalOwner[];
   repositoryObservations: RepositoryObservation[];

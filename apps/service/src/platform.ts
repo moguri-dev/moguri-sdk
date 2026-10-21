@@ -351,10 +351,16 @@ export class PlatformRuntime {
     const oauth = this.snapshot().oauthAuthorizations.filter((value) => ["waiting", "exchanging"].includes(value.state));
     if (oauth.length) this.host.commit(oauth.map((authorization) => ({ event_type: "mcp.oauth_changed", profile_id: this.snapshot().profileId, project_id: authorization.projectId, payload: { authorization: { ...authorization, state: "failed", authorizationUrlReady: false, diagnostic: "Service restarted. OAuth callbacks/verifiers were not replayed; reconnect explicitly." } } })));
     const interrupted = this.snapshot().jobs.filter((job) => job.status === "running" || job.status === "waiting_input");
-    if (interrupted.length) this.host.commit(interrupted.map((job) => ({
+    const candidates: EventInput[] = this.snapshot().candidates.filter((candidate) => ["staging", "applying"].includes(candidate.status)).map((candidate) => ({
+      event_type: "candidate.saved", profile_id: this.snapshot().profileId, project_id: candidate.projectId,
+      payload: { candidate: { ...candidate, revision: candidate.revision + 1, status: "partial", updatedAt: new Date().toISOString(),
+        diagnostic: "Service restarted during candidate work. Original intent/effects remain unconfirmed; inspect the retained source and owned staging root. Nothing was replayed." } },
+    }));
+    if (interrupted.length || candidates.length) this.host.commit([...candidates, ...interrupted.map((job): EventInput => ({
       event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
-      payload: { jobId: job.id, status: "partial", resultDigest: null, error: "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed." },
-    })));
+      payload: { jobId: job.id, status: "partial", resultDigest: null, error: "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed.",
+        ...(job.candidate ? { candidateId: job.candidate.candidateId } : {}) },
+    }))]);
     this.workspace.start();
     await this.sessions.recover();
   }
@@ -577,11 +583,12 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     const id = randomUUID();
     const job: CapabilityJob = { id, kind, projectId, sessionId, workspaceId: workspaceId ?? (sessionId ? this.session(sessionId).workspaceId : null), parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
     if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job } }]);
+    const candidateId = this.snapshot().jobs.find((job) => job.id === id)?.candidate?.candidateId, retention = candidateId ? { candidateId } : {};
     const abort = new AbortController();
-    const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300) } }]);
+    const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
       abort.signal.throwIfAborted();
-      this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null } }]);
+      this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null, ...retention } }]);
     }).catch((error: unknown) => {
       const partial = error instanceof MoguriError && ["install_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
         kind === "repository.refresh" && this.snapshot().repositoryObservations.some((observation) => observation.jobId === id) ||
@@ -589,7 +596,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
       console.error(`Moguri capability ${kind} (${id}) ${partial ? "partial" : cancelled ? "cancelled" : "failed"}:`, error instanceof Error ? error.message : "Unknown capability error");
       this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: {
-        jobId: id, status: partial ? "partial" : cancelled ? "cancelled" : "failed", resultDigest: null,
+        jobId: id, status: partial ? "partial" : cancelled ? "cancelled" : "failed", resultDigest: null, ...retention,
         error: error instanceof MoguriError ? error.message : error instanceof Error && error.name === "AbortError" ? "Capability cancelled; no automatic retry." : "Capability failed. Check the configured runtime, file permissions and connection; no success was recorded.",
       } }]);
     }).finally(() => { this.active.delete(id); settled?.(); });

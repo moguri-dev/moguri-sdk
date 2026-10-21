@@ -5,6 +5,8 @@ Every durable event carries `id`, `seq`, `schema_version`, `timestamp`,
 `parent_event_id`, `correlation_id`, `event_type` and a typed `payload`.
 Migration 10 adds optional opaque `artifact_id` key-scope metadata without
 changing event identities or plaintext payloads.
+Protocol 28 also uses that existing artifact compartment for candidate records
+and their complete job lifecycle/results; it does not add a workflow database.
 Unused scope fields are null in checkpoint 1.
 
 | Event family | Payload and invariant |
@@ -39,7 +41,7 @@ Unused scope fields are null in checkpoint 1.
 | `settings.updated` | Shared validated settings, value revision and permission revision. Edits cannot rewrite an admitted prompt snapshot. |
 | `capability.saved` | Project content digest, kind, source, owner and explicit enablement revision. |
 | `capability.proposed`, `proposal.decided` | Reviewed exact proposal/base digest, real model/user origin and actual user decision. No automatic application or enablement. |
-| `job.started`, `job.progress`, `job.finished` | Owned capability work, bounded progress, actual completed/failed/cancelled/partial outcome and retained result reference. Protocol-27 memory indexing atomically retains original command/digest/authority/target intent and receipt before source capture; a lost receipt cannot replay its job. Post-publication stop/failure is partial, not rollback. |
+| `job.started`, `job.progress`, `job.finished` | Owned capability work, bounded progress, actual completed/failed/cancelled/partial outcome and retained result reference. Protocol-27 memory indexing retains original command/digest/authority/target before capture. Protocol-28 candidate jobs retain exact original phase/command/root; progress/finished bind `candidateId` and share its independent artifact key. A terminal/partial candidate job cannot be replayed/upgraded; completion needs its matching verified candidate result. |
 | `board.saved` | Project configuration/revision, ordered phases, merged destination and explicit read-only integration policy. |
 | `issue.saved` | Complete revisioned local ticket and real `user`, `github` or `linear` actor. Only a verified merge can drive an automated phase transition. |
 | `cache.prepared` | Exact plan digest, advisory check time, package/reuse/download counts and `scripts: blocked`, never a permanent safety grant. |
@@ -50,6 +52,7 @@ Unused scope fields are null in checkpoint 1.
 | `project.configured`, `project.folder_saved`, `project.relocated` | Typed policy/configuration/navigation and attached-folder changes; atomic exact-membership reorder and index invalidation. |
 | `artifact.saved` | Legacy immutable plan snapshot; migration preserves its payload/identity while moving encryption into an independent artifact compartment. |
 | `artifact.revised`, `artifact.deleted` | Typed document revisions, exact source/actual-actor provenance and user edits/archive or profile-owned deletion tombstone. Source sessions/files and other grants are not deleted. |
+| `candidate.saved` | Protocol-28 version-1 internal candidate revision, independently artifact-owned: exact Local source/stage/base, document/proposal, ordered paths, original commands/jobs, actual user acceptance and observed/verified/partial effects. Changed identities, erased effects, fabricated acceptance and terminal replay are rejected. Startup preserves interrupted intent without a filesystem probe or replay. Public APIs/clients remain gated. |
 | `workspace.saved` | Revisioned owned Local root/branch/base/common-directory identity, job and creating/ready/removing/partial/removed outcome. Never a permission or fallback root. |
 | `change_set.saved` | Stable workspace/branch/base and optional ticket/PR association. No publish/merge authorization. |
 | `session.workspace_bound` | Explicit nullable binding for a fresh idle session; existing conversation/queue is not moved. |
@@ -152,7 +155,7 @@ estimated admission; missing historical pricing is not free usage.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":22,"profileId":"default","token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":28,"profileId":"default","token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

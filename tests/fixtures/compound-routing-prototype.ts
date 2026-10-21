@@ -1,7 +1,7 @@
 import { normalizeContext } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import { MoguriError } from "../../packages/protocol/src/index.ts";
+import { CandidatePatchSchema, MoguriError } from "../../packages/protocol/src/index.ts";
 import { modelRequest } from "../../apps/service/src/model-controls.ts";
 import { modelEndpointBoundary } from "../../apps/service/src/model-registry.ts";
 import { isProtectedProjectPath } from "../../apps/service/src/files.ts";
@@ -26,9 +26,7 @@ const PlanSchema = Type.Union([
 ]);
 const CandidateSchema = Type.Union([
   Type.Object({ kind: Type.Literal("answer"), text: Type.String({ minLength: 1, maxLength: 8192 }) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("patch"), summary: Type.String({ minLength: 1, maxLength: 1200 }), edits: Type.Array(Type.Object({
-    path: Type.String({ minLength: 1, maxLength: 4096 }), baseDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }), text: Type.String({ maxLength: 128 * 1024 }),
-  }, { additionalProperties: false }), { minItems: 1, maxItems: 20 }) }, { additionalProperties: false }),
+  CandidatePatchSchema,
 ]);
 export type CompoundCandidate = Static<typeof CandidateSchema>;
 const CritiqueSchema = Type.Object({

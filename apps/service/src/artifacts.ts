@@ -96,6 +96,11 @@ export class ArtifactRuntime {
     return this.host.events().flatMap((event) => event.event_type === "artifact.saved" && event.payload.artifact.id === id ? [legacyArtifact(event.payload.artifact, event.id)] :
       event.event_type === "artifact.revised" && event.payload.artifact.id === id ? [normalizeArtifact(event.payload.artifact)] : []);
   }
+  private candidateEvents(id: string): StoredEvent[] {
+    if (!this.host.snapshot().candidates.some((candidate) => candidate.id === id)) return [];
+    return this.host.events().filter((event) => event.artifact_id === id &&
+      (event.event_type === "candidate.saved" || event.event_type === "job.started" || event.event_type === "job.progress" || event.event_type === "job.finished"));
+  }
   private source(sessionId: string, kind: "message" | "tool", id: string): ArtifactSourcePreview {
     this.session(sessionId);
     const event = this.host.events().find((event) => event.session_id === sessionId && (kind === "tool" ?
@@ -116,21 +121,41 @@ export class ArtifactRuntime {
     if (!this.host.snapshot().projects.some((project) => project.id === projectId)) throw new MoguriError("project_missing", "Project is outside this profile.", 404);
     const artifacts = this.host.snapshot().artifacts.filter((artifact) => artifact.projectId === projectId).sort((a, b) => a.id.localeCompare(b.id));
     const records = artifacts.map(({ id, name, kind, revision, status }) => ({ id, name, kind, revision, status }));
-    return { projectId, artifacts: records, digest: digest(JSON.stringify({ projectId, artifacts: artifacts.map((artifact) => ({ ...artifact, revisions: this.revisions(artifact.id).map(({ revision, contentDigest }) => ({ revision, contentDigest })) })) })) };
+    return { projectId, artifacts: records, digest: digest(JSON.stringify({ projectId, artifacts: artifacts.map((artifact) => {
+      const candidateEvents = this.candidateEvents(artifact.id);
+      return { ...artifact, revisions: this.revisions(artifact.id).map(({ revision, contentDigest }) => ({ revision, contentDigest })),
+        ...(candidateEvents.length ? { candidateEvents } : {}) };
+    }) })) };
   }
   private export(artifacts: RetainedArtifact[], filename: string): ArtifactExport {
     let bytes = 0;
-    const documents = artifacts.map((artifact) => ({ artifact, revisions: this.revisions(artifact.id).map((revision) => {
-      const text = this.store.blob(revision.contentDigest);
-      bytes += Buffer.byteLength(text) + Buffer.byteLength(JSON.stringify(revision));
+    const account = (text: string) => {
+      bytes += Buffer.byteLength(text);
       if (bytes > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
-      return { artifact: revision, text };
-    }) }));
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: 1, documents }, null, 2);
+    };
+    const documents = artifacts.map((artifact) => {
+      const revisions = this.revisions(artifact.id).map((revision) => {
+        const text = this.store.blob(revision.contentDigest); account(text); account(JSON.stringify(revision));
+        return { artifact: revision, text };
+      });
+      const events = this.candidateEvents(artifact.id), hashes = new Set<string>();
+      for (const event of events) {
+        if (event.event_type === "candidate.saved") {
+          if (event.payload.candidate.stageResultDigest) hashes.add(event.payload.candidate.stageResultDigest);
+          if (event.payload.candidate.applyResultDigest) hashes.add(event.payload.candidate.applyResultDigest);
+        }
+        if (event.event_type === "job.finished" && event.payload.resultDigest) hashes.add(event.payload.resultDigest);
+      }
+      const results = [...hashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
+      if (events.length) account(JSON.stringify(events));
+      return { artifact, revisions, ...(events.length ? { candidate: { events, results } } : {}) };
+    });
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
   async removal(projectId: string, choice?: ProjectArtifactChoice): Promise<{ events: EventInput[]; forget: string[] }> {
+    if (this.host.snapshot().jobs.some((job) => job.projectId === projectId && job.candidate && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("candidate_busy", "Stop the project's active candidate work before reviewing retention or removal. Its independent grants were preserved.", 409);
     const preview = this.preview(projectId);
     if (!choice && preview.artifacts.length) throw new MoguriError("artifact_choice", "Preview this project's artifacts and explicitly choose retain, export/materialize then delete, or delete before removal.", 409);
     if (choice && choice.expectedDigest !== preview.digest) throw new MoguriError("artifact_conflict", "The artifact set changed. Review a fresh removal preview; nothing was deleted.", 409);
@@ -281,7 +306,15 @@ export class ArtifactRuntime {
     const artifact = this.artifact(command.artifactId);
     this.writable(artifact.projectId);
     if (artifact.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "Artifact changed. Reload before editing, archiving or deleting it.", 409);
-    if (command.type === "artifact.delete") return finish([{ event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: artifact.id } }], { id: artifact.id }, { artifacts: [artifact.id] });
+    const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === artifact.id);
+    const activeCandidate = candidate && (["staging", "applying"].includes(candidate.status) ||
+      this.host.snapshot().jobs.some((job) => job.candidate?.candidateId === candidate.id && ["running", "waiting_input"].includes(job.status)));
+    if (command.type === "artifact.delete") {
+      if (activeCandidate) throw new MoguriError("candidate_busy", "Stop the candidate's active owned job before deleting its independent document/history.", 409);
+      return finish([{ event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: artifact.id } }], { id: artifact.id }, { artifacts: [artifact.id] });
+    }
+    if (candidate && command.changes.text !== undefined) throw new MoguriError("candidate_document", "A candidate's exact proposal document is immutable. Export it or create a separately reviewed new proposal; renaming/organizing does not change its bytes.", 409);
+    if (activeCandidate && command.changes.status === "archived") throw new MoguriError("candidate_busy", "Stop the candidate's active owned job before archiving its document.", 409);
     if (!Object.keys(command.changes).length) throw new MoguriError("artifact_changes", "Choose an actual title, text or archive change.");
     const updated: RetainedArtifact = { ...artifact, revision: artifact.revision + 1, updatedAt: new Date().toISOString(),
       ...this.associations(artifact.projectId, { folderId: command.changes.folderId === undefined ? artifact.folderId : command.changes.folderId, workItemId: command.changes.workItemId === undefined ? artifact.workItemId : command.changes.workItemId }),

@@ -58,7 +58,7 @@ test("schema-27 scope migration rolls back exactly and preserves schema-26 ciphe
       files: store.db.prepare("SELECT project_id,path,digest,mtime,size FROM memory_files ORDER BY project_id,path").all(),
       chunks: store.db.prepare("SELECT id,project_id,path,digest,text FROM memory_chunks ORDER BY id").all(),
     };
-    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id='remote_memory_schema'; PRAGMA user_version=26;
+    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','candidate_workflow_schema'); PRAGMA user_version=26;
       CREATE TRIGGER generated_remote_memory_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='remote_memory_schema'
       BEGIN SELECT RAISE(ABORT,'Generated scoped memory migration failure'); END; COMMIT;`);
     store.close(); store = undefined;
