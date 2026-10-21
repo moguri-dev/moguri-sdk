@@ -1,0 +1,602 @@
+# Owned execution transports
+
+This contract extends the existing worker loop, not a second agent framework.
+Reuse Node/Node-PTY (MIT), OpenSSH (BSD), pi-ai (MIT), the explicit keychain
+backend and the encrypted append-only event store. SSH is transport and host
+separation, not SendBox process isolation.
+
+## Qualification before capability
+
+An owned rootless loopback OpenSSH server passed strict generated host-key
+verification and a real worker-originated HTTP request in 175.94 ms. A changed
+host key prevented execution before another request. The server used generated
+keys, loopback-only listening and no system service changes. This proves that
+primitive on macOS, not Linux support, a complete worker transport or an external
+host's readiness. `node scripts/remote-spike.mjs` repeats it.
+
+The actual existing worker now passes SSH inference, exact read/write approvals,
+remote instructions, scoped remote-local discovery, image transfer and
+project-free null-root execution. A deterministic lost-completion connection
+retains reported usage for reconciliation without another inference; a genuine
+control-plane SIGKILL/restart preserves its run/key/cursor and never starts a
+replacement. Initial native end-to-end worker qualification completed in
+1,377.74 ms; the refreshed SSH primitive completed in 131.59 ms. Generated hidden
+Electron drives actual setup, explicit project mapping, model-preserving env
+selection and execution through the compiled transport.
+
+This qualifies the macOS core agent path, not Linux release readiness or live
+Copilot entitlement. Protocol 17 separately qualifies read-only SSH files,
+Git changes and plan views below. Protocol 20 adds
+[exact user-requested Remote plan saves](remote-plan-saves.md) through the
+same owned worker with no model or Local fallback. In the qualified 0.17
+delivery, embedded Remote consoles, executable MCP transport and repository-memory retrieval remain blocked. Explicit
+client-side browser URLs do not create an implicit remote-port tunnel.
+The later [Remote MCP prerequisite](remote-mcp-primitives.md) separately
+qualifies actual generated SSH stdio/HTTP connector origin, exact scopes,
+denied-by-default synthetic access, cancellation and lost-result inspection.
+It is not public Remote MCP support or a grant to forward real credentials.
+The subsequent [protocol-24 development integration](remote-mcp.md) now adds
+explicit peer/resource grants and actual approved model/external MCP calls in
+that same worker, with encrypted intent/results, no-replay restart/late
+receipts and shared CLI/TUI/desktop review. The exact 0.18.0-alpha.2 delivery
+is independently qualified. The qualified **0.19.0-alpha.1 / protocol 25** adds
+[owned Remote user consoles](remote-user-consoles.md) with separate
+immutable peer/root/technical-key state and no input replay. The exact
+installed SDK and actual packaged runtime pass independent lifecycle checks.
+Qualified **0.21.0-alpha.1 / protocol 27** adds
+[bound Remote repository memory](remote-repository-memory.md): source capture/
+freshness runs on the actual SSH host, while typed vector/graph caches stay
+on the control plane. Optional indexing/context and exact reviewed MCP
+memory retrieval share that scope, never a Local index fallback. Exact
+installed SDK and packaged acceptance are recorded in setup. Transferred Local scripts stay
+blocked.
+
+Protocol 22 reuses the qualified Git view for optional immutable repository
+attribution at model admission. It reads the actual pinned Remote origin and
+rechecks authority after await; metadata lookup is separately explicit and
+displayed as public control-plane access. Qualified **0.20.0-alpha.1 / protocol 26** adds
+[explicit authenticated repository metadata](remote-github-metadata.md)
+through the selected SSH host's existing CLI account, with retained original
+peer/root/build provenance and no controller-account fallback. This does not
+move client attachments or linked-PR observation onto that host.
+
+## Authority and identities
+
+Remote requires an explicitly configured SSH host, pinned public host key,
+selected local identity and installed compatible Moguri worker command.
+Private keys and the local secret store are never copied or forwarded.
+Each project supplies its own approved canonical remote path; null-project
+chats retain no filesystem root. Model metadata and inference for remote-local
+endpoints originate on that host. Scoped Copilot access requires a separate
+explicit grant and sends only per-request access, never a refresh credential.
+
+An owned remote supervisor forks the existing worker over real Node IPC.
+Versioned bounded frames cross SSH; they are not a replacement `process.send`
+implemented by mutating Node. The controller remains the only event writer and
+authorizer. Tool policy is rechecked locally and filesystem policy at the actual
+worker root. Unqualified MCP/extension/terminal transports remain blocked rather
+than executing on the local host.
+
+## Shared pinned-root writer ownership
+
+Writable Remote turns share a root lease across profiles, keyed by the pinned
+SSH public host key and the explicit canonical remote workspace. Local
+project IDs, profile IDs, target display names/IDs and connection aliases are
+not physical ownership boundaries. The active lease uses the execution's
+captured peer/root, not later editable project/target settings. Distinct remote
+roots remain independent; project-free Remote chats acquire no fake root.
+
+The previous Local-only cross-profile lookup let two distinct Local project
+mappings dispatch writers to the same Remote root. A generated two-profile
+real-SSH regression reproduced `running` where the second turn had to remain
+queued. The corrected root authority checks actual captured Remote leases
+before dispatch and derives quarantine from retained execution metadata,
+including unloaded profiles after restart. Another profile's resume or
+readiness probe cannot clear that quarantine; the actual owner's explicit
+inspection/resume is required. Same-profile duplicate remote mappings remain
+rejected rather than silently creating competing writers.
+
+A requested read-only restriction does not release an effective writer early.
+An acknowledged read-only boundary releases its lease and wakes other
+controllers even while the original read-only turn continues. Promotion uses
+the actual acquisition reservation, not a pending mode label that could make
+two readers falsely claim the same writer lease.
+
+This reuses Node crypto and existing execution/mode/blocked events; no new
+durable shape, account backend, migration or client-specific state is added.
+Generated coverage exercises actual SSH models, aliases, same-profile
+refusal, independent roots, delayed mode acknowledgement and unloaded-profile
+restart quarantine. It does not infer that distinct/rekeyed host keys identify
+the same OS filesystem, discover Local/Remote aliasing or establish SSH
+process isolation. Unqualified console, MCP and memory transports remain blocked.
+
+The corrected source gate passes **262** full local checks in **176,325.91
+ms**. Seven focused peer/root cases cover the reproduced cross-profile race,
+existing same-profile refusal, independent roots, unloaded-owner restart
+quarantine and both sides of actual read-only acknowledgement. The temporary
+lifecycle-only handle probe was removed; no native VM, personal credential,
+system SSH daemon change or new containment claim was involved.
+The versioned **0.9.1-alpha.1** development app then passes all **20** actual
+packaged hidden workflows in **45.2 s**, strict runtime/assets/signature and
+DMG integrity. A fresh audited installation of the exact delivered SDK passes
+its compiled runtime and existing profile/Guided/model/platform exchanges.
+The seven peer/root scenarios above are actual generated SSH integration,
+not simulated native VM evidence. Setup records hashes and historical limits.
+
+## Failure and recovery
+
+Run IDs are unique and start is create-only. Reattachment never creates another
+worker or replays a side effect. Run-scoped transport keys live in the explicit
+local secret backend and remote supervisor memory. Private remote replay frames
+are encrypted; credential-bearing controller replies are never journaled.
+Acknowledged frames can be removed only after the local durable writer records
+them. Cursors bind run, sequence and digest atomically with their primary events.
+
+Disconnect requests owned cancellation, but does not prove remote cleanup.
+Model/tool outcomes, cancellation request/acknowledgement, uncertain descendants
+and late accounting stay distinct. Recovery reconciles an existing run without
+admitting new work or supplying new model access. Late usage can improve an
+unknown ledger entry without rewriting a partial turn as successful.
+
+The persistent bridge closes only after the actual final durable cursor drains,
+not after an assumed 30ms delay. Final status/journal writes share the control
+queue, so closing cannot race a late acknowledgement's filesystem writes.
+Actual worker exit confirms only `owned-worker-stopped`; it does not invent an
+acknowledged successful outcome or descendant containment. Generated coverage
+holds the terminal cursor deliberately and exercises genuine control-plane
+SIGKILL recovery.
+
+Protocol/database migration 8 adds transport configuration, run identities,
+frame receipts and late-usage events without rewriting prior event identities
+or encrypted grants. Generated acceptance must cover actual SSH worker/model
+execution, host-key/auth failure, exact workspace and attachment transfer,
+configuration races, duplicate frames, reconnect, disconnect cancellation,
+late usage, restart and no Local fallback. A capability becomes ready only
+after the installed worker/runtime and target pass those checks.
+
+## Owned file-tool publication
+
+The shared Local/SSH file tool uses Node filesystem/abort primitives (MIT)
+and the existing `tool.completed` partial outcome, without another schema,
+permission or runtime. Its owned signal reaches asynchronous file preparation
+and the pre-rename check. A stop before publication preserves the source and
+removes the temporary candidate.
+
+Record the publication attempt and actual rename separately. An unacknowledged
+rename, later directory-sync failure or stop after the real effect is
+explicitly partial, never a completed/effect-free stopped tool. Non-cancelled
+I/O failures log a safe code; the retained tool result explains possible or
+confirmed publication without claiming rollback. The existing owned worker
+retains that result and stops before another model request.
+
+Generated filesystem mocks exercise those exact boundaries, not personal
+files or a native VM. Base conflicts remain ordinary effect-free errors.
+This does not establish hostile external-writer races or complete detached/
+reparented-process containment; Sandbox remains paused.
+
+The focused gate passes five cases in **699.56 ms**. Its actual Moguri-owned
+worker carries a generated post-publication directory-sync fault through the
+normal two approved model/tool steps in **333.23 ms**: the real file remains
+inspectable, the tool and turn are partial, the root is quarantined and no
+third model leg runs. The ledger retains both actual calls (**84** reported
+tokens), not a refund or successful stop. No separate agent loop is used.
+The final directly related Local/SSH/routing/plan/supervision gate passes
+**60/60 in 29.84 s**, type checks/build and a fresh approved/audited packed SDK
+compatibility install. Four hidden desktop/SSH workflows pass in **13.6 s**.
+This reuses protocol 28's existing outcome contract, not another durable
+schema or a claim of complete descendant containment.
+
+## Read-only Remote workspace views
+
+Protocol/database **17** reuses OpenSSH (BSD), Node filesystem/process/crypto
+primitives (MIT), existing TypeBox contracts (MIT) and the current SDK/panels.
+There is no new dependency, model call, command side effect or parallel state
+store. Its transactional compatibility marker preserves schema-16 event
+ciphertexts, command receipts, retention keys and blob grants across profiles;
+an injected marker failure leaves the old state unchanged and reopenable.
+
+Files, Git changes and plan reads use one bounded typed SSH request carrying
+the captured canonical remote root and only the relevant read policy.
+The execution host applies existing protected/denied path and UTF-8/file
+bounds; directory results retain the existing 1,000-entry bound. Shared Git
+helpers suppress hooks, fsmonitor, external diffs, text conversion and configured
+filters, including required filters. No file, Git process or plan lookup runs
+against the attached Local checkout as a fallback.
+
+The controller rechecks profile-owned session/env, target, root and settings
+after the await. Changed mappings, denied paths, deleted sessions, cancelled
+queries, transport failures and mismatched build/root/operation replies are
+errors, not relabeled or empty successful views. Runtime shutdown cancels its
+owned one-shot queries. Nonblocking regular-file opens reject FIFOs rather than
+leaving a filesystem thread waiting for a writer.
+
+Desktop Files/Changes views remount on binding changes; dirty Plan edits remain
+preserved and cannot save into a new root. At the protocol-17 checkpoint,
+Remote plans were read-only; viewing still never retains an independent artifact
+implicitly. `/files`, `/file`,
+`/diff` and `/plan` share the SDK in both clients; Remote CLI/TUI plans return
+text, never a path handed to a Local opener. Protocol 20's explicit `/plan edit`
+and `plans.save` now use a reviewed binding, typed provider-free control purpose,
+actual result/terminal acknowledgement, owned-worker exit and independent
+artifact/receipt settlement. Partial writes remain partial through real
+control-plane SIGKILL and exact late-frame reconciliation without replay.
+Consoles, executable MCP and repository-memory transport remain unavailable.
+
+The updated inspector verifies authenticated protocol-16 saved metadata and
+existing receipts without attaching or resuming that worker. New queries and
+turns require the exact protocol-17 worker build at the approved SSH command.
+Neither inspection nor upgrade replays model/tool effects or refunds unknown
+usage. No SendBox work is part of this slice; it remains paused by user request.
+
+Generated acceptance uses actual rootless loopback SSH and distinct Local/
+Remote fixture trees, not a fake SSH executable. It covers exact byte limits,
+protected/denied/symlink/FIFO data, Git filters, immutable arguments, all five
+target/root/policy/env/deletion races, mismatch replies, abort/shutdown and
+schema migration/restart. Hidden Electron drives the actual Files, Changes
+and read-only Plan controls. The external installed SDK exercises its shipped
+worker and the same queries; these checks establish mechanical macOS behavior,
+not Linux release readiness, paid provider access or process containment.
+
+The complete source gate passes **326 checks in 201.84 s** and all **21**
+hidden desktop workflows in **45.8 s**. Native TUI interaction reads actual
+SSH file/diff/plan data in **1,210.76 ms**, with no model call or Local opener.
+All 21 flows also pass against the real ad-hoc-signed **0.11.0-alpha.1**
+packaged app in **46.5 s**. The exact delivered SDK archive independently
+installs, audits and exercises its shipped SSH worker; its four entrypoint
+types remain external-consumer compatible. Source/consumer audits are zero.
+Setup records immutable artifact hashes and remaining first-release limits.
+
+## Linux payload preparation
+
+`node scripts/prepare-worker-image.mjs --build` prepares an isolated context
+containing only the dependency manifests and built worker/MCP/bridge modules,
+not the checkout, host home, credentials or model weights. Apple Containerization
+builds it without cache from Node 26.12.0/Trixie's pinned Linux arm64 manifest
+`sha256:f6e55fb0e92f7f115549278ab36f68f0659790f5d4fd7cb4446486d8ed70d842`.
+The upstream Docker Hub tag API supplied that platform digest before work.
+The original Bookworm digest/build measurements below are historical
+prerequisites, not the current compatible native workload.
+
+The image reuses Node (MIT), existing locked runtime dependencies, Node-PTY
+(MIT), system nftables and the build toolchain. Other dependency lifecycle
+scripts stay disabled; only the explicitly pinned Node-PTY native rebuild runs.
+The image verifies every staged payload digest, Node version and a generated
+Linux PTY primitive before success. It runs as the image's unprivileged node
+user and never publishes an image.
+
+This prepares a workload prerequisite, not a ready Sandbox or a proof of
+Linux-host cancellation, guest policy, model networking or containment.
+Authenticated candidate guest installation remains a separate user action.
+
+The initial no-cache build failed after 6,848.36 ms because Apple's newly
+installed builder defaults to Rosetta while Rosetta is absent. No workload
+success or Sandbox readiness was claimed. Native ARM preparation uses the
+supported `build.rosetta=false` property rather than installing translation,
+changing guest trust or modifying unrelated Porto workloads.
+
+`node scripts/pty-worker-spike.mjs` separately tests a generated bounded ASCII
+frame over an owned raw host PTY, with delayed-reader backpressure and echo
+checks. SendBox's documented interactive channel requires a controlling
+foreground PTY and cannot use `--json`; its own authenticated input-credit
+behavior still needs genuine guest qualification, not inference from this
+host-only primitive.
+
+After selecting native ARM mode, the no-cache workload build passed in
+40,351.79 ms: Node 26.12.0, all staged hashes, a compiled Linux Node-PTY and
+zero npm audit findings. Its initial manifest is
+`sha256:4b2e8c1cfe35d0e1b06c62e7d4bd3a352c6e09af5f2b0ea28b28a814f4b25f30`.
+Apple's image store requires an explicit immutable local repository alias;
+without it a differently qualified name attempts a registry pull. Preparation
+now registers and verifies that alias instead of assuming tag normalization.
+The parent-owned builder was stopped after this check.
+
+The raw host PTY primitive passed 1,398,104 generated payload bytes in
+374.86 ms with a delayed reader and no input echo. The private worker frontend
+can negotiate the same bounded prefixed encoding on an owned TTY while keeping
+ordinary SSH pipes on their existing JSON protocol. This does not enable
+Sandbox or substitute host-only checks for the candidate's genuine guest gate.
+
+## Native foreground primitive
+
+SendBox is reused as its maintained Apache-2.0 CLI, not reimplemented or
+described as a process group. The separately installed development R4 bundle,
+public key, version pair, trust-root ID, release sequence and host ownership/
+hashes remain explicit; they do not replace production trust.
+
+Signed egress intentionally blocks direct loopback TCP. Native control therefore
+uses the same bounded private wire with an owned foreground process and real
+Node fork/IPC, not the SSH loopback daemon. The runtime's exact proxy environment
+is preserved into the worker; arbitrary ambient secrets and NODE_OPTIONS are
+not. Actual worker/provider-step/tool/large-image gates use synthetic fetch
+responses and are labeled as such; live proxy/networking is a separate gate.
+
+## Native SDK contract being qualified
+
+### Live mounts and failure rollback
+
+The separately qualified R5 runtime live-binds its selected workspace. It does
+not wait for exit 0 to copy files back. Its common security wrapper regards only
+`GuestTerminal::Exited { code: 0 }` as successful. Normal non-success finalization
+captures an after-snapshot/diff, then restores the pre-run tree by swapping the
+host workspace directory. Newly created files disappear and baseline files
+return. A later security-finalization failure can also roll back guest exit 0.
+This applies equally to awaited direct writes and same-filesystem atomic
+rename; `fsync` is not a way to bypass the rollback policy.
+
+These semantics are explicit in the retained SendBox revision
+`f2d8770ba3e9b5c95cdfa7eca0fe0d20f7279d39`:
+`crates/sendbox-host/src/lib.rs:223-246`,
+`crates/sendbox-host/src/security.rs:448-499`,
+`crates/sendbox-session-security/src/lifecycle.rs:617-684` and
+`crates/sendbox-security/src/snapshot.rs:475-545`.
+
+Therefore a native SDK execution must not hand a concurrently editable user
+checkout to automatic security rollback. It needs a private Moguri-owned
+staging root and captured source/base identity. Retain failed/stopped
+after-snapshot provenance and pending changes separately; apply only an accepted
+change set after rechecking the exact host base, current policy and required
+human decision. Rollback of the private root must never erase a concurrent user
+edit in the source checkout. Every client must identify staged versus actually
+published effects through the SDK rather than assuming a completed guest
+`write_file` survived teardown.
+
+Do not force a stopped/partial worker to exit 0 merely to retain its files.
+Keep actual worker, CLI, snapshot, publication and cleanup outcomes distinct.
+Generated acceptance must include stop/nonzero rollback, retained after-state,
+publication failure, changed host base and concurrent source edits, alongside
+the model/control/VM gates below.
+
+The internal `native-staging.ts` prerequisite uses Node filesystem/crypto (MIT),
+the existing protected-path and folder-policy readers, and the same explicit
+**200-file / 2-MiB UTF-8** bounds as reviewed folder context. It captures only an
+explicit approved file set, never scans or silently copies ignored credentials,
+Git metadata, dependencies or a whole host home. Immutable source/root/policy
+digests and mode metadata are checked again after copying into a separate
+0700 profile/session/turn-owned root. An ownership marker sits outside the
+runtime-restorable workspace; it is not another workflow store or permission.
+
+Cancellation preserves partial owned staging without writing the source.
+Changed source digests invalidate later base acceptance, while changed parent
+or workspace directory identity rejects reuse, including expected R5 rollback
+replacement. This primitive has no source-publication API and does not create
+an alternate Git history, new SDK capability or ready Sandbox choice. Durable
+execution/stage lifecycle still belongs in versioned service events when the
+controller integration is added; it is not inferred from a marker file.
+
+Nine generated staging groups now cover exact private copies and permissions,
+immutable arguments, protected/denied/symlink/binary/aggregate bounds,
+cancelled partial preparation, empty scopes, forged metadata, root replacement
+and source conflicts. A genuine R5 command-stop run uses that separate stage,
+writes its partial file, then deliberately changes the generated source
+concurrently. R5 rollback affects only staging: the source edit survives,
+source-base acceptance and replaced-stage reuse both reject, and retained
+after-state hashes remain verified. It completes in **5,673.40 ms**, settling
+as **partial / CLI 2** in **1,207.54 ms**, without publishing to the source.
+This qualifies the isolated text-set primitive, not source application or
+complete native Git/command/project mapping.
+The complete local suite then passes **308 checks in 244.35 s** with clean
+types/build. A separate privately staged model-stop gate settles in **232.00 ms**
+(CLI 130, total 5,195.97 ms), preserving the concurrent source edit and rejecting
+the changed base. Normal staged execution passes in **8,056.98 ms**, changes only
+its candidate, and publishes nothing to the source.
+
+### Current protocol-16 R5 prerequisite
+
+The separate user-authenticated R5 prefix is
+`/opt/sendbox-readiness-adc32f48-r5`, host/guest 0.2.0/aarch64,
+trust root `readiness-qualification-adc32f48-r5`, caller minimum sequence 9
+(bundle sequence 9/minimum accepted 8). Moguri independently verified regular
+canonical root-owned installed host/key/manifest hashes and non-writable modes.
+Production trust, guest controls and Apple's service were not changed.
+
+| R5 candidate artifact | SHA-256 |
+| --- | --- |
+| Host | `b1cecdc3b9ae472adcf3027c3b23078f3106760729db8de9527b4848fa67663d` |
+| Guest tar, reported by the coordinated installer | `47512860170186ec6fe4a5f5059b6f456851e43fe5ca75b4f116cd77ba913948` |
+| Public key | `9834a580e8997500e446525776a6f28fdba8aee774b107a501258e46a844aa4f` |
+| Manifest | `030b950048469331adfe40865301765e9c9f9f20431c9c46ca5f1a4e41d3cee3` |
+
+A fresh no-cache arm64 image passed in **33,482.15 ms**, with locked
+dependencies, zero npm audit findings, native PTY and all current payload
+hashes verified. Its local-only immutable reference is
+`docker.io/library/moguri-worker@sha256:0a0a9eb33a894ee34ec5c31d33465a859ce2bec84f868f75d9e65cace0fd5825`;
+protocol 16 worker SHA-256 is
+`9190c0d469413924acb65ea90626739e12fd6c9666c89f731c7e8b04e9fb3b0b`.
+The parent-owned builder was stopped afterward.
+
+The current payload passed genuine R5 normal Node/thread/workspace and
+foreground worker primitives in **4,832.06 ms**: three explicitly generated
+pi-ai responses, two exact approved read/write tools, a **3,151,914-byte**
+generated image and a **4,202,798-byte** start frame. All owned VMs were removed.
+The refreshed atomic-proof fixture separately passed its normal run in
+**5,248.49 ms**. Neither run uses a real provider response or egress.
+
+The first model-stop harness run observed a pending model delta, requested and
+acknowledged stop, `aborted`/unreported model completion, a stopped worker and
+CLI 130 in **289.63 ms**. The command-stop run observed an actual approved
+process, acknowledged stop, conservative partial tool/turn outcome and CLI 2
+in **1,309.35 ms**. Both had empty independently checked generated-prefix VM
+inventory. Those first harness runs failed because their assertions incorrectly
+expected a new file to remain in the host workspace after normal failure
+rollback. The failures remain recorded; missing live-path proof did not mean
+the guest never wrote it.
+
+Fresh corrected gates now verify the live-captured native SID, exact generated
+workspace/image/argv/time and host public Ed25519 plan/audit signatures.
+The model stream stopped in **277.23 ms** (CLI **130**, aborted/unreported
+metering, total **5,133.10 ms**). The approved command wrote a generated file,
+then stopped with its conservative **partial** tool/turn outcome in
+**1,313.52 ms** (CLI **2**, total **6,073.19 ms**). Both verify successful
+audited baseline rollback and recover nonce-bound proof from the retained
+after-state. The command's **34-byte** partial file is hash-verified there,
+not falsely reported as surviving in the live workspace. The final normal
+three-call/two-tool run passes in **4,882.61 ms**. All owned VMs are removed.
+
+An additional explicit **`control-lost` message** gate passes in
+**4,913.67 ms**, settling in **242.76 ms** after authority loss. Its late
+model/final frames receive no continuation/terminal acknowledgement; the worker
+and CLI remain **partial / 2**, usage stays unreported, and retained rollback
+proof is verified before owned VM absence. This is not a real service SIGKILL
+or restart-recovery qualification. Those still belong to the SDK lifecycle gate.
+
+`native-evidence.ts` reads only the known SID's public plan/audit/snapshots and
+requested content-addressed object, never the host signing key or bootstrap
+material. It verifies domain-prefixed provenance-v1 Ed25519 payloads using the
+host public identity, preserving typed field order, explicit nulls and UTF-8
+metadata ordering. Inner plan bytes are losslessly minified, while audit
+subjects hash the exact file bytes: nanosecond timestamps must not round through
+JavaScript numbers. Snapshot IDs hash typed content excluding `id`; object
+length/SHA-256 and captured baseline hashes are checked independently.
+
+Audit v1 does not sign an explicit after-ID. The reader therefore labels the
+association **`unique-private-store`**, requiring one distinct non-baseline
+manifest in the same private SID store. It rejects ambiguity rather than
+claiming a cryptographic after-ID binding. Eight generated checks cover
+signatures/subject mutation, foreign scope, unsafe paths and sizes, missing
+rollback, aliases, ambiguous after-state, lost integer/order fidelity,
+snapshot self-hashing and changed baselines. A ninth generated case now binds
+the live signed plan before an audit/final result exists and rejects a foreign
+workspace. This helper is not a new trust
+root, SDK execution capability or statement of real provider completion.
+The combined portable/native-local suite passes **299 checks in 187.67 s**,
+including these eight generated evidence groups and the existing TUI/SSH/budget
+foundation. Clean type/build checks pass without changing protocol 16 or the
+previously delivered 0.10 archive bytes.
+
+Networking remains a separate failed/unqualified gate. An api-only deny-first
+R5 fetch retained CONNECT 502 and explicit CONNECT 403; these are not evidence
+of user cancellation. Fresh public DNS still shows the unapproved exact alias
+`glb-db52c2cf8be544.github.com` for `api.githubcopilot.com`, but no retained guest
+audit proves it is the sole cause. The user's domain-consent question returned
+automatic unavailability, not either offered choice, so no user-profile,
+factory or production policy was changed or represented as approved.
+Offline cancellation work does not enable Sandbox/API readiness.
+
+Further isolation uses a **separate generated, credential-free development
+fixture**, explicitly naming only the API host and exact observed GitHub alias.
+It is not a user-policy grant, never adds wildcards/literal IPs, and retains
+deny-first DNS/egress controls. The first fetch in a fresh VM still fails
+CONNECT 502 with `signal.aborted=false`: adding the alias is demonstrably not
+sufficient, and those failures remain failures.
+
+A bounded SOCKS DOMAIN diagnostic uses the gateway's existing policy/pin/dial
+path, not a new route or control port. Five generated framing groups cover
+split/truncated/IPv6/domain replies, cancellation and target/proxy restrictions.
+A genuinely first operation in a fresh R5 VM returns SOCKS **REP 0x04
+(`resolution_failed`)**. The subsequent HTTP fetch in that same VM obtains a
+verified TLS Response **400**; later A lookup succeeds, AAAA is empty, raw HTTP
+CONNECT returns 200 and another TLS fetch obtains 400. A credential-free host
+control also returns 400. These classify their own ordered requests, not
+retrospectively every historical 502.
+
+The shared per-VM authorization cache makes cold/warm ordering significant.
+CONNECT 502 can be resolution or upstream-dial failure; the existing HTTP
+status alone does not distinguish them. SOCKS REP4 versus REP5 does, per request.
+A 1.5-second diagnostic DNS timeout was shorter than the resolver's documented
+three-second exchange/five-second combined lookup budget and was not evidence
+of gateway failure; current DNS diagnostics respect that budget. No retry,
+sleep, cache priming or warmed result is substituted for the failing fresh
+first-request gate. TLS 400 is transport evidence, not authenticated model
+access or a paid inference pass. Sandbox/API remains unavailable while the
+cold-resolution failure is investigated.
+
+The opt-in `--observe-dns` diagnostic verifies the live signed plan's exact
+workspace/image/command/time before attaching a bounded, privileged observer
+only to that owned generated VM. It reads the non-auth resolver-state
+`upstream` scalar and retains only DNS header metadata, request ports and
+SHA-256 query comparisons excluding transaction IDs. It never retains raw
+packets, names, response bodies, bootstrap/control configuration or credentials.
+The workload still verifies non-root execution, NNP, seccomp and zero effective
+capabilities. This diagnostic is not the execution path or a weakening of those
+controls. The four generated parser checks include upstream scope, unsupported/
+truncated frames, transaction-ID-independent hashes and unexpected response
+sources restricted to observed request ports.
+
+In the correlated owned run, the selected upstream was `192.168.64.1:53`.
+Initial A/AAAA requests were observed at **84.85-84.88 ms**, with no matching
+DNS reply during the bounded **12-second** observation. The first SOCKS
+request returned REP4. New requests at **3,159.44-3,159.48 ms** had identical
+per-type query hashes and received NOERROR replies from the expected upstream
+at **3,161.03 ms** and **3,186.90 ms**. Later requests also received replies.
+This narrows the failing request to absent observed DNS responses, not a
+hostname-policy rejection, API/TLS failure or changed DNS question. It does
+not establish where packets were lost, prove a particular host/upstream bug or
+recover discarded gateway errors.
+
+Observer attachment delayed the gated workload by **105 ms**; its total
+**13,579 ms** includes the observation window. The separate unmodified fresh
+first-fetch gate still failed CONNECT 502 afterward. A response-only initial
+collector was insufficient to observe outgoing queries; the corrected
+bidirectional collector and source-port correlation are recorded separately.
+All generated VMs were removed. No warmed pass, retry or observation-induced
+timing change is substituted for cold-network qualification.
+
+This source checkpoint passes **314 local checks in 239.47 s**, all **21**
+hidden desktop workflows in **44.2 s**, clean types/build and the externally
+installed SDK/CLI/worker checks. Source and consumer audits report zero
+vulnerabilities. These internal Node-only prerequisites add no protocol/schema
+version, migration or ready capability; delivered 0.10 archives are unchanged.
+
+### Released 0.2.1 qualification
+
+The user-authorized, checksum/provenance-verified **SendBox 0.2.1** system
+installation now supplies the matching root-owned host and signed guest.
+[Runtime foundation](runtime-foundation.md#released-sendbox-021) records its
+exact installed paths, artifact hashes, release identity and retained R5
+separation. This is not a silent development-key substitution or Apple upgrade.
+
+With the same immutable protocol-16 workload, real Node/thread/workspace and
+foreground-worker execution passes in **4,940.86 ms**: three generated pi-ai
+responses, two approved file tools and the existing **3,151,914-byte** image /
+**4,202,798-byte** start frame. Source remains unchanged and no candidate is
+published. Released-guest model stop settles **stopped / CLI130** in
+**283.11 ms** (total **4,969.95 ms**). Approved command stop remains
+**partial / CLI2** in **1,284.88 ms** (total **5,932.89 ms**); its retained
+34-byte partial file, baseline rollback and concurrent source-edit survival
+are verified. Explicit `control-lost` settles **partial / CLI2** in
+**285.46 ms** (total **4,839.83 ms**) without granting late continuation.
+These remain explicit control-message tests, not service SIGKILL/restart.
+
+The released runtime does **not** fix the cold-network gate. Under the
+unchanged generated exact API/CNAME policy, first SOCKS returns **REP4**;
+later same-VM HTTP obtains TLS400, A lookup succeeds, AAAA is empty and raw
+CONNECT returns 200. A separate fresh first-fetch still fails CONNECT502,
+`signal.aborted=false`, CLI1. All generated VMs are removed. Neither release
+installation nor later transport success enables Sandbox: native SDK
+ownership/application/recovery and reliable cold networking remain open.
+
+### Owned SDK execution requirements
+
+The control plane must record an owned native execution before CLI effects:
+profile/session/turn, immutable configuration signature, pinned image/worker,
+actual host/guest mount mapping, trust metadata, unique runtime prefix and
+eventual CLI/worker/VM identities. The same SDK serves both clients. No selected
+configuration or executable-presence check makes Sandbox ready.
+
+User-provided policy is bounded/validated, and cannot implicitly forward Git,
+SSH, IDE, refresh or unrelated secret-store credentials. Copilot delegation is
+separate and explicit; only per-request access crosses the authenticated raw
+channel. Prepared model metadata/inference and repository instruction reads
+must originate in the guest. Unqualified model/extension/console/panel surfaces
+remain blocked, not run against a same-named host root.
+
+Native frame sequence/digest receipts commit atomically with their primary
+events. A worker terminal report is only a report: acknowledge it durably, then
+wait for actual owned VM teardown before recording a successful turn. Stopped,
+failed, partially cancelled and cleanup-unconfirmed outcomes remain distinct.
+Unknown model usage never becomes zero. No credential-bearing reply is logged.
+
+Stop propagates through owned work and private queries. Host CLI termination
+does not prove teardown. Inspect only the exact persisted runtime prefix,
+verified bootstrap executable and approved mount/image, then stop/delete only
+that VM. Never kill a stale/reused host PID or foreign Apple/Porto workload.
+Restart marks interrupted work partial and inspects/cleans existing owned
+resources without launching another worker, replaying a tool or promoting a
+late model result into success.
+
+Durable native execution/report/frame events require migration and recovery
+coverage. Generated acceptance must include genuine SDK/CLI/TUI/Electron
+execution, private provider access, root mapping, input-credit/backpressure,
+concurrent runs, configuration/approval races, cancellation failure and actual
+control-plane loss. A failing live gate remains a failure, not a skip or a
+reason to weaken guest controls.

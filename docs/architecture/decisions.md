@@ -2,6 +2,20 @@
 
 **Decided 2026-10-17 by the project owner. Status: accepted, pending the Phase 0 validation spikes below.**
 
+**Initial executable checkpoint, 2026-10-18.** The [Phase 0 results](phase-zero.md)
+authorize a deliberately smaller development checkpoint: macOS Local execution,
+fixed GitHub Copilot models, Manual approvals, and Unlimited budget through both
+clients. This is not completion of the first milestone. Unsupported environments,
+routing, delegation, attachment types and finite budgets were initially
+unavailable. Later qualified slices below do not silently approximate guarantees
+or fall back to Local. External-service and
+release-packaging failures remain release blockers.
+
+The [D14 SDK platform slice](#d14-one-importable-sdk-and-user-controlled-capability-platform)
+also supports explicit exact tool/command grants, Guided human confirmation
+and bounded Autopilot, while Manual remains the factory default. It does not
+enable Autopilot Max, qualified SendBox or Remote execution.
+
 These decisions define the implementation stack and constraints for the [implementation specification][B]. Moguri is built from zero and does not fork OpenCode or Pi. The [README][I] and [`AGENTS.md`][A] follow these decisions.
 
 ## Summary
@@ -21,6 +35,19 @@ These decisions define the implementation stack and constraints for the [impleme
 | D11 | Users choose a fixed model or `kupo`, a synthetic router/orchestrator spanning approved local and hosted models with single, cascade, and critique/revision workflows. | Evaluation cannot meet the chosen quality, cost, latency, or isolation budgets. |
 | D12 | Autonomy level defaults to Manual. Guided, Autopilot, and System One-backed Autopilot Max are independent of model, Env, and Budget; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
 | D13 | Remote SSH runs the agent task and model calls on a user-configured reachable machine; the local control plane retains durable authority. | Phase 0 cannot prove secure transport, remote model access, cancellation, and reconnect recovery. |
+| D14 | One importable SDK powers both clients, default-dark branding and user-controlled memory, extensions, MCP and local dictation. | SDK packaging, policy, recovery or physical runtime qualification fails. |
+| D15 | Verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
+| D16 | Ghostty embeds the desktop terminal; shared held queues, read-only/side sessions and retained project artifacts extend the same SDK/event authority. | Native input/resize/cancellation, retention-key migration, multi-client policy or packaged-client acceptance fails. |
+| D17 | Compact icon controls expose shared working-context/thinking settings, estimated context preview and provenance-safe usage, with the original red-pom-pom mascot. | Supported transport options, bounded request sizing, migration/restart or compact native-popover behavior fails. |
+| D18 | Project-free chats, explicit MCP OAuth, scoped suggestions/reviewed metachat and shared attention extend the same SDK authority. | Scope isolation, issuer/resource binding, exact configuration review, cancellation, migration or private notification delivery fails. |
+| D19 | Configured local models, snapshotted startup defaults and typed reviewed context extend the shared runtime. | Provider identity, resource-bound credentials, source consent or migration/recovery fails. |
+| D20 | Core SSH execution uses a pinned owned worker bridge and durable late receipts without replay. | Host/build/root verification, actual remote inference or truthful loss/cancellation accounting fails. |
+| D21 | Managed Local worktrees use explicit owned roots and per-root writer leases across every SDK/client filesystem surface. | Safe Git creation/removal, root consistency, concurrency or restart reconciliation fails. |
+| D22 | Typed text artifacts have independent encryption/revisions and exact source provenance; project removal binds an explicit reviewed retention choice. | Legacy rekeying, source-actor separation, deletion isolation or persistent client export fails. |
+| D23 | Structured clarifications record actual owning-turn answers; optional retained artifacts and saved-draft consumption are one transaction, never permissions. | Actor/turn/revision isolation, cancellation, atomic retention or cross-client answer/queue behavior fails. |
+| D24 | Artifact repository copies bind exact source/root/policy and optional new local commit intent; deleting stored grants requires real copy/commit verification. | Copy persistence, no-overwrite/index isolation, cancellation/recovery or deletion proof fails. |
+| D25 | Every owned model dispatch has an atomic profile-owned reservation. Finite limits require explicit estimates; unknown completion holds capacity and settings resets cannot lift policy. | Concurrent/late/restart accounting, actual output forwarding, unknown-price handling or role/source retention fails. |
+| D26 | Immutable profile views share one root event authority. Credentials/data stay scoped; global environment policy, startup values and budgets remain root-owned across client switching. | Default migration, cross-client isolation, atomic policy/cap races, resource ownership or external SDK/native preview qualification fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -76,7 +103,7 @@ These decisions define the implementation stack and constraints for the [impleme
 
 ## D05. Moguri-owned agent loop, `pi-ai` providers
 
-**Decision.** Moguri writes its own agent loop: step scheduling, tool dispatch, steer points, compaction triggers, budget checks and cancellation. `pi-ai` supplies provider adapters, GitHub Copilot sign-in and OpenAI-compatible endpoints such as `ds4-server`. Moguri does not use `pi-agent-core`. [P1]
+**Decision.** Moguri writes its own agent loop: step scheduling, tool dispatch, steer points, compaction triggers, budget checks and cancellation. `pi-ai` supplies provider adapters, GitHub Copilot sign-in and OpenAI-compatible endpoints such as `ds4-server`. The maintained npm package is now `@earendil-works/pi-ai`; the deprecated `@mariozechner/pi-ai` package is not used. Moguri does not use `pi-agent-core`. [P1]
 
 **Why.** Queue, Steer and Interrupt, hard budget stops before each model request, per-step events and cancellation all depend on step boundaries that Moguri controls.
 
@@ -111,6 +138,31 @@ These decisions define the implementation stack and constraints for the [impleme
 - Keep a Cargo workspace beside the JavaScript workspace. Ship prebuilt binaries for each target and sign them with the app.
 - SendBox workloads need Linux builds of the worker's native addon and supervisor. Local helpers may supervise SendBox/SSH and serve trusted UI queries, but cannot execute Sandbox or Remote agent tool requests locally.
 - Move more work into Rust only when a measured budget fails.
+
+**Initial-checkpoint exception.** Rust could not be validated on the available
+host. The bounded Node filesystem/Git baseline and `node-pty` process-group
+cancellation passed the recorded macOS budgets. The development checkpoint uses
+a separate Node worker, `node-pty`, and explicit process-group escalation instead
+of claiming that unbuilt Rust helpers work. Workers stop owned commands on parent
+disconnect. A service restart marks interrupted work partial and does not replay
+effects or assume that cleanup succeeded. Large-repository native search,
+Linux supervision and the Rust implementation
+remain unvalidated. Revisit this exception before release.
+Because process groups do not contain arbitrarily detached descendants, shell
+cancellation/deadlines remain partial and pause admission even after the known
+group exits. Do not treat the measured nested-process fixture as proof of
+complete containment or enable background execution.
+
+The later [user-terminal reattachment prerequisite](terminal-reattachment-primitives.md)
+qualifies a separate generated Node/Node-PTY broker on macOS: a controller
+SIGKILL preserves one actual PTY, with authenticated scope-bound reconnect,
+bounded volatile output and no relaunch/input replay. Protocol 23 integrates
+[restart-reattachable user consoles](terminal-reattachment.md), with one
+authenticated owner per profile, durable intent and explicit private cleanup.
+Source/native, exact packed SDK and actual packaged memory/lifecycle acceptance
+remain separate gates recorded in setup. This is for explicitly opened user
+terminals and intentional service restart, not general model/agent background
+execution, Linux/Rust acceptance or complete descendant containment.
 
 ## D07. Local API transport
 
@@ -176,6 +228,103 @@ These decisions define the implementation stack and constraints for the [impleme
 
 **Schema impact.** Phase 1 defines versioned routing-policy snapshots, plans, leg ownership, candidate bases, acceptance/application outcomes, and complete per-call accounting. Use the existing event/projection model and normal migration and restart-recovery rules; do not build a second hidden workflow store.
 
+**Measured prerequisite.** The [generated routing transport probe](routing-primitives.md)
+passes eight mechanical Single-pattern cases through maintained pi-ai:
+actual 128/64 output bounds, role telemetry, approved snapshot membership,
+receipt failure, unknown usage, changed eligibility and cancellation before
+solver dispatch. It does not qualify production routing, calibrated quality,
+durable all-role admission, compound candidates or budget wind-down.
+
+The subsequent [private compound transport gate](compound-routing-primitives.md)
+exercises an efficient Cascade draft/one configured escalation and independent
+Critique/one bounded revision using generated canonical/family metadata.
+Every actual pi-ai role forwards its admitted output bound and retains
+known/unknown costs before continuation. The result is only a tool-less
+proposal. This does not qualify real model-family independence, candidate
+workspaces/acceptance/application, the owned ledger or finite wind-down.
+The subsequent [private owned-file probe](candidate-primitives.md) exercises
+actual SDK worktree staging, exact base/byte review and partial application
+without changing the source index/HEAD. Its caller hooks do not qualify durable
+candidate ownership, recovery, scheduler accounting or public admission.
+
+**Executable alpha boundary.** [Protocol 16 Single](routing.md) now adds an
+explicitly approved scoped pool/hosted-data flag, actual router/solver
+reservations and one acknowledged continuation in the existing owned worker.
+It is disabled by default and pauses on invalid/stale/unmetered advice, without
+a fallback. Local and qualified core SSH use the same approvals and accounting.
+Any finite inherited cap, images or per-model tuning block this alpha.
+The protocol-29 [manual Local candidate workflow](candidate-workflows.md)
+now implements separately reviewed staging/application through all clients,
+with independent retention, exact writer ownership and real SIGKILL recovery.
+It calls no model and proves base/byte checks, not code quality.
+Cascade, independent critique/revision and their candidate/ledger integration,
+calibrated thresholds and reserved wind-down remain incomplete; this is not
+completion of D11 or its full Phase 0 quality evaluation.
+
+The 0.23 [private checkpoint gate](winddown-primitives.md) additionally proves
+pre-reserved role dispatch at exact current caps, stale-session/price rejection,
+no borrowed profile capacity and real accepted-work Git mechanics. It passes
+42 generated checks, with 93 expanded compatibility cases. The actual
+three-role path reports 126 tokens inside its captured 279-token cap.
+Production compound ownership/wind-down recovery and public admission remain
+gated; these are not live quality, pricing or automatic-approval results.
+
+Protocol 30 adds the [planned-budget foundation](budget-plans.md): future holds
+are distinct from model calls, atomically transfer once, and release only while
+provably undispatched after the exact owner ends. The actual SIGKILL case
+preserves interrupted model usage while releasing only its unused plan.
+Production compound/checkpoint ownership and live quality remain unqualified.
+
+Protocol 31 adds [owned reviewed generation](candidate-generations.md): one
+explicit fixed-model Local draft reuses the production worker and ledger with
+zero tools, exact selected source, independent input/result/provenance and
+canonical no-paid-replay intent. Staging/application remain separate real-user
+reviews. This is an integrated first model role, not completion of compound
+patterns, finite kupo wind-down, calibrated quality or D11.
+
+The 0.24 [private owned-role protocol](owned-role-protocol.md) now exercises
+acknowledged candidate-stage continuation in that same actual worker, with
+complete planned-capacity transfer and retained results before another role.
+It keeps model/host advice separate from acceptance and halts on unknown
+usage, failed receipts, stop or control loss. This is not a durable compound
+workflow, real-family quality gate or public routing configuration.
+
+Protocol 32 adds the [independent role-state foundation](role-sequences.md):
+exact original role/plan/input/result observations survive source retention,
+remain data-only and cannot authorize another call on unknown accounting.
+This adds shared inspection and no-replay recovery, not a new model-start,
+quality or public compound policy.
+
+Source 0.26 connects those records and complete future context/role holds to the
+actual control plane and worker. Its internal Node executor shares original
+intent, concurrency, receipts and removal/commit guards. Actual per-role raw
+contexts/results survive real controller SIGKILL and source deletion without
+replay; later contexts explicitly label prior output as untrusted data.
+The extended `compound-routing-spike.mjs` covers this integrated mechanical
+path alongside the earlier transport/pure-ledger probes. No new event shape,
+database, model loop or outward SDK creator is introduced. Pattern/pool
+selection, genuine family/quality, candidate decisions and actually authorized
+accepted-work wind-down remain separate gates; finite kupo stays blocked.
+
+Source 0.27/protocol 33 adds [canonical final-role proposal origin](role-proposals.md),
+not public pattern admission. Read-only resolution verifies the actual final
+proposer/input/result/known ledger, while exact staging preview binds its
+self-contained origin. Independent candidate grants retain the original raw
+inputs/results through source-role deletion; source application still records
+separate actual-user acceptance. The additive marker preserves old state and
+version-5 exports disclose the new copy. No quality or Git authority follows.
+
+Source 0.28/protocol 34 adds
+[explicit provider-declared model inspection](model-evidence.md).
+Normal Copilot login/discovery/inference is unchanged. One exact available
+model can expose bounded family/vendor/version declarations from the
+authenticated catalogue without project content, inference, a durable cache
+or inferred aliases. The report's digest binds its observation, not independent
+training or quality. Unknown/local/synthetic lineage remains unknown; neither
+this report nor its metadata labels can enable compound routing, finite kupo,
+Max or acceptance. The additive compatibility marker preserves schema-33
+candidate origin and independent raw-copy history.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.
@@ -194,6 +343,22 @@ These decisions define the implementation stack and constraints for the [impleme
 
 **Schema impact.** Phase 1 defines autonomy-level settings and default sources, bounded delegation, decision requests and results, recommendation versus human/automated approval actors, policy revisions, invalidation, and requested/applied steering events. Recovery must preserve pending questions and accounting without re-executing effects; durable changes require migrations.
 
+**Measured prerequisite.** The [generated System One wire/schema probe](decision-primitives.md)
+passes eight checks without a real account or automatic authority. The
+documented request has no output-token-limit field; finite-token contexts
+cannot admit this adapter until a qualified bound exists. Missing telemetry
+is unreported, invalid advice preserves valid cost units and transport abort
+never proves provider-side cancellation. Owned-call/ledger, calibrated
+delegation and live/remote integration remain unqualified.
+
+**Guided slice.** The existing solver may attach an offered-choice
+recommendation to `ask_user`; the service stamps actual step/model provenance.
+The same call pays for that output. Desktop/TUI expose advice without answering
+or approving. Exact-step tool narration may guide the human, never replace the
+deterministic authorizer. Migration 15 preserves old questions/keys/receipts
+and defaults legacy advice to null. This does not enable a decision provider,
+Autopilot Max or automated steering.
+
 ## D13. Remote SSH execution
 
 **Decision.** Include a user-configured **Remote** env in the first release. It runs the agent task, tools, and all router/solver/critic/decision model calls on the SSH machine. The user's local Moguri service still owns durable state and the client API; the remote worker reports through a versioned, run-scoped protocol inside SSH.
@@ -208,6 +373,15 @@ These decisions define the implementation stack and constraints for the [impleme
 - Reuse the same permissions, autonomy levels, budgets, Git gates, event schemas, and cancellation tree. Remote work does not introduce a remote scheduler or second durable authority. Broader managed cloud provisioning and hosted orchestration remain deferred.
 
 **Composer/default contract.** Follow the implementation specification's Env/Model/Autonomy level/Budget controls, typed attachment triggers, and global/profile/repo/project/session precedence. Factory values are Local, model unset until a generative provider login or local-model configuration, Manual, and Unlimited. Default changes do not rewrite a running turn or override policy.
+
+**Executable read boundary.** Protocol 17 adds shared read-only Files, Changes
+and Plan views through the pinned SSH worker, never the attached Local folder.
+Root/env/peer/policy are rechecked after awaiting the bounded read. Git hooks,
+filters and protected/denied paths stay suppressed; cancellation/close stops
+owned queries. CLI/TUI return Remote plan text, not a Local file action. The
+updated inspector can verify authenticated protocol-16 receipts but cannot
+attach or resume that legacy worker. This does not qualify Remote consoles,
+MCP/memory execution, direct plan saves or native Sandbox.
 
 ## Phase 0 validation spikes
 
@@ -226,19 +400,378 @@ Each spike records a pass or fail result and its measurements under `docs/`.
 11. **Remote SSH.** Prove remote worker and model execution, host verification, scoped credentials/workspaces, attachment transfer, local-model reachability, reconnect/replay, cancellation across a lost connection, and truthful late outcomes without Local fallback or duplicate execution.
 12. **Composer and defaults.** Exercise all attachment triggers and clipboard capability states; provider discovery and the no-model setup state; Local/Manual/Unlimited defaults and repo/project overrides; invalid inherited values; concurrent token/USD reservations, telemetry gaps, and session restart without resetting usage.
 
+## D14. One importable SDK and user-controlled capability platform
+
+**Decision, 2026-10-18.** The `moguri` package exposes browser-safe SDK and React
+entrypoints plus a Node entrypoint for service discovery/embedding and the CLI.
+Both TUI and desktop import that SDK. SDK capabilities own API access and domain
+semantics; Electron adds only native affordances and presentation. Protocol 2
+and transactional database migration 2 extend existing state without reset.
+The [SDK platform contract](sdk-platform.md) records validation and gates.
+
+User-viewable/editable system instructions have shared defaults and reset.
+Deterministic permissions cannot be weakened through prompt text. Repository
+vector/import-symbol graph indexes are local derived data and explicit opt-in.
+Standard skills, approved evolution proposals, scripts, optional read-only
+subagents, plugin manifests and the native MCP gateway extend the same policy,
+ledger and cancellation tree. Later unattended/self-modifying modes are not
+silently enabled.
+
+Dark is the desktop factory theme. Local dictation uses pinned native
+NeMo-Speech.cpp and a user-downloaded Nemotron 3.5 GGUF, with NVIDIA's documented
+locale tiers shown accurately. No cloud ASR fallback or implicit model download
+is allowed. SendBox remains unavailable until its real transport and guest
+prerequisites pass; configuration alone is not proof of containment.
+
+## D15. Shared cache and local project workflow
+
+**Decision, 2026-10-19.** The user-requested
+[workspace slice](workspace-platform.md) adds shared content-addressed npm/pnpm
+archives, script-free managed installs, local feature/bug/misc boards and
+read-only PR/optional Linear integrations through the same SDK.
+Protocol/database migration 3 preserves previous state and rejects incompatible
+clients. These are explicit bounded additions, not permission to activate
+unattended self-modification or the remaining deferred roadmap.
+
+Package/version identity includes SHA-512 and the exact manifest/lock plan.
+Advisory checks happen before artifact download/reuse; unknown is not clean.
+Project scripts/hooks/configuration are not evaluated during managed installs.
+No package gets a malware-free guarantee and no lifecycle code runs on the host
+as a fake SendBox substitute. Only qualified adapters are offered; workspace,
+private-registry and further ecosystem support remain explicit limitations.
+
+Tickets are local and independent of sessions, with revisioned configurable
+phases and no assignee. A verified merged PR can advance phase under the
+board's read-only observation policy. Linear starts off and imports only
+explicit pages using a scoped user key; local issues are never auto-exported.
+Neither integration starts CI, merges, pushes or grants permissions.
+
+CI is restricted to pushes to `main`. Feature/PR checks are performed locally.
+
+## D16. Session workspace, Ghostty and retention
+
+**Decision.** Use maintained `ghostty-web` 0.4.0 (MIT) with Ghostty's actual
+WASM VT core and its supplied renderer. Node-PTY remains only the owned
+transport. No homemade VT renderer or xterm.js substitution. The generated
+[session workspace spike](session-workspace.md) qualifies self-hosted WASM
+under sandboxed Electron and strict CSP before feature work.
+
+Cmd/Ctrl+Enter creates a held prompt without starting work. One SDK slash
+catalogue drives desktop and TUI; native panel actions are thin bindings.
+Read-only mode is enforced at declaration, authorization and execution, not by
+prompt text. User-created side/subsessions are distinct from opt-in model
+subagents. Agent writers serialize; question-only work may run in parallel.
+
+Protocol/database migration 4 retains immutable event identities and sequences,
+using independent encrypted profile/project/session payload compartments.
+Deleting a session removes its payload keys, not project-owned artifacts or
+external PRs. Production keys use an explicit OS-keychain master; tests inject
+generated keys. Missing/corrupt keys fail closed. This is operational retention,
+not forensic erasure or deletion of backups.
+
+User consoles have ephemeral input/output and never enter durable command
+receipts or model context. Restart never relaunches or replays them. Unconfirmed
+ownership requires inspection. Project default files are published only after
+an explicit user action, on a non-protected branch, preserving the current
+checkout/index. Failed or interrupted publication is partial, not successful.
+Repo MCP imports bind the exact reviewed digest and start disabled. Porto is
+read-only inventory access, not daemon/process control.
+
+The isolated browser is a basic native preview, not the deferred Stainless
+automation integration. Sandbox, Remote, managed worktrees and the wider release
+gates remain unqualified. CI remains main-push-only.
+
+## D17. Compact composer and model settings
+
+**Decision.** The user-requested [composer/model contract](model-controls.md)
+uses one icon toolbar with native lightweight popovers. Cmd/Ctrl visibly
+switches Send to a held-queue clock. Default-unlimited usage stays behind the
+infinity icon; unknown usage and dollar values are not fabricated.
+
+Working context is an explicitly configured limit within the model's fixed
+maximum, with labeled estimates and the maintained provider library's output
+headroom. Oversized requests fail without dropping history or adding a paid
+call. Thinking settings expose only the actual transport's qualified values:
+the generated spike proves OpenAI Responses/Anthropic forwarding and detects
+Copilot Gemini's explicitly ignored effort knob. No silent clamping/fallback.
+Model options and context preview are SDK operations, not client-only state.
+
+Protocol/database migration 5 preserves existing encrypted state and event
+identity, while permitting optional typed model settings and per-step sizing/
+effort provenance. The original mascot gains a small red pom-pom using online
+trait references, not embedded/copied artwork. Existing protection, budget
+qualification and model-provider boundaries are unchanged.
+
+## D18. OAuth and reviewed metachat
+
+**Decision.** The [engagement contract](engagement.md) adds true nullable project
+scope, not a hidden shared workspace. No-project chats have no workspace file,
+command, terminal or repository-memory authority and no fake project writer
+lease. Both clients consume the same typed SDK.
+
+Reuse the official MIT-licensed MCP SDK for OAuth discovery, registration,
+S256 PKCE and resource-bound exchange/refresh. Owned loopback callbacks require
+exact state and one exchange. Secrets stay in the explicit keychain backend;
+new grants are unusable until a durable connected event confirms them.
+Cancellation settles or explicitly reports uncertain credential cleanup.
+No model starts login and no authorization opens without a user action.
+
+Suggestions preview bounded prior user prompts locally. Project-free scope
+excludes project chats unless the user explicitly reviews an all-project
+preview. Analysis is an ordinary accounted/cancellable model turn in a settings
+chat. The model may read non-secret settings or propose an exact change, never
+apply, authenticate or grant permissions. Human decisions bind content/base
+digests, revisions, evidence and risk; skills install disabled and instruction
+writes remain local.
+
+Question/bell/done attention is derived in the same SQLite transaction as the
+underlying state. Question detection is a nonblocking heuristic, not a human
+answer. Desktop banners are opt-in, generic by default and not replayed on
+startup; TUI and GUI share read acknowledgements without resolving work.
+Protocol/database migration 6 preserves earlier encrypted history and grants.
+
+## D19. Local model registry, resolved controls and typed context
+
+**Decision.** Reuse maintained pi-ai's OpenAI-compatible adapter for explicitly
+configured local endpoints. Never scan hosts, download weights or silently
+replace a failed selection. Canonical model/provider identity and actual API
+model ID are distinct, and Copilot account readiness remains independent.
+Resource-bound keys use the explicit secret backend; untrusted provider echo is
+redacted before public persistence, including split stream chunks.
+
+Resolve complete new-session controls once from factory, global,
+Default-profile, project and explicit session layers, retaining source/revision
+provenance. This is not yet multiple isolated profiles, and preferences never
+widen hard policy or rewrite active sessions.
+
+Reuse Sharp (Apache-2.0; bundled libvips LGPL-2.1-or-later) for local bounded,
+metadata-stripped image normalization. Reuse existing nested-ignore and exact
+GitHub read helpers for reviewed folder/reference snapshots. Images and
+snapshots use the existing encrypted destination-session grants; unsupported
+image models preserve the full draft/queue instead of dropping or captioning
+content. Shared SDK inputs power CLI, TUI and desktop, with no fake terminal
+clipboard support.
+
+Protocol/database migration 7 preserves old event identities, defaults,
+ciphertext grants and recovery behavior. The [runtime contract](runtime-foundation.md)
+records actual provider and failing native qualification; the [input contract](context-inputs.md)
+records limits, consent, generated decoder measurements and restart boundaries.
+SendBox remains unavailable until a genuinely qualified worker/model/tool
+transport exists; a test-signed guest is not a production attested release.
+
+## D20. Owned SSH worker bridge and late receipts
+
+**Decision.** Use system OpenSSH (BSD) with one explicit pinned host identity,
+user-selected local private identity, private remote state path and exact
+installed worker build. Never disable host verification, forward an agent,
+infer a workspace from its local name or silently tunnel localhost. Remote
+models and tools run there; the local controller remains authoritative.
+
+An owned Node supervisor forks the existing worker over real IPC and carries
+bounded, versioned control frames over SSH. Transport keys live in the explicit
+local secret backend and remote supervisor memory; private replay frames are
+encrypted and credential-bearing controller replies are never journaled.
+Durable local frame receipts bind sequence/digest to primary events atomically.
+Reconnect/restart inspects an existing run, never creates another or replays a
+side effect. Late usage can improve unknown accounting but cannot turn a
+partial turn into successful work.
+
+Model declarations are env-scoped. Remote-local discovery and inference
+originate on the SSH host; Copilot forwarding is an explicit short-lived grant
+and its model metadata is rechecked remotely. Project-free chats keep null
+roots. Changed host keys, targets, workspaces, permissions and approvals fail
+closed. Additional transports are qualified separately, never locally
+substituted: protocol 17 adds read-only files/Git/plan, protocol 20 exact
+provider-free plan saves, and protocol 24 [reviewed Remote MCP](remote-mcp.md)
+with independent peer/resource access grants and no refresh forwarding.
+Protocol 25 adds [owned Remote user consoles](remote-user-consoles.md)
+through a separate pinned, bounded carrier with explicit env/peer/root
+identity and the same SDK/client lifecycle. Qualified protocol 27 adds
+[repository memory](remote-repository-memory.md) with actual-host bounded
+source capture/freshness and atomic typed control-plane derived caches.
+Session SDK/clients/model/MCP bind the same peer/root; legacy project APIs
+remain explicitly Local. Optional memory is still off, its output untrusted,
+and no protected transport falls back to Local.
+
+Protocol/database migration 8 preserves prior inputs, settings and event/grant
+identities. Actual generated macOS SSH, worker/file/model operations, image
+transfer, lost-completion accounting and SIGKILL recovery qualify the core
+path. This is not Linux release qualification, live Copilot entitlement or
+detached-descendant containment. The [transport contract](execution-transports.md)
+records measurements, ownership and remaining limits. Native SendBox still
+requires the separately rebuilt/qualified guest and genuine worker transport.
+
+## D21. Managed Local worktrees and root-scoped leases
+
+**Decision.** Use the user's Git executable (GPL-2.0) and existing Node/SDK/store
+without a second workspace database or new library. Unlike explicit Git
+publication, automated worktree setup never executes repository hooks, filters,
+fsmonitor helpers or submodule fetches. It creates a named non-protected branch
+from a resolved local base; no implicit fetch, checkout switch, push or deletion.
+
+Record exact private owned path, directory identity, common Git directory,
+branch/base, change-set association and job intent before effects. Every
+filesystem surface shares this binding, including memory/cache/MCP and terminal
+cwd. Writers serialize per actual root and a failed worktree does not quarantine
+unrelated branches. A changed/missing root fails closed, never becomes the base.
+
+Removal requires clean, idle, unbound owned state, retains the branch/artifacts
+and never force-deletes partial work. Restart marks unfinished intent partial;
+explicit reconciliation checks the filesystem without replaying Git.
+Session retention does not delete a worktree. Project relocation/removal blocks
+while roots remain. Discovery reads registrations without adopting them.
+Protocol/database migration 9 preserves older events, keys, grants, IDs and
+defaults. [The contract](managed-workspaces.md) records the measured primitive,
+Local slice and remaining Remote/Sandbox/orchestration boundaries.
+
+## D22. Independent artifact keys and canonical provenance
+
+**Decision.** Reuse Node AES-GCM, the explicit keychain and append-only SQLite
+authority. Give each typed text document its own key and revision history,
+separate from its source conversation. Plan, decision, answer, research note
+and report are real classes, not headings in a session transcript.
+
+Migration 10 transactionally rekeys legacy plans while preserving event
+plaintext, IDs/sequences, receipts and content digests. Source promotion binds
+the canonical event/text and actual user/model/tool actor; file authorship is
+unknown, and manual entry is not proof of human authorship. User edits do not
+relabel model text or grant instructions/permissions.
+
+Project removal reviews an exact set/digest and explicitly retains to profile,
+exports then deletes, or deletes artifact grants. Client exports use an explicit
+save action and a new private file, never silent overwrite or repository
+publication. Restart, concurrency, shared-content grants and rollback are
+generated acceptance. Structured questions, repository materialization/local
+commits and work-item/folder organization are separate slices in D23/D24.
+
+## D23. Structured questions and actual-answer authority
+
+**Decision.** Reuse the worker's real tool/delegation path and shared durable
+composer. A typed model clarification is untrusted task context, not permission
+to execute its contents. Routing respects explicit tool denials but does not
+ask the user for redundant permission to ask a question.
+
+Only an actual owning-turn/revision-bound user endpoint records actor `user`.
+Choices do not consume unrelated draft text; freeform answers may atomically
+consume the exact saved draft while preserving attachments. Cmd/Ctrl+Enter
+still holds queued intent. Stop/restart cancels the wait without inventing an
+answer or blocking cancellation behind a human response.
+
+Migration 11 preserves prior state and adds source events plus explicit
+answer-retention settings, on by default as requested. Answer, independently
+keyed artifact/source actors, optional draft clearing and receipt commit
+together. Models and delegated decision providers cannot reuse this endpoint
+or promote automated answers into user-only Core memory. Their own evaluated
+policy/call path remains a separate capability.
+
+## D24. Reviewed repository artifact copies and associations
+
+**Decision.** Reuse Node filesystem/crypto and system Git's independent-index
+publication path. Folders and same-project work items are revisioned artifact
+associations, never filesystem authority. Migration 12 projects missing legacy
+associations as null without rewriting history; project retain clears the
+removed work-item link.
+
+Explicit Local previews bind source/history, canonical directory identity,
+policy and optional new local branch/base. The owned job/receipt precede
+effects. Copy an exact new private history bundle under `artifacts/`, without
+overwrites or symlink aliases. Optional commit creates only a reviewed new
+non-protected local branch; no checkout, push, signing or hook/filter execution,
+and no changes to the real index or unrelated edits.
+
+Partial/cancelled/interrupted effects preserve documents and quarantine the
+root, never replay. Project removal revalidates a completed job, exact source
+set, actual bytes and requested local commit before forgetting grants.
+Independent exports, repository copies and automated answers never become
+instructions or user-only memory. Remote/Sandbox publication remains
+unavailable until its own qualified transport exists.
+
+## D25. Cumulative reservations and explicit estimated admission
+
+**Decision.** Reuse maintained pi-ai metering and SQLite events; never treat
+adapter default cost zero as reported pricing. The generated
+[metering prerequisite](budgets.md) proves cache totals and actual output-limit
+forwarding before feature work.
+
+Migration 13 preserves source history and imports legacy usage once by actual
+step. Model-created children charge their owner; solver/side/subagent and future
+routing/decision roles share admission. Persist the profile-owned reservation
+with model start before dispatch. Provider reports settle once; unknown/lost
+completion keeps capacity through source deletion, stop and restart. Late SSH
+usage never rewrites a partial turn as successful.
+
+Only explicit estimate-based finite controls are offered. USD needs fresh,
+dated model-specific approved estimates; unbounded/unpriced history blocks
+affected units. Separate hard profile policy is not a preference and cannot
+be lifted by factory/default reset. Reported overages and output-bound
+violations remain visible, never hidden by increasing a cap or refund.
+
+SDK/CLI/TUI/desktop share cumulative status, policy and role/provider/model
+dashboard. Budget exhaustion retains a deterministic checkpoint without an
+extra model call or claimed commit. Exact bills, routed kupo wind-down,
+approved committed checkpoints and broader repository/visibility metadata
+remain separate qualification.
+
+## D26. Immutable profiles over one root authority
+
+**Decision.** Reuse Node/React/TypeBox (MIT), SQLite (public domain), the
+existing AES-GCM compartments and explicit keychain backend. No new library,
+provider loop or per-client database is introduced. Follow the
+[profile contract](profiles.md).
+
+Migration 14 preserves Default IDs, receipt results, ciphertexts, wrapped keys,
+directories and credential names. New UUID profiles have owned private resource
+markers and explicit creating/ready/partial state. Restart never replays setup;
+retry/stop is an actual user action. Profiles cannot copy or merge accounts.
+
+Every store/controller/client is scoped; a client property cannot be rebound
+even by JavaScript assignment. A switch flushes old editors before constructing
+the new client, blocks unsaved forms/dialogs/dictation and never moves owned work.
+Native notifications and preview partitions bind profile plus session identity.
+Shared verified public archives/official weights may deduplicate, while mutable
+installs, captures, grants, memory/style/indexes and task content stay private.
+
+Global environment policy and its per-profile replicas commit atomically,
+preserving only actual running Local turn exceptions. Revision checks happen
+after asynchronous initialization. Global estimated caps aggregate profile-owned
+reservations; deletion/reset/switching cannot refund them. Content-free sequence
+invalidation updates available capacity without exposing foreign model events.
+Global startup preferences are shared intentionally, with a separate explicit
+revisioned reset; profile resets preserve shared values and hard policy.
+Remote writer identity uses the execution's captured pinned SSH key and
+canonical root, not a profile's Local mapping or target alias. Existing
+execution/quarantine events enforce that identity across restart without
+rewriting durable payloads. Effective mode/acquisition, not a requested
+read-only label, determines when the common writer lease is released.
+
 ## Still open
 
 - Package manager and monorepo tooling.
 - Protocol schema tool and code generation. `pi-ai` already uses TypeBox.
 - SQLite driver: `better-sqlite3` or Node.js's built-in `node:sqlite` module.
 - Diff renderer: `@pierre/diffs` or CodeMirror's merge view.
-- Terminal renderer: xterm.js or ghostty-web.
 - How the service and runtime are packaged for the CLI and the desktop app.
 - Linux package formats.
 - Default kupo classifier, evaluated candidate pools, quality gates, and per-pattern limits.
 - Decision-provider thresholds and bounded delegation presets; a concrete model is chosen by the user or a valid saved default after discovery, not silently before setup.
 - Remote worker lease, reconnect, and orphan-cleanup behavior under peer loss, to be settled in Phase 0.
 - Attachment size/context limits and telemetry quality thresholds for enforceable token/USD budgets.
+
+**Settled for the initial checkpoint:** npm with an exact-version lockfile;
+TypeBox for command/IPC validation; Node's built-in `node:sqlite` with WAL,
+`synchronous=FULL`, numbered transactional migrations and one service writer;
+OpenTUI 0.6.6 on a bundled Node 26.12 runtime; Electron 44 with a same-origin
+`moguri://app` HTTP proxy and authenticated loopback WebSocket; native OS keyring
+credentials via `@napi-rs/keyring`. Packaging uses `@electron/packager`.
+Development macOS artifacts are not notarized releases. Folder attachments,
+images, external references and snapshotted default inheritance follow D19.
+Estimated finite caps and immutable profiles follow D25/D26. Exact billing,
+routed wind-down and decision-model qualification remain open.
+
+The development app deliberately uses unpacked application files (`asar: false`):
+the external pinned Node runtime must execute the service/worker and load their
+native dependencies through ordinary filesystem paths. An ASAR containing those
+entrypoints is not executable by a standalone Node process.
 
 ## Sources
 
