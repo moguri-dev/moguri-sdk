@@ -1,6 +1,12 @@
 # Routing transport prerequisite
 
-Status: generated Single-pattern primitive only. No public kupo selection,
+This is the historical pre-integration Single proof. The later
+[owned Single implementation](routing.md) is qualified separately; current
+[compound transport evidence](compound-routing-primitives.md) still does not
+enable public Cascade or Critique. The original stage below describes its
+then-current boundary, not the current Single API.
+
+Historical status: generated Single-pattern primitive only. No public kupo selection,
 automatic pattern, coding candidate or new provider is enabled. The qualified
 0.9 app/SDK artifacts remain unchanged.
 

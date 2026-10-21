@@ -235,6 +235,14 @@ receipt failure, unknown usage, changed eligibility and cancellation before
 solver dispatch. It does not qualify production routing, calibrated quality,
 durable all-role admission, compound candidates or budget wind-down.
 
+The subsequent [private compound transport gate](compound-routing-primitives.md)
+exercises an efficient Cascade draft/one configured escalation and independent
+Critique/one bounded revision using generated canonical/family metadata.
+Every actual pi-ai role forwards its admitted output bound and retains
+known/unknown costs before continuation. The result is only a tool-less
+proposal. This does not qualify real model-family independence, candidate
+workspaces/acceptance/application, the owned ledger or finite wind-down.
+
 **Executable alpha boundary.** [Protocol 16 Single](routing.md) now adds an
 explicitly approved scoped pool/hosted-data flag, actual router/solver
 reservations and one acknowledged continuation in the existing owned worker.

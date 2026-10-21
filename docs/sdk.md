@@ -12,6 +12,8 @@ model telemetry, explicitly granted MCP and owned user consoles.
 The 0.21 delivery implements session-bound Local/SSH memory through the same
 SDK. Its exact independently installed archive and actual packaged runtime
 pass index/search/MCP/original-intent/restart/CLI/TUI qualification.
+Current 0.22 development keeps protocol 27 and adds only private compound
+transport prerequisites; public kupo remains the qualified Single subset.
 Current state migrations preserve schema-1 through schema-26 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
