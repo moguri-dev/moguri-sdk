@@ -279,7 +279,9 @@ try {
               console.log("Installed complete planned-capacity batches honor cumulative finite limits, retain no failed prefix and create no model calls.");
             }
             await candidateSdk.sessions.delete(owner.id,true,control.snapshot().sessions.find(session=>session.id===owner.id).revision);
-            assert.equal((await candidateSdk.budgets.plans({sessionId:owner.id})).plans[0].status,"released");
+            const released=(await candidateSdk.budgets.plans({sessionId:owner.id})).plans;
+            assert.equal(released.length,typeof control.platform.budgets.planBatch==="function"?3:1);assert.ok(released.every(plan=>plan.status==="released"));
+            assert.equal((await candidateSdk.budgets.dashboard({sessionId:owner.id})).totals.plannedHolds,0);
             assert.equal((await candidateSdk.budgets.calls({sessionId:owner.id})).calls.length,0);
           }
           const project=await candidateSdk.command({type:"project.add",path:directory}),source=await candidateSdk.sessions.create(project.id);

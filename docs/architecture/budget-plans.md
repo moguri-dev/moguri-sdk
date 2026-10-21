@@ -153,6 +153,14 @@ exact token/USD boundaries in all scopes, foreign-profile capacity, current
 controls, no failed prefix or receipt, simultaneous admission, source
 deletion/reopen and safe aggregate precision.
 
+A fresh temporary 0.24 SDK independently installs with explicit script
+approval/rebuild, zero audit findings and four strict external entrypoint types.
+Its actual internal batch rejects an 89-token cumulative cap without a prefix,
+fits exactly 90 tokens, creates no model call, then releases all unused holds
+on source deletion/reopen. Prior installed Local/SSH/generation contracts pass.
+Five relevant hidden desktop workflows pass in **10.9 s** and three real native
+TUI flows in **2.97 s**. No immutable 0.24 app or archive is claimed.
+
 Retained red evidence includes the initially missing batch API, stale fixture
 SDK revisions, assuming a synthetic unreported reservation had an observed
 terminal lifecycle, and relying on a query page's order instead of stable plan
