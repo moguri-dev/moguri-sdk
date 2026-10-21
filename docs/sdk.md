@@ -5,7 +5,7 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Development **0.28 uses protocol 34**; the frozen qualified
+This is an alpha API. Qualified **0.28.0-alpha.1 uses protocol 34**; the frozen qualified
 **0.27.0-alpha.1 uses protocol 33**. Both deliberately reject incompatible
 running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
@@ -52,10 +52,14 @@ compound workflow creator. Restart incompatible services explicitly, never
 delete their state. Its exact installed SDK and bundled runtime are independently
 qualified; [setup](setup.md#current-qualified-0270-alpha1-checkpoint) records
 immutable identities. Frozen qualified 0.25 remains protocol 32.
-The 0.28 source adds explicit `models.evidence(modelId)` inspection. Its
+The qualified 0.28 delivery adds explicit `models.evidence(modelId)` inspection. Its
 version-1 provider-declared report is ephemeral and does not rewrite ModelInfo,
 select a model or grant lineage/quality/approval. The additive schema-34 marker
 preserves actual schema-33 candidate origins and independent raw-copy grants.
+Its exact installed SDK and actual bundled default Copilot adapter use the
+same generated, memory-only keyring/catalogue qualification, not a substituted
+adapter or a personal account. [Setup](setup.md#current-qualified-0280-alpha1-checkpoint)
+records frozen native/SDK identities and limits.
 Current state migrations preserve schema-1 through schema-33 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project

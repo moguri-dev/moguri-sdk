@@ -1,8 +1,8 @@
 # Explicit provider-declared model evidence
 
-Source 0.28/protocol 34 implements this development contract. Full source,
-independently installed archive and exact native qualification are still
-pending. Qualified 0.27/protocol 33 and its immutable SDK/native delivery remain
+Qualified 0.28.0-alpha.1/protocol 34 implements this contract across source,
+independently installed SDK and actual native delivery.
+Qualified 0.27/protocol 33 and its immutable SDK/native delivery remain
 preserved. Sandbox and personal inference stay off.
 
 The maintained pi-ai 1.3 Copilot adapter filters static supported models using
@@ -79,6 +79,11 @@ or manufacturing a family.
 | Hidden source desktop explicit/unknown read and held-response model change | 2/2 in 2.0 s |
 | Native OpenTUI key interaction | One pass; shared SDK report, zero model calls |
 | Compiled CLI | One pass; same typed report, no model-selection change |
+| Complete source compatibility | 810/810 in 728.61 s; no failures, cancellations or skips |
+| All source / exact packaged-app desktop workflows | 53/53 in 2.0 min / 53/53 in 2.0 min |
+| Fresh / exact delivered SDK | Approved/rebuilt installation, audit 0, four strict external types and all previous runtime contracts pass |
+| Actual fresh / exact installed default adapter | 457.33 / 410.33 ms; five intercepted reads, zero model calls/events |
+| Actual bundled Node/runtime/default adapter/SDK/CLI | 408.48 ms; same exact report/digest/unknown/secret/foreign gates |
 
 The built/installed qualifier runs a private child against the actual package
 default adapter, without injecting a substitute ProviderAdapter. Node's
@@ -87,5 +92,9 @@ in-memory implementation restricted to the exact Default provider namespace.
 Catalogue fetch is intercepted; only the owned service loopback may use real
 networking. This does not open an OS keychain, log in a person, make paid
 inference or qualify live Copilot entitlement/header compatibility.
-The same helper is wired into packed-consumer and actual native qualification;
-those delivered-byte gates are pending.
+The same helper passes against the independently installed archive and actual
+bundled Node/runtime. The exact SDK also passes 12/12 actual private worker/
+ledger cases in 3.29 s. Archive identities, footprint scope and the retained
+initial native serial-fixture failure are recorded in
+[setup](../setup.md#current-qualified-0280-alpha1-checkpoint). No earlier
+archive was repacked and no test-only keyring hook is installed in production.
