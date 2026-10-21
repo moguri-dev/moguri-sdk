@@ -1,9 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import { isRecord, MoguriError, parse } from "../../../packages/protocol/src/core.ts";
-import type { TerminalOwner } from "../../../packages/protocol/src/terminals.ts";
+import type { TerminalOwner, PreparedTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
 import { JsonLineChannel } from "./worker-wire.ts";
-import { assertTerminalEndpoint, terminalProof, validTerminalProof } from "./terminal-identity.ts";
+import { assertTerminalEndpoint, preparedTerminalOwner, terminalProof, validTerminalProof } from "./terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES, TerminalOwnerInfoSchema, type TerminalOwnerInfo, type TerminalRequestInput } from "./terminal-protocol.ts";
 
 export class TerminalChannel {
@@ -19,7 +19,7 @@ export class TerminalChannel {
   private nonce: string | null = null;
   private observedPid: number | null = null;
   private readonly clientNonce = randomBytes(32).toString("hex");
-  private constructor(private readonly socket: Socket, private readonly owner: TerminalOwner, private readonly key: string,
+  private constructor(private readonly socket: Socket, private readonly owner: PreparedTerminalOwner, private readonly key: string,
     private readonly clientId: string, private readonly lost: (diagnostic: string) => void) {
     this.started = new Promise((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject; });
     this.wire = new JsonLineChannel(socket, socket, false, TERMINAL_FRAME_BYTES);
@@ -32,9 +32,9 @@ export class TerminalChannel {
   static async connect(owner: TerminalOwner, key: string, clientId: string,
     lost: (diagnostic: string) => void = () => {}, signal?: AbortSignal): Promise<{ channel: TerminalChannel; info: TerminalOwnerInfo }> {
     signal?.throwIfAborted();
-    await assertTerminalEndpoint(owner);
+    const prepared = preparedTerminalOwner(owner); await assertTerminalEndpoint(prepared);
     signal?.throwIfAborted();
-    const channel = new TerminalChannel(createConnection(owner.endpoint), owner, key, clientId, lost);
+    const channel = new TerminalChannel(createConnection(prepared.endpoint), prepared, key, clientId, lost);
     const abort = () => channel.fail(new MoguriError("terminal_connection_stopped", "Terminal connection was stopped. No input was replayed.", 409));
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();

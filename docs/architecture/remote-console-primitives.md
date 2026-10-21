@@ -1,9 +1,11 @@
 # Remote console ownership prerequisites
 
-The 0.19 development source privately tests Remote user-console transport.
+The 0.19 development source privately tests Remote user-console transport and
+now adds protocol-25 ownership/schema foundations.
 The current qualified delivery remains immutable **0.18.0-alpha.2 /
-protocol 24**. This proof does not enable a Remote terminal API, migrate its
-durable ownership schema or qualify complete public recovery.
+protocol 24**. The private proof alone did not enable a Remote terminal API
+or qualify complete public recovery. The later schema foundation below does
+not enable that API either.
 Sandbox work remains explicitly paused.
 
 Reuse Node 26 (MIT), Node-PTY 1.1 (MIT), OpenSSH (BSD) and the existing
@@ -81,6 +83,38 @@ The refreshed combined gate passes **14/14 in 11,356.49 ms**, including the
 five private console cases and existing real SSH worker/model/tool,
 host-key/cold-connect, image, project-free and stale-approval regressions.
 The shared agent/query frame ceiling and existing SSH semantics are unchanged.
+
+## Protocol-25 ownership foundation
+
+Remote owner intent can begin with **preparing**, a null endpoint/directory
+and no PID before remote resource preparation. Later endpoint/PID observations
+are filled once, never switched. Missing/unconfirmed/unstarted metadata stays
+explicit rather than being turned into a Local path. The independent profile
+owner binds an immutable pinned target, actual peer digest and bridge/broker
+digests. A dedicated Remote HMAC scope is distinct from the preserved
+version-1 Local scope.
+
+Remote terminal bindings explicitly carry `env: Remote`, the pinned peer,
+actual execution-host canonical root/device/inode and their digest. The broker
+accepts only a binding matching its own boundary. Original owner/binding bytes,
+env, launch/original-command and observed PID cannot change under a retained
+identity, including a forged unchanged digest with altered root fields.
+Remote metadata can never authorize Local endpoint stat, key lookup or
+private-path cleanup; unfinished transport paths fail explicitly.
+
+Migration 25 adds the `remote_terminal_schema` marker without rewriting
+schema-24 payloads, content grants, keys or receipts. The legacy downgrade
+fixtures remove only markers newer than their chosen version.
+Existing Local owner/proof/launch formats remain accepted unchanged.
+Migration failure rolls back and preserves the exact schema-24 database.
+
+The current **11/11 boundary/state cases pass in 6,887.38 ms**, with both type
+checks. They cover actual SSH broker Remote mode and cross-peer rejection
+before a PTY, preserved Local owner/PTY identity and ciphertext through
+schema-24 upgrade, explicit unready Remote-owner reconciliation without any
+Local key read, immutable projection/field bytes and interrupted marker
+recovery. The earlier combined Local recovery regression also passed; these
+foundations are not public Remote-console service-SIGKILL/client acceptance.
 
 ## Required public acceptance
 

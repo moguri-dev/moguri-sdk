@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import {
-  MoguriError, parse, type Snapshot, type TerminalBinding, type TerminalInput, type TerminalOwner, type TerminalState, type RuntimeCloseOptions,
+  MoguriError, parse, type Snapshot, type TerminalBinding, type TerminalInput, type TerminalOwner, type LocalTerminalOwner, type TerminalState, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { TerminalChannel } from "./terminal-channel.ts";
@@ -70,6 +70,7 @@ export class TerminalManager {
       diagnostic: result.terminal.diagnostic, attachmentId: state.ownerId ? this.attached.get(state.ownerId)?.attachmentId ?? state.attachmentId : state.attachmentId };
   }
   private async attach(owner: TerminalOwner): Promise<void> {
+    if (owner.remote) throw new MoguriError("terminal_remote_unqualified", "Remote owner transport is being integrated. Its endpoint was not inspected as a Local path.", 409);
     const previous = this.attached.get(owner.id);
     let connected: { channel: TerminalChannel; info: TerminalOwnerInfo };
     if (previous) connected = { channel: previous.channel, info: await previous.channel.inspectOwner() };
@@ -125,7 +126,7 @@ export class TerminalManager {
     const profileId = this.snapshot().profileId, id = randomUUID(), directory = await realpath(await mkdtemp(join(tmpdir(), "mo-")));
     const timestamp = new Date().toISOString();
     const scopeDigest = terminalOwnerScope({ id, profileId });
-    let owner: TerminalOwner = { id, profileId, protocol: 1, buildDigest, scopeDigest, directory, endpoint: join(directory, "control.sock"),
+    let owner: LocalTerminalOwner = { id, profileId, protocol: 1, buildDigest, scopeDigest, directory, endpoint: join(directory, "control.sock"),
       pid: null, status: "starting", cleanup: "retained", createdAt: timestamp, updatedAt: timestamp, diagnostic: "User terminal owner admitted; no PTY has been started." };
     try { this.host.ownerChanged(owner); }
     catch (error) { await rmdir(directory); throw error; }
@@ -189,6 +190,7 @@ export class TerminalManager {
     }
   }
   private async cleanupStoppedOwner(owner: TerminalOwner): Promise<void> {
+    if (owner.remote) throw new MoguriError("terminal_remote_unqualified", "Remote cleanup transport is being integrated. No Local key/path cleanup was attempted.", 409);
     if (owner.status !== "stopped") throw new MoguriError("terminal_unconfirmed", "Private terminal resources cannot be removed before owned groups are confirmed stopped.", 409);
     const pending: TerminalOwner = { ...owner, cleanup: "pending", updatedAt: new Date().toISOString() };
     this.host.ownerChanged(pending);
@@ -234,6 +236,7 @@ export class TerminalManager {
   }
   private async launchTerminal(binding: TerminalBinding, cols: number, rows: number, identity: { id: string; digest: string }, recheck: () => void,
     script?: { name: string; command: string }): Promise<TerminalState> {
+    if (binding.env === "Remote") throw new MoguriError("terminal_remote_unqualified", "Remote PTY admission is not yet integrated. No Local broker or shell was created.", 409);
     const duplicate = this.snapshot().terminals.find((terminal) => terminal.commandId === identity.id);
     if (duplicate) throw new MoguriError(duplicate.commandDigest === identity.digest ? "terminal_intent_exists" : "idempotency_conflict",
       "This original command already owns a terminal intent. Inspect its actual outcome; no shell was replayed.", 409);

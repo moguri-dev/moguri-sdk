@@ -20,6 +20,10 @@ intent/result retention and no-replay crash reconciliation; shared native
 clients share the same review and inspection APIs. Exact archive identities
 and qualification are recorded in [setup](setup.md); older immutable
 deliveries are not repacked.
+The current 0.19 development source extends this with protocol-25 Remote
+owner/binding and migration foundations. Remote-console execution/client
+readiness is still blocked until its full lifecycle is qualified; there is
+no qualified 0.19 archive yet.
 
 ## Build and consume
 

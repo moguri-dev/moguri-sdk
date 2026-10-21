@@ -6,18 +6,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRecord, MoguriError, parse } from "../../packages/protocol/src/core.ts";
-import type { TerminalOwner } from "../../packages/protocol/src/terminals.ts";
+import type { PreparedTerminalOwner } from "../../packages/protocol/src/terminals.ts";
 import { TerminalChannel } from "../../apps/service/src/terminal-channel.ts";
-import { assertTerminalEndpoint, terminalBinding, terminalKey, terminalOwnerScope } from "../../apps/service/src/terminal-identity.ts";
+import { assertTerminalEndpoint, preparedTerminalOwner, terminalBinding, terminalKey, terminalOwnerScope } from "../../apps/service/src/terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES, TerminalOwnerInfoSchema, TerminalRequestSchema } from "../../apps/service/src/terminal-protocol.ts";
 import { JsonLineChannel } from "../../apps/service/src/worker-wire.ts";
 import { RemoteConsoleInitSchema } from "./remote-terminal-wire.ts";
 
 const broker = fileURLToPath(new URL("../../apps/service/src/terminal-broker.ts", import.meta.url));
 const build = async () => createHash("sha256").update(await readFile(broker)).digest("hex");
-const admission = (owner: TerminalOwner) => JSON.stringify({ format: "moguri-private-remote-console-admission", version: 1,
+const admission = (owner: PreparedTerminalOwner) => JSON.stringify({ format: "moguri-private-remote-console-admission", version: 1,
   ownerId: owner.id, profileId: owner.profileId, scopeDigest: owner.scopeDigest, buildDigest: owner.buildDigest });
-async function start(owner: TerminalOwner, key: string): Promise<TerminalOwner> {
+async function start(owner: PreparedTerminalOwner, key: string): Promise<PreparedTerminalOwner> {
   terminalKey(key); await assertTerminalEndpoint(owner, false);
   if (owner.pid !== null || owner.status !== "starting" || owner.buildDigest !== await build()) throw new MoguriError("remote_console_build", "This exact unstarted broker/build is not eligible. No replacement was started.", 409);
   try { await writeFile(join(owner.directory, "admitted.json"), admission(owner), { flag: "wx", mode: 0o600 }); }
@@ -31,7 +31,7 @@ async function start(owner: TerminalOwner, key: string): Promise<TerminalOwner> 
   const expected = { ...owner, pid: child.pid };
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const ready = new Promise<TerminalOwner>((resolve, reject) => {
+    const ready = new Promise<PreparedTerminalOwner>((resolve, reject) => {
       timer = setTimeout(() => reject(new MoguriError("remote_console_timeout", "Remote broker startup is unconfirmed. Preserve its original admission/key; no retry.", 409)), 8000);
       child.once("error", reject);
       child.once("exit", () => reject(new Error("Remote broker exited before readiness.")));
@@ -40,7 +40,7 @@ async function start(owner: TerminalOwner, key: string): Promise<TerminalOwner> 
           if (!isRecord(raw) || raw.kind !== "terminal-owner-ready") throw new Error("Remote broker rejected bootstrap.");
           const info = parse(TerminalOwnerInfoSchema, { owner: raw.owner, terminalIds: [], nodeVersion: process.versions.node });
           if (info.owner.id !== expected.id || info.owner.pid !== expected.pid || info.owner.buildDigest !== expected.buildDigest) throw new Error("Remote broker readiness changed its admitted identity.");
-          resolve(info.owner);
+          resolve(preparedTerminalOwner(info.owner));
         } catch (error) { reject(error); }
       });
     });
@@ -48,7 +48,7 @@ async function start(owner: TerminalOwner, key: string): Promise<TerminalOwner> 
     const result = await ready; child.unref(); return result;
   } finally { clearTimeout(timer); if (child.connected) child.disconnect(); child.unref(); }
 }
-async function cleanup(owner: TerminalOwner): Promise<void> {
+async function cleanup(owner: PreparedTerminalOwner): Promise<void> {
   await assertTerminalEndpoint(owner, false);
   const entries = await readdir(owner.directory);
   if (!entries.length && owner.pid === null && owner.status === "starting") { await rmdir(owner.directory); return; }
@@ -74,7 +74,7 @@ wire.on("message", (raw: unknown) => {
       initialized = true; const init = parse(RemoteConsoleInitSchema, raw);
       if (init.action === "prepare") {
         const binding = terminalBinding({ ...init, workspaceId: null }), directory = await realpath(await mkdtemp(join(tmpdir(), "mo-"))), now = new Date().toISOString();
-        const owner: TerminalOwner = { id: init.ownerId, profileId: init.profileId, protocol: 1, buildDigest: await build(),
+        const owner: PreparedTerminalOwner = { id: init.ownerId, profileId: init.profileId, protocol: 1, buildDigest: await build(),
           scopeDigest: terminalOwnerScope({ id: init.ownerId, profileId: init.profileId }), directory, endpoint: join(directory, "control.sock"),
           pid: null, status: "starting", cleanup: "retained", createdAt: now, updatedAt: now, diagnostic: null };
         wire.send({ id, ok: true, value: { kind: "prepared", owner, binding } }, detach); return;

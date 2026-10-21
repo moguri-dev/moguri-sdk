@@ -5,7 +5,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, PROTOCOL_VERSION, parse, LocalTerminalOwnerSchema } from "../packages/sdk/src/index.ts";
 import { stopMoguriService } from "../packages/sdk/src/node.ts";
 import { executeSlash } from "../packages/sdk/src/slash.ts";
 import { startService } from "../apps/service/src/server.ts";
@@ -24,7 +24,7 @@ test("schema-23 marker failure preserves exact schema-22 ciphertext and restarts
   try {
     store.commit([{ event_type: "job.progress", profile_id: "default", payload: { jobId: "generated-source", progress: "Generated encrypted terminal migration source." } }]);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
-    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('terminal_ownership_schema','remote_mcp_schema'); PRAGMA user_version=22;
+    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema'); PRAGMA user_version=22;
       CREATE TRIGGER generated_terminal_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='terminal_ownership_schema'
       BEGIN SELECT RAISE(ABORT,'Generated terminal marker failure'); END; COMMIT;`);
     store.close(); store = undefined;
@@ -46,7 +46,7 @@ test("a missing explicit key or non-private endpoint cannot replace an owner; re
   let restarted: Awaited<ReturnType<typeof startService>> | undefined, peer: MoguriSdk | undefined;
   let restore: { id: string; value: string; directory: string } | undefined;
   try {
-    const opened = await sdk.terminal.open(fixture.sessionId), before = await sdk.terminal.read(opened.id!), owner = sdk.getState().snapshot!.terminalOwners[0]!;
+    const opened = await sdk.terminal.open(fixture.sessionId), before = await sdk.terminal.read(opened.id!), owner = parse(LocalTerminalOwnerSchema, sdk.getState().snapshot!.terminalOwners[0]!);
     const slot = `terminal-owner-${owner.id}`, key = await fixture.terminalVault.read(slot);
     assert.ok(key); restore = { id: slot, value: key, directory: owner.directory };
     await assert.rejects(() => TerminalChannel.connect(owner, key, randomUUID()), { code: "terminal_owner_busy" });
@@ -173,7 +173,7 @@ test("failed private-key cleanup keeps the registry/writer lock and an explicit 
     await sdk.terminal.open(fixture.sessionId);
     await assert.rejects(() => stopMoguriService(join(fixture.directory, "state")), /shutdown is unconfirmed/);
     await lstat(join(fixture.directory, "state/connection.json")); await lstat(join(fixture.directory, "state/service.lock"));
-    const stopped = fixture.service.controller.snapshot().terminalOwners[0]!;
+    const stopped = parse(LocalTerminalOwnerSchema, fixture.service.controller.snapshot().terminalOwners[0]!);
     assert.equal(stopped.status, "stopped"); assert.equal(stopped.cleanup, "pending"); assert.equal(secrets.size, 1);
     assert.equal(gatewayClose.mock.calls.length, 1); assert.equal(remoteClose.mock.calls.length, 1);
     const denied = await fetch(`${fixture.service.connection.baseUrl}/v1/commands`, { method: "POST",
@@ -191,7 +191,7 @@ test("runtime cleanup never recursively removes an unrelated file and can retry 
   let sentinel: string | undefined;
   try {
     await sdk.terminal.open(fixture.sessionId);
-    const owner = sdk.getState().snapshot!.terminalOwners[0]!;
+    const owner = parse(LocalTerminalOwnerSchema, sdk.getState().snapshot!.terminalOwners[0]!);
     sentinel = join(owner.directory, "generated-unrelated-file");
     await writeFile(sentinel, "Generated unrelated bytes must survive cleanup.\n");
     await assert.rejects(() => fixture.service.close(), { code: "terminal_runtime_cleanup" });
@@ -227,7 +227,7 @@ test("profile-isolated owners recover eagerly and ordinary stop covers a profile
     const { client: beta } = await fixture.create("Generated terminal Beta"), projectRoot = join(fixture.directory, "generated-beta-project");
     await mkdir(projectRoot);
     const project = await beta.command({ type: "project.add", path: projectRoot }), session = await beta.sessions.create(project.id!);
-    const opened = await beta.terminal.open(session.id!), owner = beta.getState().snapshot!.terminalOwners[0]!;
+    const opened = await beta.terminal.open(session.id!), owner = parse(LocalTerminalOwnerSchema, beta.getState().snapshot!.terminalOwners[0]!);
     await assert.rejects(() => fixture.sdk.terminal.read(opened.id!), { code: "terminal_missing" });
     assert.equal(fixture.sdk.getState().snapshot!.terminalOwners.length, 0);
     assert.equal(JSON.stringify(fixture.sdk.getState()).includes(owner.directory), false);

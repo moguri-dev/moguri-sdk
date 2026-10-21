@@ -1,5 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
-import { TerminalOwnerSchema, TerminalStateSchema } from "../../../packages/protocol/src/terminals.ts";
+import { TerminalOwnerSchema, PreparedTerminalOwnerSchema, TerminalStateSchema } from "../../../packages/protocol/src/terminals.ts";
 
 export const TERMINAL_PROTOCOL = 1;
 export const TERMINAL_FRAME_BYTES = 512 * 1024;
@@ -11,7 +11,7 @@ export const TerminalLaunchSchema = object({
 });
 export type TerminalLaunch = Static<typeof TerminalLaunchSchema>;
 export const TerminalBootstrapSchema = object({
-  kind: Type.Literal("terminal-owner"), owner: TerminalOwnerSchema, key: Type.String({ maxLength: 64 }),
+  kind: Type.Literal("terminal-owner"), owner: PreparedTerminalOwnerSchema, key: Type.String({ maxLength: 64 }),
 });
 export type TerminalBootstrap = Static<typeof TerminalBootstrapSchema>;
 const terminal = { terminalId: id, bindingDigest: hash };

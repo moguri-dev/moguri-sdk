@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Socket } from "node:net";
 import { chmod } from "node:fs/promises";
 import { isRecord, MoguriError, parse } from "../../../packages/protocol/src/core.ts";
-import type { TerminalOwner, TerminalState } from "../../../packages/protocol/src/terminals.ts";
+import type { PreparedTerminalOwner, TerminalState } from "../../../packages/protocol/src/terminals.ts";
 import { TerminalEngine } from "./terminal-engine.ts";
 import { assertTerminalBinding, assertTerminalEndpoint, terminalKey, terminalProof, validTerminalProof } from "./terminal-identity.ts";
 import { JsonLineChannel, frameDigest } from "./worker-wire.ts";
@@ -15,7 +15,7 @@ export async function runTerminalOwner(boot: TerminalBootstrap): Promise<void> {
   terminalKey(boot.key);
   await assertTerminalEndpoint(boot.owner, false);
   if (boot.owner.pid !== process.pid) throw new MoguriError("terminal_owner_pid", "Terminal owner bootstrap does not match its actual process.", 409);
-  let owner: TerminalOwner = { ...boot.owner, status: "running", updatedAt: new Date().toISOString(), diagnostic: null };
+  let owner: PreparedTerminalOwner = { ...boot.owner, status: "running", updatedAt: new Date().toISOString(), diagnostic: null };
   const states = new Map<string, TerminalState>(), seen = new Map<string, string>();
   const engine = new TerminalEngine((state) => { const previous = states.get(state.id); states.set(state.id, { ...previous, ...state, title: previous?.title ?? state.title }); });
   const peers = new Set<Socket>();
@@ -70,7 +70,9 @@ export async function runTerminalOwner(boot: TerminalBootstrap): Promise<void> {
           if (request.action === "dispose" && owner.status !== "stopped") throw new MoguriError("terminal_unconfirmed", "Terminal owner cleanup is unconfirmed. Its endpoint/capability was retained.", 409);
         } else if (request.action === "open") {
           const intent = request.intent, binding = intent.binding;
-          if (owner.status !== "running" || !binding || binding.profileId !== owner.profileId || intent.ownerId !== owner.id || intent.env !== "Local" ||
+          const env = owner.remote ? "Remote" : "Local";
+          if (owner.status !== "running" || !binding || binding.profileId !== owner.profileId || intent.ownerId !== owner.id || intent.env !== env || binding.env !== env ||
+            owner.remote && (binding.env !== "Remote" || binding.peerDigest !== owner.remote.peerDigest) ||
             intent.status !== "starting" || intent.pid !== null || !intent.commandId || !intent.commandDigest || !intent.launchDigest ||
             binding.sessionId !== intent.sessionId || binding.projectId !== intent.projectId || binding.workspaceId !== (intent.workspaceId ?? null)) {
             throw new MoguriError("terminal_intent", "The user terminal launch has no exact admitted owner/root/command binding. Nothing was started.", 409);
@@ -88,7 +90,7 @@ export async function runTerminalOwner(boot: TerminalBootstrap): Promise<void> {
             try {
               const started = engine.open({ id: intent.id, sessionId: intent.sessionId, projectId: intent.projectId, workspaceId: intent.workspaceId, root: binding.root },
                 intent.cols, intent.rows, undefined, request.launch);
-              const terminal: TerminalState = { ...intent, ...started, title: intent.title, env: "Local", ownerId: owner.id, binding };
+              const terminal: TerminalState = { ...intent, ...started, title: intent.title, env, ownerId: owner.id, binding };
               states.set(intent.id, terminal);
               prune();
               value = { terminal, launchDigest };

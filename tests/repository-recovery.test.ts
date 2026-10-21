@@ -18,7 +18,7 @@ test("schema-22 marker failure leaves exact schema-21 ciphertext and recovers wi
   try {
     store.commit([{ event_type: "job.progress", profile_id: "default", payload: { jobId: "generated-source", progress: "Generated encrypted source." } }]);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
-    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('repository_attribution_schema','terminal_ownership_schema','remote_mcp_schema'); PRAGMA user_version=21;
+    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('repository_attribution_schema','terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema'); PRAGMA user_version=21;
       CREATE TRIGGER generated_repository_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='repository_attribution_schema'
       BEGIN SELECT RAISE(ABORT,'Generated repository marker failure'); END; COMMIT;`);
     store.close(); store = undefined;

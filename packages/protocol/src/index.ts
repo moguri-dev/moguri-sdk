@@ -25,11 +25,11 @@ import type { ContextCompaction } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
-import { TerminalOwnerSchema, type TerminalOwner } from "./terminals.ts";
+import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 24;
+export const PROTOCOL_VERSION = 25;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -383,7 +383,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "terminal.owner_changed") {
       if (event.project_id || event.session_id || !Value.Check(TerminalOwnerSchema, event.payload.owner) || event.payload.owner.profileId !== profileId) throw new MoguriError("terminal_owner_corrupt", "Terminal owner metadata is invalid or outside its independent profile. State was preserved.", 409);
-      terminalOwners.set(event.payload.owner.id, structuredClone(event.payload.owner));
+      const owner = event.payload.owner, previous = terminalOwners.get(owner.id);
+      if (previous && (["profileId", "protocol", "buildDigest", "scopeDigest", "createdAt", "env"].some((key) =>
+        previous[key as keyof TerminalOwner] !== owner[key as keyof TerminalOwner]) || JSON.stringify(previous.remote) !== JSON.stringify(owner.remote) ||
+        previous.directory !== null && previous.directory !== owner.directory || previous.endpoint !== null && previous.endpoint !== owner.endpoint ||
+        previous.pid !== null && previous.pid !== owner.pid || previous.cleanup === "removed" && owner.cleanup !== "removed")) {
+        throw new MoguriError("terminal_owner_corrupt", "Original terminal owner peer/build/path/PID or removed cleanup identity changed. No process or endpoint was adopted.", 409);
+      }
+      terminalOwners.set(owner.id, structuredClone(owner));
     }
     if (event.event_type === "repository.recorded") {
       if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(RepositoryObservationSchema, event.payload.observation) || event.payload.observation.profileId !== profileId) throw new MoguriError("repository_corrupt", "Repository observation is invalid or outside its independent owning profile. State was preserved.", 409);
@@ -456,7 +463,23 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "change_set.saved") changeSets.set(event.payload.changeSet.id, structuredClone(event.payload.changeSet));
     if (event.event_type === "terminal.changed") {
-      terminals.set(event.payload.terminal.id, { ...event.payload.terminal });
+      const terminal = event.payload.terminal, previous = terminals.get(terminal.id);
+      if (!Value.Check(TerminalStateSchema, terminal)) throw new MoguriError("terminal_corrupt", "Terminal state is invalid. Retained history was preserved.", 409);
+      if (terminal.binding && terminal.env !== terminal.binding.env) throw new MoguriError("terminal_corrupt", "Terminal execution env differs from its captured binding. No boundary was relabeled.", 409);
+      if (terminal.env === "Remote") {
+        const owner = terminal.ownerId ? terminalOwners.get(terminal.ownerId) : undefined;
+        if (!owner?.remote || terminal.binding?.env !== "Remote" || terminal.binding.peerDigest !== owner.remote.peerDigest ||
+          terminal.binding.profileId !== profileId || terminal.binding.projectId !== terminal.projectId || terminal.binding.sessionId !== terminal.sessionId ||
+          terminal.projectId !== event.project_id || terminal.sessionId !== event.session_id) throw new MoguriError("terminal_corrupt", "Remote terminal does not own its exact retained peer/profile/session/root. No Local metadata was substituted.", 409);
+      }
+      if (previous && (previous.ownerId !== undefined && previous.ownerId !== terminal.ownerId ||
+        previous.binding !== undefined && JSON.stringify(previous.binding) !== JSON.stringify(terminal.binding) ||
+        previous.launchDigest !== undefined && previous.launchDigest !== terminal.launchDigest ||
+        previous.commandId !== undefined && previous.commandId !== terminal.commandId ||
+        previous.commandDigest !== undefined && previous.commandDigest !== terminal.commandDigest ||
+        previous.env !== undefined && previous.env !== terminal.env ||
+        previous.pid !== null && previous.pid !== terminal.pid)) throw new MoguriError("terminal_corrupt", "Original terminal launch/root/peer/command/PID changed. No shell or input was replayed.", 409);
+      terminals.set(terminal.id, { ...terminal });
       if (event.payload.terminal.status === "unconfirmed") {
         if (event.payload.terminal.workspaceId) blockedWorkspaces.add(event.payload.terminal.workspaceId);
         else blockedProjects.add(event.payload.terminal.projectId);

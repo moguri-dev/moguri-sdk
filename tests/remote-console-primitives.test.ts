@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TerminalState } from "../packages/protocol/src/terminals.ts";
+import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import { remoteConsoleFixture, type RemoteConsolePeer } from "./fixtures/remote-terminal-client.ts";
 import { waitFor } from "./fixture.ts";
 
@@ -16,6 +17,20 @@ async function output(f: Awaited<ReturnType<typeof remoteConsoleFixture>>, peer:
   throw new Error("Actual Remote broker did not produce its generated PTY witness.");
 }
 const absent = (pid: number) => { try { process.kill(pid, 0); return false; } catch (error) { if (error instanceof Error && "code" in error && error.code === "ESRCH") return true; throw error; } };
+
+test("the actual SSH broker retains explicit Remote boundary fields and rejects a different peer before a PTY", native, async () => {
+  const f = await remoteConsoleFixture({ remote: true });
+  try {
+    assert.equal(f.owner.env, "Remote"); assert.ok(f.owner.remote); assert.equal(f.intent.binding.env, "Remote");
+    const opened = await f.openTerminal(f.peer), read = await output(f, f.peer, opened.terminal, "GENERATED_REMOTE_CONSOLE_READY");
+    assert.equal(read.terminal.env, "Remote"); assert.equal(read.terminal.binding?.env, "Remote");
+    const bad = f.terminal();
+    if (bad.binding?.env !== "Remote") throw new Error("Generated Remote binding is missing.");
+    bad.binding = { ...bad.binding, peerDigest: "0".repeat(64) };
+    bad.launchDigest = frameDigest([bad.id, bad.binding, f.launch, bad.cols, bad.rows, bad.title]);
+    await assert.rejects(() => f.openTerminal(f.peer, bad), { code: "terminal_intent" });
+  } finally { await f.close(); }
+});
 
 test("private SSH console uses the real Remote root and independent authenticated broker without a model or transcript/key file", native, async () => {
   const f = await remoteConsoleFixture();

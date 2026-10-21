@@ -21,6 +21,7 @@ export const RemoteTargetSchema = object({
   models: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
 });
 export type RemoteTarget = Static<typeof RemoteTargetSchema>;
+export const RemoteIdentitySchema = Type.Pick(RemoteTargetSchema, ["id", "name", "host", "port", "user", "hostKey", "identityFile", "stateDir", "command"]);
 export type RemoteIdentity = Pick<RemoteTarget, "id" | "name" | "host" | "port" | "user" | "hostKey" | "identityFile" | "stateDir" | "command">;
 export interface RemoteReadiness {
   ready: boolean; diagnostic: string; configDigest: string | null; hostFingerprint: string | null;

@@ -11,7 +11,7 @@ import { setupFixture, waitFor, fixtureProvider } from "./fixture.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 import { TerminalChannel } from "../apps/service/src/terminal-channel.ts";
-import { assertTerminalEndpoint } from "../apps/service/src/terminal-identity.ts";
+import { assertTerminalEndpoint, preparedTerminalOwner } from "../apps/service/src/terminal-identity.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 30_000 };
 async function output(sdk: MoguriSdk, id: string, marker: string) {
@@ -148,7 +148,7 @@ test("an actual service SIGKILL recovers the same authenticated owner/PTY from a
         try { await connected.channel.request({ action: "close-all" }); connected.channel.retire(); await connected.channel.request({ action: "dispose" }); }
         finally { connected.channel.detach(); }
         await new GeneratedFileVault(vaultPath).remove(`terminal-owner-${owner.id}`);
-        await assertTerminalEndpoint(owner, false); await rm(owner.directory, { recursive: true, force: true });
+        const prepared = preparedTerminalOwner(owner); await assertTerminalEndpoint(prepared, false); await rm(prepared.directory, { recursive: true, force: true });
       }
     }
     await provider.close(); await rm(directory, { recursive: true, force: true });

@@ -1,11 +1,12 @@
-import { randomBytes, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Type } from "typebox";
 import { isRecord, MoguriError, parse } from "../../packages/protocol/src/core.ts";
-import { TerminalBindingSchema, TerminalOwnerSchema, type TerminalOwner, type TerminalState } from "../../packages/protocol/src/terminals.ts";
+import { TerminalBindingSchema, PreparedTerminalOwnerSchema, type PreparedTerminalOwner, type TerminalState } from "../../packages/protocol/src/terminals.ts";
 import type { RemoteTarget } from "../../packages/protocol/src/execution.ts";
+import { remoteTerminalPeer, terminalOwnerScope } from "../../apps/service/src/terminal-identity.ts";
 import { RemoteRuntime, type SshConnection } from "../../apps/service/src/remote.ts";
 import { frameDigest } from "../../apps/service/src/worker-wire.ts";
 import { TERMINAL_FRAME_BYTES, TerminalOwnerInfoSchema, TerminalInspectSchema, TerminalReadSchema, type TerminalRequestInput } from "../../apps/service/src/terminal-protocol.ts";
@@ -13,8 +14,9 @@ import { createSshTarget } from "./ssh-target.ts";
 import type { RemoteConsoleInit } from "./remote-terminal-wire.ts";
 
 const common = { format: "moguri-private-remote-console" as const, version: 1 as const };
-const Prepared = Type.Object({ kind: Type.Literal("prepared"), owner: TerminalOwnerSchema, binding: TerminalBindingSchema }, { additionalProperties: false });
-const Attached = Type.Object({ kind: Type.Literal("attached"), info: TerminalOwnerInfoSchema, frontPid: Type.Integer({ minimum: 2 }) }, { additionalProperties: false });
+const PrivateOwnerInfo = Type.Object({ ...TerminalOwnerInfoSchema.properties, owner: PreparedTerminalOwnerSchema }, { additionalProperties: false });
+const Prepared = Type.Object({ kind: Type.Literal("prepared"), owner: PreparedTerminalOwnerSchema, binding: TerminalBindingSchema }, { additionalProperties: false });
+const Attached = Type.Object({ kind: Type.Literal("attached"), info: PrivateOwnerInfo, frontPid: Type.Integer({ minimum: 2 }) }, { additionalProperties: false });
 export class RemoteConsolePeer {
   private pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
   private closed = false;
@@ -65,19 +67,19 @@ export class RemoteConsolePeer {
   }
 }
 
-export async function remoteConsoleFixture() {
+export async function remoteConsoleFixture(options: { remote?: boolean } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-private-console-"))), stateDir = join(directory, "state"), workspace = join(directory, "remote"), sshRoot = join(directory, "ssh");
   for (const path of [stateDir, workspace, sshRoot]) await mkdir(path, { mode: 0o700 });
   const ssh = await createSshTarget(sshRoot), target = { ...ssh.target, command: ssh.target.command.with(-1, resolve("tests/fixtures/remote-terminal-front.ts")) };
   const vault = { read: async () => null, write: async () => {}, remove: async () => {} };
   const runtime = new RemoteRuntime(stateDir, () => target, resolve("apps/service/src/worker.ts"), { vault }), peers = new Set<RemoteConsolePeer>();
   const key = randomBytes(32).toString("base64");
-  let owner: TerminalOwner | undefined;
+  let owner: PreparedTerminalOwner | undefined;
   const open = async (init: RemoteConsoleInit, destination = target) => {
     const result = await RemoteConsolePeer.open(runtime, destination, init); peers.add(result.peer); return result;
   };
   const dispose = async (peer: RemoteConsolePeer) => {
-    const stopped = parse(TerminalOwnerInfoSchema, await peer.request({ action: "dispose" })); owner = stopped.owner;
+    const stopped = parse(PrivateOwnerInfo, await peer.request({ action: "dispose" })); owner = stopped.owner;
     await peer.close(); return stopped;
   };
   const cleanup = async () => {
@@ -100,10 +102,21 @@ export async function remoteConsoleFixture() {
   };
   try {
     const prepared = await open({ ...common, action: "prepare", profileId: "generated-profile", projectId: "generated-project", sessionId: "generated-session", ownerId: randomUUID(), root: workspace });
-    const intent = parse(Prepared, prepared.value); owner = intent.owner; await prepared.peer.close();
+    let intent = parse(Prepared, prepared.value); owner = intent.owner; await prepared.peer.close();
+    if (options.remote) {
+      const peerDigest = remoteTerminalPeer(target), previous = intent.binding;
+      const bridgeDigest = createHash("sha256").update(await readFile(resolve("tests/fixtures/remote-terminal-front.ts"))).digest("hex");
+      const remote = { target: { id: target.id, name: target.name, host: target.host, port: target.port, user: target.user, hostKey: target.hostKey,
+        identityFile: target.identityFile, stateDir: target.stateDir, command: target.command }, peerDigest, bridgeDigest, brokerDigest: intent.owner.buildDigest };
+      const scoped = { ...intent.owner, env: "Remote" as const, remote };
+      const identity = { profileId: previous.profileId, sessionId: previous.sessionId, projectId: previous.projectId, workspaceId: previous.workspaceId,
+        root: previous.root, env: "Remote" as const, peerDigest, device: previous.device, inode: previous.inode };
+      intent = parse(Prepared, { ...intent, owner: { ...scoped, scopeDigest: terminalOwnerScope(scoped) }, binding: { ...identity, digest: frameDigest(identity) } });
+      owner = intent.owner;
+    }
     const started = await open({ ...common, action: "start", owner: intent.owner, key, clientId: randomUUID() });
     const initial = parse(Attached, started.value); owner = initial.info.owner;
-    const attach = async (options: { owner?: TerminalOwner; key?: string; target?: RemoteTarget } = {}) => {
+    const attach = async (options: { owner?: PreparedTerminalOwner; key?: string; target?: RemoteTarget } = {}) => {
       const result = await open({ ...common, action: "attach", owner: options.owner ?? owner!, key: options.key ?? key, clientId: randomUUID() }, options.target);
       const attached = parse(Attached, result.value);
       return { peer: result.peer, info: attached.info, frontPid: attached.frontPid };
@@ -112,7 +125,7 @@ export async function remoteConsoleFixture() {
     const terminal = (): TerminalState => {
       const id = randomUUID(), binding = intent.binding;
       return { id, sessionId: binding.sessionId, projectId: binding.projectId, workspaceId: null, title: "Generated private SSH console", pid: null,
-        cols: 80, rows: 24, status: "starting", diagnostic: null, env: "Local", binding, ownerId: owner!.id, commandId: randomUUID(),
+        cols: 80, rows: 24, status: "starting", diagnostic: null, env: binding.env, binding, ownerId: owner!.id, commandId: randomUUID(),
         commandDigest: frameDigest({ id, action: "generated-private-open" }), launchDigest: frameDigest([id, binding, launch, 80, 24, "Generated private SSH console"]) };
     };
     const read = (peer: RemoteConsolePeer, state: TerminalState) => peer.request({ action: "read", terminalId: state.id, bindingDigest: intent.binding.digest, offset: 0, limit: 65536 }).then((value) => parse(TerminalReadSchema, value));
