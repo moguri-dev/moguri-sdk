@@ -5,7 +5,7 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Qualified **0.22.0-alpha.1 uses protocol 29** and
+This is an alpha API. Qualified **0.23.0-alpha.1 uses protocol 31** and
 deliberately rejects incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
@@ -18,9 +18,13 @@ following the protocol-28 event/retention foundation and private compound/file
 prerequisites. Its exact SDK and actual packaged app are independently
 qualified; [setup](setup.md#current-qualified-0220-alpha1-checkpoint) preserves
 immutable delivery identities. Public kupo remains the qualified Single subset.
-Current 0.23 development uses protocol/database **31** for independent planned
+The qualified 0.23 delivery uses protocol/database **31** for independent planned
 capacity and one bounded Local [owned draft](architecture/candidate-generations.md)
 with shared generation/review/stop inspection, without enabling public finite kupo.
+Its exact installed SDK and actual native runtime pass independent
+generation/staging/application/restart qualification, including missing
+original receipts; [setup](setup.md#current-qualified-0230-alpha1-checkpoint)
+records its immutable identities.
 Current state migrations preserve schema-1 through schema-30 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project

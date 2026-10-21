@@ -9,7 +9,7 @@ separately reviewed application. They do not enable compound model routing or
 finite kupo budgets. Exact installed SDK and actual packaged-app qualification
 are recorded below and in [setup](../setup.md#current-qualified-0220-alpha1-checkpoint).
 Sandbox remains paused.
-Current protocol-31 development additionally exposes
+Qualified 0.23/protocol 31 additionally exposes
 [one owned fixed-model generation](candidate-generations.md). It produces
 unaccepted source-bound proposals before this manual workflow, with a separate
 cost review and actual model provenance; it does not collapse the two file

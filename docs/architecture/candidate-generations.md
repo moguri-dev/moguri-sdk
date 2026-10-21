@@ -1,6 +1,6 @@
 # Owned reviewed proposal generation
 
-Status: **0.23.0-alpha.1 development, protocol/database 31**. This is one
+Status: qualified **0.23.0-alpha.1, protocol/database 31**. This is one
 bounded, tool-less production `draft` role in the existing owned worker. It
 generates an unaccepted text patch from explicitly reviewed Local source
 snapshots. It does not enable Cascade, independent critique/revision, finite
@@ -167,3 +167,27 @@ the same generated public workflow and independently retained replay check;
 their delivery results belong in [setup](../setup.md), not inferred from source
 tests. No paid inference, personal account, microphone, model weights or VM
 probe is part of this qualification.
+
+The complete source gate passes **720/720 in 519.93 s**, both type checks/build
+and zero audit findings. All **47 hidden source desktop flows** pass in
+**1.7 min** and all **47 from the exact packaged app** in **1.8 min**.
+The focused generation/migration/client gate passes **23/23 in 33.17 s**,
+including actual four-phase controller SIGKILL in **5.25 s** and a measured
+schema-30-to-31 marker after failure rollback in **0.82 ms**.
+
+Both a fresh temporary SDK pack and the exact delivered archive independently
+install with explicit script approval/rebuild, zero consumer vulnerabilities
+and four strict external entrypoint types. Their installed worker/SDK/CLI
+generate one actually metered draft, retain canonical model provenance and
+version-3 history, separately stage/apply, then reopen missing-receipt intent
+without another request or overwriting newer user work. The actual app's
+bundled Node/service/worker/SDK/CLI independently passes that same path and
+the prior Local/SSH contracts. Native identity/signature/assets/DMG integrity
+and separately scoped Electron/runtime footprint are recorded in setup.
+
+The first complete source attempt was **719/720** because an existing SSH
+connectivity fixture's generated-directory cleanup returned `ENOTEMPTY`.
+Its isolated seven-case suite and the complete 720-case rerun pass without a
+production or policy change. That failed cleanup is retained as red evidence,
+not counted as a passed source gate. Earlier invalid fixture assumptions and
+the concurrent-admission red/green remain recorded separately.
