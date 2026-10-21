@@ -1,5 +1,11 @@
 # Remote repository memory
 
+Current **0.21 / protocol-27 development source** implements the complete
+session-bound SDK/service/model/MCP/client slice below. Full source and exact
+installed/packaged qualification remain separate; immutable 0.20 is still the
+latest delivered checkpoint. Earlier sections record prerequisite stages, not
+claims that the present source API is unavailable.
+
 ## Prerequisite boundary
 
 Reuse Node 26/TypeBox (MIT), OpenSSH (BSD), the existing bounded UTF-8 framer,
@@ -137,3 +143,63 @@ These cover exact metadata/vector rollback, last-moment revocation, restart,
 profile-only deletion, real Remote source/ignore/deny checks, admitted/pre-abort
 and held-write cancellation. Session SDK/service admission, model/context/MCP
 wiring, native clients and exact 0.21 artifacts remain unfinished and blocked.
+
+## Public source integration
+
+Legacy project/worktree `memory.index/search/graph` select Local explicitly.
+New `indexSession/searchSession/graphSession/state` methods use the session's
+actual service-resolved env/profile/project/workspace/peer/root. Remote needs
+its current pinned worker probe and approved mapping; Sandbox remains blocked.
+Missing Remote cache is an actionable error, not an empty result or Local
+substitute. Indexing/injection stay off by default and cannot enable themselves.
+
+Index admission atomically stores canonical command/digest/authority/target
+intent and its receipt with `job.started`, before capture. A missing receipt
+returns the original job without resolving another host or recapturing data.
+Projection rejects duplicated/changed intents. One scope admits one index;
+authority is checked after awaits and immediately before atomic publication.
+An admitted stop before publication leaves the old complete cache; stop or
+outcome-retention failure afterward is partial with the real published cache.
+New indexing cannot borrow an old Local turn's finishing-policy exception.
+
+State exposes the configured target separately from actual indexed
+path/device/inode/peer/build/source digest. Search validates actual-host
+mtime/size/ignore policy before returning snippets, with empty text on stale
+hits. Graph validation drops stale/denied paths and edges. This is
+observation-based freshness, not protection against hostile timestamp
+preservation. Metadata, retrieved code and graph labels remain untrusted and
+grant no permissions.
+
+Optional model context and approved `memory_search` use the same session
+route, propagate owned abort and disclose actual binding. Context uses whole
+bounded hits and valid JSON, not sliced history or half a JSON document.
+Builtin `search_memory`/`memory_graph` require ordinary exact MCP review and
+approval. Their prepared payload binds scope/query/tool/source/root, is
+bounded at 1 MiB and rechecks the actual root inode on the worker before its
+existing owned connector returns it. No Local gateway, model call or credential
+is introduced. The expanded four-tool builtin resource has a different digest;
+old two-tool grants stay denied until actual user review.
+
+CLI `memory ... --session`, shared `/memory` and actual OpenTUI expose
+index/state/search/graph/stop and user-authored style retention. Desktop's
+factory-dark settings label Local versus Remote, show real jobs and captured
+roots, preserve unsaved controls and drop held old-scope results after env/
+profile changes. Settled jobs do not display stale `Starting` progress as their
+current outcome.
+
+The public backend/CLI/intent/schema/actual-crash gate passes **19/19 in
+13,988.01 ms**. Coverage includes real service SIGKILL before/after publication,
+missing original receipts, no-model and actual Remote solver/context/MCP work,
+scope/query misuse, current ignore/deny policy, replaced roots, concurrency,
+post-publication stop, failed canonical/outcome appends and private profiles.
+The compiled CLI case passes in **2,312.63 ms** and three actual TUI memory/
+repository flows in **4,627.98 ms**. Both hidden Remote settings workflows
+pass in **5.2 s**, with matching desktop/compact source captures.
+
+Retained failures include a case-sensitive generated prompt that produced text
+instead of the intended tool call, an accidental nested test block and a
+foreign-session assertion that first encountered the new profile's disabled
+memory flag. Tests are now independent and scope is checked before optional
+enablement. Initial UI cases selected nonexistent `Memory` rather than actual
+`Repository memory`; the trace-backed locators were corrected, not the policy.
+These targeted passes alone do not qualify full source or an exact archive.

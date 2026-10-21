@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, realpath, stat } from "node:fs/promises";
+import { lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
@@ -53,6 +54,11 @@ export function repositorySourceDigest(records: SourceRecord[]): string {
 }
 export async function sourceRoot(root: string): Promise<SourceRoot> {
   const [canonical, metadata] = await Promise.all([realpath(root), lstat(root, { bigint: true })]);
+  if (canonical !== root || !metadata.isDirectory() || metadata.isSymbolicLink()) throw new MoguriError("memory_root", "Repository memory needs its exact canonical directory, not an alias or replacement.");
+  return { root, device: String(metadata.dev), inode: String(metadata.ino) };
+}
+export function sourceRootSync(root: string): SourceRoot {
+  const canonical = realpathSync(root), metadata = lstatSync(root, { bigint: true });
   if (canonical !== root || !metadata.isDirectory() || metadata.isSymbolicLink()) throw new MoguriError("memory_root", "Repository memory needs its exact canonical directory, not an alias or replacement.");
   return { root, device: String(metadata.dev), inode: String(metadata.ino) };
 }

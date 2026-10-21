@@ -23,8 +23,8 @@ export const RemoteMcpIntentSchema = Type.Object({
 export const remoteMcpPeer = (target: Pick<RemoteTarget, "host" | "port" | "user" | "hostKey">) => frameDigest(["moguri-remote-mcp-peer-v1", target.host, target.port, target.user, target.hostKey]);
 export function mcpResource(server: McpServerConfig | null) {
   if (!server) return { id: "builtin", name: "Moguri foundational tools", transport: "builtin" as const, auth: "none" as const,
-    resource: "Remote grep_logs and fetch_page only. No Local script, repository-memory or implicit host path transfer.",
-    digest: frameDigest(["moguri-mcp-resource-v1", "builtin", ["grep_logs", "fetch_page"]]) };
+    resource: "Remote grep_logs/fetch_page and opt-in search_memory/memory_graph for the captured SSH repository, with actual-host source checks. No transferred Local script or implicit host path.",
+    digest: frameDigest(["moguri-mcp-resource-v1", "builtin", ["grep_logs", "fetch_page", "search_memory", "memory_graph"]]) };
   const transport = server.transport;
   let resource: string;
   if (transport.type === "http") {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseDocument } from "yaml";
+import { Value } from "typebox/value";
 import {
   defaultSettings, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
   defaultBoard,
@@ -15,11 +16,12 @@ import {
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   isPlanSaveCommand, isPlanSaveQuery, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse,
   isRemoteMcpCommand, isRemoteMcpQuery, type RemoteMcpCommand, type RemoteMcpQuery, type RemoteMcpResponse,
+  type MemoryTarget, type MemoryBinding, type MemoryIndex, type MemoryHit, type GraphNode, type GraphEdge,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig, type McpServerInfo, type McpToolInfo,
   type RuntimeCloseOptions,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
-import { RepositoryMemory } from "./memory.ts";
+import { RepositoryMemory, memoryIndexId, memoryLocator } from "./memory.ts";
 import { McpGateway, McpKeychain, type SecretVault } from "./gateway.ts";
 import { LocalDictation, type SpeechOptions } from "./voice.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
@@ -40,6 +42,22 @@ import { OperationTelemetry } from "./operation-telemetry.ts";
 import { RepositoryTelemetry } from "./repository-telemetry.ts";
 import { remoteMcpPreview, type RemoteMcpScope } from "./remote-mcp.ts";
 import type { RepositoryApiMetadata } from "./repository-metadata.ts";
+import { sourceRootSync, validateRepositorySource, type RepositorySourceCapture, type SourceRoot, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
+import { frameDigest } from "./worker-wire.ts";
+import { MemoryPreparedSchema, type MemoryPrepared } from "./memory-mcp.ts";
+import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
+
+type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
+interface MemoryContext {
+  sessionId: string | null; target: MemoryTarget; root: SourceRoot | null; denied: string[]; authorityDigest: string; assertCurrent(): void;
+}
+function memoryArguments(tool: string, args: Record<string, unknown>) {
+  const schema = INTERNAL_MCP_TOOLS.find((candidate) => candidate.name === tool)?.inputSchema;
+  if (!schema || !["search_memory", "memory_graph"].includes(tool) || !Value.Check(schema, args)) throw new MoguriError("memory_input", "Choose exact valid memory tool arguments before repository retrieval. No source was read.", 403);
+  if (tool === "search_memory" && "query" in args) return { tool: "search_memory" as const, query: args.query };
+  if (tool === "memory_graph" && "path" in args) return { tool: "memory_graph" as const, path: args.path };
+  throw new MoguriError("memory_input", "The selected memory tool has no valid query or graph path.", 403);
+}
 
 export interface PlatformHost {
   snapshot(): Snapshot;
@@ -51,6 +69,9 @@ export interface PlatformHost {
   repositoryScope(session: Session): RepositoryScope;
   repositoryGit(session: Session, signal: AbortSignal): Promise<string | null>;
   remoteRepository(session: Session, repository: string, signal: AbortSignal): Promise<RepositoryApiMetadata>;
+  memoryTarget(session: Session): MemoryTarget;
+  remoteMemoryCapture(root: string, maxFiles: number, denied: string[], signal: AbortSignal, progress: (files: number) => void): Promise<ReturnType<RepositorySourceCapture["complete"]>>;
+  remoteMemoryValidate(request: SourceValidationRequest, signal: AbortSignal): Promise<SourceValidationResult>;
   subagent(session: Session, prompt: string): string;
   stopOwnedSession(id: string): void;
   cancelExternalJob(id: string): boolean;
@@ -96,6 +117,7 @@ export class PlatformRuntime {
   readonly telemetry: OperationTelemetry;
   readonly repositories: RepositoryTelemetry;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
+  private readonly memoryIndexes = new Map<string, string>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
     this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
@@ -207,6 +229,123 @@ export class PlatformRuntime {
     if (!session) throw new MoguriError("session_not_found", "Session is outside this profile.", 404);
     return session;
   }
+  private memoryContext(reference: MemoryReference): MemoryContext {
+    const authority = () => {
+      const snapshot = this.snapshot(), session = "sessionId" in reference ? this.session(reference.sessionId) : null;
+      this.memoryEnabled();
+      let target: MemoryTarget;
+      if (session) target = this.host.memoryTarget(session);
+      else {
+        if (!("projectId" in reference)) throw new MoguriError("memory_scope", "Choose an exact session or explicitly Local project for memory.");
+        const project = this.managed.project({ projectId: reference.projectId, workspaceId: reference.workspaceId ?? null });
+        target = { profileId: snapshot.profileId, projectId: project.id, workspaceId: reference.workspaceId ?? null, env: "Local", root: project.path };
+      }
+      if (!snapshot.policy.allowedEnvs.includes(target.env) && !(session?.localFinishing && target.env === "Local")) throw new MoguriError("memory_env", "The current allowed-env policy blocks this repository memory operation. No other environment was used.", 403);
+      const configuration = this.sessions.projects.configuration(target.projectId), root = target.env === "Local" ? sourceRootSync(target.root) : null;
+      return { target, root, denied: [...configuration.values.deniedFolders], signature: frameDigest([
+        target, root, configuration.revision, snapshot.policy.revision, snapshot.settings.permissionRevision, snapshot.settings.values.memory.maxFiles, session?.status === "archived",
+      ]) };
+    };
+    const captured = authority();
+    return { sessionId: "sessionId" in reference ? reference.sessionId : null, target: captured.target, root: captured.root, denied: captured.denied, authorityDigest: captured.signature,
+      assertCurrent: () => { if (authority().signature !== captured.signature) throw new MoguriError("memory_scope_changed", "Repository memory env, peer, root or policy changed during the operation. No stale cache or Local fallback was used.", 409); } };
+  }
+  private memoryCache(context: MemoryContext) {
+    const cache = this.memory.cached(context.target);
+    if (context.target.env === "Remote" && !cache) throw new MoguriError("memory_missing", "Index this exact captured SSH repository explicitly before searching or injecting memory. No Local index was reused.", 409);
+    if (cache && context.root && (cache.index.binding.device !== context.root.device || cache.index.binding.inode !== context.root.inode)) throw new MoguriError("memory_root_changed", "The indexed Local directory identity changed. Rebuild this exact repository cache.", 409);
+    const scope = cache?.scope ?? { id: memoryIndexId(this.localMemoryBinding(context)), path: context.target.root };
+    return { scope, index: cache?.index ?? null };
+  }
+  private localMemoryBinding(context: MemoryContext): Extract<MemoryBinding, { env: "Local" }> {
+    if (context.target.env !== "Local" || !context.root) throw new MoguriError("memory_binding", "This operation has no captured Local repository identity. No Remote root was relabeled.");
+    return { ...context.target, ...context.root };
+  }
+  private async validateMemory(context: MemoryContext, binding: MemoryBinding, files: SourceValidationRequest["files"], signal: AbortSignal) {
+    const chunks: SourceValidationRequest["files"][] = [];
+    let current: SourceValidationRequest["files"] = [], bytes = 0;
+    for (const file of files) {
+      const size = Buffer.byteLength(JSON.stringify(file));
+      if (current.length && (bytes + size > 512 * 1024 || current.length === 1000)) { chunks.push(current); current = []; bytes = 0; }
+      current.push(file); bytes += size;
+    }
+    if (current.length || !chunks.length) chunks.push(current);
+    const result: SourceValidationResult["files"] = [];
+    for (const chunk of chunks) {
+      signal.throwIfAborted(); context.assertCurrent();
+      const request = { binding: { root: binding.root, device: binding.device, inode: binding.inode }, files: chunk, denied: context.denied };
+      const observed = binding.env === "Remote" ? await this.host.remoteMemoryValidate(request, signal) : await validateRepositorySource(request, signal);
+      signal.throwIfAborted(); context.assertCurrent(); result.push(...observed.files);
+    }
+    return result;
+  }
+  async memorySearch(sessionId: string, text: string, limit: number, requested: AbortSignal = AbortSignal.timeout(15_000)): Promise<{ items: MemoryHit[]; binding?: MemoryBinding; sourceDigest?: string }> {
+    const context = this.memoryContext({ sessionId }), cache = this.memoryCache(context), signal = AbortSignal.any([requested, AbortSignal.timeout(15_000)]);
+    if (context.target.env === "Local") {
+      const items = await this.memory.search(cache.scope, text, limit, context.denied);
+      signal.throwIfAborted(); context.assertCurrent(); return { items, ...(cache.index ? { binding: cache.index.binding, sourceDigest: cache.index.sourceDigest } : {}) };
+    }
+    const index = cache.index;
+    if (!index) throw new MoguriError("memory_missing", "This exact Remote repository has no published index.", 409);
+    const candidates = this.memory.candidates(cache.scope, text, limit, context.denied);
+    const files = this.memory.versions(cache.scope, [...new Set(candidates.map((hit) => hit.path))]);
+    const observed = await this.validateMemory(context, index.binding, files, signal), stale = new Map(observed.map((file) => [file.path, file.stale]));
+    return { binding: index.binding, sourceDigest: index.sourceDigest, items: candidates.map((hit) => ({ path: hit.path, digest: hit.digest, distance: hit.distance,
+      stale: stale.get(hit.path) !== false, text: stale.get(hit.path) === false ? hit.text : "", source: "lexical-vector" })) };
+  }
+  async memoryGraph(sessionId: string, path: string, requested: AbortSignal = AbortSignal.timeout(15_000)): Promise<{ nodes: GraphNode[]; edges: GraphEdge[]; binding?: MemoryBinding; sourceDigest?: string; stalePaths: string[] }> {
+    const context = this.memoryContext({ sessionId }), cache = this.memoryCache(context), graph = this.memory.graph(cache.scope, path);
+    const allowed = graph.nodes.filter((node) => !matchesFolder(node.path, context.denied)), paths = [...new Set(allowed.map((node) => node.path))];
+    const binding = cache.index?.binding ?? this.localMemoryBinding(context);
+    const observed = await this.validateMemory(context, binding, this.memory.versions(cache.scope, paths), AbortSignal.any([requested, AbortSignal.timeout(15_000)]));
+    const stalePaths = observed.filter((file) => file.stale).map((file) => file.path), stale = new Set(stalePaths);
+    const nodes = allowed.filter((node) => !stale.has(node.path)), ids = new Set(nodes.map((node) => node.id));
+    return { nodes, edges: graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)), binding, stalePaths, ...(cache.index ? { sourceDigest: cache.index.sourceDigest } : {}) };
+  }
+  async preparedMemory(sessionId: string, tool: string, args: Record<string, unknown>, scopeDigest: string, signal: AbortSignal): Promise<MemoryPrepared> {
+    const input = memoryArguments(tool, args);
+    const result = input.tool === "search_memory" ? await this.memorySearch(sessionId, input.query, 6, signal) :
+      await this.memoryGraph(sessionId, input.path, signal);
+    if (!result?.binding || result.binding.env !== "Remote" || !result.sourceDigest) throw new MoguriError("memory_authorization", "This exact memory tool has no validated Remote repository data. No Local index was forwarded.", 403);
+    const common = { version: 1 as const, binding: result.binding, sourceDigest: result.sourceDigest, argumentsDigest: frameDigest(args), scopeDigest };
+    const prepared = "items" in result ? { ...common, tool: "search_memory" as const, result: { items: result.items } } :
+      { ...common, tool: "memory_graph" as const, result: { nodes: result.nodes, edges: result.edges, stalePaths: result.stalePaths } };
+    if (!Value.Check(MemoryPreparedSchema, prepared) || Buffer.byteLength(JSON.stringify(prepared)) > 1024 * 1024) throw new MoguriError("memory_limit", "This repository memory result exceeds its typed bounded MCP payload. Narrow the query or graph path.");
+    return prepared;
+  }
+  private indexMemory(reference: MemoryReference, finish: WorkspaceFinish): CommandResult {
+    const intent = finish.intent;
+    if (!intent) throw new MoguriError("memory_intent", "Repository indexing needs its original canonical command identity before capture.");
+    const previous = this.snapshot().jobs.find((job) => job.memory?.commandId === intent.id);
+    if (previous) {
+      if (previous.memory?.commandDigest !== intent.digest) throw new MoguriError("idempotency_conflict", "This command ID already owns another memory index intent. No capture was replayed.", 409);
+      return finish([], { id: previous.id });
+    }
+    const context = this.memoryContext(reference), locator = memoryLocator(context.target), maxFiles = this.snapshot().settings.values.memory.maxFiles;
+    if (!this.snapshot().policy.allowedEnvs.includes(context.target.env)) throw new MoguriError("memory_env", "New repository indexing is blocked in this environment. Finishing an old turn does not authorize another index job.", 403);
+    if (this.memoryIndexes.has(locator)) throw new MoguriError("memory_pending", "One index job already owns this exact profile/repository scope. Stop or wait before another capture.", 409);
+    let result: CommandResult | undefined;
+    const id = this.job("memory.index", context.target.projectId, context.sessionId, async (signal, progress, jobId) => {
+      signal.throwIfAborted(); context.assertCurrent();
+      if (context.target.env === "Local") {
+        const binding = this.localMemoryBinding(context);
+        return this.memory.index({ id: memoryIndexId(binding), path: context.target.root },
+          maxFiles, signal, progress, context.denied, { binding, jobId, assertCurrent: () => { signal.throwIfAborted(); context.assertCurrent(); } });
+      }
+      const captured = await this.host.remoteMemoryCapture(context.target.root, maxFiles, context.denied, signal, (files) => progress(`Captured ${files} files from the pinned SSH repository.`));
+      signal.throwIfAborted(); context.assertCurrent();
+      const index: MemoryIndex = { version: 1, binding: { ...context.target, ...captured.binding }, sourceDigest: captured.digest,
+        indexedFiles: captured.records.length, excludedFiles: captured.excluded, sourceBytes: captured.sourceBytes, indexedAt: new Date().toISOString(), jobId };
+      this.memory.publish(index, captured.records, () => { signal.throwIfAborted(); context.assertCurrent(); }, context.denied);
+      return { indexedFiles: index.indexedFiles, reusedFiles: 0, excludedFiles: index.excludedFiles, sourceBytes: index.sourceBytes, boundedAt: maxFiles, vectorKind: "control-plane lexical vectors of the captured SSH root", graph: "import/symbol graph", index };
+    }, () => this.memoryIndexes.delete(locator), (job) => {
+      job.memory = { commandId: intent.id, commandDigest: intent.digest, authorityDigest: context.authorityDigest, target: context.target };
+      result = finish([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId, payload: { job } }], { id: job.id });
+    }, context.target.workspaceId ?? undefined);
+    this.memoryIndexes.set(locator, id);
+    if (!result) throw new MoguriError("memory_intent", "Repository index intent was not durably admitted. No successful index was reported.");
+    return result;
+  }
   async recover(): Promise<void> {
     this.managed.recover();
     const oauth = this.snapshot().oauthAuthorizations.filter((value) => ["waiting", "exchanging"].includes(value.state));
@@ -241,7 +380,7 @@ ${session?.kind === "metachat" ? "This is an explicit Moguri settings chat. Use 
 ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-knowledge>` : ""}`;
   }
   private memoryEnabled(): void {
-    if (!this.snapshot().settings.values.memory.enabled) throw new MoguriError("memory_disabled", "Enable local repository memory explicitly before indexing or searching.", 409);
+    if (!this.snapshot().settings.values.memory.enabled) throw new MoguriError("memory_disabled", "Enable repository memory explicitly before indexing or searching.", 409);
   }
   server(id: string, projectId?: string | null): McpServerConfig | null {
     if (id === "builtin") return null;
@@ -309,14 +448,22 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         const session = query.sessionId ? this.session(query.sessionId) : undefined;
         return { type: query.type, editable: this.snapshot().settings.values.systemPrompt, effective: session ? await this.effectivePrompt(session) : this.prompt(), warning: SYSTEM_PROMPT_WARNING };
       }
-      case "memory.search": this.memoryEnabled(); return { type: query.type, items: await this.memory.search(this.managed.indexScope({ projectId: query.projectId, workspaceId: query.workspaceId ?? null }), query.text, query.limit, this.sessions.projects.configuration(query.projectId).values.deniedFolders) };
+      case "memory.search":
+        if ("sessionId" in query) return { type: query.type, ...await this.memorySearch(query.sessionId, query.text, query.limit) };
+        this.memoryEnabled(); return { type: query.type, items: await this.memory.search(this.managed.indexScope({ projectId: query.projectId, workspaceId: query.workspaceId ?? null }), query.text, query.limit, this.sessions.projects.configuration(query.projectId).values.deniedFolders) };
       case "memory.graph": {
+        if ("sessionId" in query) return { type: query.type, ...await this.memoryGraph(query.sessionId, query.path) };
         this.memoryEnabled();
         const graph = this.memory.graph(this.managed.indexScope({ projectId: query.projectId, workspaceId: query.workspaceId ?? null }), query.path);
         const denied = this.sessions.projects.configuration(query.projectId).values.deniedFolders;
         const nodes = graph.nodes.filter((node) => !matchesFolder(node.path, denied));
         const ids = new Set(nodes.map((node) => node.id));
         return { type: query.type, nodes, edges: graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)) };
+      }
+      case "memory.state": {
+        const context = this.memoryContext({ sessionId: query.sessionId });
+        const index = this.memory.cached(context.target)?.index ?? null; context.assertCurrent();
+        return { type: query.type, target: context.target, index };
       }
       case "mcp.servers": return { type: query.type, servers: await this.mcpServers(query.sessionId ? this.session(query.sessionId) : undefined) };
       case "mcp.tools": {
@@ -386,14 +533,17 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     const text = this.store.blob(job.resultDigest);
     return { text: text.slice(offset, offset + limit), nextOffset: offset + limit < text.length ? offset + limit : null };
   }
-  async effectivePrompt(session: Session, base = this.prompt(session), repositoryContext?: string): Promise<string> {
-    const project = session.projectId ? this.managed.project(session) : undefined;
+  async effectivePrompt(session: Session, base = this.prompt(session), repositoryContext?: string, signal: AbortSignal = AbortSignal.timeout(15_000)): Promise<string> {
     const settings = this.snapshot().settings.values;
     const instructions = repositoryContext ?? await this.host.repositoryContext(session);
-    const memory = project && session.controls.env === "Local" && settings.memory.enabled && settings.memory.useInContext ?
-      await this.memory.search(this.managed.indexScope(session), session.messages.findLast((message) => message.role === "user")?.text ?? "project", 4, this.sessions.projects.configuration(project.id).values.deniedFolders) : [];
+    const memory = session.projectId && settings.memory.enabled && settings.memory.useInContext ?
+      await this.memorySearch(session.id, session.messages.findLast((message) => message.role === "user")?.text || "project", 4, signal) : null;
+    signal.throwIfAborted();
+    const items = memory?.items.slice() ?? [], total = items.length;
+    let text = memory ? JSON.stringify({ binding: memory.binding, items, omittedHits: 0 }) : "";
+    while (text.length > 8000 && items.length) { items.pop(); text = JSON.stringify({ binding: memory?.binding, items, omittedHits: total - items.length }); }
     return `${base}\n<session-mode>${session.mode}. ${session.mode === "read-only" ? "Answer questions using only permitted read operations. Never edit files, execute commands, publish, commit, push or create a PR." : "Use only the currently declared and authorized tools."}</session-mode>${instructions}` +
-      (memory.length ? `\n<untrusted-repository-memory>\n${JSON.stringify(memory).slice(0, 8000)}\n</untrusted-repository-memory>` : "");
+      (memory && total > 0 ? `\n<untrusted-repository-memory>\n${text}\n</untrusted-repository-memory>` : "");
   }
   private async content(path: string, limit = 64 * 1024): Promise<string> {
     const file = await stat(path);
@@ -434,7 +584,8 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null } }]);
     }).catch((error: unknown) => {
       const partial = error instanceof MoguriError && ["install_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
-        kind === "repository.refresh" && this.snapshot().repositoryObservations.some((observation) => observation.jobId === id);
+        kind === "repository.refresh" && this.snapshot().repositoryObservations.some((observation) => observation.jobId === id) ||
+        kind === "memory.index" && this.memory.published(id);
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
       console.error(`Moguri capability ${kind} (${id}) ${partial ? "partial" : cancelled ? "cancelled" : "failed"}:`, error instanceof Error ? error.message : "Unknown capability error");
       this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: {
@@ -486,10 +637,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         return result;
       }
       case "memory.index": {
-        this.memoryEnabled();
-        const scope = this.managed.indexScope({ projectId: command.projectId, workspaceId: command.workspaceId ?? null });
-        const id = this.job("memory.index", command.projectId, null, (signal, progress) => this.memory.index(scope, snapshot.settings.values.memory.maxFiles, signal, progress, this.sessions.projects.configuration(command.projectId).values.deniedFolders));
-        return finish([], { id });
+        return this.indexMemory(command, finish);
       }
       case "memory.remember": {
         this.project(command.projectId);
@@ -633,8 +781,11 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     let prepared: unknown;
     const input = isRecord(args.arguments) ? args.arguments : {};
     if (!project && serverId === "builtin" && args.tool !== "fetch_page") throw new MoguriError("project_required", "This internal workspace tool requires a selected project.");
-    if (project && serverId === "builtin" && args.tool === "search_memory") { this.memoryEnabled(); prepared = await this.memory.search(this.managed.indexScope(session), String(input.query), 6); }
-    if (project && serverId === "builtin" && args.tool === "memory_graph") { this.memoryEnabled(); prepared = this.memory.graph(this.managed.indexScope(session), String(input.path)); }
+    if (project && serverId === "builtin" && ["search_memory", "memory_graph"].includes(String(args.tool))) {
+      const query = memoryArguments(String(args.tool), input);
+      prepared = query.tool === "search_memory" ? await this.memorySearch(session.id, query.query, 6, signal) :
+        await this.memoryGraph(session.id, query.path, signal);
+    }
     const root = project?.path ?? join(this.stateDir, "gateway-workspace"); await mkdir(root, { recursive: true, mode: 0o700 });
     return this.gateway.operate({ action: "call", server, root, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared, scripts: await this.scripts(project?.id) }, signal, session.id);
   }
@@ -658,9 +809,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       } finally { if (signal.aborted) this.host.stopOwnedSession(id); }
     }
     if (call.name === "memory_search") {
-      this.memoryEnabled();
-      const scope = this.managed.indexScope(session);
-      return { text: JSON.stringify(await this.memory.search(scope, String(call.arguments.query), 6, this.sessions.projects.values(session.projectId).deniedFolders)), isError: false, outcome: "completed" };
+      return { text: JSON.stringify(await this.memorySearch(session.id, String(call.arguments.query), 6, signal)), isError: false, outcome: "completed" };
     }
     if (call.name === "propose_skill" || call.name === "propose_script" || call.name === "propose_memory") {
       const project = this.project(session.projectId);

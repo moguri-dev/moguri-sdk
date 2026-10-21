@@ -43,7 +43,13 @@ is independently qualified. The qualified **0.19.0-alpha.1 / protocol 25** adds
 [owned Remote user consoles](remote-user-consoles.md) with separate
 immutable peer/root/technical-key state and no input replay. The exact
 installed SDK and actual packaged runtime pass independent lifecycle checks.
-Remote memory/scripts remain blocked.
+Protocol-27 development adds
+[bound Remote repository memory](remote-repository-memory.md): source capture/
+freshness runs on the actual SSH host, while typed vector/graph caches stay
+on the control plane. Optional indexing/context and exact reviewed MCP
+memory retrieval share that scope, never a Local index fallback. Exact
+0.21 artifact acceptance remains separate. Transferred Local scripts stay
+blocked.
 
 Protocol 22 reuses the qualified Git view for optional immutable repository
 attribution at model admission. It reads the actual pinned Remote origin and

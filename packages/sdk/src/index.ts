@@ -289,8 +289,12 @@ export class MoguriSdk extends TransportClient {
   };
   readonly memory = {
     index: (projectId: string, workspaceId?: string) => this.command({ type: "memory.index", projectId, ...(workspaceId ? { workspaceId } : {}) }),
+    indexSession: (sessionId: string) => this.command({ type: "memory.index", sessionId }),
     search: (projectId: string, text: string, limit = 6, workspaceId?: string) => this.query({ type: "memory.search", projectId, text, limit, ...(workspaceId ? { workspaceId } : {}) }),
+    searchSession: (sessionId: string, text: string, limit = 6) => this.query({ type: "memory.search", sessionId, text, limit }),
     graph: (projectId: string, path = "", workspaceId?: string) => this.query({ type: "memory.graph", projectId, path, ...(workspaceId ? { workspaceId } : {}) }),
+    graphSession: (sessionId: string, path = "") => this.query({ type: "memory.graph", sessionId, path }),
+    state: (sessionId: string) => this.query({ type: "memory.state", sessionId }),
     remember: (projectId: string, text: string) => this.command({ type: "memory.remember", projectId, text }),
   };
   readonly capabilities = {

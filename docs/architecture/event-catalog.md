@@ -39,7 +39,7 @@ Unused scope fields are null in checkpoint 1.
 | `settings.updated` | Shared validated settings, value revision and permission revision. Edits cannot rewrite an admitted prompt snapshot. |
 | `capability.saved` | Project content digest, kind, source, owner and explicit enablement revision. |
 | `capability.proposed`, `proposal.decided` | Reviewed exact proposal/base digest, real model/user origin and actual user decision. No automatic application or enablement. |
-| `job.started`, `job.progress`, `job.finished` | Owned capability work, bounded progress, actual completed/failed/cancelled/partial outcome and retained result reference. |
+| `job.started`, `job.progress`, `job.finished` | Owned capability work, bounded progress, actual completed/failed/cancelled/partial outcome and retained result reference. Protocol-27 memory indexing atomically retains original command/digest/authority/target intent and receipt before source capture; a lost receipt cannot replay its job. Post-publication stop/failure is partial, not rollback. |
 | `board.saved` | Project configuration/revision, ordered phases, merged destination and explicit read-only integration policy. |
 | `issue.saved` | Complete revisioned local ticket and real `user`, `github` or `linear` actor. Only a verified merge can drive an automated phase transition. |
 | `cache.prepared` | Exact plan digest, advisory check time, package/reuse/download counts and `scripts: blocked`, never a permanent safety grant. |

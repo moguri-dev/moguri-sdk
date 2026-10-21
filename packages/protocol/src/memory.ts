@@ -25,3 +25,5 @@ export const MemoryIndexSchema = object({
   sourceBytes: Type.Integer({ minimum: 0, maximum: 64 * 1024 * 1024 }), indexedAt: Type.String({ minLength: 1, maxLength: 40 }),
 });
 export type MemoryIndex = Static<typeof MemoryIndexSchema>;
+export const MemoryIndexIntentSchema = object({ commandId: id, commandDigest: hash, authorityDigest: hash, target: MemoryTargetSchema });
+export type MemoryIndexIntent = Static<typeof MemoryIndexIntentSchema>;

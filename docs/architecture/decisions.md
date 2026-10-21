@@ -506,8 +506,12 @@ provider-free plan saves, and protocol 24 [reviewed Remote MCP](remote-mcp.md)
 with independent peer/resource access grants and no refresh forwarding.
 Protocol 25 adds [owned Remote user consoles](remote-user-consoles.md)
 through a separate pinned, bounded carrier with explicit env/peer/root
-identity and the same SDK/client lifecycle. Repository-memory retrieval
-remains unavailable; no protected transport falls back to Local.
+identity and the same SDK/client lifecycle. Protocol-27 development adds
+[repository memory](remote-repository-memory.md) with actual-host bounded
+source capture/freshness and atomic typed control-plane derived caches.
+Session SDK/clients/model/MCP bind the same peer/root; legacy project APIs
+remain explicitly Local. Optional memory is still off, its output untrusted,
+and no protected transport falls back to Local.
 
 Protocol/database migration 8 preserves prior inputs, settings and event/grant
 identities. Actual generated macOS SSH, worker/file/model operations, image

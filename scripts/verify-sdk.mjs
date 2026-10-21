@@ -85,6 +85,13 @@ try {
       ${installedProtocol >= 26 ? "void repositoryPreview.remote?.hostFingerprint;void repositoryPreview.remote?.workerDigest;" : ""}
       await sdk.repositories.refresh("generated-id",repositoryPreview.bindingDigest,repositoryPreview.revision,true);
       const repositoryState=await sdk.repositories.state("generated-id");void repositoryState.observation?.repository?.osiApproved;
+      ${installedProtocol >= 27 ? `
+      const memoryState=await sdk.memory.state("generated-id");void memoryState.index?.sourceDigest;
+      if(memoryState.index?.binding.env==="Remote")void memoryState.index.binding.remote.peerDigest;
+      await sdk.memory.indexSession("generated-id");
+      const snippets=await sdk.memory.searchSession("generated-id","generated query");void snippets.binding?.inode;
+      const graph=await sdk.memory.graphSession("generated-id");void graph.stalePaths;
+      ` : ""}
       await sdk.repositories.clear("generated-id",repositoryState.observation?.revision??0,true);
       const repositoryCalls=await sdk.budgets.dashboard({repositoryId:42,organization:"generated",visibility:"open-source"});
       void repositoryCalls.repositoryCoverage.unattributedCalls;
@@ -154,7 +161,7 @@ try {
     import {mkdir,writeFile,readFile,realpath,lstat} from "node:fs/promises";
     import {spawn,execFile,execFileSync} from "node:child_process";
     import {promisify} from "node:util";
-    import {createHash} from "node:crypto";
+    import {createHash,randomUUID} from "node:crypto";
     import {createServer} from "node:http";
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
@@ -599,6 +606,38 @@ try {
         await assert.rejects(()=>lstat(observed.controllerMarker),{code:"ENOENT"});
       }finally{metadataSdk.disconnect();await metadataRuntime.close();}
     }
+    if(PROTOCOL_VERSION>=27&&process.env.MOGURI_GENERATED_REMOTE){
+      const state=join(root,"generated-memory-state"),remoteRoot=await realpath(join(root,"generated-remote-workspace"));
+      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x75),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault}}};
+      let memoryRuntime=await createRuntime(options),memorySdk=await connectMoguri({stateDir:state,autoStart:false});
+      try{
+        const memoryProject=await memorySdk.command({type:"project.add",path:project}),session=await memorySdk.sessions.create(memoryProject.id);
+        const settings=structuredClone(memorySdk.settings.get().values);settings.remote=JSON.parse(process.env.MOGURI_GENERATED_REMOTE);settings.memory.enabled=true;
+        await memorySdk.settings.update(settings,memorySdk.settings.get().revision);
+        const config=(await memorySdk.projects.configuration(memoryProject.id)).configuration;
+        await memorySdk.projects.configure(memoryProject.id,{...config.values,remotePath:remoteRoot},config.revision);
+        await memorySdk.remote.probe();await memorySdk.sessions.env(session.id,"Remote");
+        await assert.rejects(()=>memorySdk.memory.searchSession(session.id,"generated"),{code:"memory_missing"});
+        const command={type:"memory.index",sessionId:session.id},commandId=randomUUID(),indexed=await memorySdk.command(command,commandId);
+        assert.equal((await memorySdk.jobs.wait(indexed.id)).status,"completed");
+        const before=(await memorySdk.memory.state(session.id)).index;assert.equal(before.binding.env,"Remote");assert.equal(before.binding.root,remoteRoot);
+        const hits=await memorySdk.memory.searchSession(session.id,"SSH-only change");assert.ok(hits.items.some(hit=>hit.text.includes("SSH-only change")&&!hit.stale));
+        const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
+        assert.match((await promisify(execFile)(process.execPath,[cli,"memory","search","SSH-only change","--session",session.id],{env:{...process.env,MOGURI_STATE_DIR:state}})).stdout,/SSH-only change/);
+        assert.match((await memorySdk.slash(session.id,"/memory state","tui")).text,/Remote/);
+        memorySdk.disconnect();await memoryRuntime.close();memoryRuntime=await createRuntime(options);memorySdk=await connectMoguri({stateDir:state,autoStart:false});
+        assert.equal((await memorySdk.command(command,commandId)).id,indexed.id);assert.equal((await memorySdk.remote.status()).remote.ready,false);
+        await memorySdk.remote.probe();assert.deepEqual((await memorySdk.memory.state(session.id)).index,before);
+        const preview=(await memorySdk.mcp.remotePreview(session.id,"builtin")).preview;
+        await memorySdk.mcp.grantRemote(session.id,"builtin",preview.digest,preview.settingsRevision,false,true);await memorySdk.remote.probe();
+        const tool=(await memorySdk.mcp.tools("builtin","memory",0,session.id)).tools.find(tool=>tool.name==="search_memory");
+        const requested=await memorySdk.mcp.call(session.id,"builtin",tool.name,{query:"SSH-only change"},tool.digest);
+        const approval=memorySdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval;
+        await memorySdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});
+        assert.equal((await memorySdk.jobs.wait(requested.id)).status,"completed");assert.match((await memorySdk.mcp.readResult(requested.id)).text,/SSH-only change/);
+        assert.equal(memorySdk.getState().snapshot.sessions.find(value=>value.id===session.id).usage.length,0);
+      }finally{memorySdk.disconnect();await memoryRuntime.close();}
+    }
     if(PROTOCOL_VERSION>=23&&process.platform==="darwin")for(const mode of ["Local",...(PROTOCOL_VERSION>=25&&process.env.MOGURI_GENERATED_REMOTE?["Remote"]:[])]){
       const consoleRoot=join(root,"generated-console-project-"+mode),consoleState=join(root,"generated-console-state-"+mode),keys=new Map();
       await mkdir(consoleRoot);
@@ -639,7 +678,7 @@ try {
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/CLI/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
 } finally { try { await ssh?.close(); } finally { controllerGithub?.restore(); await rm(temporary, { recursive: true, force: true }); } }

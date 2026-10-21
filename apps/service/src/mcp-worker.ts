@@ -54,7 +54,10 @@ async function run(operation: McpOperation): Promise<unknown> {
         return textResult({ path: file.path, digest: file.digest, matches: lines, boundedAt: 100 });
       }
       if (request.params.name === "fetch_page") return textResult(await fetchPage(String(args.url), abort.signal));
-      if (request.params.name === "search_memory" || request.params.name === "memory_graph") return textResult(operation.prepared);
+      if (request.params.name === "search_memory" || request.params.name === "memory_graph") {
+        if (operation.prepared === undefined) throw new Error("This memory tool has no authorized root-bound prepared data. No index or Local fallback was selected.");
+        return textResult(operation.prepared);
+      }
       const script = operation.scripts?.find((script) => `script.${script.id}` === request.params.name);
       if (!script) throw new Error("Unknown approved internal tool.");
       const child = spawn(process.execPath, [script.path], { cwd: operation.root, stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, HOME: process.env.HOME } });

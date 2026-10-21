@@ -1,7 +1,7 @@
 # Initial domain model
 
 `packages/protocol/src/index.ts` is the shared TypeScript/TypeBox contract.
-Protocol version and database migration version are 22; immutable event
+Current source protocol/database version is 27; immutable event
 envelopes remain schema version 1. This is the
 initial checkpoint, not the complete Phase 1 schema for future capabilities.
 
@@ -41,6 +41,13 @@ unassigned, never reclassified using current GitHub/Git state. Schema-21
 ciphertext, grants and receipts remain unchanged. Lookup jobs recover partial
 without retry; observed metadata is not model input or permission authority.
 
+Migrations 23/25 add authenticated Local/Remote user-console ownership,
+24 retained reviewed Remote MCP intent/results and 26 actual-host GitHub
+lookup provenance. Migration 27 adds typed derived-memory scope metadata
+without rewriting old ciphertext/keys/receipts or Local vector/chunk rows.
+Index jobs retain immutable original command/authority/target intent before
+capture; the optional cache is not another domain or permission authority.
+
 ## Implemented entities
 
 | Entity | Identity and authority |
@@ -66,8 +73,8 @@ without retry; observed metadata is not model input or permission authority.
 | Settings | Profile-owned revisioned values and factory defaults, with intentionally shared root startup preferences. A separate permission revision invalidates stale approvals. Prompt text is not policy. |
 | Capability | Project-scoped skill/script/plugin/style knowledge, immutable content digest, source, enablement revision and optional owning plugin. |
 | Proposal | Exact content/base digests, project, kind, actual user/model actor and pending/approved/rejected decision. Approval installs disabled content. |
-| Capability job | Owned kind/session/turn, progress, terminal status, retained result digest and explicit error. A wait timeout is not cancellation. |
-| Repository index | Derived profile/root-partitioned lexical vectors, source digests/mtime/size, chunks and import/symbol graph. Default IDs remain unchanged; other profiles prefix derived index identity. Not a second session store. |
+| Capability job | Owned kind/session/turn, progress, terminal status, retained result digest and explicit error. Index intent also binds original canonical command, authority and target; duplicate/changed intents are rejected. A wait timeout is not cancellation. |
+| Repository index | Derived profile/env/peer/canonical-root lexical vectors, source digests/mtime/size, chunks and import/symbol graph. Typed scope metadata and rows publish atomically; Remote identities include lossless device/inode. Actual-host validation suppresses stale text. Local IDs remain compatible, and project/worktree removal clears owned Remote rows too. Not a second session or permission store. |
 | Issue board | Project, configuration revision, ordered phase IDs/names, merged destination, explicit PR-observation access and optional Linear team. |
 | Local issue | Stable UUID/project-local number, feature/bug/misc, title/body/phase, optimistic revision, archive state and verified remote-link provenance. No assignee. |
 | Dependency plan | Exact project/manager/manifest/lock digest, unique public package versions and SHA-512 artifacts. Branch names are not mutable cache identities. |

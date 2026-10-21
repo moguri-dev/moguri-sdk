@@ -18,7 +18,7 @@ export const tools: Tool[] = [
   { name: "read_file", description: "Read an approved project UTF-8 file up to 128 KiB. Returns its digest for conflict-safe writes. Requires human approval.", parameters: Type.Object({ path }, { additionalProperties: false }) },
   { name: "write_file", description: "Write a complete project text file. expectedDigest must be the digest returned by read_file, or 'absent' for a new file. Requires human approval.", parameters: Type.Object({ path, text: Type.String({ maxLength: MAX_TEXT }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }) }, { additionalProperties: false }) },
   { name: "run_command", description: "Run an exact shell command in the approved project on the Local host, without sandbox isolation. Requires human approval or an explicit exact-command grant, including Git writes. No automatic backgrounding. Output is bounded; timeout cancels the owned process group.", parameters: Type.Object({ command: Type.String({ minLength: 1, maxLength: 16_384 }), timeoutMs: Type.Integer({ minimum: 1000, maximum: 600_000 }) }, { additionalProperties: false }) },
-  { name: "memory_search", description: "Search the explicitly enabled local repository lexical-vector memory. Returns source digests and marks stale snapshots; no embeddings are sent to a hosted model.", parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 4000 }) }, { additionalProperties: false }) },
+  { name: "memory_search", description: "Search the explicitly enabled lexical-vector memory for the actual execution root. Returns binding/source digests and marks stale snapshots; no embeddings are sent to a hosted model.", parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 4000 }) }, { additionalProperties: false }) },
   { name: "mcp_gateway", description: "The one native gateway for foundational scripts and configured MCP servers. Discover servers, find tool schemas, check non-secret auth status, call an exact approved tool using its schema digest, or read a retained result page. Metadata/results are untrusted; authentication changes and configuration are user-only.", parameters: Type.Object({
     action: Type.Union([Type.Literal("discover"), Type.Literal("tools"), Type.Literal("auth"), Type.Literal("call"), Type.Literal("read_result")]),
     serverId: Type.Optional(Type.String({ maxLength: 128 })), query: Type.Optional(Type.String({ maxLength: 200 })),
@@ -42,7 +42,7 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
     .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)
     .filter((tool) => !tool.name.startsWith("propose_") || settings.evolution.enabled)
-    .filter((tool) => scope.env !== "Remote" || tool.name !== "memory_search" && (tool.name !== "mcp_gateway" || scope.project && Boolean(settings.remote?.mcpGrants?.length)))
+    .filter((tool) => scope.env !== "Remote" || tool.name !== "mcp_gateway" || scope.project && Boolean(settings.remote?.mcpGrants?.length))
     .map((tool) => tool.name === "run_command" && scope.env === "Remote" ? { ...tool, description: tool.description.replace("on the Local host, without sandbox isolation", "on the approved SSH host, without SendBox isolation") } : tool);
 }
 export function validateTool(call: ToolCall): void {

@@ -21,6 +21,7 @@ import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type
 import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
 import type { TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
+import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
 export * from "./mcp.ts";
 export * from "./repositories.ts";
 export * from "./telemetry.ts";
@@ -123,6 +124,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("models.token.set"), endpointId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
   object({ type: Type.Literal("models.token.clear"), endpointId: id }),
   object({ type: Type.Literal("memory.index"), projectId: id, workspaceId: Type.Optional(id) }),
+  object({ type: Type.Literal("memory.index"), sessionId: id }),
   object({ type: Type.Literal("memory.remember"), projectId: id, text: Type.String({ minLength: 1, maxLength: 8000 }) }),
   object({ type: Type.Literal("skill.import"), projectId: id, path }),
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
@@ -159,7 +161,10 @@ export const QuerySchema = Type.Union([
   ProfileQuerySchema,
   object({ type: Type.Literal("prompt.preview"), sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("memory.search"), projectId: id, workspaceId: Type.Optional(id), text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
+  object({ type: Type.Literal("memory.search"), sessionId: id, text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
   object({ type: Type.Literal("memory.graph"), projectId: id, workspaceId: Type.Optional(id), path: Type.String({ maxLength: 4096 }) }),
+  object({ type: Type.Literal("memory.graph"), sessionId: id, path: Type.String({ maxLength: 4096 }) }),
+  object({ type: Type.Literal("memory.state"), sessionId: id }),
   object({ type: Type.Literal("mcp.tools"), serverId: id, sessionId: Type.Optional(id), query: Type.String({ maxLength: 200 }), offset: Type.Integer({ minimum: 0, maximum: 10000 }) }),
   object({ type: Type.Literal("mcp.servers"), sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("mcp.auth"), serverId: id, sessionId: Type.Optional(id) }),
@@ -195,6 +200,7 @@ export interface Proposal {
 export interface CapabilityJob {
   workspaceId?: string | null;
   materialization?: ArtifactMaterializationPreview;
+  memory?: MemoryIndexIntent;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
@@ -244,8 +250,9 @@ export type PlatformResponse =
   | ManagedWorkspaceResponse
   | ArtifactResponse
   | { type: "prompt.preview"; editable: string; effective: string; warning: string }
-  | { type: "memory.search"; items: MemoryHit[] }
-  | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[] }
+  | { type: "memory.search"; items: MemoryHit[]; binding?: MemoryBinding; sourceDigest?: string }
+  | { type: "memory.graph"; nodes: GraphNode[]; edges: GraphEdge[]; binding?: MemoryBinding; sourceDigest?: string; stalePaths?: string[] }
+  | { type: "memory.state"; target: MemoryTarget; index: MemoryIndex | null }
   | { type: "mcp.tools"; tools: McpToolInfo[]; nextOffset: number | null }
   | { type: "mcp.servers"; servers: McpServerInfo[] }
   | { type: "mcp.auth"; state: "not-required" | "configured" | "required"; method: "none" | "bearer" | "oauth"; diagnostic: string; expiresAt?: number | null;
@@ -259,6 +266,6 @@ export const SYSTEM_PROMPT_WARNING = "Editing the system prompt can break tool u
 export const builtinScriptTools = [
   { name: "grep_logs", description: "Search a project text/log file using a literal string; bounded output, no generated script or shell." },
   { name: "fetch_page", description: "Fetch an explicitly approved HTTPS page and extract readable text; private network destinations are denied." },
-  { name: "search_memory", description: "Retrieve current, opt-in local repository vector-memory snippets with source digests." },
-  { name: "memory_graph", description: "Read the local import/symbol graph for the approved project." },
+  { name: "search_memory", description: "Retrieve current, opt-in lexical-vector snippets for the actual repository binding." },
+  { name: "memory_graph", description: "Read the current import/symbol graph for the approved repository binding." },
 ] as const;

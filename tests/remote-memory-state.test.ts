@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { EventStore } from "../apps/service/src/store.ts";
 import { RepositoryMemory } from "../apps/service/src/memory.ts";
-import { MemoryBindingSchema, MemoryIndexSchema, PROTOCOL_VERSION, parse } from "../packages/protocol/src/index.ts";
+import { MemoryBindingSchema, MemoryIndexSchema, PROTOCOL_VERSION, parse, projectEvents, type CapabilityJob } from "../packages/protocol/src/index.ts";
 
 const root = { profileId: "default", projectId: "generated-project", root: "/generated/source", device: "1", inode: "2" };
 const remote = { peerDigest: "a".repeat(64), host: "generated.invalid", port: 2222, user: "generated", hostFingerprint: "SHA256:generated", workerDigest: "b".repeat(64) };
@@ -23,6 +23,23 @@ test("memory bindings distinguish exact Local/worktree identity from a Remote pe
   const index = { version: 1, binding: ssh, sourceDigest: "c".repeat(64), indexedFiles: 1, excludedFiles: 0, sourceBytes: 10, indexedAt: "2026-01-01T00:00:00Z" };
   assert.equal(parse(MemoryIndexSchema, index).binding.env, "Remote");
   assert.throws(() => parse(MemoryIndexSchema, { ...index, sourceBytes: 64 * 1024 * 1024 + 1 }), { code: "invalid_request" });
+});
+
+test("memory job projection retains one immutable original command and cannot move it to another root or job", () => {
+  const store = new EventStore(":memory:");
+  try {
+    const target = { profileId: "default", projectId: root.projectId, root: root.root, env: "Remote" as const, workspaceId: null, remote };
+    const job: CapabilityJob = { id: "generated-index", projectId: target.projectId, sessionId: "generated-session", workspaceId: null, parentTurnId: null,
+      kind: "memory.index", status: "running", progress: "Starting", resultDigest: null, error: null,
+      memory: { commandId: "generated-original", commandDigest: "c".repeat(64), authorityDigest: "d".repeat(64), target } };
+    store.commit([{ event_type: "job.started", profile_id: "default", project_id: job.projectId, session_id: job.sessionId, payload: { job } }]);
+    const history = store.events(), event = history.at(-1)!;
+    for (const altered of [
+      { ...job, id: "generated-second-job" },
+      { ...job, memory: { ...job.memory!, target: { ...target, root: "/generated/other-root" } } },
+      { ...job, memory: { ...job.memory!, commandDigest: "f".repeat(64) } },
+    ]) assert.throws(() => projectEvents([...history, { ...event, event_type: "job.started", seq: event.seq + 1, id: randomUUID(), payload: { job: altered } }]), { code: "memory_corrupt" });
+  } finally { store.close(); }
 });
 
 test("schema-27 scope migration rolls back exactly and preserves schema-26 ciphertext, original receipts and usable Local vectors", async () => {

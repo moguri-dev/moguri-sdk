@@ -47,6 +47,26 @@ process.once("message", (raw: unknown) => {
         }
       };
     }
+    if (raw.holdMemory === true) {
+      const capture = service.controller.remote.captureMemory.bind(service.controller.remote);
+      service.controller.remote.captureMemory = async (...args) => {
+        const result = await capture(...args); process.send?.({ kind: "held-memory-source", root: args[0] });
+        await new Promise<void>(() => {}); return result;
+      };
+    }
+    if (raw.holdMemoryStream === true) {
+      const connect = service.controller.remote.connect.bind(service.controller.remote);
+      service.controller.remote.connect = async (...args) => {
+        const connection = await connect(...args); let files = 0;
+        connection.wire.on("message", (value: unknown) => {
+          if (isRecord(value) && value.kind === "memory" && isRecord(value.frame) && value.frame.kind === "source.file" && ++files === 25) {
+            connection.child.stdout.pause();
+            process.send?.({ kind: "held-memory-source", root: "streaming" });
+          }
+        });
+        return connection;
+      };
+    }
     process.send?.({ kind: "connection", connection: service.connection });
   })().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Generated runtime bootstrap failed."); process.exitCode = 1; process.disconnect?.(); });
 });

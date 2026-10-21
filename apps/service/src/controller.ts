@@ -16,6 +16,7 @@ import {
   type RemotePlanSave, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse, type PlanFileResult, type SessionWorkspaceCommand,
   PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions, type McpServerConfig, type RemoteMcpCall,
   type RepositoryRemoteBoundary,
+  type MemoryTarget,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -148,6 +149,9 @@ export class ControlPlane extends EventEmitter {
       invalidateApprovals: (id) => this.invalidateApprovals(id),
       externalCall: (session, call, execute, identity) => this.externalCall(session, call, execute, identity),
       repositoryScope: (session) => this.repositoryScope(session),
+      memoryTarget: (session) => this.memoryTarget(session),
+      remoteMemoryCapture: (root, maxFiles, denied, signal, progress) => this.remote.captureMemory(root, maxFiles, denied, signal, progress),
+      remoteMemoryValidate: (request, signal) => this.remote.validateMemory(request, signal),
       remoteRepository: async (session, repository, signal) => {
         const captured = this.repositoryScope(session);
         if (captured.env !== "Remote" || captured.access !== "gh-cli") throw new MoguriError("repository_scope", "Authenticated Remote metadata needs the explicitly selected SSH account and root.", 409);
@@ -206,7 +210,7 @@ export class ControlPlane extends EventEmitter {
       remoteMcpScope: (session) => this.remoteMcpScope(session),
       remoteMcpTools: async (session, server) => {
         const catalog = await this.remoteMcpCatalog(session, server, AbortSignal.timeout(20_000));
-        return catalog.tools.filter((tool) => server !== null || ["grep_logs", "fetch_page"].includes(tool.name)).map((tool) => {
+        return catalog.tools.filter((tool) => server !== null || ["grep_logs", "fetch_page", ...(this.projection.settings.values.memory.enabled ? ["search_memory", "memory_graph"] : [])].includes(tool.name)).map((tool) => {
           const digest = frameDigest(["moguri-scoped-mcp-tool-v1", tool.digest, catalog.preview.digest]);
           this.mcpCatalogs.set(digest, { digest: tool.digest, scopeDigest: catalog.preview.digest, helperDigest: catalog.helperDigest, serverId: tool.serverId, tool: tool.name });
           while (this.mcpCatalogs.size > 512) { const first = this.mcpCatalogs.keys().next().value; if (first !== undefined) this.mcpCatalogs.delete(first); }
@@ -408,6 +412,16 @@ export class ControlPlane extends EventEmitter {
     const key = [this.profileId, session.projectId, session.workspaceId, env];
     const scopeDigest = frameDigest([key, root, identity, configuration.revision, configuration.values.repo, this.projection.policy.revision]);
     return { scopeKey: frameDigest(key), scopeDigest, profileId: this.profileId, projectId: session.projectId, workspaceId: session.workspaceId, env, root, access: configuration.values.repo.githubAccess, ...(remote ? { remote } : {}) };
+  }
+  private memoryTarget(session: Session): MemoryTarget {
+    if (!session.projectId || session.controls.env === "Sandbox") throw new MoguriError("memory_scope", "Repository memory needs a bound Local or qualified SSH project. No previous or Local root was reused.", 409);
+    if (session.controls.env === "Local") return { profileId: this.profileId, projectId: session.projectId, workspaceId: session.workspaceId, env: "Local", root: this.platform.managed.project(session).path };
+    if (session.workspaceId) throw new MoguriError("memory_scope", "A Local managed worktree cannot become a Remote memory root.", 409);
+    const target = this.remote.assertReady();
+    return { profileId: this.profileId, projectId: session.projectId, workspaceId: null, env: "Remote", root: this.remoteWorkspace(session)!, remote: {
+      host: target.host, port: target.port, user: target.user, hostFingerprint: remoteFingerprint(target), workerDigest: this.remote.readiness.workerDigest!,
+      peerDigest: frameDigest(["moguri-memory-peer-v1", target.host, target.port, target.user, target.hostKey]),
+    } };
   }
   private admissionSignature(session: Session): string {
     const root = session.projectId ? session.controls.env === "Remote" ? this.remoteWorkspace(session) : this.platform.managed.project(session).path : null;
@@ -908,7 +922,7 @@ export class ControlPlane extends EventEmitter {
     const input = call.arguments.arguments;
     await this.assertCurrentTool(session, call, !external);
     const scope = this.remoteMcpScope(this.session(session.id)), server = this.platform.server(String(call.arguments.serverId), session.projectId);
-    if (!server && !["grep_logs", "fetch_page"].includes(String(call.arguments.tool))) throw new MoguriError("remote_mcp_unqualified", "Remote Local-script or repository-memory MCP transport is not qualified. No host fallback.", 403);
+    if (!server && !["grep_logs", "fetch_page", "search_memory", "memory_graph"].includes(String(call.arguments.tool))) throw new MoguriError("remote_mcp_unqualified", "Transferred Local scripts are not qualified on this SSH host. No Local fallback.", 403);
     const helperDigest = await this.platform.gateway.workerDigest(), preview = remoteMcpPreview(scope, server, helperDigest);
     requireRemoteMcpGrant(preview);
     const cached = this.mcpCatalogs.get(String(call.arguments.schemaDigest));
@@ -941,6 +955,9 @@ export class ControlPlane extends EventEmitter {
       };
       check();
       const token = await this.platform.gateway.accessToken(server, run.abort.signal); check();
+      const preparedMemory = !server && ["search_memory", "memory_graph"].includes(entry.tool) ?
+        await this.platform.preparedMemory(session.id, entry.tool, input, entry.scopeDigest, run.abort.signal) : undefined;
+      check();
       const policy = authorizeTool(this.projection.settings.values, call, scope.root);
       if (policy.decision === "deny") throw new MoguriError("tool_denied", policy.reason, 403);
       entry = this.updateMcp(entry, { phase: "authorized", accessForwarded: token ? null : false });
@@ -948,7 +965,7 @@ export class ControlPlane extends EventEmitter {
       run.mcpDispatches ??= new Map(); run.mcpDispatches.set(call.id, dispatch);
       return { kind: "remote-mcp", operationId: entry.id, scopeDigest: entry.scopeDigest, stepId: request.stepId, callDigest: dispatch.callDigest, env: "Remote",
         root: scope.root, helperDigest, server, tool: entry.tool, arguments: input, schemaDigest: cached.digest,
-        reviewedDigest: String(call.arguments.schemaDigest), ...(token ? { accessToken: token } : {}) };
+        reviewedDigest: String(call.arguments.schemaDigest), ...(token ? { accessToken: token } : {}), ...(preparedMemory ? { preparedMemory } : {}) };
     } catch (error) {
       this.updateMcp(entry, { phase: "settled", status: run.abort.signal.aborted ? "stopped" : "failed", diagnostic: error instanceof MoguriError ? error.message : "Remote MCP admission failed; no operation was dispatched." });
       throw error;
@@ -1741,7 +1758,7 @@ export class ControlPlane extends EventEmitter {
         const started = this.history.find((event) => event.event_type === "turn.started" && event.turn_id === run.turnId);
         const prompt = started?.event_type === "turn.started" && started.payload.promptDigest ? this.store.blob(started.payload.promptDigest) : this.platform.prompt(current);
         run.repositoryContext ??= await this.repositoryContext(current);
-        const solverPrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext);
+        const solverPrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext, run.abort.signal);
         const effectivePrompt = phase === "router" ? ROUTER_PROMPT : solverPrompt;
         if (run.done || run.abort.signal.aborted) return;
         if (synthetic && (policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || permissionRevision !== this.projection.settings.permissionRevision ||
@@ -1900,7 +1917,7 @@ export class ControlPlane extends EventEmitter {
         } catch (error) { this.reply(run, { kind: "reply", requestId: request.requestId, error: error instanceof MoguriError ? error.message : "Remote MCP authorization failed; no credential or effect fallback." }); }
         return;
       }
-      if (session.controls.env === "Remote" && (request.call.name === "memory_search" || request.call.name === "moguri_config" && isRecord(request.call.arguments.proposal) && request.call.arguments.proposal.target === "repo-instructions")) {
+      if (session.controls.env === "Remote" && request.call.name === "moguri_config" && isRecord(request.call.arguments.proposal) && request.call.arguments.proposal.target === "repo-instructions") {
         this.reply(run, { kind: "reply", requestId: request.requestId, error: "This capability has no qualified remote workspace transport. No local host operation or repository fallback was used." }); return;
       }
       void this.platform.delegate(session, request.call, run.abort.signal).then((result) => this.reply(run, { kind: "reply", requestId: request.requestId, value: result })).catch((error: unknown) => {

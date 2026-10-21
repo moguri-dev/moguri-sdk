@@ -27,6 +27,7 @@ import { OperationEntrySchema, type OperationEntry, type OperationCoverage } fro
 import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
 import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
+import { MemoryIndexIntentSchema } from "./memory.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
@@ -512,7 +513,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const proposal = proposals.get(event.payload.proposalId);
       if (proposal) proposal.status = event.payload.approve ? "approved" : "rejected";
     }
-    if (event.event_type === "job.started") jobs.set(event.payload.job.id, { ...event.payload.job });
+    if (event.event_type === "job.started") {
+      const job = event.payload.job;
+      if (job.memory && (!Value.Check(MemoryIndexIntentSchema, job.memory) || job.kind !== "memory.index" ||
+        job.memory.target.profileId !== profileId || job.memory.target.projectId !== job.projectId || job.sessionId !== event.session_id ||
+        job.projectId !== event.project_id || (job.workspaceId ?? null) !== job.memory.target.workspaceId)) {
+        throw new MoguriError("memory_corrupt", "Repository memory job intent changed its original owning profile/session/root.", 409);
+      }
+      if (job.memory && ([...jobs.values()].some((entry) => entry.id !== job.id && entry.memory?.commandId === job.memory?.commandId) ||
+        jobs.get(job.id)?.memory && JSON.stringify(jobs.get(job.id)!.memory) !== JSON.stringify(job.memory))) {
+        throw new MoguriError("memory_corrupt", "Original repository memory command intent was duplicated or changed.", 409);
+      }
+      jobs.set(job.id, { ...job });
+    }
     if (event.event_type === "job.progress") {
       const job = jobs.get(event.payload.jobId);
       if (job) { job.progress = event.payload.progress; if (event.payload.status) job.status = event.payload.status; }

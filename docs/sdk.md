@@ -9,8 +9,9 @@ This is an alpha API. Qualified **0.20.0-alpha.1 uses protocol 26** and
 deliberately rejects incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
-The 0.21 private source proof used protocol 26; its subsequent typed cache/
-migration foundation uses protocol 27. Neither enables Remote SDK memory APIs.
+The 0.21 development source uses protocol 27 and implements session-bound
+Local/SSH memory through the same SDK. Its full/exact-artifact qualification
+remains separate from the current immutable 0.20 delivery.
 Current state migrations preserve schema-1 through schema-25 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
@@ -738,6 +739,28 @@ call `settings.update` with the observed revision. `memory.index(projectId)`
 returns a job ID. Wait for a terminal job, inspect its status, and use
 `mcp.readResult(jobId)` for the retained bounded result. Failure, partial work
 and cancellation must not be interpreted as completion.
+
+Project/worktree `memory.index/search/graph` are explicitly **Local**, never
+an active-session env guess. Protocol 27 adds `memory.indexSession(sessionId)`,
+`searchSession(sessionId, text, limit)`, `graphSession(sessionId, path)` and
+`state(sessionId)` for the service-resolved actual Local/Remote root.
+State/results expose typed env/profile/peer/path/device/inode/build and source
+digest; unindexed Remote scope fails `memory_missing`, not a Local substitute.
+Source validation uses the actual host's mtime/size/ignore policy; this is cheap
+freshness, not a hostile timestamp-preserving content proof. Stale hit text
+is empty, stale graph paths are omitted, and retrieved text stays untrusted.
+Metadata and vector/chunk/graph rows publish atomically. Original canonical
+index intent/receipt is event-first; restart or a missing receipt cannot
+recapture the job. A stop/result-retention failure after publication remains
+partial and inspectable through `memory.state`.
+
+Optional `memory.useInContext` uses that same session binding and whole bounded
+hits, never truncated JSON/history. Direct model search and builtin MCP
+`search_memory`/`memory_graph` share current source/policy checks. The expanded
+builtin Remote resource needs a new explicit grant; old two-tool grants do not
+widen. The worker validates prepared scope/query/tool/root before echoing
+approved cache data through its owned connector. No provider/refresh/private
+SSH credential is copied for memory. See [the memory contract](architecture/remote-repository-memory.md).
 
 ## Skills, scripts and plugins
 
