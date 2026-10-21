@@ -210,6 +210,28 @@ export class BudgetRuntime {
     };
     return { event: recorded(entry, snapshot.profileId), maxTokens: low };
   }
+  reservedOutput(session: Session, input: { stepId: string; modelId: string; apiModelId: string; role: ModelRole; inputEstimate: number; maxOutputTokens: number }): number {
+    session = this.session(session.id);
+    const snapshot = this.host.snapshot(), owner = this.owner(session), entry = snapshot.budgetEntries.find((entry) => entry.id === input.stepId);
+    if (!entry || entry.sessionId !== session.id || entry.ownerSessionId !== owner.id || entry.env !== session.controls.env ||
+      input.role === "unknown" || entry.role !== input.role || entry.modelId !== input.modelId || entry.apiModelId !== input.apiModelId ||
+      !integer(input.inputEstimate) || !integer(input.maxOutputTokens) || input.maxOutputTokens < 1 ||
+      !integer(entry.inputEstimate) || !integer(entry.outputLimit) || entry.outputLimit < 1 ||
+      input.inputEstimate > entry.inputEstimate || entry.outputLimit > input.maxOutputTokens ||
+      entry.reservedTokens !== entry.inputEstimate + entry.outputLimit) throw new MoguriError("budget_reservation", "This exact role/model/session/input has no matching bounded reservation. No held capacity was borrowed or dispatched.", 409);
+    if (this.host.events().some((event) => event.event_type === "model.started" && event.step_id === input.stepId)) throw new MoguriError("budget_duplicate", "The reserved model step already has a recorded dispatch. No lost-receipt request was replayed.", 409);
+    if (entry.status !== "reserved") throw new MoguriError("budget_reservation", "Only an original undispatched reservation can start. Settled or unknown work was not replayed or refunded.", 409);
+    const status = this.status(session.id, input.modelId), limits = this.limits(owner);
+    if (status.diagnostics.length) throw new MoguriError("budget_unavailable", status.diagnostics.join(" "), 409);
+    if (limits.some(({ limit }) => limit.usd !== undefined) && JSON.stringify(entry.rate) !== JSON.stringify(this.rate(input.modelId))) throw new MoguriError("budget_reservation", "The captured USD estimate changed before reserved dispatch. Review a new policy; no repricing or free call was invented.", 409);
+    for (const { scope, limit } of limits) {
+      const scoped = scope === "session" ? this.owned(snapshot.budgetEntries, owner.id) : snapshot.budgetEntries, global = scope === "global" ? this.host.global?.() : undefined;
+      const tokens = global ? global.chargedTokens : sum(scoped, chargedTokens), usd = global ? global.chargedUsdMicros : sum(scoped, chargedUsd);
+      if (limit.tokens !== undefined && (tokens === null || tokens > limit.tokens) ||
+        limit.usd !== undefined && (usd === null || usd > micros(limit.usd))) throw new MoguriError("budget_exhausted", "The latest cumulative policy is below actual/held usage. Reserved wind-down cannot override a stricter cap; work and its hold were preserved.", 409);
+    }
+    return entry.outputLimit;
+  }
   estimated(usage: Usage): Usage {
     const entry = this.host.snapshot().budgetEntries.find((entry) => entry.id === usage.stepId);
     const cost = entry?.rate && reportedModelUsage(usage) ?

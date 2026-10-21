@@ -14,7 +14,7 @@ export interface RoutingPolicy {
   classifierId: string; approvedSolvers: string[]; allowHosted: boolean; minimumConfidence: number;
 }
 export interface RoutingContext { env: "Local" | "Remote" | "Sandbox"; estimatedTokens: number; images: boolean; state: string }
-export type RoutingRole = "router" | "solver" | "draft" | "critic" | "revision" | "fallback";
+export type RoutingRole = "router" | "solver" | "draft" | "critic" | "revision" | "fallback" | "checkpoint";
 export interface RoutingCall { role: RoutingRole; modelId: string; outputLimit: number; reportedTokens: number | null; outcome: string; resolvedModelId?: string; reportedOutputTokens?: number | null; requestMs?: number; billedUsd?: null }
 function fail(code: string, message: string): never { throw new MoguriError(code, message); }
 function eligible(model: RoutingModel, policy: RoutingPolicy, context: RoutingContext): boolean {

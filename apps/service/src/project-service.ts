@@ -13,6 +13,14 @@ import { digest } from "./store.ts";
 import { readWorkspaceGit } from "./project-git.ts";
 import { prepareProjectDirectory } from "./project-directory.ts";
 
+export interface ReviewedGitFile { path: string; text: string; mode?: "100644" | "100755" }
+export interface ReviewedGitCommit { branch: string; base: string; commit: string }
+interface ReviewedGitHooks {
+  beforeCommit?: () => void;
+  publishIntent?: (value: ReviewedGitCommit) => Promise<void>;
+  committed?: (value: ReviewedGitCommit) => void;
+}
+
 export class ProjectService {
   constructor(private readonly snapshot: () => Snapshot, private readonly stateDir: string) {}
   values(id: string | null | undefined): ProjectSettings { return id ? this.configuration(id).values : defaultProjectSettings(); }
@@ -91,13 +99,30 @@ export class ProjectService {
     return { branch, base: (await this.git(project, ["rev-parse", "--verify", "HEAD"], signal)).trim() };
   }
   async artifactCommit(project: Project, path: string, text: string, expected: { branch: string; base: string }, signal: AbortSignal): Promise<{ branch: string; base: string; commit: string }> {
-    const current = await this.artifactCommitPreview(project, expected.branch, signal);
-    if (current.base !== expected.base) throw new MoguriError("artifact_base", "Repository HEAD changed after review. Inspect the persisted copy and review a new commit; no branch was created.", 409);
-    const commit = await this.commitFiles(project, [{ path, text }], expected.base, "docs: retain reviewed Moguri artifact history", signal);
+    return this.reviewedCommit(project, [{ path, text }], expected, "docs: retain reviewed Moguri artifact history", signal);
+  }
+  async reviewedCommit(project: Project, files: ReviewedGitFile[], expected: { branch: string; base: string }, message: string, signal: AbortSignal, hooks: ReviewedGitHooks = {}): Promise<ReviewedGitCommit> {
+    const captured = { ...expected }, bound = { ...project }, prepared = files.map((file) => ({ ...file }));
     signal.throwIfAborted();
-    if ((await this.git(project, ["rev-parse", "--verify", "HEAD"], signal)).trim() !== expected.base) throw new MoguriError("artifact_base", "Repository HEAD changed during commit preparation. No branch was created.", 409);
-    await this.git(project, ["update-ref", `refs/heads/${expected.branch}`, commit, "0".repeat(commit.length)], signal);
-    return { ...expected, commit };
+    hooks.beforeCommit?.(); signal.throwIfAborted();
+    if (!prepared.length || new Set(prepared.map((file) => file.path.normalize("NFC").toLowerCase())).size !== prepared.length) throw new MoguriError("reviewed_commit_files", "Review a nonempty set of distinct portable paths before preparing a commit.");
+    for (const file of prepared) {
+      validateProjectPath(file.path);
+      if (isProtectedProjectPath(file.path)) throw new MoguriError("reviewed_commit_path", "Reviewed commits cannot include protected project paths.");
+      if (!file.path.isWellFormed() || !file.text.isWellFormed() || file.mode !== undefined && !["100644", "100755"].includes(file.mode)) throw new MoguriError("reviewed_commit_files", "Reviewed files need lossless text/paths and an explicit supported regular-file mode.");
+    }
+    if (!message.trim() || !message.isWellFormed() || message.includes("\0")) throw new MoguriError("reviewed_commit_message", "Review a nonempty lossless commit message without NUL bytes.");
+    const current = await this.artifactCommitPreview(bound, captured.branch, signal);
+    if (current.base !== captured.base) throw new MoguriError("artifact_base", "Repository HEAD changed after review. Inspect the retained work and review a new commit; no branch was created.", 409);
+    const commit = await this.commitFiles(bound, prepared, captured.base, message, signal), result = { ...captured, commit };
+    await hooks.publishIntent?.({ ...result }); signal.throwIfAborted();
+    if ((await this.git(bound, ["rev-parse", "--verify", "HEAD"], signal)).trim() !== captured.base) throw new MoguriError("artifact_base", "Repository HEAD changed during commit preparation. No branch was created.", 409);
+    hooks.beforeCommit?.(); signal.throwIfAborted();
+    await this.git(bound, ["update-ref", `refs/heads/${captured.branch}`, commit, "0".repeat(commit.length)], signal);
+    hooks.committed?.({ ...result }); signal.throwIfAborted();
+    if ((await this.git(bound, ["rev-parse", "--verify", `refs/heads/${captured.branch}`], signal)).trim() !== commit) throw new MoguriError("reviewed_commit_changed", "The published checkpoint reference changed. Inspect its actual outcome; no successful commit was acknowledged.", 409);
+    hooks.beforeCommit?.(); signal.throwIfAborted();
+    return result;
   }
   async verifyArtifactCommit(project: Project, path: string, expected: { branch: string; commit: string }, signal: AbortSignal): Promise<void> {
     const ref = (await this.git(project, ["rev-parse", "--verify", `refs/heads/${expected.branch}`], signal)).trim();
@@ -105,7 +130,7 @@ export class ProjectService {
     const file = (await this.git(project, ["hash-object", "--no-filters", "--", path], signal)).trim();
     if (ref !== expected.commit || blob !== file) throw new MoguriError("artifact_commit_changed", "The reviewed local branch or committed artifact copy changed. Stored documents were preserved.", 409);
   }
-  private async commitFiles(project: Project, files: Array<{ path: string; text: string }>, base: string, message: string, signal: AbortSignal): Promise<string> {
+  private async commitFiles(project: Project, files: ReviewedGitFile[], base: string, message: string, signal: AbortSignal): Promise<string> {
     const temporary = await mkdtemp(join(this.stateDir, "repo-commit-"));
     try {
       const env = { GIT_INDEX_FILE: join(temporary, "index"), GIT_CONFIG_NOSYSTEM: "1" };
@@ -114,7 +139,7 @@ export class ProjectService {
         validateProjectPath(file.path);
         const staged = join(temporary, randomUUID()); await writeFile(staged, file.text, { mode: 0o600, signal });
         const hash = (await this.git(project, ["hash-object", "-w", "--no-filters", staged], signal, env)).trim();
-        await this.git(project, ["update-index", "--add", "--cacheinfo", `100644,${hash},${file.path}`], signal, env);
+        await this.git(project, ["update-index", "--add", "--cacheinfo", `${file.mode ?? "100644"},${hash},${file.path}`], signal, env);
       }
       signal.throwIfAborted();
       const tree = (await this.git(project, ["write-tree"], signal, env)).trim();
