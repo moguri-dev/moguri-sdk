@@ -85,10 +85,25 @@ typed immutable transitions, exact caps, unique atomic transfer, real bounded
 provider reporting, actual owned-worker stop, failed start append, captured
 prices, source-independent retention, isolation and schema rollback.
 
+The source spike passes **17/17 in 1.13 s**, the directly coupled encrypted
+legacy/accounting gate **70/70 in 3.53 s**, actual compiled CLI/shared commands
+**2/2 in 903.25 ms**, and the actual native TUI case in **191.52 ms**.
+Both bounded desktop/compact inspection rounds are complete. The initial
+plan-only price display was corrected from a misleading zero-price appearance
+to **No model calls**, without changing actual telemetry.
+
 Actual control-plane SIGKILL releases the unused plan while preserving one
 unknown **9,965-token** model reservation and exactly one request, with no
-source modification or retry. A full local compatibility run and external SDK
-qualification are still pending. No new immutable 0.23 archive/app is qualified.
+source modification or retry. The complete source gate passes **698/698 in
+481.26 s**, both type checks/build and all **45 hidden source desktop workflows
+in 1.6 min**. No failed or skipped test was counted as qualification.
+
+A fresh temporary packed protocol-30 SDK independently passes explicit script
+approval/rebuild, zero audit findings, all four entrypoint types and actual
+installed SDK/CLI/shared planned-hold/source-deletion/restart behavior, alongside
+all earlier Local/SSH/runtime contracts. Source audit is also zero.
+No new immutable 0.23 archive/app is qualified; 0.22 and older artifacts remain
+unchanged.
 
 Production compound ownership, bounded input planning for unknown future
 candidates, unused-plan scheduling/review, real-family quality and actually
