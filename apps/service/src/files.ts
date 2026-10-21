@@ -52,7 +52,7 @@ export async function readRegularFile(path: string, maxBytes: number): Promise<B
     return content;
   } finally { await file.close(); }
 }
-export async function writeProjectFile(root: string, input: string, text: string, expectedDigest: string, options: { signal?: AbortSignal; committed?: () => void } = {}): Promise<string> {
+export async function writeProjectFile(root: string, input: string, text: string, expectedDigest: string, options: { signal?: AbortSignal; beforeCommit?: () => void; committed?: () => void } = {}): Promise<string> {
   options.signal?.throwIfAborted();
   const path = await scopedPath(root, input, true);
   if (Buffer.byteLength(text) > MAX_TEXT) throw new MoguriError("file_limit", "File writes are limited to 128 KiB.");
@@ -76,8 +76,12 @@ export async function writeProjectFile(root: string, input: string, text: string
     await scopedPath(root, input, true);
     await checkBase();
     options.signal?.throwIfAborted();
+    options.beforeCommit?.();
+    options.signal?.throwIfAborted();
     await rename(temporary, path);
     options.committed?.();
+    const directory = await open(dirname(path), "r");
+    try { await directory.sync(); } finally { await directory.close(); }
     return digest(text);
   } finally {
     await file.close();

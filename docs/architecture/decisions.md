@@ -242,6 +242,10 @@ Every actual pi-ai role forwards its admitted output bound and retains
 known/unknown costs before continuation. The result is only a tool-less
 proposal. This does not qualify real model-family independence, candidate
 workspaces/acceptance/application, the owned ledger or finite wind-down.
+The subsequent [private owned-file probe](candidate-primitives.md) exercises
+actual SDK worktree staging, exact base/byte review and partial application
+without changing the source index/HEAD. Its caller hooks do not qualify durable
+candidate ownership, recovery, scheduler accounting or public admission.
 
 **Executable alpha boundary.** [Protocol 16 Single](routing.md) now adds an
 explicitly approved scoped pool/hosted-data flag, actual router/solver

@@ -71,3 +71,8 @@ unknown/over-limit metering and actual in-flight critic cancellation. No
 candidate is accepted or applied by these results. Owned worker/ledger/candidate
 workspaces/review/application, reserved wind-down/authorized checkpoint and
 exact SDK/native delivery remain required before public admission.
+
+The subsequent [owned candidate file probe](candidate-primitives.md) connects
+generated Cascade/Critique proposals to one actual SDK worktree stage and a
+separate exact-review application. It qualifies bounded file mechanics, not
+the production worker/lease/actor/ledger, durable recovery or public workflows.
