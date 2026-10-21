@@ -108,3 +108,17 @@ nested regression registration and a legacy-fixture guard incorrectly reading
 an already closed store. The regression was moved to top level and the legacy
 guard now uses the reopened generated database. No production data or denial
 policy was changed to make those fixtures pass.
+
+The committed foundation then passes the complete **631/631 local cases in
+494.00 s**, all **41 hidden source desktop workflows in 1.5 min**, and a
+temporary packed protocol-28 SDK's independently approved/rebuilt/audited
+installation, four external entrypoints and existing Local/SSH/runtime
+contracts. Source and consumer audits report zero vulnerabilities. The
+legacy gate's two closed-store fixture failures were corrected before this
+complete run; they were not counted as passes.
+
+This qualifies internal state/retention compatibility, not a public candidate
+stage/apply workflow, in-flight candidate-file SIGKILL, an immutable delivered
+0.22 archive or actual packaged desktop. The public Single subset and
+finite-budget/compound gates remain unchanged; the qualified 0.21 artifacts
+were not rebuilt or repacked.

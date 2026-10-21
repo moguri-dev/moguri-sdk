@@ -16,6 +16,10 @@ Current 0.22 development introduces protocol/database **28** for the internal
 [reviewed-candidate event/retention foundation](architecture/candidate-workflows.md),
 following private compound/file prerequisites. Public candidate operations are
 not exposed; kupo remains the qualified Single subset.
+The foundation passes 631 complete local cases, 41 hidden source desktop
+workflows and an independently installed temporary protocol-28 package across
+all four entrypoints and existing Local/SSH contracts. This does not qualify
+a new immutable delivery or candidate execution API.
 Current state migrations preserve schema-1 through schema-27 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
