@@ -77,6 +77,11 @@ owned and cleaned by the fixtures. Authentication keys and workload data are
 generated; the existing OS login supplies the fixture daemon's account.
 There is no personal authorization, microphone, model call, model weight or VM probe.
 
+The refreshed combined gate passes **14/14 in 11,356.49 ms**, including the
+five private console cases and existing real SSH worker/model/tool,
+host-key/cold-connect, image, project-free and stale-approval regressions.
+The shared agent/query frame ceiling and existing SSH semantics are unchanged.
+
 ## Required public acceptance
 
 Before advertising Remote user consoles, the authoritative service/SDK must
