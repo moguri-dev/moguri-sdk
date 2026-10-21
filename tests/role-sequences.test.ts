@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { projectRoleSequence, validateRoleSequenceLedger, type RoleSequenceRecord } from "../packages/protocol/src/role-sequences.ts";
+import { projectRoleSequence, validateRoleSequenceLedger, successfulRoleEntry, type RoleSequenceRecord } from "../packages/protocol/src/role-sequences.ts";
 import type { BudgetPlan } from "../packages/protocol/src/budget-plans.ts";
 import type { BudgetEntry } from "../packages/protocol/src/budgets.ts";
 
@@ -67,6 +67,16 @@ test("unknown, missing output telemetry or an actual output-limit violation cann
   for (const changed of [{ ...one.entry, status: "unknown" as const, reportedTokens: null }, { ...one.entry, outputTokens: null }, { ...one.entry, outputLimitViolation: true }]) {
     assert.throws(() => validateRoleSequenceLedger([second], [one.plan, two.plan], [changed, two.entry]), { code: "role_sequence_corrupt" });
   }
+});
+
+test("the shared continuation predicate requires a real positive safe output bound, never null or an implicit zero", () => {
+  const f = fixture(), entry = admitted(f.plans[0]!, "generated-step").entry;
+  assert.equal(successfulRoleEntry(entry), true); assert.equal(successfulRoleEntry(undefined), false);
+  for (const outputLimit of [null, 0, -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(successfulRoleEntry({ ...entry, outputLimit, outputTokens: 0 }), false);
+  }
+  assert.equal(successfulRoleEntry({ ...entry, outputTokens: null }), false);
+  assert.equal(successfulRoleEntry({ ...entry, reportedTokens: null }), false);
 });
 
 test("retaining a raw role result before derived settlement cannot itself authorize another role or sequence success", () => {

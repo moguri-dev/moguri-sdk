@@ -95,6 +95,7 @@ export function projectRoleSequence(previous: RoleSequenceRecord | undefined, va
 export const successfulRoleEntry = (entry: BudgetEntry | undefined): boolean => entry !== undefined && entry.status === "settled" &&
   entry.reportedTokens !== null && Number.isSafeInteger(entry.reportedTokens) && entry.reportedTokens >= 0 &&
   typeof entry.outputTokens === "number" && Number.isSafeInteger(entry.outputTokens) && entry.outputTokens >= 0 &&
+  typeof entry.outputLimit === "number" && Number.isSafeInteger(entry.outputLimit) && entry.outputLimit > 0 &&
   entry.outputTokens <= entry.reportedTokens && entry.outputTokens <= entry.outputLimit && entry.outcome === "stop" && !entry.outputLimitViolation;
 
 export function validateRoleSequenceLedger(records: RoleSequenceRecord[], plans: BudgetPlan[], entries: BudgetEntry[]): void {

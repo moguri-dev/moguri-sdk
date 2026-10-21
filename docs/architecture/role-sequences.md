@@ -180,7 +180,8 @@ above remain the delivery baseline, not a claimed immutable 0.26 release.
 
 Generated tests cover maximum JSON escaping, exact finite capacity versus one
 token less, whole initial transaction rollback, failed actual start/result
-inserts, concurrent/deduplicated ownership, revoked source/model/pool authority,
+inserts, concurrent/deduplicated ownership, source/model changes and unapproved
+pool authority,
 unknown/over-limit/incomplete/tool/empty results, deadline, stop and both failed
 stop-intent journals, caller mutation, source deletion/reopen and minimal
 deleted-intent refusal. None of the generated role labels attests independence
