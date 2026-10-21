@@ -174,9 +174,27 @@ inference, retained first result and completed sequence retain 0, 1, 1 and 3
 original requests; every restarted request count is zero. Unknown work stays
 held, known first/all output retains 42/126 tokens, and unused plans release.
 Recovery mocks model preparation and checkout resolution to fail if invoked.
-Both type checks/declaration build pass. Whole-source, external-consumer and
-desktop compatibility are still pending; the qualified 0.25 SDK/native records
-above remain the delivery baseline, not a claimed immutable 0.26 release.
+Both type checks/declaration build pass. A fresh installed 0.26 SDK independently
+approves/rebuilds/audits with zero findings and type-checks all four entrypoints,
+including its typed internal Node authority. The actual installed controller
+and worker perform three roles, retain 126 reported tokens and explicit
+untrusted contexts, expose SDK/CLI/shared inspection, preserve both checkouts/
+index/HEAD, then retain raw data through source deletion/reopen. Missing receipts
+and explicit report deletion cannot resurrect another paid request.
+Its actual installed worker also passes **12/12 private transport/ledger probes
+in 3.53 s**; no source worker substitutes for the installed path.
+The extended `node scripts/compound-routing-spike.mjs` now passes **60/60 in
+56.12 s**, covering actual controller execution/recovery and the same shared
+positive-bound predicate alongside the prior generated transport probes.
+
+Complete source compatibility passes **781/781 in 602.46 s**, with no failed,
+cancelled or skipped cases. All **49 hidden source desktop flows pass in
+1.8 min**, and source audit has zero findings. An initial full run was stopped
+when the extracted predicate's strict type check exposed nullable legacy output
+capacity; the explicit positive safe bound and pure regression now reject
+null/zero/unsafe values. The interrupted run is not a pass.
+The qualified 0.25 SDK/native records above remain the delivery baseline,
+not a claimed immutable 0.26 release.
 
 Generated tests cover maximum JSON escaping, exact finite capacity versus one
 token less, whole initial transaction rollback, failed actual start/result
@@ -187,6 +205,6 @@ stop-intent journals, caller mutation, source deletion/reopen and minimal
 deleted-intent refusal. None of the generated role labels attests independence
 or live model quality.
 
-Production compound policy, complete unknown-future context bounds, eligible
+Production compound policy/plan-to-role binding, eligible
 family/privacy validation, candidate/critic/revision decisions, actual-policy
 accepted-work wind-down and live quality remain separate admission gates.

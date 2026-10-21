@@ -6,6 +6,11 @@ protocol, not public Cascade/Critique admission, a durable compound workflow,
 model-family/quality qualification, a second model loop or automatic acceptance.
 The immutable 0.23 delivery is unchanged; Sandbox stays paused and live personal
 model calls remain off.
+The qualified 0.25 SDK/native delivery includes this prerequisite. Source 0.26
+also connects the [independent role-state executor](role-sequences.md#internal-owned-execution-026-source)
+to the actual control plane, not only the fixture host described below.
+That executor still does not qualify public compound scheduling or model-family
+quality, and no immutable 0.26 delivery is implied.
 
 Reuse maintained pi-ai, Node/abort/IPC and TypeBox (MIT), the existing worker,
 bounded requests, normalized results, private context and planned-capacity

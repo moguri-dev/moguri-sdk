@@ -295,6 +295,17 @@ remain data-only and cannot authorize another call on unknown accounting.
 This adds shared inspection and no-replay recovery, not a new model-start,
 quality or public compound policy.
 
+Source 0.26 connects those records and complete future context/role holds to the
+actual control plane and worker. Its internal Node executor shares original
+intent, concurrency, receipts and removal/commit guards. Actual per-role raw
+contexts/results survive real controller SIGKILL and source deletion without
+replay; later contexts explicitly label prior output as untrusted data.
+The extended `compound-routing-spike.mjs` covers this integrated mechanical
+path alongside the earlier transport/pure-ledger probes. No new event shape,
+database, model loop or outward SDK creator is introduced. Pattern/pool
+selection, genuine family/quality, candidate decisions and actually authorized
+accepted-work wind-down remain separate gates; finite kupo stays blocked.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.
