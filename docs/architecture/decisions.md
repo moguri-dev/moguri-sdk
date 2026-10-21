@@ -500,8 +500,11 @@ Model declarations are env-scoped. Remote-local discovery and inference
 originate on the SSH host; Copilot forwarding is an explicit short-lived grant
 and its model metadata is rechecked remotely. Project-free chats keep null
 roots. Changed host keys, targets, workspaces, permissions and approvals fail
-closed. Remote console/MCP/memory/diff/plan transports remain unavailable until
-qualified, not locally substituted.
+closed. Additional transports are qualified separately, never locally
+substituted: protocol 17 adds read-only files/Git/plan, protocol 20 exact
+provider-free plan saves, and protocol 24 [reviewed Remote MCP](remote-mcp.md)
+with independent peer/resource access grants and no refresh forwarding.
+Remote consoles and repository-memory retrieval remain unavailable.
 
 Protocol/database migration 8 preserves prior inputs, settings and event/grant
 identities. Actual generated macOS SSH, worker/file/model operations, image

@@ -6,8 +6,8 @@ Remote MCP, following the measured
 qualified delivery remains 0.17. Scoped discovery and exact approved model or
 provider-free external calls now run over SSH after an explicit grant. CLI, actual OpenTUI
 and factory-dark desktop share review/revoke/operation APIs.
-This is development source, not a qualified 0.18 archive; a saved grant is not
-a claim that a tool operation ran.
+This remains a macOS development alpha; a saved grant is not a claim that a
+tool operation ran. Exact archive qualification is recorded in setup.
 
 Reuse the existing Node/MCP SDK (MIT), OpenSSH transport (BSD), private worker,
 owned connector, exact tool approvals, all-role accounting and encrypted
@@ -165,3 +165,11 @@ desktop workflows pass in 1.2 min**. Both type checks and the source audit
 pass with zero vulnerabilities. These are source/build checks, not an
 independent installed SDK or actual packaged-runtime qualification. Existing
 OpenTUI experimental FFI and Ghostty chunk-size warnings are retained.
+
+The exact alpha.1 SDK and actual bundled application subsequently pass
+independent installation/types/runtime and 35 packaged desktop workflows,
+including actual granted no-model SSH MCP. A cross-surface copy check then
+found an obsolete Remote SSH settings sentence claiming MCP unavailable.
+Alpha.2 corrects that sentence with a native regression assertion; alpha.1
+archives are retained unchanged. See setup for both exact identities and the
+new candidate's qualification. No extra permission or transport was introduced.

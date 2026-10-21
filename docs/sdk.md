@@ -5,21 +5,21 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Protocol 23 deliberately rejects incompatible running
+This is an alpha API. Protocol 24 deliberately rejects incompatible running
 services and requires the matching SSH worker for exact user plan operations,
-reviewed compaction and model telemetry. State migrations preserve schema-1
-through schema-22 history, sessions, drafts,
+reviewed compaction, model telemetry and explicitly granted Remote MCP.
+State migrations preserve schema-1 through schema-23 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
 `node bin/moguri.mjs service restart`; do not delete its state.
-The unqualified 0.18 development source adds protocol-24
-[Remote MCP grant/state foundations](architecture/remote-mcp.md), preserving
-schema-23 history. Explicit peer/resource grants are deny-by-default.
+The 0.18 source adds [authoritative Remote MCP](architecture/remote-mcp.md).
+Explicit peer/resource grants are deny-by-default.
 Source SDK model/external calls now use the owned SSH worker, encrypted
 intent/result retention and no-replay crash reconciliation; shared native
-clients are wired, while exact delivery qualification remains in progress. This does not
-promote an 0.18 archive or change the recorded 0.17 delivery.
+clients share the same review and inspection APIs. Exact archive identities
+and qualification are recorded in [setup](setup.md); older immutable
+deliveries are not repacked.
 
 ## Build and consume
 
