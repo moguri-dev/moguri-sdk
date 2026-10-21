@@ -15,6 +15,7 @@ import { workerCatalog } from "./worker-queries.ts";
 import { readWorkspace } from "./workspace-reads.ts";
 import { discoverRemoteMcp } from "./remote-mcp-runtime.ts";
 import { probeTerminalBuild } from "./terminal-build.ts";
+import { readRepositoryCli } from "./repository-metadata.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -253,6 +254,15 @@ async function frontend(): Promise<void> {
         if (!init.workspace || !info.root) throw new MoguriError("remote_workspace_read", "Remote workspace reads need the exact approved root and read policy.");
         const result = await readWorkspace(info.root, init.workspace, abort.signal);
         outer.send({ kind: "workspace", info, result }, () => outer.end()); return;
+      }
+      if (init.action === "repository") {
+        if (!info.root || !init.repository) throw new MoguriError("repository_binding", "Repository metadata needs its exact approved SSH root and repository identity.", 409);
+        const stopped = () => abort.abort(new Error("Remote repository read control stopped; cleanup may be unconfirmed."));
+        process.once("SIGTERM", stopped); process.once("SIGHUP", stopped);
+        try {
+          const metadata = await readRepositoryCli(info.root, init.repository, abort.signal);
+          outer.send({ kind: "repository", repository: init.repository, metadata, info }, () => outer.end()); return;
+        } finally { process.off("SIGTERM", stopped); process.off("SIGHUP", stopped); }
       }
       if (init.action === "mcp-tools") {
         if (!info.root || !init.mcpTools) throw new MoguriError("remote_mcp_context", "MCP discovery needs the exact approved Remote root and helper request.", 409);

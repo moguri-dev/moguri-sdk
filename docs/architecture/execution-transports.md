@@ -48,8 +48,11 @@ Remote memory/scripts remain blocked.
 Protocol 22 reuses the qualified Git view for optional immutable repository
 attribution at model admission. It reads the actual pinned Remote origin and
 rechecks authority after await; metadata lookup is separately explicit and
-displayed as public control-plane access. Remote authenticated GitHub CLI
-metadata is unavailable, never a host-local credential/root fallback.
+displayed as public control-plane access. Protocol-26 development adds
+[explicit authenticated repository metadata](remote-github-metadata.md)
+through the selected SSH host's existing CLI account, with retained original
+peer/root/build provenance and no controller-account fallback. This does not
+move client attachments or linked-PR observation onto that host.
 
 ## Authority and identities
 

@@ -10,6 +10,13 @@ const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const sequence = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const nullableText = Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]);
 const path = Type.String({ minLength: 1, maxLength: 4096 });
+const RepositoryApiMetadataSchema = Type.Object({
+  id: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), name: Type.String({ minLength: 1, maxLength: 100 }),
+  full_name: Type.String({ minLength: 1, maxLength: 256 }), html_url: Type.String({ maxLength: 512 }),
+  owner: Type.Object({ login: Type.String({ minLength: 1, maxLength: 128 }), type: Type.Union([Type.Literal("User"), Type.Literal("Organization")]) }, { additionalProperties: false }),
+  private: Type.Boolean(), visibility: Type.Union([Type.Literal("public"), Type.Literal("private"), Type.Literal("internal")]),
+  license: Type.Object({ spdx_id: Type.Union([Type.String({ maxLength: 100 }), Type.Null()]) }, { additionalProperties: false }),
+}, { additionalProperties: false });
 export const WorkspaceReadQuerySchema = Type.Union([
   Type.Object({ type: Type.Literal("session.files"), path }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("session.file"), path }, { additionalProperties: false }),
@@ -45,13 +52,14 @@ export const ForegroundQuerySchema = Type.Object({
 }, { additionalProperties: false });
 export type ForegroundQuery = Static<typeof ForegroundQuerySchema>;
 export const BridgeInitSchema = Type.Object({
-  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
+  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("repository"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect")]),
   protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
   stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
   runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
   catalog: Type.Optional(catalog),
   context: Type.Optional(ProjectSettingsSchema),
   workspace: Type.Optional(WorkspaceReadRequestSchema),
+  repository: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   mcpTools: Type.Optional(RemoteMcpToolsRequestSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,
@@ -81,6 +89,7 @@ export const BridgeEnvelopeSchema = Type.Union([
   Type.Object({ kind: Type.Literal("catalog"), status: Type.Integer({ minimum: 100, maximum: 599 }), body: Type.String({ maxLength: 512 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("context"), text: Type.String({ maxLength: 256 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("workspace"), result: WorkspaceReadResultSchema, info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("repository"), repository: Type.String({ minLength: 1, maxLength: 512 }), metadata: RepositoryApiMetadataSchema, info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("mcp-tools"), tools: Type.Array(McpToolInfoSchema, { maxItems: 512 }), helperDigest: hash, info: BridgeInfoSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("inspection"), ...SavedStatusSchema.properties, frames: Type.Array(BridgeFrameSchema, { maxItems: 128 }), nextSequence: sequence }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("error"), message: Type.String({ maxLength: 4096 }), code: Type.Optional(Type.String({ maxLength: 128 })) }, { additionalProperties: false }),

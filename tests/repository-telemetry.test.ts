@@ -159,7 +159,9 @@ test("actual SSH attribution observes the remote origin, rejects host CLI fallba
     assert.equal(calls[0]?.env, "Remote"); assert.equal(calls[0]?.repository?.fullName, "generated/example");
     const configuration = (await sdk.projects.configuration(fixture.session().projectId)).configuration;
     await sdk.projects.configure(configuration.projectId, { ...configuration.values, repo: { ...configuration.values.repo, githubAccess: "gh-cli" } }, configuration.revision);
-    await assert.rejects(() => sdk.repositories.preview(fixture.sessionId), /Remote GitHub CLI.*not qualified/);
+    const authenticated = (await sdk.repositories.preview(fixture.sessionId)).preview;
+    assert.equal(authenticated.lookupBoundary, "remote-gh-cli");
+    assert.equal(authenticated.remote?.root, fixture.workspace);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

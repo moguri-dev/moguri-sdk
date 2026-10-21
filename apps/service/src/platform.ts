@@ -39,6 +39,7 @@ import { BudgetRuntime } from "./budgets.ts";
 import { OperationTelemetry } from "./operation-telemetry.ts";
 import { RepositoryTelemetry } from "./repository-telemetry.ts";
 import { remoteMcpPreview, type RemoteMcpScope } from "./remote-mcp.ts";
+import type { RepositoryApiMetadata } from "./repository-metadata.ts";
 
 export interface PlatformHost {
   snapshot(): Snapshot;
@@ -49,6 +50,7 @@ export interface PlatformHost {
   externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }): Promise<string>;
   repositoryScope(session: Session): RepositoryScope;
   repositoryGit(session: Session, signal: AbortSignal): Promise<string | null>;
+  remoteRepository(session: Session, repository: string, signal: AbortSignal): Promise<RepositoryApiMetadata>;
   subagent(session: Session, prompt: string): string;
   stopOwnedSession(id: string): void;
   cancelExternalJob(id: string): boolean;
@@ -141,6 +143,7 @@ export class PlatformRuntime {
     this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);
     this.repositories = new RepositoryTelemetry({
       snapshot: () => this.snapshot(), scope: host.repositoryScope, git: host.repositoryGit,
+      remoteRead: host.remoteRepository,
       lookupRoot: (session) => session.controls.env === "Local" ? this.managed.project(session).path : stateDir,
       commit: (events) => this.host.commit(events),
       job: (session, execute, settled) => this.job("repository.refresh", session.projectId, session.id, (signal, _progress, id) => execute(signal, id), settled),

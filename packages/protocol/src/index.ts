@@ -29,7 +29,7 @@ import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 export * from "./inputs.ts";
 
-export const PROTOCOL_VERSION = 25;
+export const PROTOCOL_VERSION = 26;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -394,6 +394,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "repository.recorded") {
       if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(RepositoryObservationSchema, event.payload.observation) || event.payload.observation.profileId !== profileId) throw new MoguriError("repository_corrupt", "Repository observation is invalid or outside its independent owning profile. State was preserved.", 409);
+      const observation = event.payload.observation;
+      if (observation.remote && observation.env !== "Remote" ||
+        observation.lookupBoundary === "remote-gh-cli" && (observation.env !== "Remote" || observation.access !== "gh-cli" || !observation.remote) ||
+        observation.access === "public" && observation.lookupBoundary !== "control-plane-public" ||
+        observation.access === "gh-cli" && observation.lookupBoundary !== (observation.env === "Remote" ? "remote-gh-cli" : "control-plane-gh-cli")) {
+        throw new MoguriError("repository_corrupt", "Repository access, execution host and retained lookup boundary disagree. No alternate account was adopted.", 409);
+      }
       repositoryObservations.set(event.payload.observation.scopeKey, structuredClone(event.payload.observation));
     }
     if (event.event_type === "operation.recorded") {

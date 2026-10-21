@@ -5,8 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Qualified **0.19.0-alpha.1 uses protocol 25** and
-deliberately rejects incompatible running services. Remote execution requires
+This is an alpha API. Qualified **0.19.0-alpha.1 uses protocol 25**;
+current **0.20 development uses protocol 26**. Both deliberately reject
+incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
 Current state migrations preserve schema-1 through schema-24 history, sessions, drafts,
@@ -646,9 +647,14 @@ owned job; inspect `jobs.wait(id)` and `repositories.state(sessionId)`.
 not historical names, metadata or charges.
 
 Public metadata uses the control-plane API without credentials; Local
-`gh-cli` requires explicitly selected project access. Remote authenticated CLI
-is unavailable, never a Local account fallback. Copilot credentials are not
-reused. No network lookup occurs at model admission: configured calls recheck
+`gh-cli` requires explicitly selected project access. Protocol-26 development
+uses the selected SSH account for Remote `gh-cli`, never a Local account
+fallback. Review `preview.remote` host/port/login/key fingerprint/root/build
+and `lookupBoundary: "remote-gh-cli"` before explicit refresh. The retained
+observation keeps that proof across restart. Missing tools/accounts and
+unconfirmed cancellation fail visibly without another request. Copilot
+credentials are not reused. Exact 0.20 archive acceptance remains pending.
+No network lookup occurs at model admission: configured calls recheck
 their actual Git identity and capture previously verified metadata or remain
 unassigned.
 

@@ -6,7 +6,12 @@ const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ p
 const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 const integer = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const access = Type.Union([Type.Literal("public"), Type.Literal("gh-cli")]);
-const boundary = Type.Union([Type.Literal("control-plane-public"), Type.Literal("control-plane-gh-cli")]);
+const boundary = Type.Union([Type.Literal("control-plane-public"), Type.Literal("control-plane-gh-cli"), Type.Literal("remote-gh-cli")]);
+export const RepositoryRemoteBoundarySchema = object({
+  host: Type.String({ minLength: 1, maxLength: 253 }), port: Type.Integer({ minimum: 1, maximum: 65535 }),
+  user: id, root: Type.String({ minLength: 1, maxLength: 4096 }), hostFingerprint: Type.String({ minLength: 1, maxLength: 128 }), workerDigest: hash,
+});
+export type RepositoryRemoteBoundary = Static<typeof RepositoryRemoteBoundarySchema>;
 export const RepositoryMetadataSchema = object({
   id: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), url: Type.String({ maxLength: 512 }), fullName: Type.String({ maxLength: 256 }),
   owner: id, ownerKind: Type.Union([Type.Literal("organization"), Type.Literal("user")]),
@@ -25,15 +30,16 @@ export const RepositoryObservationSchema = object({
   id, scopeKey: hash, scopeDigest: hash, revision: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   profileId: id, projectId: id, workspaceId: nullable(id), env: Type.Union([Type.Literal("Local"), Type.Literal("Remote")]),
   status: Type.Union([Type.Literal("active"), Type.Literal("cleared")]), actor: Type.Literal("user"), jobId: nullable(id),
-  access, lookupBoundary: boundary, repository: nullable(RepositoryMetadataSchema), createdAt: Type.String({ maxLength: 40 }), updatedAt: Type.String({ maxLength: 40 }),
+  access, lookupBoundary: boundary, remote: Type.Optional(RepositoryRemoteBoundarySchema),
+  repository: nullable(RepositoryMetadataSchema), createdAt: Type.String({ maxLength: 40 }), updatedAt: Type.String({ maxLength: 40 }),
 });
 export type RepositoryObservation = Static<typeof RepositoryObservationSchema>;
 export interface RepositoryScope {
   scopeKey: string; scopeDigest: string; profileId: string; projectId: string; workspaceId: string | null; env: "Local" | "Remote";
-  root: string; access: "public" | "gh-cli";
+  root: string; access: "public" | "gh-cli"; remote?: RepositoryRemoteBoundary;
 }
 export interface RepositoryPreview extends RepositoryScope {
-  bindingDigest: string; repository: string; revision: number; lookupBoundary: "control-plane-public" | "control-plane-gh-cli";
+  bindingDigest: string; repository: string; revision: number; lookupBoundary: Static<typeof boundary>;
 }
 export interface RepositoryCapture { repository: RepositoryAttribution | null; repositoryDiagnostic: RepositoryDiagnostic | null }
 export interface RepositoryCoverage { attributedCalls: number; unattributedCalls: number; unverifiedLicenseCalls: number }

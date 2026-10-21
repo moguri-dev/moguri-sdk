@@ -1,8 +1,14 @@
 import licenseList from "spdx-license-list";
 import { isRecord, MoguriError, type RepositoryMetadata } from "../../../packages/protocol/src/index.ts";
 import { fetchJson } from "./network.ts";
+import { runProgram } from "./program.ts";
 
 export interface RepositoryReadBinding { digest: string; repository: string | null }
+export interface RepositoryApiMetadata {
+  id: number; name: string; full_name: string; html_url: string;
+  owner: { login: string; type: "User" | "Organization" };
+  private: boolean; visibility: "public" | "private" | "internal"; license: { spdx_id: string | null };
+}
 export function repositoryIdentity(input: string) {
   let url: URL;
   try { url = new URL(input); } catch { throw new MoguriError("repository_identity", "A canonical GitHub repository identity is required."); }
@@ -44,6 +50,32 @@ export function observedRepository(expected: string, value: unknown): Repository
     id: value.id, url: value.html_url, fullName: value.full_name, owner: value.owner.login, ownerKind: value.owner.type === "Organization" ? "organization" as const : "user" as const,
     visibility, licenseId, osiApproved, publicOsiLicensed: visibility === "public" ? osiApproved : false,
     licenseData: "spdx-license-list@6.12.0" as const, observedAt: new Date().toISOString(),
+  };
+}
+export async function readRepositoryCli(root: string, repository: string, signal: AbortSignal): Promise<RepositoryApiMetadata> {
+  const identity = repositoryIdentity(repository);
+  let text: string;
+  try {
+    text = await runProgram("gh", ["api", "--hostname", "github.com", "--method", "GET", `repos/${identity.fullName}`], {
+      cwd: root, signal, timeoutMs: 8000, maxBytes: 2 * 1024 * 1024, label: "Read selected GitHub repository metadata",
+      env: { GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" },
+    });
+  } catch (error) {
+    if (!(error instanceof MoguriError)) throw error;
+    if (error.code === "program_unavailable") throw new MoguriError("repository_cli_unavailable", "GitHub CLI is unavailable on the selected execution host. Install and authenticate it there explicitly; no other account or public lookup was used.", 503);
+    if (error.code === "program_partial") throw new MoguriError("program_partial", "GitHub metadata read stopped, exceeded its deadline or output limit. No observation was retained; inspect the selected host before retrying.", 409);
+    if (error.code === "program_failed") throw new MoguriError("repository_cli_failed", "GitHub CLI rejected the repository read on the selected execution host. Check that host's account and repository access; raw CLI diagnostics were not transferred.", 409);
+    throw error;
+  }
+  signal.throwIfAborted();
+  let source: unknown;
+  try { source = JSON.parse(text); }
+  catch (error) { if (error instanceof SyntaxError) throw new MoguriError("repository_cli_response", "GitHub CLI returned invalid repository JSON. No observation was retained."); throw error; }
+  const metadata = observedRepository(repository, source);
+  return {
+    id: metadata.id, name: repositoryIdentity(metadata.url).name, full_name: metadata.fullName, html_url: metadata.url,
+    owner: { login: metadata.owner, type: metadata.ownerKind === "organization" ? "Organization" : "User" },
+    private: metadata.visibility !== "public", visibility: metadata.visibility, license: { spdx_id: metadata.licenseId },
   };
 }
 export async function loadRepository(readBinding: () => Promise<RepositoryReadBinding>, reader: (fullName: string) => Promise<unknown>, signal: AbortSignal) {

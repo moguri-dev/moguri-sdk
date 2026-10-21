@@ -45,13 +45,19 @@ Access follows the explicit project's `repo.githubAccess` setting:
   credential in metadata, workers, prompts or command receipts.
 - Remote Git origin is read on the pinned machine, not a Local checkout.
   Public metadata lookup still occurs at the displayed control plane.
-  Remote `gh-cli` metadata access is unqualified and fails explicitly rather
-  than using the host-local account or another environment.
+  Protocol-26 development adds [Remote `gh-cli` metadata](remote-github-metadata.md)
+  through that pinned host's existing account and exact repository-only GET.
+  Preview/observation expose `remote-gh-cli` and captured host/key/root/build
+  provenance. No control-plane account, copied credential or public fallback
+  is used. Exact 0.20 delivery qualification remains separate.
 
 `repository.recorded` retains a typed `actor:"user"` observation or explicit
 clear revision under the profile root. It captures only canonical identity,
 actual owner kind/visibility, nullable recognized license evidence, dataset/
 observation time, scope digest, access boundary and exact refresh job ID.
+Remote authenticated observations also retain their captured peer/root/build.
+Migration 26 preserves schema-25 data/keys/receipts and old observations;
+legacy Local/public metadata is not retroactively assigned another host.
 Descriptions, response bodies, credentials and credential-bearing clone URLs
 are excluded. Schema-21 data/keys/grants/receipts are preserved by migration 22.
 Another profile never receives these observations or attributed ledger rows.

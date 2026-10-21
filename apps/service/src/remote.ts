@@ -18,6 +18,7 @@ import { probeTerminalDigests } from "./terminal-build.ts";
 import type { RemoteTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
 import { remoteTerminalPeer, terminalOwnerScope } from "./terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES } from "./terminal-protocol.ts";
+import { repositoryIdentity, type RepositoryApiMetadata } from "./repository-metadata.ts";
 
 export function validateRemoteTarget(target: RemoteTarget | null): void {
   if (!target) return;
@@ -136,7 +137,7 @@ export class RemoteRuntime {
         connection.wire.on("message", (raw) => {
           if (!Value.Check(BridgeEnvelopeSchema, raw)) { settle(undefined, new MoguriError("remote_protocol", "Remote worker protocol/build is incompatible.", 409)); return; }
           if (raw.kind === "error") settle(undefined, new MoguriError(raw.code ?? "remote_bootstrap", raw.message, 409));
-          else if (["probe", "catalog", "context", "workspace", "mcp-tools", "inspection"].includes(raw.kind)) settle(raw);
+          else if (["probe", "catalog", "context", "workspace", "repository", "mcp-tools", "inspection"].includes(raw.kind)) settle(raw);
         });
         signal.throwIfAborted();
         connection.wire.send(init);
@@ -203,6 +204,22 @@ export class RemoteRuntime {
     if (this.closed || frameDigest(this.target()) !== frameDigest(target) || !this.readiness.ready) throw new MoguriError("remote_changed", "Remote configuration/readiness changed during the workspace read. No stale response or Local fallback was used.", 409);
     if (result.kind !== "workspace" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.result.type !== request.query.type) throw new MoguriError("remote_workspace_read", "Remote workspace response did not match its approved root, build or requested operation.", 409);
     return result.result;
+  }
+  async readRepository(root: string, repository: string, signal: AbortSignal): Promise<RepositoryApiMetadata> {
+    signal.throwIfAborted(); repositoryIdentity(repository);
+    const target = this.assertReady(), workerDigest = this.readiness.workerDigest!;
+    try {
+      const result = await this.query(target, { action: "repository", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir, root, repository }, signal);
+      signal.throwIfAborted();
+      if (this.closed || frameDigest(this.target()) !== frameDigest(target) || !this.readiness.ready ||
+        result.kind !== "repository" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.repository !== repository) {
+        throw new MoguriError("remote_repository_response", "Remote repository read did not match its captured peer/root/build/request.", 409);
+      }
+      return result.metadata;
+    } catch (error) {
+      if (error instanceof MoguriError && ["repository_cli_unavailable", "repository_cli_failed", "repository_cli_response", "repository_response", "repository_identity", "repository_license", "program_partial"].includes(error.code)) throw error;
+      throw new MoguriError("program_partial", "Remote repository read or process cleanup is unconfirmed after control, scope or connection loss. No observation, retry or Local/account fallback was applied.", 409);
+    }
   }
   async forget(execution: RemoteExecution): Promise<void> {
     try { await this.vault.remove(execution.id, AbortSignal.timeout(15_000)); }

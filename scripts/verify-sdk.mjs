@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const temporary = await mkdtemp(join(tmpdir(), "moguri-sdk-consumer-"));
-let ssh;
+let ssh, github, controllerGithub;
 try {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const archive = process.argv[2] ? resolve(process.argv[2]) :
@@ -21,16 +21,21 @@ try {
   execFileSync("npm", ["install-scripts", "approve", manifest.name, "--no-allow-scripts-pin"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["rebuild", manifest.name, "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["audit", "--audit-level=moderate"], { cwd: consumer, stdio: "inherit" });
+  const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   if (process.platform === "darwin") {
     const { createSshTarget } = await import("../tests/fixtures/ssh-target.ts");
     const directory = join(temporary, "generated-ssh"); await mkdir(directory, { mode: 0o700 });
     ssh = await createSshTarget(directory);
     ssh.target.command = [process.execPath, join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "worker", "--stdio"];
     ssh.target.allowCopilot = false;
+    if (installedProtocol >= 26) {
+      const { generatedRemoteGithub, forbidControllerGithub } = await import("../tests/fixtures/remote-github.ts");
+      github = await generatedRemoteGithub(directory, ssh.target, { bridge: join(consumer, "node_modules", "moguri", "dist", "remote-bridge.mjs") });
+      ssh.target = github.target; controllerGithub = await forbidControllerGithub(directory);
+    }
   }
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
-  const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   await writeFile(join(consumer, "consumer.ts"), `
     import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
@@ -77,6 +82,7 @@ try {
       void operations.totals.failureRate;void operations.entries[0]?.sourceEventId;
       const retained=(await sdk.telemetry.storage()).storage;void retained.bytes.blobGrants;void retained.integrity;
       const repositoryPreview=(await sdk.repositories.preview("generated-id")).preview;
+      ${installedProtocol >= 26 ? "void repositoryPreview.remote?.hostFingerprint;void repositoryPreview.remote?.workerDigest;" : ""}
       await sdk.repositories.refresh("generated-id",repositoryPreview.bindingDigest,repositoryPreview.revision,true);
       const repositoryState=await sdk.repositories.state("generated-id");void repositoryState.observation?.repository?.osiApproved;
       await sdk.repositories.clear("generated-id",repositoryState.observation?.revision??0,true);
@@ -569,6 +575,30 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
+    if(PROTOCOL_VERSION>=26&&process.env.MOGURI_GENERATED_GITHUB){
+      const observed=JSON.parse(process.env.MOGURI_GENERATED_GITHUB),state=join(root,"generated-metadata-state"),remoteRoot=await realpath(join(root,"generated-remote-workspace"));
+      git(["remote","add","origin","https://github.com/generated/example.git"],remoteRoot);
+      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x73),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault}}};
+      let metadataRuntime=await createRuntime(options),metadataSdk=await connectMoguri({stateDir:state,autoStart:false});
+      try{
+        const metadataProject=await metadataSdk.command({type:"project.add",path:project}),session=await metadataSdk.sessions.create(metadataProject.id);
+        const settings=structuredClone(metadataSdk.settings.get().values);settings.remote=JSON.parse(process.env.MOGURI_GENERATED_REMOTE);
+        await metadataSdk.settings.update(settings,metadataSdk.settings.get().revision);
+        const config=(await metadataSdk.projects.configuration(metadataProject.id)).configuration;
+        await metadataSdk.projects.configure(metadataProject.id,{...config.values,remotePath:remoteRoot,repo:{...config.values.repo,githubAccess:"gh-cli"}},config.revision);
+        await metadataSdk.remote.probe();await metadataSdk.sessions.env(session.id,"Remote");
+        const preview=(await metadataSdk.repositories.preview(session.id)).preview;assert.equal(preview.lookupBoundary,"remote-gh-cli");assert.equal(preview.remote.root,remoteRoot);
+        const refresh=await metadataSdk.repositories.refresh(session.id,preview.bindingDigest,preview.revision,true);assert.equal((await metadataSdk.jobs.wait(refresh.id)).status,"completed");
+        const retained=(await metadataSdk.repositories.state(session.id)).observation;assert.equal(retained.repository.visibility,"private");assert.deepEqual(retained.remote,preview.remote);
+        const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
+        assert.match((await promisify(execFile)(process.execPath,[cli,"slash","/repository state","--session",session.id],{env:{...process.env,MOGURI_STATE_DIR:state}})).stdout,/remote-gh-cli/);
+        assert.match((await metadataSdk.slash(session.id,"/repository state","tui")).text,/private/);
+        metadataSdk.disconnect();await metadataRuntime.close();metadataRuntime=await createRuntime(options);metadataSdk=await connectMoguri({stateDir:state,autoStart:false});
+        await metadataSdk.remote.probe();assert.deepEqual((await metadataSdk.repositories.state(session.id)).observation,retained);
+        const calls=(await readFile(observed.calls,"utf8")).trim().split("\\n").map(line=>JSON.parse(line));assert.equal(calls.length,1);assert.equal(calls[0].home,observed.home);assert.equal(calls[0].cwd,remoteRoot);
+        await assert.rejects(()=>lstat(observed.controllerMarker),{code:"ENOENT"});
+      }finally{metadataSdk.disconnect();await metadataRuntime.close();}
+    }
     if(PROTOCOL_VERSION>=23&&process.platform==="darwin")for(const mode of ["Local",...(PROTOCOL_VERSION>=25&&process.env.MOGURI_GENERATED_REMOTE?["Remote"]:[])]){
       const consoleRoot=join(root,"generated-console-project-"+mode),consoleState=join(root,"generated-console-state-"+mode),keys=new Map();
       await mkdir(consoleRoot);
@@ -609,7 +639,7 @@ try {
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and CLI/TUI/private-profile/deletion-safe MCP attribution, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
-  execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "" } });
-} finally { try { await ssh?.close(); } finally { await rm(temporary, { recursive: true, force: true }); } }
+  execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
+} finally { try { await ssh?.close(); } finally { controllerGithub?.restore(); await rm(temporary, { recursive: true, force: true }); } }

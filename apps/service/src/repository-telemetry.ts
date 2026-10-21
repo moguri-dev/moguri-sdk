@@ -6,13 +6,14 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { ProjectIntegrations } from "./project-integrations.ts";
-import { repositoryIdentity } from "./repository-metadata.ts";
+import { loadRepository, repositoryIdentity, type RepositoryApiMetadata } from "./repository-metadata.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 
 interface Host {
   snapshot(): Snapshot;
   scope(session: Session): RepositoryScope;
   git(session: Session, signal: AbortSignal): Promise<string | null>;
+  remoteRead(session: Session, repository: string, signal: AbortSignal): Promise<RepositoryApiMetadata>;
   lookupRoot(session: Session): string;
   commit(events: EventInput[]): void;
   job(session: Session, execute: (signal: AbortSignal, jobId: string) => Promise<unknown>, settled: () => void): string;
@@ -41,14 +42,13 @@ export class RepositoryTelemetry {
   private async context(sessionId: string, signal: AbortSignal): Promise<RepositoryPreview> {
     signal.throwIfAborted();
     const session = this.session(sessionId), scope = this.host.scope(session);
-    if (scope.env === "Remote" && scope.access === "gh-cli") throw new MoguriError("repository_remote_auth", "Remote GitHub CLI metadata access is not qualified. No host-local CLI or account fallback was used. Public lookup is explicitly supported.", 409);
     const repository = await this.host.git(session, signal);
     signal.throwIfAborted();
     if (this.host.scope(this.session(sessionId)).scopeDigest !== scope.scopeDigest) throw new MoguriError("repository_scope_changed", "Repository root/policy scope changed during inspection. Reload before continuing.", 409);
     if (!repository) throw new MoguriError("repository_unsupported", "No exact credential-free GitHub upstream was observed in this bound root. No repository was guessed.", 409);
     repositoryIdentity(repository);
     return { ...scope, repository, bindingDigest: frameDigest([scope.scopeDigest, repository]), revision: this.observation(scope.scopeKey)?.revision ?? 0,
-      lookupBoundary: scope.access === "public" ? "control-plane-public" : "control-plane-gh-cli" };
+      lookupBoundary: scope.access === "public" ? "control-plane-public" : scope.env === "Remote" ? "remote-gh-cli" : "control-plane-gh-cli" };
   }
   async query(query: RepositoryQuery): Promise<RepositoryResponse> {
     if (query.type === "repository.preview") return { type: query.type, preview: await this.context(query.sessionId, AbortSignal.timeout(8000)) };
@@ -73,7 +73,9 @@ export class RepositoryTelemetry {
         if (current.bindingDigest !== preview.bindingDigest || current.revision !== command.expectedRevision) throw new MoguriError("repository_scope_changed", "Repository root/policy scope or observation changed during lookup. No result was retained.", 409);
         return { digest: current.bindingDigest, repository: current.repository };
       };
-      const result = await this.integrations.repositoryMetadata(readBinding, preview.access, this.host.lookupRoot(this.session(session.id)), signal);
+      const result = preview.lookupBoundary === "remote-gh-cli" ?
+        await loadRepository(readBinding, (fullName) => this.host.remoteRead(this.session(session.id), `https://github.com/${fullName}`, signal), signal) :
+        await this.integrations.repositoryMetadata(readBinding, preview.access, this.host.lookupRoot(this.session(session.id)), signal);
       signal.throwIfAborted();
       const current = await this.context(session.id, signal);
       if (result.bindingDigest !== current.bindingDigest || current.revision !== command.expectedRevision) throw new MoguriError("repository_scope_changed", "Repository binding changed before retention. No observation was applied.", 409);
@@ -82,6 +84,7 @@ export class RepositoryTelemetry {
         id: randomUUID(), revision: command.expectedRevision + 1, scopeKey: current.scopeKey, scopeDigest: current.scopeDigest,
         profileId: current.profileId, projectId: current.projectId, workspaceId: current.workspaceId, env: current.env,
         actor: "user", status: "active", access: current.access, lookupBoundary: current.lookupBoundary, jobId,
+        ...(current.remote ? { remote: current.remote } : {}),
         repository: result.repository, createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp,
       };
       signal.throwIfAborted(); this.host.commit([this.event(observation)]);

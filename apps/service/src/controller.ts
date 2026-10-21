@@ -15,6 +15,7 @@ import {
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   type RemotePlanSave, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse, type PlanFileResult, type SessionWorkspaceCommand,
   PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions, type McpServerConfig, type RemoteMcpCall,
+  type RepositoryRemoteBoundary,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -147,6 +148,13 @@ export class ControlPlane extends EventEmitter {
       invalidateApprovals: (id) => this.invalidateApprovals(id),
       externalCall: (session, call, execute, identity) => this.externalCall(session, call, execute, identity),
       repositoryScope: (session) => this.repositoryScope(session),
+      remoteRepository: async (session, repository, signal) => {
+        const captured = this.repositoryScope(session);
+        if (captured.env !== "Remote" || captured.access !== "gh-cli") throw new MoguriError("repository_scope", "Authenticated Remote metadata needs the explicitly selected SSH account and root.", 409);
+        const result = await this.remote.readRepository(captured.root, repository, signal);
+        if (this.repositoryScope(this.session(session.id)).scopeDigest !== captured.scopeDigest) throw new MoguriError("repository_scope_changed", "Repository authority changed during the Remote CLI read. No observation was retained.", 409);
+        return result;
+      },
       repositoryGit: async (session, signal) => {
         const bounded = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
         if (session.controls.env === "Remote") {
@@ -385,11 +393,12 @@ export class ControlPlane extends EventEmitter {
   private repositoryScope(session: Session): RepositoryScope {
     if (!session.projectId || session.controls.env === "Sandbox") throw new MoguriError("repository_scope", "Repository metadata needs a bound Local or qualified Remote project. No other root/environment was substituted.", 409);
     const configuration = this.platform.sessions.projects.configuration(session.projectId), env = session.controls.env;
-    let root: string, identity: unknown;
+    let root: string, identity: unknown, remote: RepositoryRemoteBoundary | undefined;
     if (env === "Remote") {
       root = this.remoteWorkspace(session)!;
       const target = this.remote.assertReady();
       identity = { peer: remoteFingerprint(target), host: target.host, port: target.port, user: target.user, worker: this.remote.readiness.workerDigest, config: this.remote.readiness.configDigest };
+      remote = { host: target.host, port: target.port, user: target.user, hostFingerprint: remoteFingerprint(target), root, workerDigest: this.remote.readiness.workerDigest! };
     } else {
       root = this.platform.managed.project(session).path;
       const state = lstatSync(root, { bigint: true });
@@ -398,7 +407,7 @@ export class ControlPlane extends EventEmitter {
     }
     const key = [this.profileId, session.projectId, session.workspaceId, env];
     const scopeDigest = frameDigest([key, root, identity, configuration.revision, configuration.values.repo, this.projection.policy.revision]);
-    return { scopeKey: frameDigest(key), scopeDigest, profileId: this.profileId, projectId: session.projectId, workspaceId: session.workspaceId, env, root, access: configuration.values.repo.githubAccess };
+    return { scopeKey: frameDigest(key), scopeDigest, profileId: this.profileId, projectId: session.projectId, workspaceId: session.workspaceId, env, root, access: configuration.values.repo.githubAccess, ...(remote ? { remote } : {}) };
   }
   private admissionSignature(session: Session): string {
     const root = session.projectId ? session.controls.env === "Remote" ? this.remoteWorkspace(session) : this.platform.managed.project(session).path : null;
