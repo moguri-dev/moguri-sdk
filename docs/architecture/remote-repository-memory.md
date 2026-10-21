@@ -3,7 +3,7 @@
 Qualified **0.21.0-alpha.1 / protocol 27** implements the complete session-bound
 SDK/service/model/MCP/client slice below. Source, exact installed SDK and
 actual packaged runtime pass independent gates; immutable identities are in
-[setup](../setup.md#current-qualified-0210-alpha1-checkpoint).
+[setup](../setup.md#preserved-qualified-0210-alpha1-checkpoint).
 Earlier sections record prerequisite stages, not claims that the current
 delivered API is unavailable.
 

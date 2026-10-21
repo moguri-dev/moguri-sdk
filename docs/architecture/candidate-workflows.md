@@ -1,14 +1,16 @@
 # Durable reviewed candidates
 
-Status: 0.22 source implements the Local reviewed-candidate slice. The
+Status: qualified **0.22.0-alpha.1 / protocol 29** implements the Local
+reviewed-candidate slice. The
 [private transport](compound-routing-primitives.md) and
 [owned-file prerequisites](candidate-primitives.md) are qualified separately.
 The shared SDK, CLI, native TUI and desktop expose manual proposal staging and
 separately reviewed application. They do not enable compound model routing or
-finite kupo budgets. A new immutable packaged delivery remains a separate gate.
+finite kupo budgets. Exact installed SDK and actual packaged-app qualification
+are recorded below and in [setup](../setup.md#current-qualified-0220-alpha1-checkpoint).
 Sandbox remains paused.
 
-Execution development now uses protocol/database **29**. The additive
+Execution uses protocol/database **29**. The additive
 `candidate_execution_schema` marker preserves old version-1 records with
 missing owner/attempt/stop fields; absence is not fabricated historical
 telemetry. New stage/apply intents bind an explicit Local agent-session owner,
@@ -24,7 +26,7 @@ attempted and observed paths remain separate, and terminal candidate/job
 success commits atomically. The service rejects read-only/Remote/excluded
 Local scopes before resolving Local data. Actual service SIGKILL qualification
 covers before-effects, after-first-file and retained completed outcomes without
-replay; native packaging remains required before delivery.
+replay. Native packaging has independently passed this same manual workflow.
 
 ## Executable scope and clients
 
@@ -142,7 +144,38 @@ Compound model roles additionally need the existing owned worker/all-role
 ledger, genuine model-family qualification, bounded workflow reservations and
 authorized accepted-work checkpoint wind-down. Those gates remain separate.
 
-## Foundation evidence
+## Executable and delivery qualification
+
+The complete source gate passes **656/656 in 462.93 s**, both type checks/build
+and zero audit findings. All **43 hidden source desktop workflows** and all
+**43 workflows from the exact packaged app** pass in **1.6 min each**.
+The focused candidate/file/lease/migration/client gate passes **94/94 in
+43.04 s**. Actual five-mode service SIGKILL passes in **7.19 s** with original
+index/HEAD and no replay. Schema-28-to-29 marker rollback preserves raw old
+ciphertext and absent legacy fields.
+
+Concurrent SDK admission, isolated profiles sharing physical roots,
+instruction writes in both lease directions, changed authority, real SQLite
+terminal failure, before/after-effect stop and stale completed-job stop are
+covered. Failed stop-intent persistence still aborts the actual owned job,
+does not claim a retained request and leaves both original files unchanged.
+Native TUI metadata editing omits immutable proposal text and preserves its
+digest; explicit attempted text replacement remains a backend error.
+
+The delivered SDK archive is installed independently with explicit script
+approval/rebuild, four external entrypoint types and zero audit findings.
+Its actual CLI stages the proposal; SDK performs a separate exact application,
+exports version-2 history and reopens canonical intent without replaying over
+a newer user edit. The actual app's bundled Node/service/SDK/CLI independently
+passes that workflow, including removed original receipt, and all earlier
+Local/SSH contracts. No model is called by candidate operations.
+
+Archive byte identities and native footprint are in setup. Artifacts are
+ad-hoc signed, not notarized, and frozen after qualification. No earlier
+archive was repacked. These results do not qualify compound model integration,
+finite kupo wind-down, model quality, Remote candidates or Sandbox.
+
+## Historical foundation evidence
 
 The combined internal state/file/routing gate passes **51/51 in 11.26 s**,
 including twelve state/retention cases, with both type checks/build. The
@@ -174,7 +207,7 @@ contracts. Source and consumer audits report zero vulnerabilities. The
 legacy gate's two closed-store fixture failures were corrected before this
 complete run; they were not counted as passes.
 
-This qualifies internal state/retention compatibility, not a public candidate
+That checkpoint qualified internal state/retention compatibility, not a public candidate
 stage/apply workflow, in-flight candidate-file SIGKILL, an immutable delivered
 0.22 archive or actual packaged desktop. The public Single subset and
 finite-budget/compound gates remain unchanged; the qualified 0.21 artifacts

@@ -3,6 +3,9 @@
 This is a private Local/text-patch prerequisite for D11, not a public compound
 workflow, isolated process boundary, accepted model result or new SDK API.
 Sandbox remains paused. Remote candidate transport is not qualified here.
+The subsequent protocol-29 [manual Local candidate workflow](candidate-workflows.md)
+integrates these file guards with durable ownership/recovery and shared clients;
+it does not enable compound model scheduling or prove model quality.
 
 Reuse Node filesystem/crypto and TypeBox (MIT), the existing protected-path,
 bounded UTF-8 read and base-checked atomic-file writer, and actual SDK-owned
@@ -98,7 +101,9 @@ path aliases, final-file false completion, binary proposals and unsafe reuse
 of a dirty staging root. Each failed result is retained separately and is not
 counted as qualification.
 
-Remaining gates include actual lease/actor/receipt integration, versioned
+At this private checkpoint remaining gates included lease/actor/receipt integration, versioned
 independent candidate records, restart reconciliation without replay, shared
 SDK/CLI/TUI/desktop exposure, all-role scheduler reservations and authorized
-checkpoint wind-down. No public compound policy is enabled by this probe.
+checkpoint wind-down. The manual candidate slice now implements the first
+four; compound worker/ledger integration and wind-down remain open.
+No public compound policy is enabled by this probe.

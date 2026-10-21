@@ -1,8 +1,10 @@
 # Compound routing prerequisites
 
-Current **0.22 development** keeps protocol 27; the delivered SDK/app remain
-immutable **0.21.0-alpha.1**. This private proof does not expose Cascade,
-Critique, candidate application or finite kupo budgets. Sandbox stays paused.
+This private **0.22 prerequisite** was measured at protocol 27, before the
+protocol-29 [manual Local candidate workflow](candidate-workflows.md).
+It does not expose production Cascade/Critique or finite kupo budgets.
+The immutable delivery at this checkpoint was **0.21.0-alpha.1**.
+Sandbox stays paused.
 
 Reuse maintained pi-ai, Node/abort and TypeBox (MIT), the existing actual
 request/context estimator and endpoint-boundary checks. No dependency,
@@ -25,7 +27,7 @@ solver. Candidate, critic and validation text are untrusted data. Passing
 these mechanical gates returns only a **proposal**, not user acceptance,
 permission, verified quality, a filesystem effect or an applied patch.
 
-Owned candidate workspaces, base-checked reviewed application, independent
+At this private checkpoint, owned workspaces, base-checked application, independent
 durable artifacts, real worker/ledger role ownership, complete cancellation/
 restart and shared SDK/native clients remain separate admission gates.
 Finite routes additionally require reserved wind-down capacity and an
@@ -71,6 +73,8 @@ unknown/over-limit metering and actual in-flight critic cancellation. No
 candidate is accepted or applied by these results. Owned worker/ledger/candidate
 workspaces/review/application, reserved wind-down/authorized checkpoint and
 exact SDK/native delivery remain required before public admission.
+The later manual candidate slice satisfies its own review/retention/recovery
+contract, not compound worker integration or finite route admission.
 
 The subsequent [owned candidate file probe](candidate-primitives.md) connects
 generated Cascade/Critique proposals to one actual SDK worktree stage and a
