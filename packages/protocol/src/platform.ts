@@ -25,8 +25,10 @@ import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type 
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
 import { CandidateCommandSchema, CandidateQuerySchema, type CandidateJobIntent, type CandidateRecord, type CandidateResponse } from "./candidates.ts";
 import { CandidateGenerationCommandSchema, CandidateGenerationQuerySchema, type CandidateGenerationRecord, type CandidateGenerationResponse } from "./candidate-generations.ts";
+import { RoleSequenceQuerySchema, type RoleSequenceRecord, type RoleSequenceResponse } from "./role-sequences.ts";
 export * from "./candidates.ts";
 export * from "./candidate-generations.ts";
+export * from "./role-sequences.ts";
 export * from "./mcp.ts";
 export * from "./repositories.ts";
 export * from "./telemetry.ts";
@@ -191,6 +193,7 @@ export const QuerySchema = Type.Union([
   ArtifactQuerySchema,
   CandidateQuerySchema,
   CandidateGenerationQuerySchema,
+  RoleSequenceQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -230,6 +233,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   budgetEntries: BudgetEntry[];
   budgetPlans: BudgetPlan[];
   candidateGenerations: CandidateGenerationRecord[];
+  roleSequences: RoleSequenceRecord[];
   budgetPolicy: { revision: number; limit: BudgetLimit | null };
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
@@ -250,6 +254,7 @@ export interface SandboxStatus { ready: boolean; diagnostic: string; configured:
 export type PlatformResponse =
   | CandidateResponse
   | CandidateGenerationResponse
+  | RoleSequenceResponse
   | RemoteMcpResponse
   | RepositoryResponse
   | TelemetryResponse

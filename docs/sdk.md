@@ -25,7 +25,12 @@ Its exact installed SDK and actual native runtime pass independent
 generation/staging/application/restart qualification, including missing
 original receipts; [setup](setup.md#current-qualified-0230-alpha1-checkpoint)
 records its immutable identities.
-Current state migrations preserve schema-1 through schema-30 history, sessions, drafts,
+Current 0.25 source uses protocol **32** for independently retained
+[role observations](architecture/role-sequences.md), read-only SDK/CLI/native
+inspection and version-4 history. This adds no model-start, acceptance or
+public compound workflow command. Restart old running services explicitly;
+do not delete their state. The qualified immutable delivery remains 0.23.
+Current state migrations preserve schema-1 through schema-31 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -162,6 +167,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `plans` | Digest-checked Local/Remote plan read/save and independent snapshots. Remote writes require the reviewed binding and an owned no-model operation; actual saves/info/exact-stop expose partial/recovery outcomes without replay. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
+| `roleSequences` | Read exact independently retained role intent, original input and one selected raw role input/result; never start a model, grant acceptance or resume partial work. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |

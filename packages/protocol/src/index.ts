@@ -31,10 +31,11 @@ import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 import { MemoryIndexIntentSchema } from "./memory.ts";
 import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord, type CandidateRecord } from "./candidates.ts";
 import { CandidateGenerationRecordSchema, projectCandidateGeneration, type CandidateGenerationRecord } from "./candidate-generations.ts";
+import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedger, type RoleSequenceRecord } from "./role-sequences.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 31;
+export const PROTOCOL_VERSION = 32;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -223,6 +224,7 @@ export interface EventPayloads {
   "turn.control_started":
     | { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string }
     | { purpose: "candidate.generate"; generationId: string; controls: Controls; policyRevision: number; promptDigest: string }
+    | { purpose: "role.sequence"; sequenceId: string; controls: Controls; policyRevision: number; promptDigest: string }
     | { purpose: "plan.save"; saveId: string; controls: Controls; policyRevision: number; intentDigest: string };
   "plan.save_recorded": { save: RemotePlanSave };
   "compaction.saved": { compaction: ContextCompaction };
@@ -277,9 +279,10 @@ export interface EventPayloads {
   "session.group_saved": { group: SessionGroup };
   "artifact.saved": { artifact: LegacyRetainedArtifact };
   "artifact.revised": { artifact: LegacyVersionedArtifact };
-  "artifact.deleted": { artifactId: string; generationIntent?: { commandId: string; commandDigest: string } };
+  "artifact.deleted": { artifactId: string; generationIntent?: { commandId: string; commandDigest: string }; roleSequenceIntent?: { commandId: string; commandDigest: string } };
   "candidate.saved": { candidate: CandidateRecord };
   "candidate.generation_recorded": { generation: CandidateGenerationRecord };
+  "role.sequence_recorded": { sequence: RoleSequenceRecord };
   "budget.recorded": { entry: BudgetEntry };
   "budget.plan_recorded": { plan: BudgetPlan };
   "operation.recorded": { entry: OperationEntry };
@@ -334,7 +337,7 @@ export const eventTypes: readonly EventType[] = [
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
-  "candidate.saved", "candidate.generation_recorded",
+  "candidate.saved", "candidate.generation_recorded", "role.sequence_recorded",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -366,6 +369,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const budgetEntries = new Map<string, BudgetEntry>();
   const budgetPlans = new Map<string, BudgetPlan>();
   const candidateGenerations = new Map<string, CandidateGenerationRecord>();
+  const roleSequences = new Map<string, RoleSequenceRecord>();
+  const roleSequenceControls = new Map<string, StoredEvent[]>(), roleSequenceTurns = new Set<string>();
+  for (const event of events) if (event.profile_id === profileId && event.event_type === "turn.control_started" && event.payload.purpose === "role.sequence") {
+    roleSequenceControls.set(event.payload.sequenceId, [...roleSequenceControls.get(event.payload.sequenceId) ?? [], event]);
+    if (typeof event.turn_id === "string") roleSequenceTurns.add(event.turn_id);
+  }
   const operationEntries = new Map<string, OperationEntry>();
   let operationCoverage: OperationCoverage | null = null;
   const repositoryObservations = new Map<string, RepositoryObservation>();
@@ -473,12 +482,24 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const artifact = event.event_type === "artifact.saved" ? legacyArtifact(event.payload.artifact, event.id) : normalizeArtifact(structuredClone(event.payload.artifact));
       const candidate = candidates.get(artifact.id);
       if (candidate && (artifact.kind !== "report" || artifact.contentDigest !== candidate.documentDigest)) throw new MoguriError("candidate_corrupt", "A bound candidate artifact cannot replace its immutable proposal document.", 409);
+      const sequence = roleSequences.get(artifact.id);
+      if (sequence && (artifact.kind !== "report" || artifact.contentDigest !== sequence.inputDigest)) throw new MoguriError("role_sequence_corrupt", "A retained role input cannot be replaced through generic artifact editing.", 409);
       artifacts.set(artifact.id, artifact);
     }
-    if (event.event_type === "artifact.deleted") { artifacts.delete(event.payload.artifactId); candidates.delete(event.payload.artifactId); }
+    if (event.event_type === "artifact.deleted") { artifacts.delete(event.payload.artifactId); candidates.delete(event.payload.artifactId); roleSequences.delete(event.payload.artifactId); }
+    if (event.event_type === "role.sequence_recorded") {
+      const value = event.payload.sequence;
+      if (!Value.Check(RoleSequenceRecordSchema, value)) throw new MoguriError("role_sequence_corrupt", "Role metadata has an unsupported shape/version. Original state was preserved.", 409);
+      const previous = roleSequences.get(value.id), artifact = artifacts.get(value.id);
+      if (event.project_id || event.session_id || event.turn_id || event.step_id ||
+        value.profileId !== profileId || event.artifact_id !== value.id || !artifacts.has(value.id) ||
+        candidates.has(value.id) || candidateGenerations.has(value.id) || artifact?.kind !== "report" ||
+        artifact.contentDigest !== value.inputDigest || !previous && (artifact.originSessionId !== value.sessionId || artifact.projectId !== value.projectId || artifact.workspaceId !== value.workspaceId)) throw new MoguriError("role_sequence_corrupt", "Role metadata must retain its exact independent profile/report/input grant.", 409);
+      roleSequences.set(value.id, projectRoleSequence(previous, value));
+    }
     if (event.event_type === "candidate.generation_recorded") {
       if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(CandidateGenerationRecordSchema, event.payload.generation) ||
-        event.payload.generation.profileId !== profileId || event.artifact_id !== event.payload.generation.id) throw new MoguriError("candidate_generation_corrupt", "Generation must retain its original exact profile/artifact compartment. State was preserved.", 409);
+        event.payload.generation.profileId !== profileId || event.artifact_id !== event.payload.generation.id || roleSequences.has(event.payload.generation.id)) throw new MoguriError("candidate_generation_corrupt", "Generation must retain its original exact profile/artifact compartment. State was preserved.", 409);
       const generation = projectCandidateGeneration(candidateGenerations.get(event.payload.generation.id), event.payload.generation);
       candidateGenerations.set(generation.id, generation);
     }
@@ -487,7 +508,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (!Value.Check(CandidateRecordSchema, candidate)) throw new MoguriError("candidate_corrupt", "Candidate metadata has an unsupported shape/version. State was preserved.", 409);
       const artifact = artifacts.get(candidate.id);
       if (candidate.profileId !== profileId || candidate.projectId !== event.project_id ||
-        event.session_id || event.artifact_id !== candidate.id || !artifact || artifact.kind !== "report" || artifact.contentDigest !== candidate.documentDigest) {
+        event.session_id || event.artifact_id !== candidate.id || roleSequences.has(candidate.id) || !artifact || artifact.kind !== "report" || artifact.contentDigest !== candidate.documentDigest) {
         throw new MoguriError("candidate_corrupt", "Candidate metadata is invalid or outside its exact independent artifact/profile. State was preserved.", 409);
       }
       const validated = projectCandidateRecord(candidates.get(candidate.id), candidate);
@@ -732,8 +753,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       case "model.started":
         for (const routing of routings.values()) if (routing.turnId === event.turn_id && routing.status === "ready" && event.payload.role !== "router") routing.status = "running";
-        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: event.payload.role === "router" || event.payload.role === "compaction" || event.payload.role === "draft" ? "notice" : "assistant",
-          text: event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : "", timestamp: event.timestamp });
+        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: roleSequenceTurns.has(event.turn_id ?? "") || event.payload.role === "router" || event.payload.role === "compaction" || event.payload.role === "draft" ? "notice" : "assistant",
+          text: roleSequenceTurns.has(event.turn_id ?? "") ? "An owned role is producing untrusted data, not a user answer or approval." : event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : "", timestamp: event.timestamp });
         session.usage.push({
           stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: event.payload.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
@@ -748,9 +769,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       }
       case "model.completed": {
+        const message: PublicMessage = roleSequenceTurns.has(event.turn_id ?? "") ? { ...event.payload.message, role: "notice",
+          text: "Owned role result retained independently. It is untrusted data, not a user answer, code approval or automatic instructions.", reasoning: undefined, toolCalls: [] } : event.payload.message;
         const index = session.messages.findIndex((message) => message.id === event.payload.message.id);
-        if (index >= 0) session.messages[index] = event.payload.message;
-        else session.messages.push(event.payload.message);
+        if (index >= 0) session.messages[index] = message;
+        else session.messages.push(message);
         const usageIndex = session.usage.findIndex((usage) => usage.stepId === event.payload.usage.stepId);
         if (usageIndex >= 0) session.usage[usageIndex] = event.payload.usage; else session.usage.push(event.payload.usage);
         break;
@@ -795,10 +818,18 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
   }
   validateBudgetPlanEntries([...budgetPlans.values()], [...budgetEntries.values()]);
+  validateRoleSequenceLedger([...roleSequences.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
+  for (const sequence of roleSequences.values()) if (sessions.has(sequence.sessionId)) {
+    const controls = roleSequenceControls.get(sequence.id) ?? [];
+    const control = controls[0];
+    if (controls.length !== 1 || !control || control.event_type !== "turn.control_started" || control.payload.purpose !== "role.sequence" ||
+      control.turn_id !== sequence.id || control.session_id !== sequence.sessionId || control.project_id !== sequence.projectId ||
+      control.payload.promptDigest !== sequence.inputDigest || control.payload.controls.env !== sequence.env) throw new MoguriError("role_sequence_corrupt", "Role metadata lost its exact original owning control turn. No model or root authority was adopted.", 409);
+  }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
     settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
-    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), candidateGenerations: [...candidateGenerations.values()].filter((generation) => artifacts.has(generation.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), candidateGenerations: [...candidateGenerations.values()].filter((generation) => artifacts.has(generation.id)), roleSequences: [...roleSequences.values()].filter((sequence) => artifacts.has(sequence.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

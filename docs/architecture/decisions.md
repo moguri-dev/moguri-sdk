@@ -289,6 +289,12 @@ It keeps model/host advice separate from acceptance and halts on unknown
 usage, failed receipts, stop or control loss. This is not a durable compound
 workflow, real-family quality gate or public routing configuration.
 
+Protocol 32 adds the [independent role-state foundation](role-sequences.md):
+exact original role/plan/input/result observations survive source retention,
+remain data-only and cannot authorize another call on unknown accounting.
+This adds shared inspection and no-replay recovery, not a new model-start,
+quality or public compound policy.
+
 ## D12. System One decisions and autonomy levels
 
 **Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.

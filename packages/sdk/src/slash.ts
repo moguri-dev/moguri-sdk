@@ -38,6 +38,7 @@ export const slashCommands = [
   { name: "artifacts", description: "View independent retained documents" },
   { name: "candidates", description: "Review retained repository proposals and actual stage/apply outcomes" },
   { name: "candidate", description: "Generate unaccepted data or stage reviewed bytes; source application stays separate", argument: "[generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
+  { name: "roles", description: "Inspect independently retained role intent, actual calls and raw data; never dispatch", argument: "[SEQUENCE_ID [ROLE_INDEX]]" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
@@ -157,6 +158,12 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const { modelOptions: _, ...controls } = session.controls;
       await sdk.sessions.configure(session.id, { ...controls, modelId: model.id }, session.revision);
       return { kind: "ok", message: model.synthetic ? "kupo Single selected. Router and solver calls are metered separately; no inference started and no permission changed." : `${model.name} selected explicitly. Previous model-specific options were cleared; no inference started.` };
+    }
+    case "roles": {
+      if (!command.argument) return { kind: "text", text: JSON.stringify(sdk.roleSequences.list(), null, 2) };
+      const parts = command.argument.split(/\s+/);
+      if (parts.length > 2 || parts[1] !== undefined && !/^\d+$/.test(parts[1])) throw new ClientError("role_sequence_command", "Use /roles SEQUENCE_ID [ROLE_INDEX] to inspect retained data; this command cannot run a model.");
+      return { kind: "text", text: JSON.stringify(await sdk.roleSequences.read(parts[0]!, parts[1] === undefined ? undefined : Number(parts[1])), null, 2) };
     }
     case "kupo": {
       if (!command.argument || command.argument === "status") return { kind: "text", text: JSON.stringify({ policy: sdk.routing.policy(), models: sdk.getState().snapshot!.provider.models, diagnostics: sdk.getState().snapshot!.routingDiagnostics, warning: "Experimental Single only, explicit hosted-data consent, no automatic fallback. Finite budgets, images, cascade and critique/revision remain unavailable." }, null, 2) };

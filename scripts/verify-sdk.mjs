@@ -24,6 +24,7 @@ try {
   const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
+  const retainedRoles = installedProtocol >= 32 ? JSON.parse(execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/role-sequence-export.ts"), join(temporary, "generated-retained-role-state")], { encoding: "utf8" })) : null;
   if (process.platform === "darwin") {
     const { createSshTarget } = await import("../tests/fixtures/ssh-target.ts");
     const directory = join(temporary, "generated-ssh"); await mkdir(directory, { mode: 0o700 });
@@ -39,7 +40,7 @@ try {
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
-    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}} from "moguri";
+    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
@@ -66,6 +67,11 @@ try {
       await sdk.candidates.generation(generation.id);await sdk.candidates.stopGeneration(generation.id);
       await sdk.candidates.stage("generated-source","generated-stage",patch,candidatePreview.digest,generation.id);
       void sdk.getState().snapshot?.candidateGenerations;
+      ` : ""}
+      ${installedProtocol >= 32 ? `
+      const roleRead=await sdk.roleSequences.read("generated-sequence",1);
+      const roleSequence:RoleSequenceRecord=roleRead.sequence;void roleSequence.steps[0]?.planId;void roleRead.step?.result;
+      void sdk.roleSequences.list();void sdk.getState().snapshot?.roleSequences;
       ` : ""}
       const settings: UserSettings = snapshot.values;
       const project = await sdk.projects.configuration("generated-id");
@@ -693,6 +699,31 @@ try {
         await proof.verifyRecovery(generationSdk);
         console.log("Installed protocol-31 SDK/CLI/shared generation used the actual owned worker/draft ledger, immutable model provenance/version-3 history, separate reviewed stage/apply and missing-receipt restart replay without another model request.");
       }finally{generationSdk?.disconnect();await generationRuntime?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+    }
+    if(PROTOCOL_VERSION>=32){
+      const evidence=${JSON.stringify(retainedRoles)},options={stateDir:evidence.stateDir,retentionKey:Buffer.alloc(32,0x67),provider:makeProvider()};
+      let roleRuntime=await createRuntime(options),roleSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
+      try{
+        assert.equal(roleSdk.getState().snapshot.sessions.some(session=>session.id===evidence.originSessionId),false);
+        assert.equal(roleSdk.getState().snapshot.projects.length,0);
+        const value=await roleSdk.roleSequences.read(evidence.sequenceId,1);
+        assert.equal(value.sequence.status,"completed");assert.equal(value.sequence.inputDigest,evidence.inputDigest);assert.ok(value.step.result.includes(evidence.rawMarker));
+        assert.equal(roleSdk.roleSequences.list().length,1);
+        assert.equal(JSON.parse((await roleSdk.artifacts.export(evidence.sequenceId)).export.text).schemaVersion,4);
+        const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
+        const inspected=JSON.parse((await promisify(execFile)(process.execPath,[cli,"roles",evidence.sequenceId,"1"],{env:{...process.env,MOGURI_STATE_DIR:options.stateDir}})).stdout);
+        assert.equal(inspected.sequence.id,evidence.sequenceId);assert.ok(inspected.step.result.includes(evidence.rawMarker));
+        const observer=await roleSdk.sessions.create(null,"Generated role-data observer");
+        assert.equal(JSON.parse((await roleSdk.slash(observer.id,"/roles "+evidence.sequenceId+" 1","tui")).text).sequence.id,evidence.sequenceId);
+        roleSdk.disconnect();await roleRuntime.close();roleRuntime=await createRuntime(options);roleSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
+        assert.equal((await roleSdk.roleSequences.read(evidence.sequenceId,1)).sequence.status,"completed");
+        assert.deepEqual(roleRuntime.controller.platform.roles.original(evidence.commandId,evidence.commandDigest),{id:evidence.sequenceId,revision:evidence.revision});
+        const artifact=(await roleSdk.artifacts.read(evidence.sequenceId)).artifact;await roleSdk.artifacts.delete(evidence.sequenceId,artifact.revision,true);
+        await assert.rejects(()=>roleSdk.roleSequences.read(evidence.sequenceId),{code:"role_sequence_missing"});
+        assert.throws(()=>roleRuntime.controller.platform.roles.original(evidence.commandId,evidence.commandDigest),{code:"role_sequence_deleted"});
+        assert.equal((await roleSdk.budgets.calls()).calls.length,2);
+        console.log("Actual installed protocol-32 SDK/runtime/CLI/shared role inspection preserves independent raw input/results after source deletion/reopen, version-4 history, immutable bytes and deletion intent without inference.");
+      }finally{roleSdk.disconnect();await roleRuntime.close();}
     }
     if(PROTOCOL_VERSION>=26&&process.env.MOGURI_GENERATED_GITHUB){
       const observed=JSON.parse(process.env.MOGURI_GENERATED_GITHUB),state=join(root,"generated-metadata-state"),remoteRoot=await realpath(join(root,"generated-remote-workspace"));

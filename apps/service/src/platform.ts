@@ -13,6 +13,7 @@ import {
   isArtifactCommand, isArtifactQuery, isQuestionCommand,
   isCandidateCommand, isCandidateQuery,
   isCandidateGenerationCommand, isCandidateGenerationQuery, type CandidateGenerationCommand, type CandidateGenerationQuery, type CandidateGenerationResponse,
+  isRoleSequenceQuery,
   isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
@@ -40,6 +41,7 @@ import type { RemoteOptions } from "./remote.ts";
 import { ManagedWorkspaces } from "./managed-workspaces.ts";
 import { ArtifactRuntime } from "./artifacts.ts";
 import { BudgetRuntime } from "./budgets.ts";
+import { RoleSequences } from "./role-sequences.ts";
 import { OperationTelemetry } from "./operation-telemetry.ts";
 import { RepositoryTelemetry } from "./repository-telemetry.ts";
 import { remoteMcpPreview, type RemoteMcpScope } from "./remote-mcp.ts";
@@ -121,12 +123,14 @@ export class PlatformRuntime {
   readonly artifacts: ArtifactRuntime;
   readonly candidates: CandidateRuntime;
   readonly budgets: BudgetRuntime;
+  readonly roles: RoleSequences;
   readonly telemetry: OperationTelemetry;
   readonly repositories: RepositoryTelemetry;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   private readonly memoryIndexes = new Map<string, string>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
+    this.roles = new RoleSequences(store, () => this.snapshot(), () => host.events());
     this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
     this.memory = new RepositoryMemory(store);
     this.gateway = new McpGateway(options.vault ?? new McpKeychain(`dev.moguri.profile.${store.profileId}.mcp`), options.mcpWorkerPath, { oauth: options.oauth,
@@ -450,6 +454,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isRoleSequenceQuery(query)) return this.roles.query(query);
     if (isCandidateGenerationQuery(query)) return this.host.generationQuery(query);
     if (isCandidateQuery(query)) return this.candidates.query(query);
     if (isRemoteMcpQuery(query)) return this.mcpRemoteQuery(query);

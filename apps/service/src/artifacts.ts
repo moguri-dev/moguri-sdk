@@ -128,10 +128,15 @@ export class ArtifactRuntime {
   private generationHistory(id: string): StoredEvent[] {
     return this.host.events().filter((event) => event.artifact_id === id && event.event_type === "candidate.generation_recorded");
   }
+  private roleHistory(id: string): StoredEvent[] {
+    return this.host.events().filter((event) => event.artifact_id === id && event.event_type === "role.sequence_recorded");
+  }
   private deleted(id: string): EventInput {
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === id);
+    const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === id);
     return { event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: id,
-      ...(generation ? { generationIntent: { commandId: generation.commandId, commandDigest: generation.commandDigest } } : {}) } };
+      ...(generation ? { generationIntent: { commandId: generation.commandId, commandDigest: generation.commandDigest } } : {}),
+      ...(sequence ? { roleSequenceIntent: { commandId: sequence.commandId, commandDigest: sequence.commandDigest } } : {}) } };
   }
   private source(sessionId: string, kind: "message" | "tool", id: string): ArtifactSourcePreview {
     this.session(sessionId);
@@ -156,8 +161,9 @@ export class ArtifactRuntime {
     return { projectId, artifacts: records, digest: digest(JSON.stringify({ projectId, artifacts: artifacts.map((artifact) => {
       const candidateEvents = this.candidateEvents(artifact.id);
       const generationEvents = this.generationHistory(artifact.id);
+      const roleEvents = this.roleHistory(artifact.id);
       return { ...artifact, revisions: this.revisions(artifact.id).map(({ revision, contentDigest }) => ({ revision, contentDigest })),
-        ...(candidateEvents.length ? { candidateEvents } : {}), ...(generationEvents.length ? { generationEvents } : {}) };
+        ...(candidateEvents.length ? { candidateEvents } : {}), ...(generationEvents.length ? { generationEvents } : {}), ...(roleEvents.length ? { roleEvents } : {}) };
     }) })) };
   }
   private export(artifacts: RetainedArtifact[], filename: string): ArtifactExport {
@@ -189,14 +195,26 @@ export class ArtifactRuntime {
       }
       const generationResults = [...generationHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
       if (generationEvents.length) account(JSON.stringify(generationEvents));
+      const roleEvents = this.roleHistory(artifact.id), roleHashes = new Set<string>();
+      for (const event of roleEvents) if (event.event_type === "role.sequence_recorded") {
+        roleHashes.add(event.payload.sequence.inputDigest);
+        for (const step of event.payload.sequence.steps) {
+          if (step.inputDigest) roleHashes.add(step.inputDigest);
+          if (step.resultDigest) roleHashes.add(step.resultDigest);
+        }
+      }
+      const roleResults = [...roleHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
+      if (roleEvents.length) account(JSON.stringify(roleEvents));
       return { artifact, revisions, ...(events.length ? { candidate: { events, results } } : {}),
-        ...(generationEvents.length ? { generation: { events: generationEvents, results: generationResults } } : {}) };
+        ...(generationEvents.length ? { generation: { events: generationEvents, results: generationResults } } : {}),
+        ...(roleEvents.length ? { roles: { events: roleEvents, results: roleResults } } : {}) };
     });
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
   async removal(projectId: string, choice?: ProjectArtifactChoice): Promise<{ events: EventInput[]; forget: string[] }> {
+    if (this.host.snapshot().roleSequences.some((sequence) => sequence.projectId === projectId && sequence.status === "running")) throw new MoguriError("role_sequence_busy", "Stop and settle the exact owning role sequence before reviewing its independent retention.", 409);
     if (this.host.snapshot().candidateGenerations.some((generation) => generation.projectId === projectId && generation.status === "running")) throw new MoguriError("candidate_generation_busy", "Stop active generation before reviewing its independent report retention.", 409);
     if (this.host.snapshot().jobs.some((job) => job.projectId === projectId && job.candidate && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("candidate_busy", "Stop the project's active candidate work before reviewing retention or removal. Its independent grants were preserved.", 409);
     const preview = this.preview(projectId);
@@ -351,14 +369,18 @@ export class ArtifactRuntime {
     if (artifact.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "Artifact changed. Reload before editing, archiving or deleting it.", 409);
     const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === artifact.id);
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === artifact.id);
+    const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === artifact.id);
     const activeCandidate = candidate && (["staging", "applying"].includes(candidate.status) ||
       this.host.snapshot().jobs.some((job) => job.candidate?.candidateId === candidate.id && ["running", "waiting_input"].includes(job.status)));
     if (command.type === "artifact.delete") {
+      if (sequence?.status === "running") throw new MoguriError("role_sequence_busy", "Stop and settle this role sequence before deleting its independent input/result history.", 409);
       if (generation?.status === "running") throw new MoguriError("candidate_generation_busy", "Stop generation before deleting its independently retained input/result report.", 409);
       if (activeCandidate) throw new MoguriError("candidate_busy", "Stop the candidate's active owned job before deleting its independent document/history.", 409);
       return finish([this.deleted(artifact.id)], { id: artifact.id }, { artifacts: [artifact.id] });
     }
     if (candidate && command.changes.text !== undefined) throw new MoguriError("candidate_document", "A candidate's exact proposal document is immutable. Export it or create a separately reviewed new proposal; renaming/organizing does not change its bytes.", 409);
+    if (sequence && command.changes.text !== undefined) throw new MoguriError("role_sequence_document", "Role input and actual per-role results are immutable. Export them or retain a separate document; metadata editing does not change provenance.", 409);
+    if (sequence?.status === "running" && command.changes.status === "archived") throw new MoguriError("role_sequence_busy", "Settle the exact owning role sequence before archiving its independent report.", 409);
     if (generation && command.changes.text !== undefined) throw new MoguriError("candidate_generation_document", "Generation input/result documents are immutable. Export them or generate a separately reviewed proposal; metadata changes do not rewrite model provenance.", 409);
     if (generation?.status === "running" && command.changes.status === "archived") throw new MoguriError("candidate_generation_busy", "Stop generation before archiving its independent report.", 409);
     if (activeCandidate && command.changes.status === "archived") throw new MoguriError("candidate_busy", "Stop the candidate's active owned job before archiving its document.", 409);

@@ -136,6 +136,14 @@ export class MoguriSdk extends TransportClient {
       return snapshot.routings.filter((routing) => routing.sessionId === sessionId);
     },
   };
+  readonly roleSequences = {
+    read: (sequenceId: string, index?: number) => this.query({ type: "role.sequence.read", sequenceId, ...(index === undefined ? {} : { index }) }),
+    list: () => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("disconnected", "Connect to this immutable profile before inspecting retained role sequences.");
+      return snapshot.roleSequences;
+    },
+  };
   readonly candidates = {
     generatePreview: (sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput) => this.query({ type: "candidate.generation.preview", sessionId, stageWorkspaceId, input }),
     generate: (sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput, expectedDigest: string, confirmCost: true) =>

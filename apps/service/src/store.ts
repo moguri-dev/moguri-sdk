@@ -27,6 +27,7 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "role.sequence_recorded" ? input.payload.sequence.id :
   input.event_type === "candidate.generation_recorded" ? input.payload.generation.id :
   input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
   input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? null :
@@ -58,6 +59,7 @@ function references(input: EventInput): string[] {
     case "artifact.revised": return [input.payload.artifact.contentDigest];
     case "candidate.saved": return [input.payload.candidate.documentDigest, input.payload.candidate.stageResultDigest, input.payload.candidate.applyResultDigest].filter((hash): hash is string => hash !== null);
     case "candidate.generation_recorded": return [input.payload.generation.inputDigest, input.payload.generation.resultDigest, input.payload.generation.proposalDocumentDigest].filter((hash): hash is string => hash !== null);
+    case "role.sequence_recorded": return [input.payload.sequence.inputDigest, ...input.payload.sequence.steps.flatMap((step) => [step.inputDigest, step.resultDigest])].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
     case "job.finished": return input.payload.resultDigest ? [input.payload.resultDigest] : [];
@@ -183,6 +185,9 @@ export class EventStore {
       if (version < 31) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('candidate_generation_schema','1');
         PRAGMA user_version=31; COMMIT;`);
+      if (version < 32) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('role_sequence_schema','1');
+        PRAGMA user_version=32; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

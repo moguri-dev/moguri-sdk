@@ -74,7 +74,7 @@ test("schema-21 marker failure preserves exact schema-20 ciphertext and can be r
   try {
     store.commit(inputs);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
-    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','operation_metrics_schema','repository_attribution_schema','terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema'); PRAGMA user_version=20;
+    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','operation_metrics_schema','repository_attribution_schema','terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema'); PRAGMA user_version=20;
       CREATE TRIGGER generated_marker_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='operation_metrics_schema'
       BEGIN SELECT RAISE(ABORT,'Generated operation marker failure'); END; COMMIT;`);
     store.close(); store = undefined;

@@ -264,6 +264,8 @@ export class ControlPlane extends EventEmitter {
     if (legacyAccounting.length) this.commit(legacyAccounting);
     const legacyOperations = this.platform.telemetry.legacyEvents();
     if (legacyOperations.length) this.commit(legacyOperations);
+    const interruptedRoles = this.platform.roles.recover();
+    if (interruptedRoles.length) this.commit(interruptedRoles);
     await this.platform.recover();
     const interruptedExecutions = this.projection.executions.filter((execution) => ["launching", "running", "stopping"].includes(execution.status));
     if (interruptedExecutions.length) this.commit(interruptedExecutions.map((execution) => ({
@@ -286,7 +288,8 @@ export class ControlPlane extends EventEmitter {
           this.event(session, "turn.finished", {
             outcome: "partial",
             diagnostic: "Moguri restarted during this turn. Provider usage and process cleanup may be incomplete. Inspect the workspace before continuing; no operation was retried.",
-            ...(this.projection.candidateGenerations.some((entry) => entry.sessionId === session.id && entry.id === session.turnId) &&
+            ...((this.projection.candidateGenerations.some((entry) => entry.sessionId === session.id && entry.id === session.turnId) ||
+              this.projection.roleSequences.some((entry) => entry.sessionId === session.id && entry.id === session.turnId)) &&
               !this.history.some((event) => event.turn_id === session.turnId && (event.event_type === "tool.started" || event.event_type === "process.started")) ? { workspaceEffects: "none" as const } : {}),
           }),
         ]);
@@ -358,9 +361,10 @@ export class ControlPlane extends EventEmitter {
       const next = { ...this.snapshot(), ...projectEvents([...this.history, ...primary], this.profileId) };
       const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
       const accounting = this.platform.budgets.derived(next, primary);
+      const roleSequences = this.platform.roles.derived(next, primary);
       const checkpoints = primary.some((event) => event.event_type === "budget.blocked") ? this.platform.artifacts.checkpointEvents(next, primary) : [];
       const proposals = primary.some((event) => event.event_type === "model.completed" && event.payload.usage.role === "draft") ? this.platform.artifacts.generationEvents(next, primary) : [];
-      return [...answers, ...accounting, ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...attentionEvents(next, primary)];
+      return [...answers, ...accounting, ...roleSequences, ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
@@ -1425,13 +1429,14 @@ export class ControlPlane extends EventEmitter {
   }
   private originalContextEntries(sessionId: string): ContextEntry[] {
     const entries: ContextEntry[] = [];
-    const userWrites = new Set(this.history.filter((event) => event.profile_id === this.profileId && event.session_id === sessionId && event.event_type === "turn.control_started" && event.payload.purpose === "plan.save").map((event) => event.turn_id));
+    const userWrites = new Set(this.history.filter((event) => event.profile_id === this.profileId && event.session_id === sessionId && event.event_type === "turn.control_started" &&
+      (event.payload.purpose === "plan.save" || event.payload.purpose === "role.sequence")).map((event) => event.turn_id));
     for (const event of this.history) if (event.profile_id === this.profileId && event.session_id === sessionId) {
       if (event.event_type === "session.created" && event.payload.contextDigest) {
         const context = contextMessages(JSON.parse(this.store.blob(event.payload.contextDigest)));
         entries.push(...context.map((message) => ({ seq: event.seq, turnId: null, message })));
       } else if (event.event_type === "turn.started" || event.event_type === "steer.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.contextItem(event.payload.item, Date.parse(event.timestamp)) });
-      else if (event.event_type === "model.completed" && !["router", "compaction", "draft"].includes(event.payload.usage.role)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
+      else if (event.event_type === "model.completed" && !userWrites.has(event.turn_id) && !["router", "compaction", "draft"].includes(event.payload.usage.role)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
       else if (event.event_type === "tool.completed" && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: event.payload.call.name,
@@ -2092,7 +2097,17 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     const run = this.runs.get(sessionId);
-    if (!run || run.abort.signal.aborted) return;
+    if (!run) {
+      const sequence = this.projection.roleSequences.find((sequence) => sequence.sessionId === sessionId && sequence.id === current.turnId && sequence.status === "running");
+      if (sequence) this.commit([
+        this.event(current, "turn.stop_requested", {}),
+        this.platform.roles.event({ ...sequence, revision: sequence.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true }),
+        this.event(current, "turn.finished", { outcome: "partial", diagnostic: "No active owned worker could acknowledge this retained role intent. Its stop is partial; no inference, cleanup or continuation was fabricated.",
+          ...(!this.history.some((event) => event.turn_id === sequence.id && (event.event_type === "tool.started" || event.event_type === "process.started")) ? { workspaceEffects: "none" as const } : {}) }),
+      ]);
+      return;
+    }
+    if (run.abort.signal.aborted) return;
     try { this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), ...this.cancelledQuestions(this.session(sessionId), "Owning turn was stopped. No answer was supplied.")]); }
     finally { this.releaseQuestionWaits(sessionId); this.requestWorkerStop(run); }
   }
