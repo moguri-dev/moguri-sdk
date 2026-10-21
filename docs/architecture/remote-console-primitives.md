@@ -121,6 +121,37 @@ profile owners, repository/operation/MCP schema rollbacks and the new Remote
 boundary/state cases. The SDK/types, service/workers, TUI and desktop build.
 The existing Ghostty chunk-size advisory remains visible.
 
+## Production carrier development
+
+The source now includes a separate `terminal-bridge.mjs` build and typed
+`RemoteConsoles`/`RemoteTerminalChannel` carrier. A core SSH probe reports
+the host's Node argv, shell and bridge/broker hashes; only matching local
+expected hashes enter `terminalBuild` metadata. This is installed-build
+evidence, not a public console-ready flag.
+
+The 512-KiB stream never traverses the model worker or its durable journal.
+It supports actual Remote binding reads, deterministic private endpoint
+preparation from a retained owner ID/scope, one-use broker admission,
+authenticated attach and exact known cleanup. Owner metadata/admission/
+cleanup markers are bounded, private, versioned and secret-free.
+Technical bootstrap keys cross only pinned SSH and private Node IPC.
+Cleanup preserves unexpected files, observes the known PID's exit without
+signalling an arbitrary retained PID, and can retry its exact pending stage.
+
+The shared SSH runtime tracks direct caller-owned children as well as existing
+agent/query wrappers, so shutdown detaches every owned SSH stream rather than
+leaving a hidden controller lease. The independent broker/PTY survives;
+a fresh transport can authenticate only the same retained owner/key.
+
+Three generated production-carrier cases pass in **4,186.29 ms**, with both
+type checks and a complete build. They exercise event-first durable owner/PTY
+metadata, actual SSH output/input, duplicate launch without replay,
+detach/reattach, key/build rejection before another connection and actual
+runtime shutdown/fresh transport recovery. Tests write generated control-plane
+intents directly while the public terminal admission API remains gated.
+The complete public manager/session/policy/recovery/client path is still being
+integrated; no Remote console-ready surface or 0.19 archive is qualified.
+
 ## Required public acceptance
 
 Before advertising Remote user consoles, the authoritative service/SDK must

@@ -16,6 +16,10 @@ export const TerminalBindingSchema = Type.Union([
 export type TerminalBinding = Static<typeof TerminalBindingSchema>;
 export const RemoteTerminalBoundarySchema = object({ target: RemoteIdentitySchema, peerDigest: hash, bridgeDigest: hash, brokerDigest: hash });
 export type RemoteTerminalBoundary = Static<typeof RemoteTerminalBoundarySchema>;
+export const RemoteTerminalBuildSchema = object({
+  command: Type.Array(path, { minItems: 2, maxItems: 8 }), bridgeDigest: hash, brokerDigest: hash, shell: path,
+});
+export type RemoteTerminalBuild = Static<typeof RemoteTerminalBuildSchema>;
 const owner = {
   id, profileId: id, protocol: Type.Literal(1), buildDigest: hash, scopeDigest: hash,
   cleanup: Type.Union([Type.Literal("retained"), Type.Literal("pending"), Type.Literal("removed")]),
@@ -26,17 +30,18 @@ const pid = nullable(Type.Integer({ minimum: 2, maximum: Number.MAX_SAFE_INTEGER
 export const LocalTerminalOwnerSchema = object({ ...owner, directory: path, endpoint: path, pid, status,
   env: Type.Optional(Type.Literal("Local")), remote: Type.Optional(Type.Never()) });
 export type LocalTerminalOwner = Static<typeof LocalTerminalOwnerSchema>;
-export const PreparedTerminalOwnerSchema = Type.Union([
-  LocalTerminalOwnerSchema,
-  object({ ...owner, directory: path, endpoint: path, pid, status, env: Type.Literal("Remote"), remote: RemoteTerminalBoundarySchema }),
-]);
+export const PreparedRemoteTerminalOwnerSchema = object({ ...owner, directory: path, endpoint: path, pid, status, env: Type.Literal("Remote"), remote: RemoteTerminalBoundarySchema });
+export type PreparedRemoteTerminalOwner = Static<typeof PreparedRemoteTerminalOwnerSchema>;
+export const PreparedTerminalOwnerSchema = Type.Union([LocalTerminalOwnerSchema, PreparedRemoteTerminalOwnerSchema]);
 export type PreparedTerminalOwner = Static<typeof PreparedTerminalOwnerSchema>;
-export const TerminalOwnerSchema = Type.Union([
-  PreparedTerminalOwnerSchema,
+export const RemoteTerminalOwnerSchema = Type.Union([
+  PreparedRemoteTerminalOwnerSchema,
   object({ ...owner, directory: Type.Null(), endpoint: Type.Null(), pid: Type.Null(),
     status: Type.Union([Type.Literal("preparing"), Type.Literal("unconfirmed"), Type.Literal("stopped"), Type.Literal("acknowledged")]),
     env: Type.Literal("Remote"), remote: RemoteTerminalBoundarySchema }),
 ]);
+export type RemoteTerminalOwner = Static<typeof RemoteTerminalOwnerSchema>;
+export const TerminalOwnerSchema = Type.Union([LocalTerminalOwnerSchema, RemoteTerminalOwnerSchema]);
 export type TerminalOwner = Static<typeof TerminalOwnerSchema>;
 export const TerminalStateSchema = object({
   id, sessionId: id, projectId: id, workspaceId: Type.Optional(nullable(id)),

@@ -14,6 +14,7 @@ import { foregroundWorker } from "./foreground-bridge.ts";
 import { workerCatalog } from "./worker-queries.ts";
 import { readWorkspace } from "./workspace-reads.ts";
 import { discoverRemoteMcp } from "./remote-mcp-runtime.ts";
+import { remoteTerminalBuild } from "./terminal-build.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -38,7 +39,8 @@ async function runtimeInfo(init: BridgeInit): Promise<BridgeInfo> {
     root = await realpath(init.root);
     if (root !== init.root || !(await lstat(root)).isDirectory()) throw new MoguriError("remote_workspace_alias", "Execution workspace moved or is a symlink alias. Approve its canonical path explicitly.");
   }
-  return { protocol: PROTOCOL_VERSION, workerDigest, nodeVersion: process.versions.node, platform: process.platform, root };
+  return { protocol: PROTOCOL_VERSION, workerDigest, nodeVersion: process.versions.node, platform: process.platform, root,
+    ...(init.action === "probe" ? { terminalBuild: await remoteTerminalBuild() } : {}) };
 }
 function runCredentials(init: BridgeInit): { id: string; key: Buffer } {
   if (!init.runId || !init.key) throw new Error("A remote run needs its exact owned identity and transport key.");

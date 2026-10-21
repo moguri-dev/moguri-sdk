@@ -29,6 +29,12 @@ export const TerminalRequestSchema = Type.Union([
 ]);
 export type TerminalRequest = Static<typeof TerminalRequestSchema>;
 export type TerminalRequestInput = TerminalRequest extends infer T ? T extends TerminalRequest ? Omit<T, "id"> : never : never;
+export interface TerminalControlChannel {
+  request(input: TerminalRequestInput): Promise<unknown>;
+  inspectOwner(): Promise<TerminalOwnerInfo>;
+  detach(): void | Promise<void>;
+  retire(): void;
+}
 export const TerminalOwnerInfoSchema = object({
   owner: TerminalOwnerSchema, terminalIds: Type.Array(id, { maxItems: 64 }), nodeVersion: Type.String({ maxLength: 80 }),
 });

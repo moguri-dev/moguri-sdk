@@ -14,6 +14,7 @@ import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME } from "./worker-wire.ts
 import type { ParentMessage } from "./worker-protocol.ts";
 import type { WorkerConnection, WorkerConnectionEvents } from "./worker-connection.ts";
 import type { PreparedModel } from "./provider.ts";
+import { remoteTerminalBuild } from "./terminal-build.ts";
 
 export function validateRemoteTarget(target: RemoteTarget | null): void {
   if (!target) return;
@@ -42,6 +43,7 @@ export class RemoteRuntime {
   private probes = new Set<Promise<unknown>>();
   private queries = new Map<AbortController, Promise<BridgeEnvelope>>();
   private active = new Set<RemoteWorker>();
+  private readonly sshChildren = new Set<ChildProcessWithoutNullStreams>();
   private closed = false;
   constructor(private readonly stateDir: string, private readonly target: () => RemoteTarget | null, private readonly workerPath: string, private readonly options: RemoteOptions = {}) {
     this.signature = frameDigest(target()); this.vault = options.vault ?? new McpKeychain("dev.moguri.profile.default.remote-runs");
@@ -90,6 +92,7 @@ export class RemoteRuntime {
       "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2",
       target.host, target.command.map(quote).join(" ")];
     const child = spawn("ssh", args, { stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, HOME: process.env.HOME } });
+    this.sshChildren.add(child); child.once("close", () => this.sshChildren.delete(child));
     await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
     const wire = new JsonLineChannel(child.stdout, child.stdin, false, frameBytes); let stderr = "";
     child.stderr.on("data", (data: Buffer) => { stderr = (stderr + data.toString()).slice(-8192); });
@@ -132,11 +135,14 @@ export class RemoteRuntime {
     this.probeAbort?.abort(); this.probeAbort = abort;
     const task = (async () => {
       try {
-        const workerDigest = await this.workerDigest();
+        const [workerDigest, expectedTerminal] = await Promise.all([this.workerDigest(), remoteTerminalBuild()]);
         const result = await this.query(target, { action: "probe", protocol: PROTOCOL_VERSION, stateDir: target.stateDir, root: null, workerDigest }, AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]));
         if (result.kind !== "probe") throw new MoguriError("remote_protocol", "Remote readiness returned the wrong response.", 409);
         if (this.closed || signature !== frameDigest(this.target()) || abort.signal.aborted) throw new MoguriError("remote_changed", "Remote configuration changed during qualification. Probe the current target.", 409);
-        this.readiness = { ready: true, diagnostic: `Verified SSH host ${target.name}; ${result.info.platform}/Node ${result.info.nodeVersion}. Remote execution is not SendBox isolation.`, configDigest: signature, hostFingerprint: remoteFingerprint(target), nodeVersion: result.info.nodeVersion, platform: result.info.platform, workerDigest };
+        const terminal = result.info.terminalBuild, matchingTerminal = terminal?.bridgeDigest === expectedTerminal.bridgeDigest && terminal.brokerDigest === expectedTerminal.brokerDigest;
+        this.readiness = { ready: true, diagnostic: `Verified SSH host ${target.name}; ${result.info.platform}/Node ${result.info.nodeVersion}. Remote execution is not SendBox isolation.`, configDigest: signature, hostFingerprint: remoteFingerprint(target), nodeVersion: result.info.nodeVersion, platform: result.info.platform, workerDigest,
+          ...(matchingTerminal ? { terminalBuild: terminal } : {}),
+          terminalDiagnostic: matchingTerminal ? "Exact console bridge/broker bytes are present. Public console lifecycle qualification remains separate." : "This host has no matching console bridge/broker build. No console or Local fallback is authorized." };
       } catch (error) {
         if (signature === frameDigest(this.target()) && !this.closed && !abort.signal.aborted) {
           this.readiness = { ...absentReadiness(), diagnostic: error instanceof MoguriError ? error.message : "Remote qualification failed. Check the pinned target, private identity and installed worker build; no Local fallback." };
@@ -207,6 +213,13 @@ export class RemoteRuntime {
     for (const [abort] of queries) abort.abort();
     const workers = [...this.active];
     for (const worker of workers) worker.kill("SIGTERM");
+    const children = [...this.sshChildren], ended = children.map((child) => child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise<void>((resolve) => child.once("close", () => resolve())));
+    for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { await Promise.race([Promise.all(ended), new Promise<void>((resolve) => { timer = setTimeout(resolve, 2000); })]); }
+    finally { clearTimeout(timer); }
+    for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await Promise.all(ended);
     await Promise.all(workers.map((worker) => worker.closed));
     await Promise.allSettled(queries.map(([, task]) => task));
     await Promise.allSettled(this.probes);

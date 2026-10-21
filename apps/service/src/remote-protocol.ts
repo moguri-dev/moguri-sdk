@@ -3,6 +3,7 @@ import { MAX_TEXT, PROTOCOL_VERSION, ProjectSettingsSchema } from "../../../pack
 import { WorkerRequestSchema } from "./worker-protocol.ts";
 import { RemoteMcpToolsRequestSchema } from "./remote-mcp-runtime.ts";
 import { McpToolInfoSchema } from "../../../packages/protocol/src/mcp.ts";
+import { RemoteTerminalBuildSchema } from "../../../packages/protocol/src/terminals.ts";
 
 const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -53,7 +54,8 @@ export const BridgeInitSchema = Type.Object({
   workspace: Type.Optional(WorkspaceReadRequestSchema),
   mcpTools: Type.Optional(RemoteMcpToolsRequestSchema),
 }, { additionalProperties: false });
-const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText }, { additionalProperties: false });
+const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,
+  terminalBuild: Type.Optional(RemoteTerminalBuildSchema) }, { additionalProperties: false });
 const SavedBridgeInfoSchema = Type.Object({
   ...BridgeInfoSchema.properties, protocol: Type.Integer({ minimum: 16, maximum: PROTOCOL_VERSION }),
 }, { additionalProperties: false });

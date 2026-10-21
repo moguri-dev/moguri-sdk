@@ -2,6 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { LocalEndpointSchema } from "./providers.ts";
 import { Value } from "typebox/value";
 import { RemoteMcpGrantSchema } from "./mcp.ts";
+import type { RemoteTerminalBuild } from "./terminals.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -26,6 +27,8 @@ export type RemoteIdentity = Pick<RemoteTarget, "id" | "name" | "host" | "port" 
 export interface RemoteReadiness {
   ready: boolean; diagnostic: string; configDigest: string | null; hostFingerprint: string | null;
   nodeVersion: string | null; platform: string | null; workerDigest: string | null;
+  terminalBuild?: RemoteTerminalBuild;
+  terminalDiagnostic?: string;
 }
 export interface RemoteExecution {
   id: string; sessionId: string; projectId: string | null; turnId: string; target: RemoteIdentity;
