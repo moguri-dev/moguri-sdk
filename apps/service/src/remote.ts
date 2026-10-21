@@ -15,6 +15,9 @@ import type { ParentMessage } from "./worker-protocol.ts";
 import type { WorkerConnection, WorkerConnectionEvents } from "./worker-connection.ts";
 import type { PreparedModel } from "./provider.ts";
 import { remoteTerminalBuild } from "./terminal-build.ts";
+import type { RemoteTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
+import { remoteTerminalPeer, terminalOwnerScope } from "./terminal-identity.ts";
+import { TERMINAL_FRAME_BYTES } from "./terminal-protocol.ts";
 
 export function validateRemoteTarget(target: RemoteTarget | null): void {
   if (!target) return;
@@ -64,8 +67,18 @@ export class RemoteRuntime {
     return result.tools;
   }
   async connect(target: RemoteIdentity, signal: AbortSignal, frameBytes = MAX_WORKER_FRAME): Promise<SshConnection> {
+    return this.connectSsh(target, signal, frameBytes, false);
+  }
+  async connectForTerminalCleanup(owner: RemoteTerminalOwner, signal: AbortSignal): Promise<SshConnection> {
+    if (owner.status !== "stopped" || owner.cleanup !== "pending" || owner.scopeDigest !== terminalOwnerScope(owner) ||
+      owner.remote.peerDigest !== remoteTerminalPeer(owner.remote.target) || owner.remote.target.command.at(-1) !== "--moguri-terminal-bridge") {
+      throw new MoguriError("terminal_remote_cleanup", "Only an exact retained confirmed-stopped owner may open a cleanup-only SSH connection.", 409);
+    }
+    return this.connectSsh(owner.remote.target, signal, TERMINAL_FRAME_BYTES, true);
+  }
+  private async connectSsh(target: RemoteIdentity, signal: AbortSignal, frameBytes: number, cleanup: boolean): Promise<SshConnection> {
     signal.throwIfAborted();
-    if (this.closed) throw new MoguriError("remote_closed", "The Remote runtime is closed. No connection or fallback was started.", 409);
+    if (this.closed && !cleanup) throw new MoguriError("remote_closed", "The Remote runtime is closed. No connection or fallback was started.", 409);
     if (!Number.isSafeInteger(frameBytes) || frameBytes < 1 || frameBytes > MAX_WORKER_FRAME) throw new MoguriError("remote_frame_limit", "The owned SSH frame limit is invalid. No connection was started.");
     const identity = await lstat(target.identityFile);
     if (!identity.isFile() || identity.isSymbolicLink() || identity.uid !== process.getuid?.() || identity.mode & 0o077) throw new MoguriError("ssh_identity", "The selected SSH private identity must be a user-owned non-symlink regular file with mode 0600 or stricter.", 409);
@@ -82,7 +95,7 @@ export class RemoteRuntime {
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== process.getuid?.() || metadata.mode & 0o077 || await readFile(knownHosts, "utf8") !== key) throw new MoguriError("ssh_pin", "The owned SSH pin file changed. Inspect it; verification was not disabled.", 409);
     }
     signal.throwIfAborted();
-    if (this.closed) throw new MoguriError("remote_closed", "The Remote runtime closed during SSH identity preparation. No process was started.", 409);
+    if (this.closed && !cleanup) throw new MoguriError("remote_closed", "The Remote runtime closed during SSH identity preparation. No process was started.", 409);
     const args = ["-T", "-F", "/dev/null", "-p", String(target.port), "-l", target.user, "-i", target.identityFile,
       "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
       "-o", "StrictHostKeyChecking=yes", "-o", `UserKnownHostsFile="${knownHosts.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,

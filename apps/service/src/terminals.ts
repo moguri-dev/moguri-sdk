@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import {
-  MoguriError, parse, type Snapshot, type TerminalBinding, type TerminalInput, type TerminalOwner, type LocalTerminalOwner, type TerminalState, type RuntimeCloseOptions,
+  MoguriError, parse, PreparedRemoteTerminalOwnerSchema, RemoteTerminalOwnerSchema, type Snapshot, type TerminalBinding, type TerminalInput, type TerminalOwner, type LocalTerminalOwner, type TerminalState, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { TerminalChannel } from "./terminal-channel.ts";
@@ -14,22 +14,25 @@ import { terminalOwnerScope, assertTerminalEndpoint } from "./terminal-identity.
 import {
   TerminalInspectSchema, TerminalOwnerInfoSchema, TerminalReadSchema, type TerminalLaunch, type TerminalOwnerInfo,
   type TerminalRead,
+  type TerminalControlChannel,
 } from "./terminal-protocol.ts";
 import type { TerminalLaunchOptions } from "./terminal-engine.ts";
 import { frameDigest } from "./worker-wire.ts";
+import type { RemoteConsoles, RemoteConsoleAdmission } from "./remote-terminals.ts";
 
 export interface TerminalOptions extends TerminalLaunchOptions { vault?: SecretVault; brokerPath?: string }
 interface Host {
   snapshot(): Snapshot; changed(terminal: TerminalState): void; ownerChanged(owner: TerminalOwner): void;
   inputAllowed(terminal: TerminalState): void;
+  remote?: RemoteConsoles;
 }
-interface Attached { channel: TerminalChannel; info: TerminalOwnerInfo; attachmentId: string }
+interface Attached { channel: TerminalControlChannel; info: TerminalOwnerInfo; attachmentId: string }
 export class TerminalManager {
   private readonly clientId = randomUUID();
   private readonly vault: SecretVault;
   private readonly brokerPath: string;
   private readonly attached = new Map<string, Attached>();
-  private creating?: Promise<TerminalOwner>;
+  private creating = new Map<string, Promise<TerminalOwner>>();
   private recovering = new Map<string, Promise<void>>();
   private closing = false;
   private readonly admissionAbort = new AbortController();
@@ -51,8 +54,13 @@ export class TerminalManager {
     return terminal;
   }
   private slot(owner: TerminalOwner) { return `terminal-owner-${owner.id}`; }
+  private remote(): RemoteConsoles {
+    if (!this.host.remote) throw new MoguriError("terminal_remote_unqualified", "Remote owner transport is unavailable. No Local endpoint, key or fallback was selected.", 409);
+    return this.host.remote;
+  }
   private lost(owner: TerminalOwner, diagnostic: string): void {
-    this.attached.get(owner.id)?.channel.detach();
+    const attached = this.attached.get(owner.id);
+    if (attached) void Promise.resolve(attached.channel.detach()).catch(() => console.error("Terminal owner transport detach remains unconfirmed."));
     this.attached.delete(owner.id);
     this.host.ownerChanged({ ...this.owner(owner.id), status: "unconfirmed", updatedAt: new Date().toISOString(), diagnostic });
     for (const terminal of this.snapshot().terminals.filter((terminal) => terminal.ownerId === owner.id && !["closed", "failed", "acknowledged"].includes(terminal.status))) {
@@ -63,27 +71,28 @@ export class TerminalManager {
     const result = parse(TerminalInspectSchema, actual);
     if (!state.binding || result.launchDigest !== state.launchDigest || result.terminal.id !== state.id || result.terminal.ownerId !== state.ownerId ||
       result.terminal.sessionId !== state.sessionId || result.terminal.projectId !== state.projectId || (result.terminal.workspaceId ?? null) !== (state.workspaceId ?? null) ||
-      result.terminal.binding?.digest !== state.binding.digest || state.pid !== null && result.terminal.pid !== state.pid) {
+      JSON.stringify(result.terminal.binding) !== JSON.stringify(state.binding) || result.terminal.env !== state.env || state.pid !== null && result.terminal.pid !== state.pid) {
       throw new MoguriError("terminal_receipt", "Terminal observation does not match its exact retained launch/root identity. Nothing was adopted.", 409);
     }
     return { ...state, pid: result.terminal.pid, cols: result.terminal.cols, rows: result.terminal.rows, status: result.terminal.status,
       diagnostic: result.terminal.diagnostic, attachmentId: state.ownerId ? this.attached.get(state.ownerId)?.attachmentId ?? state.attachmentId : state.attachmentId };
   }
   private async attach(owner: TerminalOwner): Promise<void> {
-    if (owner.remote) throw new MoguriError("terminal_remote_unqualified", "Remote owner transport is being integrated. Its endpoint was not inspected as a Local path.", 409);
+    if (owner.directory === null) throw new MoguriError("terminal_owner_preparing", "Remote owner preparation has no retained endpoint. No Local key/path or replacement was selected.", 409);
     const previous = this.attached.get(owner.id);
-    let connected: { channel: TerminalChannel; info: TerminalOwnerInfo };
+    let connected: { channel: TerminalControlChannel; info: TerminalOwnerInfo };
     if (previous) connected = { channel: previous.channel, info: await previous.channel.inspectOwner() };
     else {
       const key = await this.vault.read(this.slot(owner), AbortSignal.timeout(5000));
       if (!key) throw new MoguriError("terminal_key_missing", "The existing terminal owner key is missing. Restore its explicit secret backend or inspect its processes; no replacement was started.", 409);
-      connected = await TerminalChannel.connect(owner, key, this.clientId, (diagnostic) => this.lost(owner, diagnostic));
+      connected = owner.remote ? await this.remote().connect(parse(PreparedRemoteTerminalOwnerSchema, owner), key, this.clientId, (diagnostic) => this.lost(owner, diagnostic), AbortSignal.timeout(10_000)) :
+        await TerminalChannel.connect(owner, key, this.clientId, (diagnostic) => this.lost(owner, diagnostic));
     }
     this.attached.set(owner.id, { ...connected, attachmentId: randomUUID() });
     const known = this.snapshot().terminals.filter((terminal) => terminal.ownerId === owner.id);
     const unknown = connected.info.terminalIds.filter((id) => !known.some((terminal) => terminal.id === id));
     if (unknown.length) {
-      connected.channel.detach(); this.attached.delete(owner.id);
+      await connected.channel.detach(); this.attached.delete(owner.id);
       throw new MoguriError("terminal_orphans", "The authenticated owner reports terminals without retained user intent. Inspect that owner; nothing was adopted or replayed.", 409);
     }
     this.host.ownerChanged({ ...connected.info.owner, diagnostic: connected.info.owner.diagnostic });
@@ -189,8 +198,42 @@ export class TerminalManager {
       child?.unref();
     }
   }
+  private async createRemoteOwner(admission: RemoteConsoleAdmission, recheck: () => void): Promise<TerminalOwner> {
+    const profileId = this.snapshot().profileId, now = new Date().toISOString(), id = randomUUID();
+    let owner = parse(RemoteTerminalOwnerSchema, { id, profileId, protocol: 1, env: "Remote", remote: admission.boundary, buildDigest: admission.boundary.brokerDigest,
+      scopeDigest: "0".repeat(64), directory: null, endpoint: null, pid: null, status: "preparing", cleanup: "retained", createdAt: now, updatedAt: now,
+      diagnostic: "Remote owner preparation intent retained before endpoint, broker or PTY admission." });
+    owner = { ...owner, scopeDigest: terminalOwnerScope(owner) }; this.host.ownerChanged(owner);
+    const key = randomBytes(32).toString("base64");
+    let connected: { channel: TerminalControlChannel; info: TerminalOwnerInfo } | undefined, attempted = false;
+    try {
+      recheck(); owner = await this.remote().prepare(owner, this.admissionAbort.signal); this.host.ownerChanged(owner); recheck();
+      await this.vault.write(this.slot(owner), key, AbortSignal.any([this.admissionAbort.signal, AbortSignal.timeout(5000)]));
+      this.admissionAbort.signal.throwIfAborted(); recheck(); attempted = true;
+      connected = await this.remote().connect(parse(PreparedRemoteTerminalOwnerSchema, owner), key, this.clientId, (diagnostic) => this.lost(owner, diagnostic), this.admissionAbort.signal, true);
+      owner = parse(RemoteTerminalOwnerSchema, connected.info.owner); recheck(); this.host.ownerChanged(owner);
+      this.attached.set(owner.id, { ...connected, attachmentId: randomUUID() }); return owner;
+    } catch (error) {
+      if (connected) {
+        try {
+          const stopped = parse(TerminalOwnerInfoSchema, await connected.channel.request({ action: "close-all" }));
+          owner = parse(RemoteTerminalOwnerSchema, stopped.owner); this.host.ownerChanged(owner);
+          connected.channel.retire(); await connected.channel.request({ action: "dispose" }); await connected.channel.detach(); attempted = false;
+        } catch (cleanup) { console.error("New Remote terminal owner cleanup remains unconfirmed:", cleanup instanceof MoguriError ? cleanup.code : "terminal_remote_cleanup"); }
+      }
+      if (!attempted) {
+        owner = parse(RemoteTerminalOwnerSchema, { ...owner, status: "stopped", updatedAt: new Date().toISOString(), diagnostic: "Remote owner stopped before any PTY admission; exact private cleanup is pending." });
+        this.host.ownerChanged(owner); await this.cleanupStoppedOwner(owner);
+        if (error instanceof MoguriError) throw error;
+        throw new MoguriError("terminal_owner_failed", "Remote owner admission failed before any PTY. No broker, shell or input was replayed.", 409);
+      }
+      this.host.ownerChanged({ ...owner, status: "unconfirmed", updatedAt: new Date().toISOString(),
+        diagnostic: error instanceof MoguriError ? error.message : "Remote broker start/receipt is unconfirmed. Restore its exact peer/key and reconcile; no replacement." });
+      throw new MoguriError("terminal_owner_unconfirmed", "Remote owner start/receipt is unconfirmed. Its original key/metadata were retained; reconcile before another shell.", 409);
+    }
+  }
   private async cleanupStoppedOwner(owner: TerminalOwner): Promise<void> {
-    if (owner.remote) throw new MoguriError("terminal_remote_unqualified", "Remote cleanup transport is being integrated. No Local key/path cleanup was attempted.", 409);
+    if (owner.remote && !this.host.remote) throw new MoguriError("terminal_remote_unqualified", "Remote cleanup transport is unavailable. No Local key/path cleanup was attempted.", 409);
     if (owner.status !== "stopped") throw new MoguriError("terminal_unconfirmed", "Private terminal resources cannot be removed before owned groups are confirmed stopped.", 409);
     const pending: TerminalOwner = { ...owner, cleanup: "pending", updatedAt: new Date().toISOString() };
     this.host.ownerChanged(pending);
@@ -200,11 +243,19 @@ export class TerminalManager {
       this.host.ownerChanged({ ...pending, diagnostic: "Owned groups stopped, but explicit secret-backend cleanup is unconfirmed. Restore that backend and retry service stop." });
       throw new MoguriError("terminal_secret_cleanup", "Owned groups stopped; their private key cleanup failed. The writer lock and cleanup intent remain. Restore the explicit backend and retry stop.", 409);
     }
+    if (pending.remote) {
+      try { await this.remote().cleanup(parse(RemoteTerminalOwnerSchema, pending), AbortSignal.timeout(10_000)); }
+      catch (error) {
+        this.host.ownerChanged({ ...pending, diagnostic: error instanceof MoguriError ? error.message : "Exact Remote private cleanup remains unconfirmed; original metadata/intent were retained." });
+        throw error;
+      }
+      this.host.ownerChanged({ ...pending, cleanup: "removed", updatedAt: new Date().toISOString() }); return;
+    }
     try {
-      await assertTerminalEndpoint(owner, false);
-      try { await assertTerminalEndpoint(owner); await unlink(owner.endpoint); }
+      await assertTerminalEndpoint(pending, false);
+      try { await assertTerminalEndpoint(pending); await unlink(pending.endpoint); }
       catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
-      await rmdir(owner.directory);
+      await rmdir(pending.directory);
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         this.host.ownerChanged({ ...pending, diagnostic: "Owned groups stopped, but private runtime-directory cleanup failed. No unrelated file was removed. Inspect the retained directory and retry stop." });
@@ -213,42 +264,46 @@ export class TerminalManager {
     }
     this.host.ownerChanged({ ...pending, cleanup: "removed", updatedAt: new Date().toISOString() });
   }
-  private async readyOwner(): Promise<TerminalOwner> {
+  private async readyOwner(admission: RemoteConsoleAdmission | undefined, recheck: () => void): Promise<TerminalOwner> {
     if (this.closing) throw new MoguriError("terminal_closing", "The terminal controller is closing; no new shell was admitted.", 409);
-    if (this.creating) return this.creating;
+    const scope = admission ? `Remote:${admission.boundary.peerDigest}` : "Local", creating = this.creating.get(scope);
+    if (creating) return creating;
     if (this.snapshot().terminalOwners.some((owner) => owner.status === "stopped" && owner.cleanup !== "removed")) throw new MoguriError("terminal_cleanup_pending", "A proven-stopped owner still has pending private-resource cleanup. Inspect its diagnostic and retry service stop before opening another owner.", 409);
-    const owners = this.snapshot().terminalOwners.filter((owner) => !["stopped", "acknowledged"].includes(owner.status));
+    const owners = this.snapshot().terminalOwners.filter((owner) => !["stopped", "acknowledged"].includes(owner.status) &&
+      (admission ? owner.remote?.peerDigest === admission.boundary.peerDigest : !owner.remote));
     if (owners.length > 1) throw new MoguriError("terminal_owner_conflict", "Multiple retained terminal owners need inspection. No owner was guessed or replaced.", 409);
     const current = owners[0];
     if (current) {
+      if (admission && (current.remote?.bridgeDigest !== admission.boundary.bridgeDigest || current.remote.brokerDigest !== admission.boundary.brokerDigest)) throw new MoguriError("terminal_owner_build", "This peer already owns a retained console under a different exact helper build. No owner was replaced.", 409);
       if (current.status === "running" && this.attached.has(current.id)) return current;
       throw new MoguriError("terminal_owner_unconfirmed", "An existing terminal owner is pending/unconfirmed. Reconcile or inspect it; no replacement owner was started.", 409);
     }
-    this.creating ??= this.createOwner().finally(() => { this.creating = undefined; });
-    return this.creating;
+    const work = (admission ? this.createRemoteOwner(admission, recheck) : this.createOwner()).finally(() => { this.creating.delete(scope); });
+    this.creating.set(scope, work); return work;
   }
   open(binding: TerminalBinding, cols: number, rows: number, identity: { id: string; digest: string }, recheck: () => void,
-    script?: { name: string; command: string }): Promise<TerminalState> {
-    const work = this.launchTerminal(binding, cols, rows, identity, recheck, script);
+    script?: { name: string; command: string }, remote?: RemoteConsoleAdmission): Promise<TerminalState> {
+    const work = this.launchTerminal(binding, cols, rows, identity, recheck, script, remote);
     this.admissions.add(work);
     void work.then(() => this.admissions.delete(work), () => this.admissions.delete(work));
     return work;
   }
   private async launchTerminal(binding: TerminalBinding, cols: number, rows: number, identity: { id: string; digest: string }, recheck: () => void,
-    script?: { name: string; command: string }): Promise<TerminalState> {
-    if (binding.env === "Remote") throw new MoguriError("terminal_remote_unqualified", "Remote PTY admission is not yet integrated. No Local broker or shell was created.", 409);
+    script?: { name: string; command: string }, remote?: RemoteConsoleAdmission): Promise<TerminalState> {
+    if (binding.env === "Remote" && (!remote || remote.boundary.peerDigest !== binding.peerDigest)) throw new MoguriError("terminal_remote_unqualified", "Remote PTY has no exact peer-bound admission. No Local broker or shell was created.", 409);
+    if (binding.env === "Local" && remote) throw new MoguriError("terminal_env", "A Local terminal cannot borrow Remote owner authority.", 409);
     const duplicate = this.snapshot().terminals.find((terminal) => terminal.commandId === identity.id);
     if (duplicate) throw new MoguriError(duplicate.commandDigest === identity.digest ? "terminal_intent_exists" : "idempotency_conflict",
       "This original command already owns a terminal intent. Inspect its actual outcome; no shell was replayed.", 409);
-    recheck(); const owner = await this.readyOwner(); recheck();
+    recheck(); const owner = await this.readyOwner(remote, recheck); recheck();
     if (this.closing) throw new MoguriError("terminal_closing", "Terminal admission was stopped before its PTY launch. No shell was replayed.", 409);
     const live = this.snapshot().terminals.filter((terminal) => !["closed", "failed", "acknowledged"].includes(terminal.status));
     if (live.length >= 16 || live.filter((terminal) => terminal.sessionId === binding.sessionId).length >= 4) throw new MoguriError("terminal_limit", "Close or inspect existing terminals first: four per session and sixteen per profile are supported.", 409);
-    const id = randomUUID(), launch: TerminalLaunch = { executable: this.options.executable ?? process.env.SHELL ?? "/bin/sh",
-      args: script ? ["-lc", script.command] : this.options.args ?? ["-l"] };
+    const id = randomUUID(), launch: TerminalLaunch = { executable: this.options.executable ?? (remote ? remote.launch.executable : process.env.SHELL ?? "/bin/sh"),
+      args: script ? ["-lc", script.command] : this.options.args ?? remote?.launch.args ?? ["-l"] };
     const intent: TerminalState = { id, sessionId: binding.sessionId, projectId: binding.projectId, workspaceId: binding.workspaceId,
       title: script?.name ?? "Terminal", pid: null, cols, rows, status: "starting", diagnostic: "User terminal intent retained before the exact PTY launch.",
-      env: "Local", binding, ownerId: owner.id, commandId: identity.id, commandDigest: identity.digest,
+      env: binding.env, binding, ownerId: owner.id, commandId: identity.id, commandDigest: identity.digest,
       launchDigest: frameDigest([id, binding, launch, cols, rows, script?.name ?? "Terminal"]) };
     this.host.changed(intent);
     try {
@@ -274,6 +329,8 @@ export class TerminalManager {
       { action: "resize", terminalId: terminal.id, bindingDigest: terminal.binding.digest, cols: request.cols, rows: request.rows });
     const observed = this.validate(terminal, result);
     if (request.action === "resize" && (observed.cols !== terminal.cols || observed.rows !== terminal.rows)) this.host.changed(observed);
+    try { this.host.inputAllowed(terminal); }
+    catch { throw new MoguriError("terminal_input_scope_changed", "Input/resize may already have been accepted in its original terminal, but current scope/policy changed. Nothing was resent.", 409); }
   }
   async read(id: string, offset: number, limit: number) {
     const terminal = this.terminal(id);
@@ -341,12 +398,16 @@ export class TerminalManager {
     if (options.preserveTerminals) {
       for (const [id, attached] of this.attached) {
         const current = await attached.channel.inspectOwner();
-        this.host.ownerChanged(current.owner); attached.channel.detach(); this.attached.delete(id);
+        this.host.ownerChanged(current.owner); await attached.channel.detach(); this.attached.delete(id);
       }
       return;
     }
     const active = this.snapshot().terminalOwners.filter((owner) => owner.status !== "acknowledged" && owner.cleanup !== "removed");
     for (const owner of active) {
+      if (owner.remote && owner.directory === null) {
+        const stopped = parse(RemoteTerminalOwnerSchema, { ...owner, status: "stopped", diagnostic: "Unprepared Remote owner never had broker authority. Exact resource cleanup requested." });
+        this.host.ownerChanged(stopped); await this.cleanupStoppedOwner(stopped); continue;
+      }
       if (owner.status === "stopped" && owner.cleanup === "pending") { await this.cleanupStoppedOwner(owner); continue; }
       if (!this.attached.has(owner.id)) {
         if (owner.status === "stopped") {
@@ -366,7 +427,7 @@ export class TerminalManager {
       this.host.ownerChanged(stopped.owner);
       if (stopped.owner.status !== "stopped") throw new MoguriError("terminal_unconfirmed", stopped.owner.diagnostic ?? "Owned terminal cleanup is unconfirmed.", 409);
       attached.channel.retire();
-      await attached.channel.request({ action: "dispose" }); attached.channel.detach(); this.attached.delete(owner.id);
+      await attached.channel.request({ action: "dispose" }); await attached.channel.detach(); this.attached.delete(owner.id);
       await this.cleanupStoppedOwner(stopped.owner);
     }
   }

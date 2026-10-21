@@ -9,9 +9,10 @@ import type { TerminalLaunch } from "./terminal-protocol.ts";
 export interface RemoteConsoleScope {
   profileId: string; sessionId: string; projectId: string; workspaceId: null; root: string;
 }
+export interface RemoteConsoleAdmission { boundary: RemoteTerminalBoundary; launch: TerminalLaunch }
 export class RemoteConsoles {
   constructor(private readonly runtime: RemoteRuntime) {}
-  admission(): { boundary: RemoteTerminalBoundary; launch: TerminalLaunch } {
+  admission(): RemoteConsoleAdmission {
     const target = this.runtime.assertReady(), build = this.runtime.readiness.terminalBuild;
     if (!build || !isAbsolute(build.shell) || /[\0\r\n]/.test(build.shell)) throw new MoguriError("terminal_remote_unready", this.runtime.readiness.terminalDiagnostic ?? "Probe this exact installed console bridge/broker before Remote console admission. No Local shell was substituted.", 409);
     return { boundary: { target: { id: target.id, name: target.name, host: target.host, port: target.port, user: target.user, hostKey: target.hostKey,

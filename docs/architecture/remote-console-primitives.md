@@ -152,6 +152,44 @@ intents directly while the public terminal admission API remains gated.
 The complete public manager/session/policy/recovery/client path is still being
 integrated; no Remote console-ready surface or 0.19 archive is qualified.
 
+## Service and SDK development integration
+
+The current development service now routes explicit Remote console commands
+through `RemoteConsoles`, the shared terminal manager and the same SDK.
+Remote binding reads happen on the actual host; policy/env/project/root/peer
+are rechecked after awaits before broker/PTY admission. Pending owners retain
+preparation before remote directory creation, prepared metadata before key/
+broker dispatch and exact terminal/original-command intent before a PTY.
+Local and Remote owners coexist without sharing keys or endpoints; profile
+and per-session console caps still aggregate across envs.
+
+Existing Remote input needs its current allowed env/pinned peer/project
+mapping and a freshly authenticated owner attachment, not another model or
+core-agent probe after restart. The broker rechecks actual inode identity on
+the execution host. Changing env/policy/root blocks new bytes while retained
+read/close still use the original boundary. Input accepted before a scope
+change remains explicit and is never resent.
+
+Normal stop closes/disposes exact known groups/owners. Explicit preservation
+detaches the frontend and restores only the original owner/PTY with a new
+input generation. Remote cleanup checks only known remote files; it never
+stats/unlinks a Remote endpoint on the controller. A failed stop preserves its
+registry/lock and cleanup intent. An exact confirmed-stopped pending owner
+can open a fixed cleanup-only SSH connection after the agent runtime closed;
+normal new work stays closed. This avoids making a legitimate cleanup retry
+depend on reopening agent execution.
+
+The current backend gate passes **11/11 in 9,981.32 ms**, with both type
+checks. It includes actual service SIGKILL and missing-key restoration,
+preserved restart/no replacement, separate Local/Remote owners, no-model
+input/resize/close, policy revocation, original lost command receipts,
+failed running/PID publication and unrelated-file/registry-preserving stop
+retry. The Local fixture assertion initially compared `/var` to the actual
+canonical `/private/var`; the test now checks `realpath`, without changing
+the product's root invariant. CLI/TUI/Ghostty boundary UX, further concurrency/
+cancellation/lost-input coverage and exact installed/package acceptance
+remain required. No qualified 0.19 delivery is implied.
+
 ## Required public acceptance
 
 Before advertising Remote user consoles, the authoritative service/SDK must

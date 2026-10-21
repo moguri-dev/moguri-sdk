@@ -42,7 +42,12 @@ export class RemoteTerminalChannel implements TerminalControlChannel {
   }
   static async query(runtime: RemoteRuntime, boundary: RemoteTerminalBoundary, init: RemoteTerminalInit, signal: AbortSignal): Promise<unknown> {
     await checkedBoundary(boundary, signal);
-    const channel = new RemoteTerminalChannel(await runtime.connect(boundary.target, signal, TERMINAL_FRAME_BYTES));
+    if ("owner" in init ? JSON.stringify(init.owner.remote) !== JSON.stringify(boundary) :
+      init.peerDigest !== boundary.peerDigest || init.bridgeDigest !== boundary.bridgeDigest || init.brokerDigest !== boundary.brokerDigest) {
+      throw new MoguriError("terminal_remote_scope", "This console query does not own the exact retained peer/helper boundary. No request was sent.", 409);
+    }
+    const connection = init.action === "cleanup" ? await runtime.connectForTerminalCleanup(init.owner, signal) : await runtime.connect(boundary.target, signal, TERMINAL_FRAME_BYTES);
+    const channel = new RemoteTerminalChannel(connection);
     try { return await channel.send("bootstrap", init); } finally { await channel.detach(); }
   }
   static async connect(runtime: RemoteRuntime, owner: PreparedRemoteTerminalOwner, key: string, clientId: string,

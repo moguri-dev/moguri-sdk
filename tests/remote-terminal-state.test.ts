@@ -74,7 +74,7 @@ test("unready Remote owner reconciliation preserves nullable preparation without
     await sdk.terminal.reconcileOwner(owner.id); await sdk.refresh();
     const retained = sdk.getState().snapshot!.terminalOwners[0]!;
     assert.equal(retained.status, "unconfirmed"); assert.equal(retained.directory, null); assert.equal(retained.endpoint, null);
-    assert.match(retained.diagnostic ?? "", /Remote owner transport/); assert.equal(reads, 0);
+    assert.match(retained.diagnostic ?? "", /Remote owner preparation/); assert.equal(reads, 0);
     await sdk.terminal.acknowledgeOwner(owner.id, true);
   } finally { sdk.disconnect(); await f.close(); }
 });

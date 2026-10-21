@@ -41,6 +41,7 @@ import { COMPACTION_PROMPT, COMPACTION_OUTPUT_LIMIT, compactionInput, compaction
 import { RemoteMcpIntentSchema, remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant } from "./remote-mcp.ts";
 import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./remote-mcp-runtime.ts";
 import { redactSecrets } from "./secret-redactor.ts";
+import { RemoteConsoles } from "./remote-terminals.ts";
 
 interface McpDispatch { id: string; scopeDigest: string; callDigest: string; hadAccess: boolean; access: string[] }
 
@@ -208,6 +209,7 @@ export class ControlPlane extends EventEmitter {
         const scope = this.planIdentity(session);
         return { bindingDigest: frameDigest(scope), boundary: { env: "Remote", root: scope.root, hostFingerprint: remoteFingerprint(scope.target), workerDigest: scope.workerDigest } };
       },
+      remoteConsoles: new RemoteConsoles(this.remote),
       globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
       foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
       sharedGlobals: Boolean(this.profileHooks),

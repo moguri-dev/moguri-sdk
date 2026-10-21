@@ -31,7 +31,7 @@ test("the production SSH console carrier uses event-first exact Remote owner/PTY
     assert.deepEqual((await readdir(f.owner.directory)).sort(), ["admitted.json", "control.sock", "owner.json"]);
     assert.equal((await readFile(join(f.owner.directory, "owner.json"), "utf8")).includes(f.key), false);
     assert.equal(JSON.stringify(f.controller.events(0)).includes("GENERATED_PRODUCTION_INPUT"), false);
-    await assert.rejects(() => f.sdk.terminal.open(f.sessionId), { code: "terminal_env" });
+    await assert.rejects(() => f.sdk.terminal.open(f.sessionId), { code: "terminal_owner_unconfirmed" });
     assert.equal(f.requests.length, 0);
   } finally { await f.close(); }
 });

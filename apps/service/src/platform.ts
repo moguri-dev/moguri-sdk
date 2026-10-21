@@ -72,6 +72,7 @@ export interface PlatformHost {
   repositoryContext(session: Session): Promise<string>;
   remoteRead: SessionWorkspaceHost["remoteRead"];
   remotePlanBinding: SessionWorkspaceHost["remotePlanBinding"];
+  remoteConsoles?: SessionWorkspaceHost["remoteConsoles"];
   remoteMcpScope(session: Session): RemoteMcpScope;
   remoteMcpTools(session: Session, server: McpServerConfig | null): Promise<McpToolInfo[]>;
   globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
@@ -129,6 +130,7 @@ export class PlatformRuntime {
       startup: host.startup,
       remoteRead: host.remoteRead,
       remotePlanBinding: host.remotePlanBinding,
+      remoteConsoles: host.remoteConsoles,
       retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session) => this.managed.project(session),
       rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
