@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-export async function qualifyOwnedSequence({ sdk, controller, node, cli, directory, stateDir, modelId, setReply, requests, proposalOrigin = false }) {
+export async function qualifyOwnedSequence({ sdk, controller, node, cli, directory, stateDir, modelId, setReply, requests, proposalOrigin = false, roleContracts = false }) {
   await mkdir(directory);
   const original = "Generated installed owned-role source.\n", marker = "GENERATED_INSTALLED_OWNED_ROLE_DATA_NOT_ACCEPTANCE";
   await writeFile(join(directory, "fixture.txt"), original);
@@ -21,8 +21,24 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
   const patch = { kind: "patch", summary: "Generated installed canonical role proposal.", edits: [
     { path: "fixture.txt", baseDigest: input.input.files[0].baseDigest, text: marker + "\n" },
   ] }, reply = proposalOrigin ? JSON.stringify(patch) : marker;
+  const routerReason = "GENERATED_INSTALLED_ROUTER_REASON_NOT_CONTEXT";
+  if (roleContracts) input.roles = [
+    { role: "router", modelId, instruction: "Return the original exact declared role plan.", outputBound: 256, contextRoleIndices: [],
+      contract: { kind: "router", pattern: "critique", draftId: modelId, criticId: modelId, minimumConfidence: 0.9 } },
+    { role: "draft", modelId, instruction: "Return one unaccepted canonical patch.", outputBound: 256, contextRoleIndices: [], contract: { kind: "patch" } },
+    { role: "critic", modelId, instruction: "Return bounded generated advice, not independent-family evidence or approval.", outputBound: 256, contextRoleIndices: [1],
+      contract: { kind: "critic", candidateIndex: 1 } },
+    { role: "revision", modelId, instruction: "Return the explicit final unaccepted canonical patch.", outputBound: 256, contextRoleIndices: [1, 2], contract: { kind: "patch" } },
+  ];
+  const count = input.roles.length, last = count - 1;
   const preview = await controller.ownedRoles.preview(input), review = { digest: preview.digest, confirmCost: true }, commandId = randomUUID();
-  setReply(reply);
+  setReply(roleContracts ? (request) => {
+    const prompt = request.messages.filter((message) => ["system", "developer"].includes(message.role)).map((message) => message.content).join("\n");
+    if (prompt.includes("\n\nRole router:\n")) return JSON.stringify({ pattern: "critique", draftId: modelId, criticId: modelId, confidence: 0.95, reason: routerReason });
+    if (prompt.includes("\n\nRole critic:\n")) return JSON.stringify({ verdict: "revise", reason: "Generated declared-contract check, not model quality.", issues: ["Generated bounded revision."] });
+    if (prompt.includes("\n\nRole draft:\n") || prompt.includes("\n\nRole revision:\n")) return JSON.stringify(patch);
+    throw new Error("Generated installed response has no exact original role.");
+  } : reply);
   try {
     const accepted = await controller.executeOwnedRoles(input, review, commandId);
     let record;
@@ -31,20 +47,32 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
       if (record.status !== "running") break;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    assert.equal(record.status, "completed"); assert.equal(requests.length, before + 3);
-    assert.deepEqual(record.steps.map((step) => step.role), ["draft", "critic", "revision"]);
+    assert.equal(record.status, "completed"); assert.equal(requests.length, before + count);
+    assert.deepEqual(record.steps.map((step) => step.role), input.roles.map((role) => role.role));
     for (const [position, request] of requests.slice(before).entries()) {
-      assert.equal(request.tools, undefined); assert.equal(request.max_tokens ?? request.max_completion_tokens, 64);
+      assert.equal(request.tools, undefined); assert.equal(request.max_tokens ?? request.max_completion_tokens, roleContracts ? 256 : 64);
       const context = JSON.parse(request.messages.findLast((message) => message.role === "user").content);
-      assert.equal(context.untrustedPriorResults.length, position);
-      assert.ok(context.untrustedPriorResults.every((result) => result.text === reply));
+      if (roleContracts) {
+        assert.deepEqual(context.untrustedPriorResults.map((value) => value.roleIndex), [[], [], [1], [1, 2]][position]);
+        if (position) assert.equal(JSON.stringify(request).includes(routerReason), false);
+        const contract = await sdk.roleSequences.contract(record.id, position);
+        assert.equal(record.inputVersion, 2); assert.equal(contract.result.status, "valid"); assert.equal(contract.inputVersion, 2);
+      } else {
+        assert.equal(context.untrustedPriorResults.length, position);
+        assert.ok(context.untrustedPriorResults.every((result) => result.text === reply));
+      }
     }
     const calls = (await sdk.budgets.calls({ sessionId: source.id })).calls, plans = (await sdk.budgets.plans({ turnId: record.id })).plans;
-    assert.equal(calls.length, 3); assert.equal(calls.reduce((tokens, call) => tokens + call.reportedTokens, 0), 126);
-    assert.equal(plans.length, 3); assert.ok(plans.every((plan) => plan.status === "consumed"));
-    const inspected = JSON.parse((await promisify(execFile)(node, [cli, "roles", record.id, "2"], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
+    assert.equal(calls.length, count); assert.equal(calls.reduce((tokens, call) => tokens + call.reportedTokens, 0), count * 42);
+    assert.equal(plans.length, count); assert.ok(plans.every((plan) => plan.status === "consumed"));
+    const inspected = JSON.parse((await promisify(execFile)(node, [cli, "roles", record.id, String(last)], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
     assert.ok(inspected.step.input.includes(marker)); assert.ok(inspected.step.result.includes(marker));
-    assert.equal(JSON.parse((await sdk.slash(source.id, "/roles " + record.id + " 2", "tui")).text).sequence.id, record.id);
+    assert.equal(JSON.parse((await sdk.slash(source.id, "/roles " + record.id + " " + last, "tui")).text).sequence.id, record.id);
+    if (roleContracts) {
+      const gate = JSON.parse((await promisify(execFile)(node, [cli, "roles", "contract", record.id, "2"], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
+      assert.equal(gate.result.value.verdict, "revise");
+      assert.equal(JSON.parse((await sdk.slash(source.id, "/roles contract " + record.id + " 2", "tui")).text).result.status, "valid");
+    }
     assert.equal(JSON.parse((await sdk.artifacts.export(record.id)).export.text).schemaVersion, 4);
     assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), original);
     assert.equal(await readFile(join(workspace.path, "fixture.txt"), "utf8"), original);
@@ -52,7 +80,7 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
     let linked;
     if (proposalOrigin) {
       const proposed = await sdk.candidates.roleProposal(record.id), reference = { roleSequenceId: record.id };
-      assert.equal(proposed.document.roleOrigin.stepId, record.steps[2].stepId); assert.deepEqual(proposed.document.patch, patch);
+      assert.equal(proposed.document.roleOrigin.stepId, record.steps[last].stepId); assert.deepEqual(proposed.document.patch, patch);
       const exposed = JSON.parse((await promisify(execFile)(node, [cli, "candidate", "role-proposal", record.id], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
       assert.deepEqual(exposed.document.roleOrigin, proposed.document.roleOrigin);
       assert.equal(JSON.parse((await sdk.slash(source.id, "/candidate role-proposal " + record.id, "tui")).text).document.roleOrigin.sequenceId, record.id);
@@ -72,10 +100,10 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
     await sdk.sessions.delete(source.id, true, sdk.getState().snapshot.sessions.find((session) => session.id === source.id).revision);
     return {
       async verifyRecovery(current, owner) {
-        assert.equal((await current.budgets.calls({ sessionId: source.id })).calls.length, 3);
+        assert.equal((await current.budgets.calls({ sessionId: source.id })).calls.length, count);
         owner.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run(owner.profileId, commandId);
         if (!linked) {
-          const value = await current.roleSequences.read(record.id, 2);
+          const value = await current.roleSequences.read(record.id, last);
           assert.equal(value.sequence.status, "completed"); assert.ok(value.step.input.includes(marker)); assert.ok(value.step.result.includes(marker));
           assert.equal((await owner.executeOwnedRoles(input, review, commandId)).id, record.id);
           const artifact = (await current.artifacts.read(record.id)).artifact;
@@ -97,7 +125,7 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
           assert.deepEqual(await readFile(join(directory, ".git/index")), index); assert.equal(git(["rev-parse", "HEAD"]), head);
         }
         await assert.rejects(() => owner.executeOwnedRoles(input, review, commandId), { code: "role_sequence_deleted" });
-        assert.equal(requests.length, before + 3);
+        assert.equal(requests.length, before + count);
       },
     };
   } finally { setReply(null); }

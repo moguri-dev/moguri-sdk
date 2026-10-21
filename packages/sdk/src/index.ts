@@ -138,6 +138,7 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly roleSequences = {
+    contract: (sequenceId: string, index: number) => this.query({ type: "role.contract.read", sequenceId, index }),
     read: (sequenceId: string, index?: number) => this.query({ type: "role.sequence.read", sequenceId, ...(index === undefined ? {} : { index }) }),
     list: () => {
       const snapshot = this.getState().snapshot;

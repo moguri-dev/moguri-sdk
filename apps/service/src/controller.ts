@@ -202,6 +202,7 @@ export class ControlPlane extends EventEmitter {
       generationQuery: (query) => this.generations.query(query),
       generationCommand: (command, finish) => this.generations.execute(command, finish),
       roleProposal: (id) => this.ownedRoles.proposal(id),
+      roleContract: (query) => this.ownedRoles.contract(query),
       modelEvidence: (id) => this.provider.evidence(id, AbortSignal.timeout(10_000)),
       planSaveQuery: (query) => this.planSaveQuery(query),
       planSaveCommand: (command, finish) => this.planSaveCommand(command, finish),
@@ -1128,7 +1129,7 @@ export class ControlPlane extends EventEmitter {
       authorityDigest: document.base.authorityDigest, inputEstimate: role.inputBound, maxOutputTokens: role.outputBound,
     })));
     const first = planned.plans[0]!, now = new Date().toISOString();
-    const record: RoleSequenceRecord = { version: 1, id: artifact.id, profileId: this.profileId, sessionId: session.id,
+    const record: RoleSequenceRecord = { version: 1, ...(document.version === 2 ? { inputVersion: 2 as const } : {}), id: artifact.id, profileId: this.profileId, sessionId: session.id,
       ownerSessionId: first.ownerSessionId, ownerTurnId: first.ownerTurnId, projectId: session.projectId, workspaceId: session.workspaceId,
       folderId: first.folderId, env: session.controls.env, commandId: intent.id, commandDigest: intent.digest, inputDigest: artifact.contentDigest,
       authorityDigest: document.base.authorityDigest, policyDigest: document.policyDigest, revision: 0, createdAt: now, updatedAt: now,
@@ -1763,6 +1764,7 @@ export class ControlPlane extends EventEmitter {
       const reservation = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
       if (!reservation || modelOutputExceeded(reservation, usage)) throw new MoguriError("owned_role_output", "The actual role output bound was lost/exceeded. Charges remain retained; no continuation.", 409);
       const checked = await this.ownedRoles.check(owned.id, run.abort.signal); owned.current = checked.current;
+      this.ownedRoles.validateResult(owned.id, request.stepId, message);
     } catch (error) {
       if (!(error instanceof MoguriError) && !run.abort.signal.aborted) console.error("Owned role validation failed: owned_role_result");
       diagnostic = error instanceof MoguriError ? error.message : run.abort.signal.aborted ? "Owned roles stopped. Actual output and charges remain retained." :

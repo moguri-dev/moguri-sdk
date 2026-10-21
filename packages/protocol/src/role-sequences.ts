@@ -23,7 +23,7 @@ export const RoleSequenceStepSchema = object({
 });
 export type RoleSequenceStep = Static<typeof RoleSequenceStepSchema>;
 export const RoleSequenceRecordSchema = object({
-  version: Type.Literal(1), id, profileId: id, sessionId: id, ownerSessionId: id, ownerTurnId: maybeId,
+  version: Type.Literal(1), inputVersion: Type.Optional(Type.Literal(2)), id, profileId: id, sessionId: id, ownerSessionId: id, ownerTurnId: maybeId,
   projectId: maybeId, workspaceId: maybeId, folderId: maybeId,
   env: Type.Union([Type.Literal("Local"), Type.Literal("Remote"), Type.Literal("Sandbox")]),
   commandId: id, commandDigest: hash, inputDigest: hash, authorityDigest: hash, policyDigest: hash,
@@ -68,7 +68,7 @@ export function projectRoleSequence(previous: RoleSequenceRecord | undefined, va
     if (next.revision !== 0 || next.status !== "running" || next.createdAt !== next.updatedAt || next.stopRequested || next.diagnostic ||
       next.steps.some((step) => step.state !== "pending")) corrupt("A role sequence must begin with exact undispatched intent.");
   } else {
-    const immutable = ["version", "id", "profileId", "sessionId", "ownerSessionId", "ownerTurnId", "projectId", "workspaceId", "folderId", "env",
+    const immutable = ["version", "inputVersion", "id", "profileId", "sessionId", "ownerSessionId", "ownerTurnId", "projectId", "workspaceId", "folderId", "env",
       "commandId", "commandDigest", "inputDigest", "authorityDigest", "policyDigest", "createdAt"] as const;
     if (next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
       next.steps.length !== previous.steps.length || previous.stopRequested && !next.stopRequested) corrupt("Original role sequence ownership/input/intent changed or replayed.");

@@ -39,7 +39,7 @@ export const slashCommands = [
   { name: "candidates", description: "Review retained repository proposals and actual stage/apply outcomes" },
   { name: "candidate", description: "Read retained role proposals, generate unaccepted data or stage reviewed bytes; application stays separate", argument: "[role-proposal ID|generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
   { name: "model-evidence", description: "Explicitly inspect provider-declared family/version, not independence or approval; no inference", argument: "[MODEL_ID]" },
-  { name: "roles", description: "Inspect independently retained role intent, actual calls and raw data; never dispatch", argument: "[SEQUENCE_ID [ROLE_INDEX]]" },
+  { name: "roles", description: "Inspect retained role intent, calls, raw data and declared contracts; never dispatch or approve", argument: "[SEQUENCE_ID [ROLE_INDEX]|contract SEQUENCE_ID ROLE_INDEX]" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
@@ -172,6 +172,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "roles": {
       if (!command.argument) return { kind: "text", text: JSON.stringify(sdk.roleSequences.list(), null, 2) };
       const parts = command.argument.split(/\s+/);
+      if (parts[0] === "contract") {
+        if (parts.length !== 3 || !/^\d+$/.test(parts[2]!)) throw new ClientError("role_contract_command", "Use /roles contract SEQUENCE_ID ROLE_INDEX. Contract validity is not quality, independence or approval.");
+        return { kind: "text", text: JSON.stringify(await sdk.roleSequences.contract(parts[1]!, Number(parts[2])), null, 2) };
+      }
       if (parts.length > 2 || parts[1] !== undefined && !/^\d+$/.test(parts[1])) throw new ClientError("role_sequence_command", "Use /roles SEQUENCE_ID [ROLE_INDEX] to inspect retained data; this command cannot run a model.");
       return { kind: "text", text: JSON.stringify(await sdk.roleSequences.read(parts[0]!, parts[1] === undefined ? undefined : Number(parts[1])), null, 2) };
     }

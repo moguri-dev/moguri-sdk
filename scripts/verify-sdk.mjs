@@ -74,6 +74,10 @@ try {
       const roleSequence:RoleSequenceRecord=roleRead.sequence;void roleSequence.steps[0]?.planId;void roleRead.step?.result;
       void sdk.roleSequences.list();void sdk.getState().snapshot?.roleSequences;
       ` : ""}
+      ${installedProtocol >= 35 ? `
+      const roleGate=await sdk.roleSequences.contract("generated-sequence",1);
+      void roleGate.contract;void roleGate.contextRoleIndices;void roleGate.result.status;
+      ` : ""}
       ${installedProtocol >= 33 ? `
       const roleProposal=await sdk.candidates.roleProposal("generated-sequence");void roleProposal.document.roleOrigin.roleInputDigest;
       const roleReference={roleSequenceId:"generated-sequence"};
@@ -85,6 +89,7 @@ try {
       const owned:Parameters<typeof embedded.controller.executeOwnedRoles>[0]={sessionId:"generated-source",stageWorkspaceId:"generated-stage",
         input:{task:"Generated typed owned role.",files:[{path:"generated.ts",baseDigest:"absent"}]},
         roles:[{role:"draft",modelId:"generated-model",instruction:"Return unaccepted generated data.",outputBound:64}],timeoutMs:1000};
+      ${installedProtocol >= 35 ? 'owned.roles[0]!.contextRoleIndices=[];owned.roles[0]!.contract={kind:"patch"};' : ""}
       const ownedReview=await embedded.controller.ownedRoles.preview(owned);void ownedReview.document.roles[0]?.inputBound;
       await embedded.controller.executeOwnedRoles(owned,{digest:ownedReview.digest,confirmCost:true},"generated-original-owned-role");
       await embedded.close();
@@ -698,7 +703,7 @@ try {
         const chunks=[];for await(const chunk of request)chunks.push(Buffer.from(chunk));
         requests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));response.writeHead(200,{"Content-Type":"text/event-stream"});
         const frame=(delta,finish_reason=null)=>response.write("data: "+JSON.stringify({id:"generated-installed-proposal",object:"chat.completion.chunk",model:"generated-installed-proposal",choices:[{index:0,delta,finish_reason}]})+"\\n\\n");
-        frame({role:"assistant",content:reply});frame({},"stop");
+        frame({role:"assistant",content:typeof reply==="function"?reply(requests.at(-1)):reply});frame({},"stop");
         response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
       });
       let generationRuntime,generationSdk;
@@ -722,12 +727,13 @@ try {
         const {qualifyOwnedSequence}=await import(${JSON.stringify(new URL("./qualify-owned-sequence.mjs", import.meta.url).href)});
         const ownedProof=await qualifyOwnedSequence({sdk:generationSdk,controller:generationRuntime.controller,node:process.execPath,
           cli:${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},directory:join(root,"generated-installed-owned-roles"),
-          stateDir:ownedOptions.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests,proposalOrigin:PROTOCOL_VERSION>=33});
+          stateDir:ownedOptions.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests,proposalOrigin:PROTOCOL_VERSION>=33,roleContracts:PROTOCOL_VERSION>=35});
         generationSdk.disconnect();await generationRuntime.close();generationRuntime=await createRuntime(ownedOptions);
         generationSdk=await connectMoguri({stateDir:ownedOptions.stateDir,autoStart:false});
         await ownedProof.verifyRecovery(generationSdk,generationRuntime.controller);
-        console.log("Actual installed controller/worker owns three fully planned, bounded, independently retained roles with explicit untrusted prior-result context, shared CLI/TUI/SDK reads, source deletion/reopen and lost-receipt/deletion-intent replay refusal. No public compound or family-quality readiness.");
+        console.log("Actual installed controller/worker owns complete planned, bounded, independently retained roles with explicit untrusted prior-result context, shared CLI/TUI/SDK reads, source deletion/reopen and lost-receipt/deletion-intent replay refusal. No public compound or family-quality readiness.");
         if(PROTOCOL_VERSION>=33)console.log("Actual installed SDK/CLI/shared final-role proposals preserve exact review-bound origin, separate staging/application, source-role deletion, independent raw-copy/export5/reopen and actual-user acceptance without another model.");
+        if(PROTOCOL_VERSION>=35)console.log("Actual installed controller/worker binds version-2 router/patch/critic contracts, excludes router explanations from selected contexts and retains four actual 168-token role calls; SDK/CLI/shared contract reads, canonical origin/copy/reopen keep declared validity separate from quality or approval.");
         ` : ""}
       }finally{generationSdk?.disconnect();await generationRuntime?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
     }

@@ -1,0 +1,81 @@
+# Owned role contracts and selected prior-result context
+
+Development contract after qualified 0.28/protocol 34. The current native/SDK
+delivery remains frozen. This is a bounded prerequisite for compound policy
+binding, not public Cascade/Critique, independent-family proof, automatic
+acceptance, finite kupo or Max. Sandbox stays paused.
+
+## Reuse and boundary
+
+Reuse Node, TypeBox and maintained pi-ai (MIT), the existing actual owned
+worker/ledger, canonical candidate parser, independent role retention and
+read-only role inspector. No dependency, alternate model loop, permission
+source or workflow database. The qualified prerequisite spike passes 82/82 in
+96.98 s; the complete current source gate passes 810/810 in 728.61 s.
+
+The privileged Node executor may explicitly bind a role to an exact configured
+router plan, canonical selected-source patch, or bounded critic response.
+These contracts validate shape/binding, not whether code is correct. Critic
+pass/revise is untrusted advice; rejection or malformed output cannot authorize
+another paid role. It never becomes a user answer, permission or acceptance.
+Actual model/result/accounting is retained even when the contract rejects it.
+Unknown telemetry, failed retention, cancellation and changed authority still
+stop before the next preparation, through the existing ownership path.
+
+Each new contracted role explicitly selects earlier result indices. Router
+explanations cannot enter a contracted solver/critic/revision context, even as
+quoted prior-result data. Selected draft/critic text remains explicitly
+untrusted. Reserve the worst exact JSON escaping of only those permitted
+inputs before any role starts; recheck actual context at dispatch.
+Existing uncontracted inputs retain their original context semantics.
+
+## Persistence and shared inspection
+
+New private owned-input documents use version 2 and an immutable optional
+`inputVersion:2` role-record binding; version-1 bytes, digests,
+receipts, plans and independently retained copies are not rewritten. Add
+protocol/database 35 with a transactional compatibility marker and raw
+schema-34 failure/reopen coverage. Legacy fixtures reject new version-2
+semantics rather than relabeling them as schema 34.
+
+The original document fixes contracts and context selections before admission.
+Actual raw results and known accounting remain the authority. Contract
+inspection is a derived, versioned read over those original bytes, not a
+second mutable validation journal. SDK, compiled CLI, native TUI and desktop
+expose the same result with clear pending/uncontracted/invalid/rejected/valid
+states. Valid means only that the exact declared contract matched.
+Reading, original-source deletion or restart never calls a model, refunds
+capacity, promotes context or approves code.
+
+## Required gates
+
+Generated tests cover exact router roles/confidence, malformed/foreign/extra
+fields, lossless bounded critique, rejection, canonical patch paths/bases,
+explicit context selections, missing/forward/duplicate/router references and
+review digest changes. Use the actual control-plane worker for successful and
+rejected roles, preserved charges/no next preparation, failed journals, stop,
+concurrency and source retention/reopen. Cover migration rollback and old
+version-1 raw inputs, browser-safe external consumer types and all shared
+readers. Generated labels and mechanical validation are not model-quality
+benchmarks. Conditional pattern scheduling, family eligibility and
+accepted-work wind-down remain separate work.
+
+The initial exact router/critic parser primitive passes 2/2 in 217.76 ms,
+followed by 15 actual-worker/context/legacy projection cases in 13.02 s and
+strict type checks. Source 0.29/protocol 35 integration, migration/recovery,
+cross-client and external consumer qualification are still in progress.
+
+Actual version-1 and version-2 controller SIGKILL at pending, in-flight,
+recorded and completed boundaries passes all eight phases without restarted
+requests or root/model preparation (12.73 s within an 11-case, 29.61-s gate).
+Version 2 retains 0/1/1/4 original requests and known completed 168 tokens.
+Raw schema-34 marker failure/reopen preserves version-1 role/candidate
+ciphertext and the prior model-evidence marker; its successful marker measures
+4.94 ms in that gate. Compiled CLI, shared/native TUI and two hidden desktop
+contract readers pass; first desktop/compact inspection found no defect.
+
+The initial failure-injection fixture inspected an encrypted payload through
+the plaintext event header, so its predicate never ran. It now counts visible
+role-observation headers and fails the exact third atomic append; the actual
+worker retains unknown paid ownership and prepares no later role (1.32 s).
+No production fallback or relaxed result contract was introduced.

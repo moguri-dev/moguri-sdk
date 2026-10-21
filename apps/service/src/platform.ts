@@ -93,6 +93,7 @@ export interface PlatformHost {
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
   generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleProposal(id: string): import("../../../packages/protocol/src/index.ts").CandidateRoleProposalRead;
+  roleContract(query: import("../../../packages/protocol/src/role-contracts.ts").RoleContractQuery): import("../../../packages/protocol/src/role-contracts.ts").RoleContractRead;
   modelEvidence(id: string): Promise<import("../../../packages/protocol/src/index.ts").ModelEvidenceReport>;
   planSaveQuery(query: PlanSaveQuery): PlanSaveResponse;
   planSaveCommand(command: PlanSaveCommand, finish: WorkspaceFinish): CommandResult;
@@ -458,6 +459,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
     if (isRoleSequenceQuery(query)) return this.roles.query(query);
+    if (query.type === "role.contract.read") return this.host.roleContract(query);
     if (isCandidateGenerationQuery(query)) return this.host.generationQuery(query);
     if (isCandidateQuery(query)) return this.candidates.query(query);
     if (query.type === "model.evidence") return { type: query.type, evidence: await this.host.modelEvidence(query.modelId) };

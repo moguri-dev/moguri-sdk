@@ -2,6 +2,7 @@ import { normalizeContext } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { CandidatePatchSchema, MoguriError } from "../../packages/protocol/src/index.ts";
+import { RoleCritiqueSchema as CritiqueSchema, RoleRouterPlanSchema as PlanSchema } from "../../packages/protocol/src/role-contracts.ts";
 import { modelRequest } from "../../apps/service/src/model-controls.ts";
 import { modelEndpointBoundary } from "../../apps/service/src/model-registry.ts";
 import { isProtectedProjectPath } from "../../apps/service/src/files.ts";
@@ -19,20 +20,11 @@ export const CompoundPolicySchema = Type.Union([
 ]);
 export type CompoundPolicy = Static<typeof CompoundPolicySchema>;
 export interface CompoundModel extends RoutingModel { canonicalId: string; family: string }
-const planBase = { confidence: Type.Number({ minimum: 0, maximum: 1 }), reason: Type.String({ minLength: 1, maxLength: 1200 }), draftId: id };
-const PlanSchema = Type.Union([
-  Type.Object({ ...planBase, pattern: Type.Literal("cascade"), escalationId: id }, { additionalProperties: false }),
-  Type.Object({ ...planBase, pattern: Type.Literal("critique"), criticId: id }, { additionalProperties: false }),
-]);
 const CandidateSchema = Type.Union([
   Type.Object({ kind: Type.Literal("answer"), text: Type.String({ minLength: 1, maxLength: 8192 }) }, { additionalProperties: false }),
   CandidatePatchSchema,
 ]);
 export type CompoundCandidate = Static<typeof CandidateSchema>;
-const CritiqueSchema = Type.Object({
-  verdict: Type.Union([Type.Literal("pass"), Type.Literal("revise"), Type.Literal("reject")]),
-  reason: Type.String({ minLength: 1, maxLength: 1200 }), issues: Type.Array(Type.String({ minLength: 1, maxLength: 1200 }), { maxItems: 8 }),
-}, { additionalProperties: false });
 const ValidationSchema = Type.Object({ passed: Type.Boolean(), diagnostics: Type.Array(Type.String({ maxLength: 1200 }), { maxItems: 20 }) }, { additionalProperties: false });
 type Validation = Static<typeof ValidationSchema>;
 function fail(code: string, message: string): never { throw new MoguriError(code, message); }

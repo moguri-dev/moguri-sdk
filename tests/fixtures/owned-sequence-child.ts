@@ -1,10 +1,11 @@
 import { isRecord, projectEvents } from "../../packages/protocol/src/index.ts";
 import { ownedSequenceFixture } from "./owned-sequence-api.ts";
+import { roleContractFixture } from "./role-contract-api.ts";
 
 process.once("message", (raw: unknown) => {
   void (async () => {
     if (!isRecord(raw) || !["pending", "inflight", "recorded", "completed"].includes(String(raw.phase))) throw new Error("Choose one generated actual owned-role recovery phase.");
-    const phase = raw.phase, f = await ownedSequenceFixture();
+    const phase = raw.phase, f = raw.contracts === true ? await roleContractFixture() : await ownedSequenceFixture();
     let published = false;
     const publish = () => {
       if (published) return;
