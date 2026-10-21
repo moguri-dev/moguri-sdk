@@ -50,7 +50,7 @@ test("repository vectors and graph retain digests, reuse unchanged data and mark
     await mkdir(join(fixture.project, "nested"));
     await writeFile(join(fixture.project, "nested", ".gitignore"), "private.log\n");
     await writeFile(join(fixture.project, "nested", "private.log"), "generated nested ignored marker");
-    await assert.rejects(() => sdk.memory.search(fixture.session().projectId, "addition"), /Enable local/);
+    await assert.rejects(() => sdk.memory.search(fixture.session().projectId, "addition"), { code: "memory_disabled" });
     await configure(sdk, (settings) => { settings.memory.enabled = true; });
     const indexed = await sdk.memory.index(fixture.session().projectId);
     assert.equal((await sdk.jobs.wait(indexed.id!)).status, "completed");
