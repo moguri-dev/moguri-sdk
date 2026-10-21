@@ -1,7 +1,7 @@
 # Owned role contracts and selected prior-result context
 
-Development contract after qualified 0.28/protocol 34. The current native/SDK
-delivery remains frozen. This is a bounded prerequisite for compound policy
+Qualified **0.29.0-alpha.1 / protocol and database 35**. Prior 0.28/protocol 34
+native/SDK delivery remains frozen. This is a bounded prerequisite for compound policy
 binding, not public Cascade/Critique, independent-family proof, automatic
 acceptance, finite kupo or Max. Sandbox stays paused.
 
@@ -62,8 +62,7 @@ accepted-work wind-down remain separate work.
 
 The initial exact router/critic parser primitive passes 2/2 in 217.76 ms,
 followed by 15 actual-worker/context/legacy projection cases in 13.02 s and
-strict type checks. Source 0.29/protocol 35 integration, migration/recovery,
-cross-client and external consumer qualification are still in progress.
+strict type checks. Complete source, SDK and native qualification follows.
 
 Actual version-1 and version-2 controller SIGKILL at pending, in-flight,
 recorded and completed boundaries passes all eight phases without restarted
@@ -79,3 +78,25 @@ the plaintext event header, so its predicate never ran. It now counts visible
 role-observation headers and fails the exact third atomic append; the actual
 worker retains unknown paid ownership and prepares no later role (1.32 s).
 No production fallback or relaxed result contract was introduced.
+
+Complete source passes **822/822 in 790.45 s**, both type checks/declaration
+build and zero audit findings. All **55 hidden source desktop workflows**
+pass in **2.2 min**, and **55 exact packaged-app workflows** in **2.1 min**.
+The final focused contract/state/projection gate passes **30/30 in 19.58 s**;
+the expanded integrated prerequisite spike passes **92/92 in 146.20 s**.
+
+Fresh and exact delivered SDK installations are separately approved/rebuilt,
+audited with zero findings and strict-type-checked across all four entrypoints.
+Their actual installed controller/worker executes router/draft/critic/revision
+contracts with 168 reported tokens and no router explanation in later contexts,
+then preserves canonical origin, separate staging/application, independent
+raw-copy/export5/source deletion/reopen and actual-user acceptance.
+The exact archive's actual worker separately passes 12/12 private transport/
+ledger probes in 3.30 s. The actual app's bundled Node/runtime/SDK/CLI derives
+those original retained contracts and performs origin-bound publication with
+model preparation forbidden; it is not labeled live model-quality evaluation.
+
+See [setup](../setup.md#current-qualified-0290-alpha1-checkpoint) for immutable
+archive identities, honest Electron-only versus combined footprint and known
+warnings. No older archive was repacked. No public compound creator, branching
+policy, finite-kupo wind-down or independent-family/quality readiness is implied.

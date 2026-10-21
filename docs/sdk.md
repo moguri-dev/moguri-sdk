@@ -5,7 +5,7 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Development **0.29 uses protocol 35**. Qualified
+This is an alpha API. Qualified **0.29.0-alpha.1 uses protocol 35**. Qualified
 **0.28.0-alpha.1 uses protocol 34**; the frozen qualified
 **0.27.0-alpha.1 uses protocol 33**. Both deliberately reject incompatible
 running services. Remote execution requires
@@ -61,13 +61,16 @@ Its exact installed SDK and actual bundled default Copilot adapter use the
 same generated, memory-only keyring/catalogue qualification, not a substituted
 adapter or a personal account. [Setup](setup.md#current-qualified-0280-alpha1-checkpoint)
 records frozen native/SDK identities and limits.
-The 0.29 development adds optional exact output/context contracts to the
+The 0.29 delivery adds optional exact output/context contracts to the
 internal owned executor, version-2 retained inputs and immutable input-version
 binding. `roleSequences.contract(sequenceId,index)`, CLI `roles contract ID N`,
 shared/native TUI `/roles contract ID N` and desktop Artifacts inspect derived
 declared checks without inference, approval or public workflow scheduling.
 Original version-1 data is not retrofitted. See
-[the development contract](architecture/owned-role-contracts.md).
+[the contract](architecture/owned-role-contracts.md). Its exact installed SDK
+executes four actually metered contracted roles; actual native readers derive
+their original checks with model preparation forbidden. This does not enable
+public conditional pattern scheduling or attest model quality.
 Current state migrations preserve schema-1 through schema-33 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
