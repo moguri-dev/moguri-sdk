@@ -1,6 +1,10 @@
 # Remote GitHub repository metadata
 
-## Prerequisite and intended boundary
+Qualified **0.20.0-alpha.1 / protocol 26** spans service/SDK/CLI/OpenTUI and
+desktop. Exact source/installed/packaged evidence and immutable artifact
+identities are recorded in [setup](../setup.md#current-qualified-0200-alpha1-checkpoint).
+
+## Reuse and prerequisite
 
 Reuse Node 26 (MIT), OpenSSH (BSD), the existing owned bounded program/framer,
 TypeBox (MIT), GitHub CLI (MIT) and pinned `spdx-license-list` data (CC0-1.0). No new
@@ -27,7 +31,7 @@ passes in **3,253.37 ms**. The combined eight primitive/Git checks pass in
 fail at the intended existing `repository_remote_auth` guard, not a fixture
 or provider failure.
 
-The development public slice now adds protocol-26 read/response validation,
+The public slice adds protocol-26 read/response validation,
 immutable peer/root/build provenance in the existing repository observation,
 a schema-25-preserving marker migration and the existing user-reviewed,
 event-first refresh job. Listing/reviewing scope does not call
@@ -84,9 +88,9 @@ service-SIGKILL cases pass in **7,465.79 ms**. Interrupted and completed
 operations retain their original receipts/facts without another CLI call.
 Both actual TUI repository flows pass in **4,039.20 ms**. Five hidden desktop
 Remote/telemetry workflows pass in **12.8 s**, including stale-env rejection.
-Both type checks and the complete build pass. These are source results, not
-qualification of an uninstalled 0.20 archive. The qualified 0.19 delivery
-remains frozen; Sandbox and Remote repository memory remain unavailable.
+Both type checks and the complete build pass. Those source results alone did
+not qualify an archive. The qualified 0.19 delivery remains frozen; Sandbox
+and Remote repository memory remain unavailable.
 
 The complete corrected source gate passes **558/558 in 394.59 s** and all
 **39 hidden source desktop workflows in 1.4 min**. Source audit reports zero
@@ -94,3 +98,18 @@ vulnerabilities. The new compiled console broker and bridge are byte-identical
 to qualified 0.19, preserving that independent version-1 ownership wire while
 the agent bridge/database move to protocol 26. This byte comparison is not a
 claim that arbitrary future helper builds are interchangeable.
+
+## Exact delivery
+
+The exact SDK independently passes approved/rebuilt installation, a
+zero-vulnerability audit, four external entrypoint types and actual installed
+Remote account/home/cwd/CLI/TUI/whitelist/restart with one authenticated read
+and an unused controller `gh` decoy. All prior installed owner/model/compaction/
+MCP/plan/profile/budget checks remain passing.
+The actual bundled Node repeats private SSH origin and retained peer/root/
+build verification across restart without another read. All **39 actual
+packaged workflows pass in 1.5 min**, alongside signature/assets/DMG integrity
+and the original Electron-only memory budget. Exact identities, separate
+runtime RSS and existing warnings are in setup. Ad-hoc signing is not
+notarization; no personal authorization, paid inference or Sandbox probe
+was used.

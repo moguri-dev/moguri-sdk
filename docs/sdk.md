@@ -5,12 +5,11 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Qualified **0.19.0-alpha.1 uses protocol 25**;
-current **0.20 development uses protocol 26**. Both deliberately reject
-incompatible running services. Remote execution requires
+This is an alpha API. Qualified **0.20.0-alpha.1 uses protocol 26** and
+deliberately rejects incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
-Current state migrations preserve schema-1 through schema-24 history, sessions, drafts,
+Current state migrations preserve schema-1 through schema-25 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -27,6 +26,10 @@ owner/binding state, schema-preserving migration and original-PTY recovery
 across service/SDK/CLI/OpenTUI/Ghostty. Its exact independently installed SDK
 and actual packaged runtime pass the same Remote lifecycle, no-replay and
 ordinary-stop contracts. Prior qualified archives remain immutable.
+Qualified 0.20 adds explicit Remote GitHub repository metadata through the
+captured SSH account, with peer/root/build provenance and no controller
+account fallback. Its exact installed SDK and actual packaged clients pass
+separate account/restart/CLI/TUI and native qualification.
 
 ## Build and consume
 
@@ -647,13 +650,13 @@ owned job; inspect `jobs.wait(id)` and `repositories.state(sessionId)`.
 not historical names, metadata or charges.
 
 Public metadata uses the control-plane API without credentials; Local
-`gh-cli` requires explicitly selected project access. Protocol-26 development
+`gh-cli` requires explicitly selected project access. Protocol 26
 uses the selected SSH account for Remote `gh-cli`, never a Local account
 fallback. Review `preview.remote` host/port/login/key fingerprint/root/build
 and `lookupBoundary: "remote-gh-cli"` before explicit refresh. The retained
 observation keeps that proof across restart. Missing tools/accounts and
 unconfirmed cancellation fail visibly without another request. Copilot
-credentials are not reused. Exact 0.20 archive acceptance remains pending.
+credentials are not reused. Exact 0.20 delivery identities are recorded in setup.
 No network lookup occurs at model admission: configured calls recheck
 their actual Git identity and capture previously verified metadata or remain
 unassigned.

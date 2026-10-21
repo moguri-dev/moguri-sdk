@@ -45,11 +45,11 @@ Access follows the explicit project's `repo.githubAccess` setting:
   credential in metadata, workers, prompts or command receipts.
 - Remote Git origin is read on the pinned machine, not a Local checkout.
   Public metadata lookup still occurs at the displayed control plane.
-  Protocol-26 development adds [Remote `gh-cli` metadata](remote-github-metadata.md)
+  Qualified protocol 26 adds [Remote `gh-cli` metadata](remote-github-metadata.md)
   through that pinned host's existing account and exact repository-only GET.
   Preview/observation expose `remote-gh-cli` and captured host/key/root/build
   provenance. No control-plane account, copied credential or public fallback
-  is used. Exact 0.20 delivery qualification remains separate.
+  is used. Exact 0.20 delivery evidence is recorded in setup.
 
 `repository.recorded` retains a typed `actor:"user"` observation or explicit
 clear revision under the profile root. It captures only canonical identity,

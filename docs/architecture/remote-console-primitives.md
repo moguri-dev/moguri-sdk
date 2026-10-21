@@ -6,7 +6,7 @@ proof and schema foundation alone did not enable a Remote terminal API or
 qualify complete public recovery. The complete **0.19.0-alpha.1** slice is
 now independently qualified through installed SDK and actual packaged app;
 see [the operational contract](remote-user-consoles.md) and
-[immutable artifact identities](../setup.md#current-qualified-0190-alpha1-checkpoint).
+[immutable artifact identities](../setup.md#preserved-qualified-0190-alpha1-checkpoint).
 Earlier qualification statements below describe their recorded stage, not
 the current delivered capability.
 Sandbox work remains explicitly paused.
