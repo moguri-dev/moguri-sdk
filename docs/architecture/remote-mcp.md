@@ -137,8 +137,8 @@ post-effect/pre-result-ACK executions after restart, including reconciliation
 after grant revocation. This exposed and fixed missing MCP content-retention
 bindings: preserving a digest alone did not persist its process-local blob.
 Cross-profile pending approvals also serialize the same pinned root even when
-target aliases and remote runtime directories differ. Full related/native and
-exact-archive acceptance remains required.
+target aliases and remote runtime directories differ. Exact-archive acceptance
+remains required.
 
 The combined controller/state gate passes **14/14 in 11,822.65 ms**, with both
 type checks. It includes actual access-only OAuth execution and proof that
@@ -159,3 +159,9 @@ permission guard. Both bounded desktop/compact visual rounds are complete.
 Model and external failed-result-ACK reconciliation additionally pass
 **10/10 in 13,603.17 ms**, retaining the exact late result without another
 model step, tool effect, attempt or promotion of the partial turn/job.
+
+The complete source suite passes **519/519 in 330.19 s**, and all **35 hidden
+desktop workflows pass in 1.2 min**. Both type checks and the source audit
+pass with zero vulnerabilities. These are source/build checks, not an
+independent installed SDK or actual packaged-runtime qualification. Existing
+OpenTUI experimental FFI and Ghostty chunk-size warnings are retained.

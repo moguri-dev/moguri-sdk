@@ -17,8 +17,8 @@ The unqualified 0.18 development source adds protocol-24
 [Remote MCP grant/state foundations](architecture/remote-mcp.md), preserving
 schema-23 history. Explicit peer/resource grants are deny-by-default.
 Source SDK model/external calls now use the owned SSH worker, encrypted
-intent/result retention and no-replay crash reconciliation; native clients
-and complete delivery qualification are still being integrated. This does not
+intent/result retention and no-replay crash reconciliation; shared native
+clients are wired, while exact delivery qualification remains in progress. This does not
 promote an 0.18 archive or change the recorded 0.17 delivery.
 
 ## Build and consume
