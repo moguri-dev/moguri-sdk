@@ -2,7 +2,7 @@
 
 Qualified **0.20.0-alpha.1 / protocol 26** spans service/SDK/CLI/OpenTUI and
 desktop. Exact source/installed/packaged evidence and immutable artifact
-identities are recorded in [setup](../setup.md#current-qualified-0200-alpha1-checkpoint).
+identities are recorded in [setup](../setup.md#preserved-qualified-0200-alpha1-checkpoint).
 
 ## Reuse and prerequisite
 

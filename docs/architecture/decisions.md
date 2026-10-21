@@ -506,7 +506,7 @@ provider-free plan saves, and protocol 24 [reviewed Remote MCP](remote-mcp.md)
 with independent peer/resource access grants and no refresh forwarding.
 Protocol 25 adds [owned Remote user consoles](remote-user-consoles.md)
 through a separate pinned, bounded carrier with explicit env/peer/root
-identity and the same SDK/client lifecycle. Protocol-27 development adds
+identity and the same SDK/client lifecycle. Qualified protocol 27 adds
 [repository memory](remote-repository-memory.md) with actual-host bounded
 source capture/freshness and atomic typed control-plane derived caches.
 Session SDK/clients/model/MCP bind the same peer/root; legacy project APIs

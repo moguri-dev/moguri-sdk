@@ -1,10 +1,11 @@
 # Remote repository memory
 
-Current **0.21 / protocol-27 development source** implements the complete
-session-bound SDK/service/model/MCP/client slice below. Full source and exact
-installed/packaged qualification remain separate; immutable 0.20 is still the
-latest delivered checkpoint. Earlier sections record prerequisite stages, not
-claims that the present source API is unavailable.
+Qualified **0.21.0-alpha.1 / protocol 27** implements the complete session-bound
+SDK/service/model/MCP/client slice below. Source, exact installed SDK and
+actual packaged runtime pass independent gates; immutable identities are in
+[setup](../setup.md#current-qualified-0210-alpha1-checkpoint).
+Earlier sections record prerequisite stages, not claims that the current
+delivered API is unavailable.
 
 ## Prerequisite boundary
 
@@ -210,4 +211,14 @@ desktop workflows in 1.5 min**. The first full run completed 590 cases with
 589 passing; its sole failure expected the obsolete phrase `Enable local`
 after the cross-env guidance was corrected. The test now verifies the
 unchanged typed `memory_disabled` guard, with no product or policy relaxation.
-Exact installed SDK and actual packaged 0.21 acceptance remain separate.
+The independent exact-artifact results follow.
+
+The exact SDK independently passes explicitly approved/rebuilt installation,
+zero-vulnerability audit, all four external entrypoint types and actual
+installed SSH index/search/CLI/TUI/original command/restart/MCP without a model
+call or Local cache reuse. Actual bundled Node repeats those memory contracts
+and the prior model/compaction/metadata/plan/console gates. All **41 actual
+packaged workflows pass in 1.6 min**, alongside signature/assets/DMG integrity
+and the original Electron-only memory budget. Setup records separate total
+runtime RSS, warnings and exact immutable files. No personal authorization,
+weights, microphone or Sandbox probe was used.
