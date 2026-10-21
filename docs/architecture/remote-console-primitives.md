@@ -115,6 +115,11 @@ schema-24 upgrade, explicit unready Remote-owner reconciliation without any
 Local key read, immutable projection/field bytes and interrupted marker
 recovery. The earlier combined Local recovery regression also passed; these
 foundations are not public Remote-console service-SIGKILL/client acceptance.
+The broader foundation build/regression gate passes **43/43 in 6,975.28 ms**,
+covering the Local terminal lifecycle, original input/launch/secret failures,
+profile owners, repository/operation/MCP schema rollbacks and the new Remote
+boundary/state cases. The SDK/types, service/workers, TUI and desktop build.
+The existing Ghostty chunk-size advisory remains visible.
 
 ## Required public acceptance
 
