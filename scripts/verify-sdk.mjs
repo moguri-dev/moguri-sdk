@@ -52,6 +52,8 @@ try {
       const terminal=await sdk.terminal.open("generated-id");
       const consolePage=await sdk.terminal.read(terminal.id!);void consolePage.terminal.binding?.inode;void consolePage.terminal.attachmentId;
       void sdk.getState().snapshot?.terminalOwners[0]?.cleanup;
+      const observedOwner=sdk.getState().snapshot?.terminalOwners[0];
+      if(observedOwner?.remote){void observedOwner.remote.peerDigest;void observedOwner.remote.target.port;}
       await sdk.terminal.input(terminal.id!,"Generated typed input.",new AbortController().signal);
       await sdk.terminal.reconcile(terminal.id!);await sdk.terminal.reconcileOwner("generated-owner");
       await sdk.terminal.acknowledgeOwner("generated-owner",true);
@@ -567,15 +569,25 @@ try {
       const gamma=await sdk.profiles.open(gammaCreated.id);
       try{assert.deepEqual(gamma.getState().snapshot.policy.allowedEnvs,["Remote"]);assert.equal(gamma.getState().snapshot.projects.length,0);}finally{gamma.disconnect();}
     } finally {beta?.disconnect();sdk.disconnect();await runtime.close();if(budgetServer){budgetServer.closeAllConnections();await new Promise(resolve=>budgetServer.close(resolve));}}
-    if(PROTOCOL_VERSION>=23&&process.platform==="darwin"){
-      const consoleRoot=join(root,"generated-console-project"),consoleState=join(root,"generated-console-state"),keys=new Map();
+    if(PROTOCOL_VERSION>=23&&process.platform==="darwin")for(const mode of ["Local",...(PROTOCOL_VERSION>=25&&process.env.MOGURI_GENERATED_REMOTE?["Remote"]:[])]){
+      const consoleRoot=join(root,"generated-console-project-"+mode),consoleState=join(root,"generated-console-state-"+mode),keys=new Map();
       await mkdir(consoleRoot);
       const vault={read:async id=>keys.get(id)??null,write:async(id,value)=>{keys.set(id,value);},remove:async id=>{keys.delete(id);}};
-      const options={stateDir:consoleState,retentionKey:Buffer.alloc(32,0x71),provider:makeProvider(),platform:{terminal:{vault,executable:"/bin/sh",args:["-c","printf 'GENERATED_INSTALLED_CONSOLE_READY\\\\n'; exec cat"]}}};
+      const options={stateDir:consoleState,retentionKey:Buffer.alloc(32,0x71),provider:makeProvider(),platform:{remote:{vault,modelsVault:vault},terminal:{vault,executable:"/bin/sh",args:["-c","printf 'GENERATED_INSTALLED_CONSOLE_READY\\\\n'; exec cat"]}}};
       let consoleRuntime=await createRuntime(options),consoleSdk=await connectMoguri({stateDir:consoleState,autoStart:false});
       try{
         const project=await consoleSdk.command({type:"project.add",path:consoleRoot}),session=await consoleSdk.sessions.create(project.id);
+        if(mode==="Remote"){
+          const settings=structuredClone(consoleSdk.settings.get().values);settings.remote=JSON.parse(process.env.MOGURI_GENERATED_REMOTE);
+          await consoleSdk.settings.update(settings,consoleSdk.settings.get().revision);
+          const configuration=(await consoleSdk.projects.configuration(project.id)).configuration;
+          await consoleSdk.projects.configure(project.id,{...configuration.values,remotePath:await realpath(consoleRoot)},configuration.revision);
+          await consoleSdk.remote.probe();assert.ok((await consoleSdk.remote.status()).remote.terminalBuild);
+          await consoleSdk.sessions.env(session.id,"Remote");
+        }
         const opened=await consoleSdk.terminal.open(session.id),before=await consoleSdk.terminal.read(opened.id),owner=consoleSdk.getState().snapshot.terminalOwners[0];
+        assert.equal(before.terminal.env,mode);assert.equal(before.terminal.binding.root,await realpath(consoleRoot));
+        if(mode==="Remote")assert.ok(owner.remote);else assert.equal(owner.remote,undefined);
         const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
         const invoke=args=>promisify(execFile)(process.execPath,[cli,...args],{env:{...process.env,MOGURI_STATE_DIR:consoleState}});
         const input=spawn(process.execPath,[cli,"terminal","input",opened.id],{env:{...process.env,MOGURI_STATE_DIR:consoleState},stdio:["pipe","pipe","pipe"]});
@@ -594,10 +606,10 @@ try {
         const read=JSON.parse((await invoke(["terminal","read",opened.id])).stdout);assert.equal(read.terminal.pid,before.terminal.pid);
         const tui=await consoleSdk.slash(session.id,"/terminals read "+opened.id,"tui");assert.equal(tui.kind,"text");assert.equal(JSON.parse(tui.text).terminal.pid,before.terminal.pid);
         await consoleSdk.terminal.close(opened.id);consoleSdk.disconnect();await stopMoguriService(consoleState);
-        assert.equal(keys.size,0);await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
+        assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and CLI/TUI/private-profile/deletion-safe MCP attribution, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and CLI/TUI/private-profile/deletion-safe MCP attribution, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "" } });
 } finally { try { await ssh?.close(); } finally { await rm(temporary, { recursive: true, force: true }); } }

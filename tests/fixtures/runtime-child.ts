@@ -20,7 +20,9 @@ process.once("message", (raw: unknown) => {
     };
     const vault = new GeneratedFileVault(raw.vaultPath);
     const service = await startService({ stateDir: raw.stateDir, provider, retentionKey: GENERATED_RETENTION_KEY, platform: {
-      remote: { vault, modelsVault: vault }, terminal: { vault, executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CHILD_TERMINAL_READY\\n'; exec cat"] },
+      remote: { vault, modelsVault: vault }, terminal: raw.rawTerminal === true ?
+        { vault, executable: process.execPath, args: ["-e", "process.stdin.setRawMode(true); process.stdin.on('data',d=>process.stdout.write(d)); process.stdout.write('GENERATED_CHILD_TERMINAL_READY\\n');"] } :
+        { vault, executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CHILD_TERMINAL_READY\\n'; exec cat"] },
     } });
     if (raw.holdUserPlan === "approval" || raw.holdUserPlan === "result") {
       const gate = createRemoteFrameGate(raw.holdUserPlan === "approval" ? "approval" : "user-plan.complete",
@@ -33,6 +35,17 @@ process.once("message", (raw: unknown) => {
         (frame) => process.send?.({ kind: "held-user-mcp", executionId: frame?.executionId }));
       const launch = service.controller.remote.launch.bind(service.controller.remote);
       service.controller.remote.launch = (...args) => gate.wrap(launch(...args));
+    }
+    if (raw.holdTerminalInput === true) {
+      const manager = service.controller.platform.sessions.terminals, input = manager.input.bind(manager);
+      let held = false;
+      manager.input = async (request) => {
+        await input(request);
+        if (!held && request.action === "input") {
+          held = true; process.send?.({ kind: "held-terminal-input", terminalId: request.terminalId });
+          await new Promise<void>(() => {});
+        }
+      };
     }
     process.send?.({ kind: "connection", connection: service.connection });
   })().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Generated runtime bootstrap failed."); process.exitCode = 1; process.disconnect?.(); });

@@ -190,6 +190,25 @@ the product's root invariant. CLI/TUI/Ghostty boundary UX, further concurrency/
 cancellation/lost-input coverage and exact installed/package acceptance
 remain required. No qualified 0.19 delivery is implied.
 
+The shared CLI and actual OpenTUI now explicitly open/list/read/close consoles
+through `/terminals open` and the existing SDK. Stdin is never a composer
+command. Ghostty uses captured Local/Remote env/peer/root and policy to gate
+input, not a hard-coded Local label; existing Remote input after restart
+does not require a new core-agent probe. New Remote consoles still require a
+matching probed helper. UI hide/error/reconnect discards unsent bytes and
+keeps original-host reads/close available after an env change.
+
+Four targeted hidden Ghostty workflows pass in **10.3 s**, including actual
+Remote open/no-model input, stale queued-byte discard, reopened service
+restart/original PIDs/read-only env change and the existing Local reattachment
+flows. Compiled CLI stdin and actual OpenTUI pass **2/2 in 2,536.44 ms**.
+The crash/concurrency gate passes **5/5 in 6,328.15 ms**: real service SIGKILL
+with normal/missing-key/lost-input-ACK modes, one broker under parallel
+admission, profile/alias isolation including an unreopened profile, pending
+secret-write cancellation and changed authority before broker/PTY dispatch.
+Remaining source-wide and exact installed/package qualification is separate;
+the latest delivered immutable alpha remains 0.18.0-alpha.2.
+
 ## Required public acceptance
 
 Before advertising Remote user consoles, the authoritative service/SDK must

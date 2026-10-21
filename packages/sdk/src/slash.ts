@@ -31,7 +31,7 @@ export const slashCommands = [
   { name: "side", description: "Open parallel, question-only context" },
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
   { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal", desktopOnly: true },
-  { name: "terminals", description: "Inspect existing user consoles and shared profile owners without replay", argument: "[list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
+  { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
@@ -393,14 +393,19 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "session", sessionId: result.id!, side };
     }
     case "terminal":
-      if (client !== "desktop") throw new ClientError("terminal_context", "This client is already a terminal. /terminal and /termnial open Ghostty only in desktop.");
+      if (client !== "desktop") throw new ClientError("terminal_context", "This client is already a terminal. Use /terminals open/list/read for explicit Local or pinned SSH user consoles; /terminal opens Ghostty only in desktop.");
       return { kind: "panel", panel: "Terminal" };
     case "terminals": {
       const [action = "list", id, option, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (action === "open" && !id) {
+        const opened = await sdk.terminal.open(session.id);
+        return client === "desktop" ? { kind: "panel", panel: "Terminal" } : { kind: "text", text: JSON.stringify({ ...opened,
+          terminal: sdk.getState().snapshot!.terminals.find((terminal) => terminal.id === opened.id), warning: "Explicit user console opened at its captured Local or SSH boundary. Input is not a composer command and never replays." }, null, 2) };
+      }
       if (action === "list" && !id) {
         const terminals = sdk.getState().snapshot!.terminals.filter((terminal) => terminal.sessionId === session.id);
         return { kind: "text", text: JSON.stringify({ terminals, owners: sdk.getState().snapshot!.terminalOwners,
-          warning: "Local user consoles only. Bounded volatile output, no agent context, shell replacement or input replay. Service restart preserves; service stop closes known groups." }, null, 2) };
+          warning: "Local and pinned SSH user consoles keep their actual env/peer/root. Bounded volatile output, no agent context, shell replacement or input replay. Service restart preserves; service stop closes known groups." }, null, 2) };
       }
       if (action === "owner-reconcile" && id && !option) {
         await sdk.terminal.reconcileOwner(id);
@@ -419,7 +424,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "acknowledge" && option === "confirm-inspected") {
         await sdk.terminal.acknowledge(id, true); return { kind: "ok", message: "Your explicit process inspection was acknowledged, not proof of historical cleanup." };
       }
-      throw new ClientError("terminal_command", "Use /terminals list, read ID [OFFSET], reconcile ID, close ID, or acknowledge ID confirm-inspected. No command launches a replacement or replays input.");
+      throw new ClientError("terminal_command", "Use /terminals open (explicit new console), list, read ID [OFFSET], reconcile ID, close ID, or acknowledge ID confirm-inspected. Inspection never launches a replacement or replays input.");
     }
     case "browser": {
       let url = command.argument || session.browserUrl;
