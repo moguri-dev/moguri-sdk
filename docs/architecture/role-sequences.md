@@ -1,6 +1,6 @@
 # Independently retained role observations
 
-Status: **0.25 development / protocol and database 32** foundation for owned
+Status: **qualified 0.25.0-alpha.1 / protocol and database 32** foundation for owned
 compound operations. This records exact ordered role intent/observations and
 offers shared read-only inspection. It does not select a workflow/model pool,
 start a model, establish family/quality, approve code or enable finite kupo.
@@ -107,6 +107,23 @@ report 126 tokens; a failed completion insert keeps one unknown 99-token hold,
 releases unused plans and dispatches no next model. Source-session deletion
 and restart preserve its real raw results and version-4 export. Synthetic
 model identities/family labels are not empirical family or quality evidence.
+
+The complete source gate passes **760/760 in 543.54 s**, both type checks/build
+and zero audit findings. All **49 hidden source desktop workflows** and **49
+exact packaged-app workflows** pass in **1.8 min** each. Four actual controller
+SIGKILL phases complete in **1.66 s** without model/root preparation. The raw
+schema-31 rollback preserves existing generation data and measures the final
+marker in **2.20 ms**. Native TUI inspection and both bounded desktop/compact
+visual rounds are complete.
+
+The fresh and exact delivered SDK consumers independently approve/rebuild/
+audit with zero findings, type-check all four entrypoints and exercise actual
+installed role inspection, source deletion/reopen, version-4 export and
+deletion intent. The exact archive's actual worker passes **12/12 in 3.64 s**.
+The actual app's bundled Node/runtime/SDK/CLI separately passes that retained
+metadata contract without model preparation. [Setup](../setup.md#current-qualified-0250-alpha1-checkpoint)
+records immutable native/SDK identities and honest Electron-only versus
+combined footprint measurements. No earlier archive was repacked.
 
 Production compound policy, complete unknown-future context bounds, eligible
 family/privacy validation, candidate/critic/revision decisions, actual-policy

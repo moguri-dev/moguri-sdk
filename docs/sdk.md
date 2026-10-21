@@ -5,7 +5,7 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-This is an alpha API. Qualified **0.23.0-alpha.1 uses protocol 31** and
+This is an alpha API. Qualified **0.25.0-alpha.1 uses protocol 32** and
 deliberately rejects incompatible running services. Remote execution requires
 the matching SSH worker for exact user plan operations, reviewed compaction,
 model telemetry, explicitly granted MCP and owned user consoles.
@@ -25,11 +25,14 @@ Its exact installed SDK and actual native runtime pass independent
 generation/staging/application/restart qualification, including missing
 original receipts; [setup](setup.md#current-qualified-0230-alpha1-checkpoint)
 records its immutable identities.
-Current 0.25 source uses protocol **32** for independently retained
+Qualified 0.25 uses protocol **32** for independently retained
 [role observations](architecture/role-sequences.md), read-only SDK/CLI/native
 inspection and version-4 history. This adds no model-start, acceptance or
-public compound workflow command. Restart old running services explicitly;
-do not delete their state. The qualified immutable delivery remains 0.23.
+public compound workflow command. Its exact installed archive and actual
+bundled runtime pass role inspection, source deletion/reopen, version-4 export
+and deletion-intent qualification without inference;
+[setup](setup.md#current-qualified-0250-alpha1-checkpoint) records immutable
+identities. Restart old running services explicitly; do not delete their state.
 Current state migrations preserve schema-1 through schema-31 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
