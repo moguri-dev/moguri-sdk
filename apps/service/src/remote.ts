@@ -10,7 +10,7 @@ import type { RemoteMcpToolsRequest } from "./remote-mcp-runtime.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { BridgeEnvelopeSchema, type BridgeEnvelope, type BridgeInit, type BridgeStatus, type WorkspaceReadRequest, type WorkspaceReadResult } from "./remote-protocol.ts";
-import { frameDigest, JsonLineChannel } from "./worker-wire.ts";
+import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME } from "./worker-wire.ts";
 import type { ParentMessage } from "./worker-protocol.ts";
 import type { WorkerConnection, WorkerConnectionEvents } from "./worker-connection.ts";
 import type { PreparedModel } from "./provider.ts";
@@ -32,7 +32,7 @@ export function remoteRootQuarantined(snapshot: Pick<Snapshot, "executions" | "b
 }
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const absentReadiness = (): RemoteReadiness => ({ ready: false, diagnostic: "Configure an explicit SSH target, pinned host key, identity and compatible Moguri worker, then probe. SSH is not SendBox isolation; no Local fallback.", configDigest: null, hostFingerprint: null, nodeVersion: null, platform: null, workerDigest: null });
-interface SshConnection { child: ChildProcessWithoutNullStreams; wire: JsonLineChannel; diagnostic(): string }
+export interface SshConnection { child: ChildProcessWithoutNullStreams; wire: JsonLineChannel; diagnostic(): string }
 export interface RemoteOptions { vault?: SecretVault; changed?: () => void }
 export class RemoteRuntime {
   readiness = absentReadiness();
@@ -61,8 +61,10 @@ export class RemoteRuntime {
     if (result.kind !== "mcp-tools" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.helperDigest !== request.helperDigest) throw new MoguriError("remote_mcp_response", "Remote MCP metadata did not match its exact helper/root request. No alternative catalog was used.", 409);
     return result.tools;
   }
-  private async connect(target: RemoteIdentity, signal: AbortSignal): Promise<SshConnection> {
+  async connect(target: RemoteIdentity, signal: AbortSignal, frameBytes = MAX_WORKER_FRAME): Promise<SshConnection> {
     signal.throwIfAborted();
+    if (this.closed) throw new MoguriError("remote_closed", "The Remote runtime is closed. No connection or fallback was started.", 409);
+    if (!Number.isSafeInteger(frameBytes) || frameBytes < 1 || frameBytes > MAX_WORKER_FRAME) throw new MoguriError("remote_frame_limit", "The owned SSH frame limit is invalid. No connection was started.");
     const identity = await lstat(target.identityFile);
     if (!identity.isFile() || identity.isSymbolicLink() || identity.uid !== process.getuid?.() || identity.mode & 0o077) throw new MoguriError("ssh_identity", "The selected SSH private identity must be a user-owned non-symlink regular file with mode 0600 or stricter.", 409);
     const directory = join(await realpath(this.stateDir), "remote-hosts");
@@ -78,6 +80,7 @@ export class RemoteRuntime {
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== process.getuid?.() || metadata.mode & 0o077 || await readFile(knownHosts, "utf8") !== key) throw new MoguriError("ssh_pin", "The owned SSH pin file changed. Inspect it; verification was not disabled.", 409);
     }
     signal.throwIfAborted();
+    if (this.closed) throw new MoguriError("remote_closed", "The Remote runtime closed during SSH identity preparation. No process was started.", 409);
     const args = ["-T", "-F", "/dev/null", "-p", String(target.port), "-l", target.user, "-i", target.identityFile,
       "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
       "-o", "StrictHostKeyChecking=yes", "-o", `UserKnownHostsFile="${knownHosts.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,
@@ -88,7 +91,7 @@ export class RemoteRuntime {
       target.host, target.command.map(quote).join(" ")];
     const child = spawn("ssh", args, { stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, HOME: process.env.HOME } });
     await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
-    const wire = new JsonLineChannel(child.stdout, child.stdin); let stderr = "";
+    const wire = new JsonLineChannel(child.stdout, child.stdin, false, frameBytes); let stderr = "";
     child.stderr.on("data", (data: Buffer) => { stderr = (stderr + data.toString()).slice(-8192); });
     const abort = () => { child.kill("SIGTERM"); };
     signal.addEventListener("abort", abort, { once: true });
