@@ -159,6 +159,11 @@ export class EventStore {
       if (version < 26) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('remote_repository_schema','1');
         PRAGMA user_version=26; COMMIT;`);
+      if (version < 27) this.db.exec(`BEGIN IMMEDIATE;
+        CREATE TABLE memory_scopes(locator TEXT PRIMARY KEY,scope_id TEXT NOT NULL UNIQUE,profile_id TEXT NOT NULL,project_id TEXT NOT NULL,workspace_id TEXT,metadata TEXT NOT NULL);
+        CREATE INDEX memory_scopes_owner ON memory_scopes(profile_id,project_id,workspace_id);
+        INSERT INTO retention_metadata(id,value) VALUES ('remote_memory_schema','1');
+        PRAGMA user_version=27; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

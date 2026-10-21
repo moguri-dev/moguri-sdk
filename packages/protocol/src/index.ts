@@ -28,8 +28,9 @@ import { RepositoryObservationSchema, type RepositoryObservation, type Repositor
 import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 export * from "./inputs.ts";
+export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 26;
+export const PROTOCOL_VERSION = 27;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });

@@ -54,7 +54,7 @@ qualified delivery remains immutable 0.20.0-alpha.1 / protocol 26.
 
 ## Private implementation evidence
 
-Current 0.21 development still uses protocol 26 and keeps every public Remote
+The private 0.21 capture proof used protocol 26 and kept every public Remote
 memory gate closed. Shared file discovery/ignore validation has been extracted
 from the existing Local index without changing its selection/reuse behavior.
 A separate source helper and generated SSH frontend exercise capture and
@@ -83,3 +83,23 @@ deletion, schema-26 migration/restart, session-bound SDK/CLI/TUI/desktop,
 model injection/search and internal MCP authorization, full service crash/
 concurrency/policy coverage and independently installed/packaged acceptance.
 These private passes alone do not make Remote repository memory available.
+
+## Protocol-27 cache identity foundation
+
+The subsequent development foundation adds explicit Local/Remote
+`MemoryBinding` and version-1 `MemoryIndex` DTOs. Remote requires its original
+peer/host/login/port/key/build and cannot claim a Local managed-worktree ID.
+Root device/inode stay lossless strings. Migration 27 creates only the empty
+`memory_scopes` derived-metadata table and marker, preserving old Local
+vector/graph/chunk data, ciphertext, keys and original receipts.
+
+The two identity/migration checks and all affected Local/platform/operation/
+MCP/console/repository downgrade/recovery checks pass **54/54 in 8,104.12 ms**,
+with both type checks and the full build. A failed marker rolls back the
+new table and leaves schema-26 state usable; a successful reopen reads the
+original Local vector. Legacy fixtures remove only genuinely newer tables/
+markers instead of pretending a newer cache was present in an older schema.
+
+No writer, session memory API, Remote index/query or model/MCP memory support
+is enabled by this foundation. Current source is protocol/database 27; the
+qualified immutable 0.20 SDK/app remain protocol 26.
