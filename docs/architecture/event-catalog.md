@@ -52,7 +52,7 @@ Unused scope fields are null in checkpoint 1.
 | `project.configured`, `project.folder_saved`, `project.relocated` | Typed policy/configuration/navigation and attached-folder changes; atomic exact-membership reorder and index invalidation. |
 | `artifact.saved` | Legacy immutable plan snapshot; migration preserves its payload/identity while moving encryption into an independent artifact compartment. |
 | `artifact.revised`, `artifact.deleted` | Typed document revisions, exact source/actual-actor provenance and user edits/archive or profile-owned deletion tombstone. Source sessions/files and other grants are not deleted. |
-| `candidate.saved` | Protocol-28 version-1 internal candidate revision, independently artifact-owned: exact Local source/stage/base, document/proposal, ordered paths, original commands/jobs, actual user acceptance and observed/verified/partial effects. Changed identities, erased effects, fabricated acceptance and terminal replay are rejected. Startup preserves interrupted intent without a filesystem probe or replay. Public APIs/clients remain gated. |
+| `candidate.saved` | Protocol-28/29 version-1 artifact-owned candidate revision: exact Local source/stage/base, immutable proposal, original commands/jobs and optional exact owning session, actual user acceptance, attempted/observed paths and stop request. Terminal verified record/result/job commits atomically. Changed identities, erased effects, fabricated acceptance and terminal replay are rejected; restart never probes/replays pending effects. Shared user APIs do not authorize compound models. |
 | `workspace.saved` | Revisioned owned Local root/branch/base/common-directory identity, job and creating/ready/removing/partial/removed outcome. Never a permission or fallback root. |
 | `change_set.saved` | Stable workspace/branch/base and optional ticket/PR association. No publish/merge authorization. |
 | `session.workspace_bound` | Explicit nullable binding for a fresh idle session; existing conversation/queue is not moved. |
@@ -155,7 +155,7 @@ estimated admission; missing historical pricing is not free usage.
 Connect to `/v1/events`, then send:
 
 ```json
-{"type":"authenticate","protocolVersion":28,"profileId":"default","token":"<private token>","after":0}
+{"type":"authenticate","protocolVersion":29,"profileId":"default","token":"<private token>","after":0}
 ```
 
 Tokens never enter the URL. The server rejects unauthenticated, malformed,

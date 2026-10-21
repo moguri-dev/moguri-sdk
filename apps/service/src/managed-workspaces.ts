@@ -21,6 +21,7 @@ interface Host {
   project(id: string): Project;
   commit(events: EventInput[]): void;
   wake(): void;
+  writeBusy(projectId: string, workspaceId: string): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (text: string) => void) => Promise<unknown>, start: (job: CapabilityJob) => void, settled: () => void, workspaceId: string): string;
 }
@@ -203,6 +204,7 @@ export class ManagedWorkspaces {
       return { id };
     }
     const workspace = this.workspace(command.workspaceId);
+    if (this.host.writeBusy(workspace.projectId, workspace.id)) throw new MoguriError("workspace_busy", "An owned writer holds this source/staging worktree. Stop/wait before maintenance.", 409);
     if (workspace.revision !== command.expectedRevision || this.active.has(workspace.id)) throw new MoguriError("workspace_conflict", "Workspace changed or still owns a job. Reload/wait before this action.", 409);
     const inspection = await this.inspect(workspace.id);
     if (command.type === "workspace.reconcile") {

@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
+import type { CapabilityJob } from "./platform.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -26,7 +27,7 @@ export const CandidateDocumentSchema = object({
   source: CandidateRootSchema, stage: CandidateRootSchema, authorityDigest: hash, patch: CandidatePatchSchema,
 });
 export type CandidateDocument = Static<typeof CandidateDocumentSchema>;
-const intent = object({ commandId: id, commandDigest: hash, jobId: id });
+const intent = object({ commandId: id, commandDigest: hash, jobId: id, sessionId: Type.Optional(id) });
 export const CandidateJobIntentSchema = object({
   candidateId: id, phase: Type.Union([Type.Literal("stage"), Type.Literal("apply")]), commandId: id, commandDigest: hash,
 });
@@ -37,13 +38,14 @@ export const CandidateRecordSchema = object({
   paths: Type.Array(path, { minItems: 1, maxItems: 20, uniqueItems: true }),
   revision: Type.Integer({ minimum: 0 }), status: Type.Union([
     Type.Literal("staging"), Type.Literal("staged"), Type.Literal("applying"), Type.Literal("applied"),
-    Type.Literal("rejected"), Type.Literal("failed"), Type.Literal("conflict"), Type.Literal("partial"), Type.Literal("acknowledged"),
+    Type.Literal("rejected"), Type.Literal("failed"), Type.Literal("cancelled"), Type.Literal("conflict"), Type.Literal("partial"), Type.Literal("acknowledged"),
   ]),
   createdAt: timestamp, updatedAt: timestamp, stageIntent: intent, applyIntent: Type.Union([intent, Type.Null()]),
   acceptance: Type.Union([object({
     actor: Type.Literal("user"), commandId: id, commandDigest: hash, proposalDigest: hash, reviewDigest: hash, authorityDigest: hash, at: timestamp,
   }), Type.Null()]),
   stagedPaths: paths, attemptedPaths: paths, appliedPaths: paths,
+  stageAttemptedPaths: Type.Optional(paths), stopRequested: Type.Optional(Type.Boolean()),
   stageResultDigest: nullableHash, applyResultDigest: nullableHash,
   diagnostic: Type.Union([Type.String({ minLength: 1, maxLength: 4000 }), Type.Null()]),
 });
@@ -51,15 +53,15 @@ export type CandidateRecord = Static<typeof CandidateRecordSchema>;
 
 const prefix = (before: readonly string[], after: readonly string[]) => before.length <= after.length && before.every((path, index) => path === after[index]);
 const sameIntent = (a: CandidateRecord["stageIntent"], b: CandidateRecord["stageIntent"]) =>
-  a.commandId === b.commandId && a.commandDigest === b.commandDigest && a.jobId === b.jobId;
-const sameRoot = (a: CandidateRoot, b: CandidateRoot) => (["env", "projectId", "workspaceId", "root", "device", "inode", "gitCommonDir", "branch", "head"] as const).every((key) => a[key] === b[key]);
+  a.commandId === b.commandId && a.commandDigest === b.commandDigest && a.jobId === b.jobId && (a.sessionId ?? null) === (b.sessionId ?? null);
+export const sameCandidateRoot = (a: CandidateRoot, b: CandidateRoot) => (["env", "projectId", "workspaceId", "root", "device", "inode", "gitCommonDir", "branch", "head"] as const).every((key) => a[key] === b[key]);
 const validTime = (value: string) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 const relativePath = (value: string) => value.isWellFormed() && !value.startsWith("/") && !/[\\\u0000-\u001f\u007f]/.test(value) && !value.split("/").some((part) => !part || part === "." || part === "..");
 const transitions: Readonly<Record<CandidateRecord["status"], readonly CandidateRecord["status"][]>> = {
-  staging: ["staging", "staged", "failed", "conflict", "partial"],
+  staging: ["staging", "staged", "failed", "cancelled", "conflict", "partial"],
   staged: ["applying", "rejected"],
-  applying: ["applying", "applied", "failed", "conflict", "partial"],
-  partial: ["acknowledged"], applied: [], rejected: [], failed: [], conflict: [], acknowledged: [],
+  applying: ["applying", "applied", "failed", "cancelled", "conflict", "partial"],
+  partial: ["acknowledged"], applied: [], rejected: [], failed: [], cancelled: [], conflict: [], acknowledged: [],
 };
 function corrupt(message: string): never { throw new MoguriError("candidate_corrupt", `${message} State was preserved; no candidate authority was adopted.`, 409); }
 export function projectCandidateRecord(previous: CandidateRecord | undefined, value: unknown): CandidateRecord {
@@ -70,12 +72,15 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
     source.gitCommonDir !== stage.gitCommonDir || source.head !== stage.head ||
     ![source.root, stage.root, source.gitCommonDir].every((path) => path.startsWith("/") && path.isWellFormed() && !path.includes("\0"))) corrupt("Candidate roots do not identify distinct Local owned workspaces at one recorded repository base.");
   if (!next.paths.every(relativePath) || new Set(next.paths.map((path) => path.normalize("NFC").toLowerCase())).size !== next.paths.length ||
-    !prefix(next.stagedPaths, next.paths) || !prefix(next.attemptedPaths, next.paths) || !prefix(next.appliedPaths, next.attemptedPaths)) corrupt("Candidate path/effect ordering is invalid or contains aliases.");
+    !prefix(next.stagedPaths, next.paths) || !prefix(next.attemptedPaths, next.paths) || !prefix(next.appliedPaths, next.attemptedPaths) ||
+    next.stageAttemptedPaths && (!prefix(next.stageAttemptedPaths, next.paths) || !prefix(next.stagedPaths, next.stageAttemptedPaths))) corrupt("Candidate path/effect ordering is invalid or contains aliases.");
+  if (next.stageIntent.sessionId && next.stageIntent.sessionId !== next.originSessionId) corrupt("Candidate staging lost its actual origin-session owner.");
   if (!validTime(next.createdAt) || !validTime(next.updatedAt) || next.acceptance && !validTime(next.acceptance.at)) corrupt("Candidate timestamps are not exact valid UTC observations.");
   if (["staged", "applying", "applied", "rejected"].includes(next.status) && (next.stagedPaths.length !== next.paths.length || next.stageResultDigest === null)) corrupt("Candidate readiness requires the complete retained stage result.");
   if (next.status === "staging" && next.stageResultDigest !== null ||
+    next.stopRequested && ["staged", "applied"].includes(next.status) ||
     ["staging", "staged", "applying", "applied"].includes(next.status) && next.diagnostic !== null ||
-    ["failed", "conflict", "partial", "acknowledged"].includes(next.status) && next.diagnostic === null) corrupt("Candidate outcome and its verified result/diagnostic disagree.");
+    ["failed", "cancelled", "conflict", "partial", "acknowledged"].includes(next.status) && next.diagnostic === null) corrupt("Candidate outcome and its verified result/diagnostic disagree.");
   if (next.applyIntent === null) {
     if (next.acceptance !== null || next.attemptedPaths.length || next.appliedPaths.length || next.applyResultDigest !== null || ["applying", "applied"].includes(next.status)) corrupt("Candidate source effects require an actual recorded apply intent and acceptance.");
   } else {
@@ -85,16 +90,18 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
   }
   if (next.status === "applied" && (next.appliedPaths.length !== next.paths.length || next.applyResultDigest === null) ||
     next.status !== "applied" && next.applyResultDigest !== null) corrupt("Candidate verified application cannot be fabricated from partial or unacknowledged work.");
-  if (["failed", "conflict"].includes(next.status) && (next.applyIntent ? next.attemptedPaths.length > 0 : next.stagedPaths.length > 0)) corrupt("An operation with possible effects must remain partial, not a no-effect failure.");
+  if (["failed", "cancelled", "conflict"].includes(next.status) && (next.applyIntent ? next.attemptedPaths.length > 0 : (next.stageAttemptedPaths?.length ?? next.stagedPaths.length) > 0)) corrupt("An operation with possible effects must remain partial, not a no-effect failure.");
   if (!previous) {
-    if (next.revision !== 0 || next.status !== "staging" || next.stagedPaths.length || next.stageResultDigest !== null || next.applyIntent !== null) corrupt("A candidate must begin with its original effect-free stage intent.");
+    if (next.revision !== 0 || next.status !== "staging" || next.stagedPaths.length || next.stageAttemptedPaths?.length || next.stopRequested || next.stageResultDigest !== null || next.applyIntent !== null) corrupt("A candidate must begin with its original effect-free stage intent.");
   } else {
     const previousAcceptance = previous.acceptance, acceptance = next.acceptance;
     const immutable = ["version", "id", "profileId", "projectId", "originSessionId", "documentDigest", "proposalDigest", "createdAt"] as const;
-    if (next.revision !== previous.revision + 1 || immutable.some((key) => next[key] !== previous[key]) || !sameRoot(previous.source, source) || !sameRoot(previous.stage, stage) ||
+    if (next.revision !== previous.revision + 1 || immutable.some((key) => next[key] !== previous[key]) || !sameCandidateRoot(previous.source, source) || !sameCandidateRoot(previous.stage, stage) ||
       !sameIntent(previous.stageIntent, next.stageIntent) || JSON.stringify(previous.paths) !== JSON.stringify(next.paths) ||
       !transitions[previous.status].includes(next.status)) corrupt("Candidate revision, original ownership/base or lifecycle was changed/replayed.");
     if (!prefix(previous.stagedPaths, next.stagedPaths) || !prefix(previous.attemptedPaths, next.attemptedPaths) || !prefix(previous.appliedPaths, next.appliedPaths) ||
+      previous.stageAttemptedPaths && (!next.stageAttemptedPaths || !prefix(previous.stageAttemptedPaths, next.stageAttemptedPaths)) ||
+      previous.stopRequested && !next.stopRequested ||
       previous.stageResultDigest !== null && previous.stageResultDigest !== next.stageResultDigest ||
       previous.applyResultDigest !== null && previous.applyResultDigest !== next.applyResultDigest) corrupt("Candidate effects or retained results cannot be erased/replaced.");
     if (previous.applyIntent && (!next.applyIntent || !sameIntent(previous.applyIntent, next.applyIntent)) ||
@@ -103,3 +110,37 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
   }
   return structuredClone(next);
 }
+
+export const CandidateStagePreviewSchema = object({ document: CandidateDocumentSchema, documentDigest: hash, digest: hash });
+export type CandidateStagePreview = Static<typeof CandidateStagePreviewSchema>;
+export const CandidateApplyPreviewSchema = object({
+  candidateId: id, sessionId: id, revision: Type.Integer({ minimum: 0 }), source: CandidateRootSchema, stage: CandidateRootSchema,
+  documentDigest: hash, proposalDigest: hash, authorityDigest: hash, digest: hash,
+});
+export type CandidateApplyPreview = Static<typeof CandidateApplyPreviewSchema>;
+export const CandidateOperationResultSchema = object({
+  version: Type.Literal(1), candidateId: id, phase: Type.Union([Type.Literal("stage"), Type.Literal("apply")]),
+  source: CandidateRootSchema, stage: CandidateRootSchema, readback: Type.Literal(true),
+  files: Type.Array(object({ path, digest: hash, bytes: Type.Integer({ minimum: 0, maximum: 128 * 1024 }) }), { minItems: 1, maxItems: 20 }),
+});
+export type CandidateOperationResult = Static<typeof CandidateOperationResultSchema>;
+const stageInput = { sessionId: id, stageWorkspaceId: id, patch: CandidatePatchSchema };
+export const CandidateCommandSchema = Type.Union([
+  object({ type: Type.Literal("candidate.stage"), ...stageInput, expectedDigest: hash, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("candidate.apply"), candidateId: id, sessionId: id, expectedRevision: Type.Integer({ minimum: 0 }), expectedDigest: hash, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("candidate.reject"), candidateId: id, expectedRevision: Type.Integer({ minimum: 0 }), confirm: Type.Literal(true) }),
+]);
+export type CandidateCommand = Static<typeof CandidateCommandSchema>;
+export const CandidateQuerySchema = Type.Union([
+  object({ type: Type.Literal("candidate.preview"), ...stageInput }),
+  object({ type: Type.Literal("candidate.apply.preview"), candidateId: id, sessionId: id }),
+  object({ type: Type.Literal("candidate.read"), candidateId: id }),
+]);
+export type CandidateQuery = Static<typeof CandidateQuerySchema>;
+export const isCandidateCommand = (value: unknown): value is CandidateCommand => Value.Check(CandidateCommandSchema, value);
+export const isCandidateQuery = (value: unknown): value is CandidateQuery => Value.Check(CandidateQuerySchema, value);
+export type CandidateRead = { type: "candidate.read"; candidate: CandidateRecord; document: CandidateDocument; stageJob: CapabilityJob | null; applyJob: CapabilityJob | null };
+export type CandidateResponse =
+  | { type: "candidate.preview"; preview: CandidateStagePreview }
+  | { type: "candidate.apply.preview"; preview: CandidateApplyPreview }
+  | CandidateRead;

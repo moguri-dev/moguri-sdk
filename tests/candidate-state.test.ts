@@ -45,6 +45,16 @@ function append(history: StoredEvent[], records: CandidateRecord[]): StoredEvent
   return [...history, ...records.map((record, index) => ({ ...last, seq: last.seq + index + 1, id: randomUUID(), payload: { candidate: record } }))];
 }
 
+function retainedRows(db: DatabaseSync) {
+  return {
+    events: db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all(),
+    keys: db.prepare("SELECT scope,payload FROM retention_keys ORDER BY scope").all(),
+    receipts: db.prepare("SELECT profile_id,id,digest,result FROM receipts ORDER BY profile_id,id").all(),
+    blobs: db.prepare("SELECT digest,scope,payload FROM blob_payloads ORDER BY digest,scope").all(),
+    scopes: db.prepare("SELECT locator,scope_id,profile_id,project_id,workspace_id,metadata FROM memory_scopes ORDER BY locator").all(),
+  };
+}
+
 test("candidate records bind independent artifact identity instead of the origin conversation's retention grant", () => {
   const store = new EventStore(":memory:");
   try {
@@ -331,23 +341,45 @@ test("candidate exports accept exactly eight MiB and reject the next byte withou
   }
 });
 
+test("schema-29 ownership migration preserves old independent candidate ciphertext and missing telemetry through failure/reopen", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-candidate-execution-schema-"))), path = join(directory, "state.sqlite"), key = randomBytes(32);
+  let store: EventStore | undefined = new EventStore(path, key);
+  try {
+    const f = candidate(store); seed(store, f);
+    store.commit([], { id: f.record.stageIntent.commandId, digest: f.record.stageIntent.commandDigest, result: { id: f.record.id } });
+    const before = retainedRows(store.db);
+    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id='candidate_execution_schema'; PRAGMA user_version=28;
+      CREATE TRIGGER generated_candidate_execution_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='candidate_execution_schema'
+      BEGIN SELECT RAISE(ABORT,'Generated candidate execution migration failure'); END; COMMIT;`);
+    store.close(); store = undefined;
+    assert.throws(() => new EventStore(path, key), /Generated candidate execution migration failure/);
+    const raw = new DatabaseSync(path);
+    try {
+      assert.equal(raw.prepare("PRAGMA user_version").get()?.user_version, 28);
+      assert.deepEqual(retainedRows(raw), before); raw.exec("DROP TRIGGER generated_candidate_execution_marker");
+    } finally { raw.close(); }
+    const started = performance.now(); store = new EventStore(path, key);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+    assert.deepEqual(retainedRows(store.db), before);
+    const recovered = projectEvents(store.events()).candidates[0]!;
+    assert.deepEqual(recovered, f.record);
+    assert.equal(recovered.stageIntent.sessionId, undefined); assert.equal(recovered.stageAttemptedPaths, undefined); assert.equal(recovered.stopRequested, undefined);
+    assert.equal(store.blob(recovered.documentDigest), f.text);
+    assert.deepEqual(store.receipt(f.record.stageIntent.commandId, f.record.stageIntent.commandDigest), { id: f.record.id });
+    console.log(JSON.stringify({ primitive: "generated-candidate-schema-28-to-29", ms: performance.now() - started, ciphertextUnchanged: true, missingAttemptsPreserved: true }));
+  } finally { store?.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test("schema-28 marker failure leaves schema-27 ciphertext, keys, receipts and derived scope data exactly reopenable", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-candidate-state-"))), path = join(directory, "state.sqlite"), key = randomBytes(32);
   let store: EventStore | undefined = new EventStore(path, key);
-  const rows = (db: DatabaseSync) => ({
-    events: db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all(),
-    keys: db.prepare("SELECT scope,payload FROM retention_keys ORDER BY scope").all(),
-    receipts: db.prepare("SELECT profile_id,id,digest,result FROM receipts ORDER BY profile_id,id").all(),
-    blobs: db.prepare("SELECT digest,scope,payload FROM blob_payloads ORDER BY digest,scope").all(),
-    scopes: db.prepare("SELECT locator,scope_id,profile_id,project_id,workspace_id,metadata FROM memory_scopes ORDER BY locator").all(),
-  });
   try {
     const f = candidate(store);
     store.commit([{ event_type: "artifact.revised", profile_id: "default", project_id: f.record.projectId, payload: { artifact: f.artifact } }],
       { id: "generated-legacy-command", digest: "7".repeat(64), result: { id: f.record.id } });
     store.db.prepare("INSERT INTO memory_scopes VALUES (?,?,?,?,?,?)").run("generated-locator", "generated-scope", "default", f.record.projectId, null, "{\"generated\":\"retained\"}");
-    const before = rows(store.db);
-    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id='candidate_workflow_schema'; PRAGMA user_version=27;
+    const before = retainedRows(store.db);
+    store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('candidate_workflow_schema','candidate_execution_schema'); PRAGMA user_version=27;
       CREATE TRIGGER generated_candidate_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='candidate_workflow_schema'
       BEGIN SELECT RAISE(ABORT,'Generated candidate migration interruption'); END; COMMIT;`);
     store.close(); store = undefined;
@@ -356,11 +388,11 @@ test("schema-28 marker failure leaves schema-27 ciphertext, keys, receipts and d
     try {
       assert.equal(raw.prepare("PRAGMA user_version").get()?.user_version, 27);
       assert.equal(raw.prepare("SELECT value FROM retention_metadata WHERE id='candidate_workflow_schema'").get(), undefined);
-      assert.deepEqual(rows(raw), before); raw.exec("DROP TRIGGER generated_candidate_marker");
+      assert.deepEqual(retainedRows(raw), before); raw.exec("DROP TRIGGER generated_candidate_marker");
     } finally { raw.close(); }
     const started = performance.now(); store = new EventStore(path, key);
     assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
-    assert.deepEqual(rows(store.db), before); assert.equal(projectEvents(store.events()).candidates.length, 0);
+    assert.deepEqual(retainedRows(store.db), before); assert.equal(projectEvents(store.events()).candidates.length, 0);
     assert.equal(store.blob(f.record.documentDigest), f.text);
     assert.deepEqual(store.receipt("generated-legacy-command", "7".repeat(64)), { id: f.record.id });
     console.log(JSON.stringify({ primitive: "generated-candidate-schema-27-to-28", ms: performance.now() - started, ciphertextUnchanged: true }));

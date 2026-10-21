@@ -67,6 +67,17 @@ process.once("message", (raw: unknown) => {
         return connection;
       };
     }
+    if (typeof raw.holdCandidate === "string" && ["stage-before", "stage-after-first", "apply-before", "apply-after-first"].includes(raw.holdCandidate)) {
+      const assert = service.controller.platform.managed.assert.bind(service.controller.platform.managed), phase = raw.holdCandidate.startsWith("stage") ? "staging" : "applying";
+      const afterFirst = raw.holdCandidate.endsWith("after-first"); let held = false;
+      service.controller.platform.managed.assert = async (...args) => {
+        const candidate = service.controller.snapshot().candidates.find((candidate) => candidate.status === phase &&
+          (afterFirst ? (phase === "staging" ? candidate.stagedPaths.length : candidate.appliedPaths.length) === 1 :
+            (phase === "staging" ? candidate.stageAttemptedPaths?.length ?? 0 : candidate.attemptedPaths.length) === 0));
+        if (!held && candidate) { held = true; process.send?.({ kind: "held-candidate", candidateId: candidate.id }); await new Promise<void>(() => {}); }
+        return assert(...args);
+      };
+    }
     process.send?.({ kind: "connection", connection: service.connection });
   })().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Generated runtime bootstrap failed."); process.exitCode = 1; process.disconnect?.(); });
 });

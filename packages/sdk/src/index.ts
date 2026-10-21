@@ -1,6 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -133,6 +133,24 @@ export class MoguriSdk extends TransportClient {
       const snapshot = this.getState().snapshot;
       if (!snapshot?.sessions.some((session) => session.id === sessionId)) throw new ClientError("session_missing", "Choose an existing session in this profile for routing provenance.");
       return snapshot.routings.filter((routing) => routing.sessionId === sessionId);
+    },
+  };
+  readonly candidates = {
+    preview: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch) => this.query({ type: "candidate.preview", sessionId, stageWorkspaceId, patch }),
+    stage: (sessionId: string, stageWorkspaceId: string, patch: CandidatePatch, expectedDigest: string) => this.command({ type: "candidate.stage", sessionId, stageWorkspaceId, patch, expectedDigest, confirm: true }),
+    read: (candidateId: string) => this.query({ type: "candidate.read", candidateId }),
+    applyPreview: (candidateId: string, sessionId: string) => this.query({ type: "candidate.apply.preview", candidateId, sessionId }),
+    apply: (candidateId: string, sessionId: string, expectedRevision: number, expectedDigest: string) => this.command({ type: "candidate.apply", candidateId, sessionId, expectedRevision, expectedDigest, confirm: true }),
+    reject: (candidateId: string, expectedRevision: number, confirm: true) => this.command({ type: "candidate.reject", candidateId, expectedRevision, confirm }),
+    stop: async (candidateId: string) => {
+      const current = await this.candidates.read(candidateId), job = current.candidate.status === "staging" ? current.stageJob : current.candidate.status === "applying" ? current.applyJob : null;
+      if (!job || !["running", "waiting_input"].includes(job.status)) throw new ClientError("candidate_state", "This candidate has no active owned job to stop. Partial/terminal work was not replayed.");
+      return this.jobs.cancel(job.id);
+    },
+    wait: async (candidateId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<CandidateRead> => {
+      const current = await this.candidates.read(candidateId), jobId = current.candidate.applyIntent?.jobId ?? current.candidate.stageIntent.jobId;
+      await this.jobs.wait(jobId, options);
+      return this.candidates.read(candidateId);
     },
   };
   readonly artifacts = {

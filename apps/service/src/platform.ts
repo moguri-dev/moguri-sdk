@@ -11,6 +11,7 @@ import {
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
   isManagedWorkspaceCommand, isManagedWorkspaceQuery,
   isArtifactCommand, isArtifactQuery, isQuestionCommand,
+  isCandidateCommand, isCandidateQuery,
   isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
@@ -46,6 +47,7 @@ import { sourceRootSync, validateRepositorySource, type RepositorySourceCapture,
 import { frameDigest } from "./worker-wire.ts";
 import { MemoryPreparedSchema, type MemoryPrepared } from "./memory-mcp.ts";
 import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
+import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -100,6 +102,7 @@ export interface PlatformHost {
   remoteMcpTools(session: Session, server: McpServerConfig | null): Promise<McpToolInfo[]>;
   globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
   foreignRootBusy(root: string): boolean;
+  localRootBusy(root: string, exceptJobId?: string): boolean;
   sharedGlobals: boolean;
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault } }
@@ -113,6 +116,7 @@ export class PlatformRuntime {
   readonly sessions: SessionWorkspace;
   readonly managed: ManagedWorkspaces;
   readonly artifacts: ArtifactRuntime;
+  readonly candidates: CandidateRuntime;
   readonly budgets: BudgetRuntime;
   readonly telemetry: OperationTelemetry;
   readonly repositories: RepositoryTelemetry;
@@ -133,10 +137,11 @@ export class PlatformRuntime {
       assertRoot: (projectId, workspaceId) => this.managed.assert({ projectId, workspaceId }),
       projects: () => this.sessions.projects,
       job: (projectId, workspaceId, execute, start, settled) => this.job("project.artifacts.materialize", projectId, null, execute, settled, start, workspaceId ?? undefined),
-      foreignRootBusy: host.foreignRootBusy,
+      foreignRootBusy: (root) => host.localRootBusy(root),
     });
     this.managed = new ManagedWorkspaces(stateDir, {
       snapshot: () => this.snapshot(), project: (id) => this.project(id), commit: (events) => this.host.commit(events), wake: host.wake,
+      writeBusy: (projectId, workspaceId) => this.candidates.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.snapshot().managedWorkspaces.find((workspace) => workspace.id === workspaceId)?.path ?? ""),
       remoteRead: host.remoteRead,
       job: (kind, projectId, execute, start, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, start, workspaceId),
     }, () => this.sessions.projects);
@@ -144,7 +149,7 @@ export class PlatformRuntime {
       snapshot: () => this.snapshot(), project: (id, workspaceId) => this.managed.project({ projectId: id, workspaceId: workspaceId ?? null }), commit: (events) => this.host.commit(events),
       job: (kind, projectId, execute, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, undefined, workspaceId), wake: () => this.host.wake(),
       closing: host.closingProject,
-      publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path),
+      publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId ?? null) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path),
     }, store, stateDir, options);
     this.sessions = new SessionWorkspace({
       snapshot: () => this.snapshot(), commit: (events, forget) => this.host.commit(events, forget),
@@ -157,11 +162,17 @@ export class PlatformRuntime {
       remoteConsoles: host.remoteConsoles,
       retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session) => this.managed.project(session),
-      rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
+      rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
     }, stateDir, { ...options, terminal: { ...options.terminal, vault: options.terminal?.vault ?? options.vault } });
+    this.candidates = new CandidateRuntime(store, {
+      snapshot: () => this.snapshot(), managed: this.managed, projects: () => this.sessions.projects,
+      commit: (events) => this.host.commit(events), artifact: (session, text, summary, patch) => this.artifacts.candidate(session, text, summary, patch),
+      localRootBusy: host.localRootBusy, closingProject: host.closingProject, wake: host.wake,
+      job: (kind, projectId, sessionId, workspaceId, execute, start, settled, lifecycle) => this.job(kind, projectId, sessionId, execute, settled, start, workspaceId ?? undefined, lifecycle),
+    });
     this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);
     this.repositories = new RepositoryTelemetry({
       snapshot: () => this.snapshot(), scope: host.repositoryScope, git: host.repositoryGit,
@@ -176,6 +187,7 @@ export class PlatformRuntime {
       admit: (controls) => this.host.validateControls(controls),
       startup: host.startup,
       workspaceProject: (session) => this.managed.project(session),
+      rootBusy: host.localRootBusy,
       settingsEvent: (settings, revision, acknowledge) => this.settingsEvent(settings, revision, acknowledge),
       skill: (content) => this.skill(content),
     });
@@ -435,6 +447,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isCandidateQuery(query)) return this.candidates.query(query);
     if (isRemoteMcpQuery(query)) return this.mcpRemoteQuery(query);
     if (isRepositoryQuery(query)) return this.repositories.query(query);
     if (isTelemetryQuery(query)) return this.telemetry.query(query);
@@ -578,7 +591,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
   private entry(projectId: string | null, kind: CapabilityEntry["kind"], name: string, description: string, content: string, source: CapabilityEntry["source"], enabled = false): CapabilityEntry {
     return { id: randomUUID(), projectId, kind, name, description, contentDigest: this.store.putBlob(content), source, enabled, revision: 0, createdAt: new Date().toISOString() };
   }
-  private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void, start?: (job: CapabilityJob) => void, workspaceId?: string): string {
+  private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void, start?: (job: CapabilityJob) => void, workspaceId?: string, lifecycle?: CandidateJobLifecycle): string {
     if (projectId && this.host.closingProject(projectId)) throw new MoguriError("project_removing", "No new job can start while this project is being removed.", 409);
     const id = randomUUID();
     const job: CapabilityJob = { id, kind, projectId, sessionId, workspaceId: workspaceId ?? (sessionId ? this.session(sessionId).workspaceId : null), parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
@@ -588,22 +601,26 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
       abort.signal.throwIfAborted();
-      this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null, ...retention } }]);
+      const resultDigest = this.store.putBlob(JSON.stringify(result)), events = lifecycle?.completed(result, resultDigest) ?? [];
+      this.host.commit([...events, { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest, error: null, ...retention } }]);
     }).catch((error: unknown) => {
       const partial = error instanceof MoguriError && ["install_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
         kind === "repository.refresh" && this.snapshot().repositoryObservations.some((observation) => observation.jobId === id) ||
         kind === "memory.index" && this.memory.published(id);
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
-      console.error(`Moguri capability ${kind} (${id}) ${partial ? "partial" : cancelled ? "cancelled" : "failed"}:`, error instanceof Error ? error.message : "Unknown capability error");
-      this.host.commit([{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: {
-        jobId: id, status: partial ? "partial" : cancelled ? "cancelled" : "failed", resultDigest: null, ...retention,
-        error: error instanceof MoguriError ? error.message : error instanceof Error && error.name === "AbortError" ? "Capability cancelled; no automatic retry." : "Capability failed. Check the configured runtime, file permissions and connection; no success was recorded.",
+      const failure = lifecycle?.failed(error, cancelled);
+      const status = failure?.status ?? (partial ? "partial" : cancelled ? "cancelled" : "failed");
+      console.error(`Moguri capability ${kind} (${id}) ${status}:`, failure?.error ?? (error instanceof Error ? error.message : "Unknown capability error"));
+      this.host.commit([...(failure?.events ?? []), { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: {
+        jobId: id, status, resultDigest: null, ...retention,
+        error: failure?.error ?? (error instanceof MoguriError ? error.message : error instanceof Error && error.name === "AbortError" ? "Capability cancelled; no automatic retry." : "Capability failed. Check the configured runtime, file permissions and connection; no success was recorded."),
       } }]);
     }).finally(() => { this.active.delete(id); settled?.(); });
     this.active.set(id, { abort, done, sessionId: sessionId ?? undefined, projectId: projectId ?? undefined, kind });
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isCandidateCommand(command)) return this.candidates.execute(command, finish);
     if (isRemoteMcpCommand(command)) return this.mcpRemoteCommand(command, finish);
     if (isRepositoryCommand(command)) return this.repositories.execute(command, finish);
     if (isPlanSaveCommand(command)) return this.host.planSaveCommand(command, finish);
@@ -772,11 +789,13 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         if (text.length > 128 * 1024) throw new MoguriError("draft_limit", "The transcript does not fit the bounded draft. Copy a smaller selection.");
         return finish([{ event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { text, attachments: session.draft.attachments } }], { revision: session.draft.revision + 1 });
       }
-      case "job.cancel":
+      case "job.cancel": {
         if (this.host.cancelExternalJob(command.jobId)) return finish([]);
-        if (!snapshot.jobs.some((job) => job.id === command.jobId)) throw new MoguriError("job_not_found", "This job is outside the current profile.", 404);
-        this.active.get(command.jobId)?.abort.abort();
-        return finish([]);
+        const job = snapshot.jobs.find((job) => job.id === command.jobId);
+        if (!job) throw new MoguriError("job_not_found", "This job is outside the current profile.", 404);
+        try { return finish(job.candidate && ["running", "waiting_input"].includes(job.status) ? this.candidates.stopEvents(job.candidate.candidateId, job.id) : []); }
+        finally { this.active.get(command.jobId)?.abort.abort(); }
+      }
     }
   }
   async callMcp(session: Session, args: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
@@ -850,7 +869,15 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }
     throw new MoguriError("capability_unavailable", "This delegated capability is not available.");
   }
-  stopSession(id: string): void { for (const job of this.active.values()) if (job.sessionId === id) job.abort.abort(); }
+  stopSession(id: string): void {
+    const jobs = [...this.active.entries()].filter(([, job]) => job.sessionId === id);
+    const events = jobs.flatMap(([id]) => {
+      const candidateId = this.snapshot().jobs.find((job) => job.id === id)?.candidate?.candidateId;
+      return candidateId ? this.candidates.stopEvents(candidateId, id) : [];
+    });
+    try { if (events.length) this.host.commit(events); }
+    finally { for (const [, job] of jobs) job.abort.abort(); }
+  }
   async settleSession(id: string): Promise<void> { this.stopSession(id); await Promise.all([...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
   async cancelProject(id: string): Promise<void> {
     const jobs = [...this.active.values()].filter((job) => job.projectId === id);

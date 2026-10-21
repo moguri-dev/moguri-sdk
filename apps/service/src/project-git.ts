@@ -24,6 +24,16 @@ export async function gitReadFilters(root: string, signal: AbortSignal): Promise
   return [...drivers].flatMap((driver) => ["-c", `filter.${driver}.smudge=`, "-c", `filter.${driver}.clean=`, "-c", `filter.${driver}.process=`, "-c", `filter.${driver}.required=false`]);
 }
 
+export async function readGitBinding(root: string, signal: AbortSignal): Promise<{ gitCommonDir: string; head: string; branch: string }> {
+  const filters = await gitReadFilters(root, signal), read = (args: string[]) => git(root, args, signal, filters);
+  const top = (await read(["rev-parse", "--path-format=absolute", "--show-toplevel"])).replace(/\n$/, "");
+  if (await realpath(top) !== root) throw new MoguriError("workspace_git_root", "Git's working tree does not match this exact canonical candidate root.", 409);
+  const gitCommonDir = await realpath((await read(["rev-parse", "--path-format=absolute", "--git-common-dir"])).replace(/\n$/, ""));
+  const head = (await read(["rev-parse", "--verify", "HEAD"])).trim(), branch = (await read(["branch", "--show-current"])).trim() || "(detached)";
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head)) throw new MoguriError("workspace_git_base", "Git returned no exact committed candidate base.", 409);
+  return { gitCommonDir, head, branch };
+}
+
 export async function readWorkspaceGit(root: string, policy: { upstream: string; deniedFolders: string[] }, includeDiff: boolean, signal: AbortSignal, checkoutFilters?: string[]): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
   const filters = checkoutFilters ?? await gitReadFilters(root, signal), read = (args: string[]) => git(root, args, signal, filters);
   const top = (await read(["rev-parse", "--path-format=absolute", "--show-toplevel"])).replace(/\n$/, "");

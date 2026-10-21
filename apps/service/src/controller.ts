@@ -224,6 +224,7 @@ export class ControlPlane extends EventEmitter {
       remoteConsoles: new RemoteConsoles(this.remote),
       globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
       foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
+      localRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
       sharedGlobals: Boolean(this.profileHooks),
     }, platformOptions);
     this.provider.onChange = () => {
@@ -348,7 +349,7 @@ export class ControlPlane extends EventEmitter {
   }
   wake(): void { queueMicrotask(() => this.pumpAll()); }
   ownedLocalRoots(): string[] { return this.ownedWriteRoots().filter((root) => !root.startsWith("remote/")); }
-  ownedWriteRoots(exceptSessionId?: string): string[] {
+  ownedWriteRoots(exceptSessionId?: string, exceptJobId?: string): string[] {
     const reserved = new Set(this.writerReservations.values());
     const roots = [...this.runs.values()].filter((run) => {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
@@ -364,8 +365,13 @@ export class ControlPlane extends EventEmitter {
       if (session?.id !== exceptSessionId && session?.controls.env === "Local" && session.projectId) roots.push(this.platform.managed.project(session).path);
       if (session?.id !== exceptSessionId && run.remoteRoot) roots.push(run.remoteRoot);
     }
-    for (const job of this.projection.jobs.filter((job) => ["cache.install", "project.artifacts.materialize", "project.defaults"].includes(job.kind) && ["running", "waiting_input"].includes(job.status))) {
-      if (job.projectId) roots.push(this.platform.managed.project({ projectId: job.projectId, workspaceId: job.workspaceId ?? null }).path);
+    roots.push(...this.platform.engagement.writeRoots());
+    for (const job of this.projection.jobs.filter((job) => job.id !== exceptJobId && ["cache.install", "project.artifacts.materialize", "project.defaults", "candidate.stage", "candidate.apply"].includes(job.kind) && ["running", "waiting_input"].includes(job.status))) {
+      if (job.candidate) {
+        const candidate = this.projection.candidates.find((candidate) => candidate.id === job.candidate?.candidateId);
+        if (!candidate) throw new MoguriError("candidate_ownership", "An owned candidate writer lost its original captured roots.", 409);
+        roots.push(candidate.source.root, candidate.stage.root);
+      } else if (job.projectId) roots.push(this.platform.managed.project({ projectId: job.projectId, workspaceId: job.workspaceId ?? null }).path);
     }
     return roots;
   }

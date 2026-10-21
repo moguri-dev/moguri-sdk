@@ -253,7 +253,11 @@ reservations and one acknowledged continuation in the existing owned worker.
 It is disabled by default and pauses on invalid/stale/unmetered advice, without
 a fallback. Local and qualified core SSH use the same approvals and accounting.
 Any finite inherited cap, images or per-model tuning block this alpha.
-Cascade, independent critique/revision, candidate acceptance/application,
+The protocol-29 [manual Local candidate workflow](candidate-workflows.md)
+now implements separately reviewed staging/application through all clients,
+with independent retention, exact writer ownership and real SIGKILL recovery.
+It calls no model and proves base/byte checks, not code quality.
+Cascade, independent critique/revision and their candidate/ledger integration,
 calibrated thresholds and reserved wind-down remain incomplete; this is not
 completion of D11 or its full Phase 0 quality evaluation.
 

@@ -12,15 +12,15 @@ model telemetry, explicitly granted MCP and owned user consoles.
 The 0.21 delivery implements session-bound Local/SSH memory through the same
 SDK. Its exact independently installed archive and actual packaged runtime
 pass index/search/MCP/original-intent/restart/CLI/TUI qualification.
-Current 0.22 development introduces protocol/database **28** for the internal
-[reviewed-candidate event/retention foundation](architecture/candidate-workflows.md),
-following private compound/file prerequisites. Public candidate operations are
-not exposed; kupo remains the qualified Single subset.
+Current 0.22 development uses protocol/database **29** for the shared
+[Local reviewed-candidate workflow](architecture/candidate-workflows.md),
+following the protocol-28 event/retention foundation and private compound/file
+prerequisites. Public kupo remains the qualified Single subset.
 The foundation passes 631 complete local cases, 41 hidden source desktop
 workflows and an independently installed temporary protocol-28 package across
 all four entrypoints and existing Local/SSH contracts. This does not qualify
-a new immutable delivery or candidate execution API.
-Current state migrations preserve schema-1 through schema-27 history, sessions, drafts,
+a new immutable delivery; the later candidate execution slice is recorded separately.
+Current state migrations preserve schema-1 through schema-28 history, sessions, drafts,
 receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
@@ -156,6 +156,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
 | `plans` | Digest-checked Local/Remote plan read/save and independent snapshots. Remote writes require the reviewed binding and an owned no-model operation; actual saves/info/exact-stop expose partial/recovery outcomes without replay. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
+| `candidates` | Explicit Local preview/stage/read/wait, fresh separate apply review/application, reject and exact-job stop. Independent immutable proposals, actual user acceptance, base/index/HEAD preservation and partial/restart outcomes. No model or automatic Git publication. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
@@ -718,6 +719,53 @@ Wait observes its job; aborting a wait is not cancelling the job. Use
 `reconcile` verifies existing identity/absence without re-executing Git.
 Discovery reports Git registrations, not new ownership or filesystem authority.
 External worktree adoption and multi-candidate orchestration remain unavailable.
+
+### Local reviewed repository candidates
+
+Use an explicitly Local agent-mode source session and a separate **clean
+owned worktree at the same HEAD**. Creating/selecting that worktree is a
+separate user action. Optional indexing, models and inference are not needed.
+
+```ts
+import type { CandidatePatch } from "moguri";
+
+const base = await sdk.workspaces.file(sourceSessionId, "src/example.ts");
+const patch: CandidatePatch = {
+  kind: "patch", summary: "Explicit reviewed edit",
+  edits: [{ path: base.path, baseDigest: base.digest, text: replacementText }],
+};
+const preview = (await sdk.candidates.preview(sourceSessionId, stageWorkspaceId, patch)).preview;
+const created = await sdk.candidates.stage(sourceSessionId, stageWorkspaceId, patch, preview.digest);
+const staged = await sdk.candidates.wait(created.id!);
+if (staged.candidate.status !== "staged") throw new Error("Inspect the actual retained outcome.");
+const review = (await sdk.candidates.applyPreview(created.id!, sourceSessionId)).preview;
+await sdk.candidates.apply(created.id!, sourceSessionId, staged.candidate.revision, review.digest);
+const result = await sdk.candidates.wait(created.id!);
+```
+
+`read(id)` retains the immutable document, exact roots, real stage/apply jobs
+and observed/attempted paths independently of origin-session retention.
+`wait` returns actual settled metadata, not a success-shaped retry. Inspect
+`candidate.status` and the original job; stop through `candidates.stop(id)`.
+A wait timeout or client abort does not cancel work. A partial result never
+rolls back or retries newer user files; explicit existing root recovery is
+still required.
+
+New files use `baseDigest: "absent"` and need existing allowed parent
+directories. The slice accepts at most 20 portable distinct paths, 32-KiB
+patch JSON and a 64-KiB document. It does not create directories, delete/rename
+files, change modes or run code-quality validators. Byte/base checks and critic
+advice are not user acceptance or a project-test result. No commit/push occurs.
+
+CLI:
+`moguri candidate preview PATCH.json --session SOURCE --workspace STAGE`,
+then `stage PATCH.json` with the same selectors, `--digest` and
+`--confirm-write`. Use `apply-preview ID --session SOURCE`, then `apply ID`
+with `--session`, observed `--revision`, fresh `--digest` and
+`--confirm-write`. `read`, `wait`, `stop` and explicitly reviewed `reject`
+expose the same SDK data. Shared `/candidate` JSON commands and the desktop
+Candidates panel perform the same two separate reviews. Source Env/mode/policy
+changes invalidate stale results; no Remote/Sandbox-to-Local fallback.
 
 ### Model context and thinking
 

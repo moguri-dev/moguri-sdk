@@ -1,10 +1,63 @@
 # Durable reviewed candidates
 
-Status: 0.22 foundation in development. The
+Status: 0.22 source implements the Local reviewed-candidate slice. The
 [private transport](compound-routing-primitives.md) and
 [owned-file prerequisites](candidate-primitives.md) are qualified separately.
-They do not expose public compound routing, finite kupo budgets or a new
-candidate client workflow. Sandbox remains paused.
+The shared SDK, CLI, native TUI and desktop expose manual proposal staging and
+separately reviewed application. They do not enable compound model routing or
+finite kupo budgets. A new immutable packaged delivery remains a separate gate.
+Sandbox remains paused.
+
+Execution development now uses protocol/database **29**. The additive
+`candidate_execution_schema` marker preserves old version-1 records with
+missing owner/attempt/stop fields; absence is not fabricated historical
+telemetry. New stage/apply intents bind an explicit Local agent-session owner,
+while record/job/result encryption remains independently artifact-owned.
+Stopping that owning session cancels its job; deleting an old source session
+does not destroy the candidate. A later explicit compatible Local session may
+review/apply the same retained proposal without relabeling its authorship.
+
+The shared SDK flow is preview, explicit stage into an existing
+clean managed worktree, read/wait, fresh apply review and explicit apply.
+No selected model or model call is required. Stop intent precedes abort;
+attempted and observed paths remain separate, and terminal candidate/job
+success commits atomically. The service rejects read-only/Remote/excluded
+Local scopes before resolving Local data. Actual service SIGKILL qualification
+covers before-effects, after-first-file and retained completed outcomes without
+replay; native packaging remains required before delivery.
+
+## Executable scope and clients
+
+`candidates.preview(sessionId, stageWorkspaceId, patch)` checks the current
+Local agent session, exact clean owned worktree/repository/HEAD, source bases
+and policy. `stage` requires that preview digest and retains a separate report
+and original job before files. `read` and `wait` expose actual metadata and
+immutable proposed bytes; a settled wait is not necessarily successful.
+
+`applyPreview(candidateId, explicitSessionId)` freshly checks the same recorded
+source/base and staged bytes. `apply` requires its current revision/digest and
+records actual-user acceptance before source publication. A compatible new
+Local session can own this action after the original session is deleted.
+`reject` changes only a fully staged proposal; `stop` requests only the exact
+captured active job. Cancelling an old completed stage job cannot affect a later
+apply phase.
+
+The CLI accepts bounded patch JSON files with explicit `--session`,
+`--workspace`, digest/revision and `--confirm-write` flags. Shared
+`/candidate` commands use exact structured JSON and `confirm-stage` /
+`confirm-apply`; `/candidates` opens the desktop panel or lists retained
+proposals in the TUI. Desktop loads or explicitly adds text files, stages an
+exact preview, then requires a separate fresh source review. Scope changes
+preserve unsaved text, invalidate old output and never retarget a pending edit.
+Bound candidate report bytes are read-only in the generic artifact editor;
+renaming, organization and complete history export remain available.
+
+This slice supports at most 20 unique portable relative text paths, 32-KiB
+patch JSON and a 64-KiB versioned document. New leaf files need existing
+approved parent directories. It does not delete/rename files, create directories,
+alter modes, run validators or execute model-generated commands. Checks prove
+roots/bases/bytes, not project tests, semantic code quality or model-family
+independence. No model, automatic Git commit, push, merge or branch deletion.
 
 Reuse Node and TypeBox (MIT), existing AES-GCM/SQLite artifact compartments,
 managed worktrees/root leases and canonical capability jobs. System Git is
@@ -78,9 +131,13 @@ verified terminal result. Restart preserves the original intent, marks
 interrupted work honestly and inspects without replay. Unknown/partial roots
 remain quarantined until an explicit existing user recovery action.
 
-The foundation first qualifies schemas, transitions, retention and migration.
-Public service/SDK/CLI/TUI/desktop operations, actual writer admission,
-concurrency, failure/stop and service-SIGKILL recovery must pass before exposure.
+Candidate jobs lease both captured roots across clients and isolated profiles.
+Cache/plan/artifact/terminal/worktree surfaces honor that ownership. Reviewed
+repository-instruction publication also registers its exact writer root and
+cannot race a candidate in either direction. Final verified candidate state,
+result grant and job completion commit together; a failed terminal append
+preserves actual partial files instead of claiming success.
+
 Compound model roles additionally need the existing owned worker/all-role
 ledger, genuine model-family qualification, bounded workflow reservations and
 authorized accepted-work checkpoint wind-down. Those gates remain separate.

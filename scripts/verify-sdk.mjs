@@ -37,7 +37,7 @@ try {
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   await writeFile(join(consumer, "consumer.ts"), `
-    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}} from "moguri";
+    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
@@ -46,6 +46,15 @@ try {
       const snapshot = sdk.settings.get();
       if (!snapshot) throw new Error("Not connected");
       ${installedProtocol >= 28 ? "const candidate:CandidateRecord|undefined=sdk.getState().snapshot?.candidates[0];void candidate?.stageIntent.commandId;" : ""}
+      ${installedProtocol >= 29 ? `
+      const patch:CandidatePatch={kind:"patch",summary:"Generated typed candidate.",edits:[{path:"generated.ts",baseDigest:"absent",text:"Generated typed bytes."}]};
+      const candidatePreview=(await sdk.candidates.preview("generated-source","generated-stage",patch)).preview;void candidatePreview.document.source.inode;
+      const stagedCandidate=await sdk.candidates.stage("generated-source","generated-stage",patch,candidatePreview.digest);
+      const candidateRead=await sdk.candidates.wait(stagedCandidate.id!);void candidateRead.candidate.stageIntent.sessionId;
+      const applyReview=(await sdk.candidates.applyPreview(stagedCandidate.id!,"generated-source")).preview;
+      await sdk.candidates.apply(stagedCandidate.id!,"generated-source",candidateRead.candidate.revision,applyReview.digest);
+      await sdk.candidates.stop(stagedCandidate.id!);await sdk.candidates.reject(stagedCandidate.id!,candidateRead.candidate.revision,true);
+      ` : ""}
       const settings: UserSettings = snapshot.values;
       const project = await sdk.projects.configuration("generated-id");
       await sdk.projects.configure("generated-id",project.configuration.values,project.configuration.revision);
@@ -224,6 +233,38 @@ try {
       await sdk.sessions.delete(bound.id,true);
       await sdk.workspaces.remove(owned.id,owned.revision,true);
       assert.equal((await sdk.workspaces.wait(owned.id)).status,"removed");
+      if(PROTOCOL_VERSION>=29){
+        const directory=join(root,"generated-installed-candidates");await mkdir(directory);
+        const original="Generated installed candidate base.\\n",proposed="Generated installed reviewed candidate.\\n";
+        await writeFile(join(directory,"candidate.txt"),original);
+        git(["init","--initial-branch=main"],directory);git(["add","--","candidate.txt"],directory);
+        git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated installed candidate base"],directory);
+        const options={stateDir:join(root,"candidate-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x68)};
+        let candidateRuntime=await createRuntime(options),candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
+        try{
+          const project=await candidateSdk.command({type:"project.add",path:directory}),source=await candidateSdk.sessions.create(project.id);
+          const created=await candidateSdk.workspaces.create(project.id,"moguri/generated-installed-candidate"),stage=await candidateSdk.workspaces.wait(created.id);
+          const index=await readFile(join(directory,".git/index")),head=git(["rev-parse","HEAD"],directory);
+          const patch={kind:"patch",summary:"Generated installed exact candidate.",edits:[{path:"candidate.txt",baseDigest:createHash("sha256").update(original).digest("hex"),text:proposed}]};
+          const path=join(root,"generated-installed-patch.json");await writeFile(path,JSON.stringify(patch));
+          const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},env={...process.env,MOGURI_STATE_DIR:options.stateDir};
+          const preview=JSON.parse((await promisify(execFile)(process.execPath,[cli,"candidate","preview",path,"--session",source.id,"--workspace",stage.id],{env})).stdout).preview;
+          const staged=JSON.parse((await promisify(execFile)(process.execPath,[cli,"candidate","stage",path,"--session",source.id,"--workspace",stage.id,"--digest",preview.digest,"--confirm-write"],{env})).stdout);
+          assert.equal(staged.candidate.status,"staged");assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),original);
+          const review=(await candidateSdk.candidates.applyPreview(staged.candidate.id,source.id)).preview,commandId=randomUUID();
+          const command={type:"candidate.apply",candidateId:staged.candidate.id,sessionId:source.id,expectedRevision:staged.candidate.revision,expectedDigest:review.digest,confirm:true};
+          await candidateSdk.command(command,commandId);assert.equal((await candidateSdk.candidates.wait(staged.candidate.id)).candidate.status,"applied");
+          assert.deepEqual(await readFile(join(directory,".git/index")),index);assert.equal(git(["rev-parse","HEAD"],directory),head);
+          assert.equal(JSON.parse((await candidateSdk.artifacts.export(staged.candidate.id)).export.text).schemaVersion,2);
+          const shared=await candidateSdk.slash(source.id,"/candidate read "+staged.candidate.id,"tui");assert.equal(shared.kind,"text");
+          candidateSdk.disconnect();await candidateRuntime.close();candidateRuntime=await createRuntime(options);candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
+          assert.equal((await candidateSdk.candidates.read(staged.candidate.id)).candidate.acceptance.actor,"user");
+          await writeFile(join(directory,"candidate.txt"),"Generated newer installed user edit.\\n");
+          assert.equal((await candidateSdk.command(command,commandId)).id,staged.candidate.id);
+          assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
+          console.log("Installed SDK/CLI candidate stage, separate exact apply, version-2 history and canonical restart replay preserved source index/HEAD without a model.");
+        }finally{candidateSdk.disconnect();await candidateRuntime.close();}
+      }
       const general=await sdk.sessions.create();
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");

@@ -6,7 +6,7 @@ import {
   legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
   type ArtifactResponse, type ArtifactSource, type ArtifactSourcePreview, type CommandResult, type EventInput, type ProjectArtifactChoice,
   type ProjectArtifactPreview, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type ArtifactMaterializationPreview, type ArtifactMaterialization,
-  type ArtifactMaterializeOptions, type CapabilityJob, type Project,
+  type ArtifactMaterializeOptions, type CapabilityJob, type Project, type CandidatePatch,
 } from "../../../packages/protocol/src/index.ts";
 import { digest, EventStore } from "./store.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -62,6 +62,11 @@ export class ArtifactRuntime {
   }
   capture(session: Session, path: string, text: string, source?: ArtifactSource): RetainedArtifact {
     return this.create(session, "plan", basename(path), text, "file", [source ?? { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: null, contentDigest: digest(text) }], path);
+  }
+  candidate(session: Session, text: string, summary: string, patch: CandidatePatch): RetainedArtifact {
+    return this.create(session, "report", `Candidate: ${summary.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
+      { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "user-imported-proposal", contentDigest: digest(JSON.stringify(patch)) },
+    ]);
   }
   answerEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
     if (!snapshot.settings.values.artifacts.retainAnswers) return [];

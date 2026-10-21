@@ -22,7 +22,7 @@ import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse
 import type { TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
-import type { CandidateJobIntent, CandidateRecord } from "./candidates.ts";
+import { CandidateCommandSchema, CandidateQuerySchema, type CandidateJobIntent, type CandidateRecord, type CandidateResponse } from "./candidates.ts";
 export * from "./candidates.ts";
 export * from "./mcp.ts";
 export * from "./repositories.ts";
@@ -113,6 +113,7 @@ const section = Type.Union([
   Type.Literal("kupo"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  CandidateCommandSchema,
   RemoteMcpCommandSchema,
   RepositoryCommandSchema,
   PlanSaveCommandSchema,
@@ -183,6 +184,7 @@ export const QuerySchema = Type.Union([
   ExecutionQuerySchema,
   ManagedWorkspaceQuerySchema,
   ArtifactQuerySchema,
+  CandidateQuerySchema,
 ]);
 export type PlatformQuery = Static<typeof QuerySchema>;
 export interface MemoryHit { path: string; text: string; digest: string; distance: number; stale: boolean; source: "lexical-vector" }
@@ -238,6 +240,7 @@ export interface VoiceStatus {
 }
 export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
 export type PlatformResponse =
+  | CandidateResponse
   | RemoteMcpResponse
   | RepositoryResponse
   | TelemetryResponse

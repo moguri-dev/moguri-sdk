@@ -24,11 +24,14 @@ interface Host {
   skill(content: string): { name: string; description: string };
   startup(projectId: string | null): ResolvedControls;
   workspaceProject(session: ScopeSession): Project;
+  rootBusy(root: string): boolean;
 }
 interface Target { before: unknown; revision: number | null }
 type ScopeSession = Pick<Session, "id" | "projectId" | "workspaceId">;
 export class Engagement {
+  private readonly writers = new Set<string>();
   constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly host: Host) {}
+  writeRoots(): string[] { return [...this.writers]; }
   private snapshot() { return this.host.snapshot(); }
   private session(id: string) {
     const session = this.snapshot().sessions.find((session) => session.id === id);
@@ -202,11 +205,25 @@ export class Engagement {
         const project = this.project(contextSession); const before = current.before;
         if (!isRecord(before) || typeof before.path !== "string" || typeof before.digest !== "string") throw new MoguriError("configuration_base", "Instruction base is invalid.");
         const policy = folderPolicy(this.projects.configuration(project.id).values);
+        if (this.writers.has(project.path) || this.host.rootBusy(project.path)) throw new MoguriError("workspace_busy", "An owned writer holds this instruction root. Wait before applying the reviewed configuration.", 409);
         assertFolderName(before.path, true, policy);
-        await this.projects.prepareDirectory(project.path, before.path);
-        await assertFolderAccess(project.path, before.path, true, policy);
-        await writeProjectFile(project.path, before.path, String(spec.value), before.digest);
-        writtenInstructions = before.path;
+        this.writers.add(project.path);
+        try {
+          const path = before.path;
+          await this.projects.prepareDirectory(project.path, path);
+          await assertFolderAccess(project.path, path, true, policy);
+          await writeProjectFile(project.path, path, String(spec.value), before.digest, {
+            beforeCommit: () => {
+              if (this.project(contextSession).path !== project.path || !this.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("configuration_stale", "Instruction root or Local policy changed before publication.", 409);
+              assertFolderName(path, true, folderPolicy(this.projects.configuration(project.id).values));
+            },
+            committed: () => { writtenInstructions = path; },
+          });
+        } catch (error) {
+          if (!writtenInstructions) throw error;
+          console.error("Configuration instruction publication is unconfirmed:", error instanceof Error && "code" in error ? String(error.code) : "configuration_write");
+          throw new MoguriError("configuration_partial", "Instructions were published, but final durability was not acknowledged. Inspect the file; no successful apply or rollback was recorded.", 409);
+        } finally { this.writers.delete(project.path); this.host.wake(); }
       }
     }
     events.push({ event_type: "configuration.decided", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { proposalId: proposal.id, approve: command.approve, actor: "user" } });

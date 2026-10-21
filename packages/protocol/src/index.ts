@@ -32,7 +32,7 @@ import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 28;
+export const PROTOCOL_VERSION = 29;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -546,7 +546,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const workspaceId = reference.phase === "stage" ? candidate?.stage.workspaceId : candidate?.source.workspaceId;
         if (!candidate || !intent || job.memory || jobs.has(job.id) || job.kind !== `candidate.${reference.phase}` ||
           job.id !== intent.jobId || reference.commandId !== intent.commandId || reference.commandDigest !== intent.commandDigest ||
-          job.projectId !== candidate.projectId || event.project_id !== job.projectId || job.sessionId !== null || event.session_id ||
+          job.projectId !== candidate.projectId || event.project_id !== job.projectId || job.sessionId !== (intent.sessionId ?? null) || (event.session_id ?? null) !== job.sessionId ||
           (job.workspaceId ?? null) !== workspaceId || event.artifact_id !== candidate.id ||
           job.status !== "running" || job.resultDigest !== null || job.error !== null ||
           [...jobs.values()].some((other) => other.candidate?.commandId === reference.commandId || other.memory?.commandId === reference.commandId)) {
@@ -567,7 +567,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "job.progress" || event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if ((event.payload.candidateId ?? null) !== (job?.candidate?.candidateId ?? null) ||
-        job?.candidate && ((event.artifact_id ?? null) !== job.candidate.candidateId || event.project_id !== job.projectId || event.session_id)) {
+        job?.candidate && ((event.artifact_id ?? null) !== job.candidate.candidateId || event.project_id !== job.projectId || (event.session_id ?? null) !== job.sessionId)) {
         throw new MoguriError("candidate_corrupt", "Candidate job lifecycle lost its independent artifact owner.", 409);
       }
       if (job?.candidate) {
