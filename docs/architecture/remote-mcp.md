@@ -3,10 +3,10 @@
 The 0.18 development source introduces **protocol/database 24 foundations** for
 Remote MCP, following the measured
 [real-SSH prerequisite](remote-mcp-primitives.md). The latest independently
-qualified delivery remains 0.17. Scoped Remote MCP discovery now runs over SSH
-after an explicit grant. Tool calls are still blocked until the worker/
-lifecycle/client integration below is qualified; a saved grant is not a claim
-that a tool operation ran.
+qualified delivery remains 0.17. Scoped discovery and exact approved model or
+provider-free external calls now run over SSH after an explicit grant.
+This is development source, not a qualified 0.18 archive or completed native
+client integration; a saved grant is not a claim that a tool operation ran.
 
 Reuse the existing Node/MCP SDK (MIT), OpenSSH transport (BSD), private worker,
 owned connector, exact tool approvals, all-role accounting and encrypted
@@ -61,6 +61,11 @@ error, never another helper, host, user answer or approval.
 Migration 24 adds its version marker without rewriting schema-23 ciphertext,
 keys, terminal ownership, receipts or historical charges. Marker failure rolls
 back and reopening preserves the exact prior state.
+The version-1 `moguri-remote-mcp-intent` content binds the complete typed scope,
+call, server, helper/schema digests and required access method. Both intent and
+result blobs are encrypted into the owning session's retention compartment in
+the same transaction as their referencing event. A process-local pending blob
+is not durable evidence. Session deletion removes those content grants.
 
 ## Integration boundary
 
@@ -77,6 +82,16 @@ restart, partial cancellation and late results must remain inspectable without
 another effect or a falsely successful turn. Expired/revoked grants cannot
 authorize retries or move an existing result to a new root. Unknown external
 side effects are not zero work or proven rollback.
+External admission atomically retains its original command, waiting approval,
+job, turn and MCP intent. Replaying a receipted command returns its old job;
+a lost command receipt still cannot launch that original intent again.
+Pending approvals lease the actual peer/root across profile and target aliases.
+Only the owned worker's terminal result plus confirmed worker cleanup can
+settle an external job successfully. Stop after access/dispatch stays partial.
+Explicit late-result reconciliation validates the original intent/approval and
+private frame without reading a new access token or needing a current grant.
+It can improve the retained evidence but never promote the original partial
+turn to success.
 
 Until separately qualified, Remote repository-memory tools, transferred Local
 scripts and other extension transports remain unavailable. Read-only sessions
@@ -108,3 +123,20 @@ helper bytes and auth method before a connector, returns actual bounded data
 after child closure and supports one provider-free owned worker operation.
 These checks are not a substitute for public controller result/ACK/restart
 integration or delivered-client acceptance.
+
+The new controller checks exercise actual approved model calls and
+provider-free external calls, stale catalogs, failed result retention, lost
+original command receipts, denial/cancellation and actual held-connector group
+cleanup. Real service SIGKILL coverage now inspects both pre-authorization and
+post-effect/pre-result-ACK executions after restart, including reconciliation
+after grant revocation. This exposed and fixed missing MCP content-retention
+bindings: preserving a digest alone did not persist its process-local blob.
+Cross-profile pending approvals also serialize the same pinned root even when
+target aliases and remote runtime directories differ. Full related/native and
+exact-archive acceptance remains required.
+
+The combined controller/state gate passes **14/14 in 11,822.65 ms**, with both
+type checks. It includes actual access-only OAuth execution and proof that
+retained private frames/results contain neither generated access nor refresh
+values, plus revocation during an awaited access read. These are generated
+same-host SSH fixtures, not real account consent or proof of every remote OS.

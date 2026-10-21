@@ -14,7 +14,7 @@ import {
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   type RemotePlanSave, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse, type PlanFileResult, type SessionWorkspaceCommand,
-  PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions, type McpServerConfig,
+  PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions, type McpServerConfig, type RemoteMcpCall,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -23,7 +23,7 @@ import { validateTool } from "./tools.ts";
 import { effectiveTools } from "./tools.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
 import { authorizeTool } from "./permissions.ts";
-import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest, type UserPlanOperation } from "./worker-protocol.ts";
+import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateModelOptions, validateContextSize } from "./model-controls.ts";
@@ -38,7 +38,11 @@ import { frameDigest } from "./worker-wire.ts";
 import type { BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { normalizeStreamObservation } from "./stream-metrics.ts";
 import { COMPACTION_PROMPT, COMPACTION_OUTPUT_LIMIT, compactionInput, compactionProposal, estimateConversationTokens, selectCompactionPrefix, type ContextEntry } from "./compaction-context.ts";
-import { remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant } from "./remote-mcp.ts";
+import { RemoteMcpIntentSchema, remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant } from "./remote-mcp.ts";
+import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./remote-mcp-runtime.ts";
+import { redactSecrets } from "./secret-redactor.ts";
+
+interface McpDispatch { id: string; scopeDigest: string; callDigest: string; hadAccess: boolean; access: string[] }
 
 interface Run {
   sessionId: string;
@@ -58,10 +62,15 @@ interface Run {
   declaredTools: Set<string>;
   repositoryContext?: string;
   root: string | null;
+  mcpDispatches?: Map<string, McpDispatch>;
   compaction?: { id: string; context: Message[] };
   planSave?: {
     id: string; operation: UserPlanOperation; finish: WorkspaceFinish;
     resolve(result: CommandResult): void; reject(error: Error): void;
+    terminal?: Extract<WorkerRequest, { kind: "finished" }>; cleanupTimer?: ReturnType<typeof setTimeout>;
+  };
+  mcpControl?: {
+    id: string; operation: UserMcpOperation; resolve(result: unknown): void; reject(error: Error): void;
     terminal?: Extract<WorkerRequest, { kind: "finished" }>; cleanupTimer?: ReturnType<typeof setTimeout>;
   };
 }
@@ -75,6 +84,8 @@ interface ExternalRun {
   sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
   policyRevision: number; permissionRevision: number; abort: AbortController; started: boolean;
   execute: (signal: AbortSignal) => Promise<unknown>;
+  remoteMcpId?: string;
+  remoteRoot?: string;
 }
 export class ControlPlane extends EventEmitter {
   get profileId(): string { return this.store.profileId; }
@@ -95,6 +106,7 @@ export class ControlPlane extends EventEmitter {
   readonly remote: RemoteRuntime;
   private readonly remoteModels: ModelRegistry;
   private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
+  private readonly mcpCatalogs = new Map<string, { digest: string; scopeDigest: string; helperDigest: string; serverId: string; tool: string }>();
   private readonly profileHooks?: ProfileHooks;
   constructor(readonly store: EventStore, provider: ProviderAdapter | undefined = undefined, private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string; profileHooks?: ProfileHooks } = {}) {
     super();
@@ -132,7 +144,7 @@ export class ControlPlane extends EventEmitter {
     this.platform = new PlatformRuntime(store, platformOptions.stateDir ?? dirname(store.path), {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events, forget) => this.commit(events, undefined, forget),
       invalidateApprovals: (id) => this.invalidateApprovals(id),
-      externalCall: (session, call, execute) => this.externalCall(session, call, execute),
+      externalCall: (session, call, execute, identity) => this.externalCall(session, call, execute, identity),
       repositoryScope: (session) => this.repositoryScope(session),
       repositoryGit: async (session, signal) => {
         const bounded = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
@@ -185,10 +197,12 @@ export class ControlPlane extends EventEmitter {
       remoteMcpScope: (session) => this.remoteMcpScope(session),
       remoteMcpTools: async (session, server) => {
         const catalog = await this.remoteMcpCatalog(session, server, AbortSignal.timeout(20_000));
-        return catalog.tools.filter((tool) => server !== null || ["grep_logs", "fetch_page"].includes(tool.name)).map((tool) => ({
-          ...tool, digest: frameDigest(["moguri-scoped-mcp-tool-v1", tool.digest, catalog.preview.digest]),
-          scope: { env: "Remote" as const, root: catalog.scope.root, peerDigest: catalog.preview.peerDigest, resourceDigest: catalog.preview.resourceDigest, helperDigest: catalog.helperDigest },
-        }));
+        return catalog.tools.filter((tool) => server !== null || ["grep_logs", "fetch_page"].includes(tool.name)).map((tool) => {
+          const digest = frameDigest(["moguri-scoped-mcp-tool-v1", tool.digest, catalog.preview.digest]);
+          this.mcpCatalogs.set(digest, { digest: tool.digest, scopeDigest: catalog.preview.digest, helperDigest: catalog.helperDigest, serverId: tool.serverId, tool: tool.name });
+          while (this.mcpCatalogs.size > 512) { const first = this.mcpCatalogs.keys().next().value; if (first !== undefined) this.mcpCatalogs.delete(first); }
+          return { ...tool, digest, scope: { env: "Remote" as const, root: catalog.scope.root, peerDigest: catalog.preview.peerDigest, resourceDigest: catalog.preview.resourceDigest, helperDigest: catalog.helperDigest } };
+        });
       },
       remotePlanBinding: (session) => {
         const scope = this.planIdentity(session);
@@ -228,6 +242,7 @@ export class ControlPlane extends EventEmitter {
           ...this.routingFinished(session, session.turnId, "partial", "Service restarted. Routing advice and owned work were not replayed."),
           ...this.projection.compactions.filter((entry) => entry.sessionId === session.id && entry.status === "running").map((entry) => this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: "partial", completedAt: new Date().toISOString(), diagnostic: "Service restarted. Compaction was not replayed or applied; unknown usage remains held." })),
           ...this.projection.planSaves.filter((save) => save.sessionId === session.id && save.status === "running").map((save) => this.recoveredPlanSave(session, save)),
+          ...this.projection.remoteMcpCalls.filter((call) => call.sessionId === session.id && ["waiting_input", "running"].includes(call.status)).map((call) => this.recoveredMcp(call)),
           ...unfinished.map((call) => this.event(session, "tool.completed", { call, text: "Service restarted before a durable tool result. Execution and cleanup are unconfirmed; this tool was not replayed.", isError: true, outcome: "unconfirmed" })),
           this.event(session, "turn.finished", {
             outcome: "partial",
@@ -249,6 +264,8 @@ export class ControlPlane extends EventEmitter {
     if (unfinishedCompactions.length) this.commit(unfinishedCompactions.map((entry) => this.compactionEvent(this.session(entry.sessionId), { ...entry, revision: entry.revision + 1, status: "partial", completedAt: new Date().toISOString(), diagnostic: "Service restarted with unsettled compaction metadata. No call or context change was replayed." })));
     const unfinishedPlanSaves = this.projection.planSaves.filter((save) => save.status === "running");
     if (unfinishedPlanSaves.length) this.commit(unfinishedPlanSaves.map((save) => this.recoveredPlanSave(this.session(save.sessionId), save)));
+    const unfinishedMcp = this.projection.remoteMcpCalls.filter((call) => ["waiting_input", "running"].includes(call.status));
+    if (unfinishedMcp.length) this.commit(unfinishedMcp.map((call) => this.recoveredMcp(call)));
     await this.provider.refresh();
   }
   snapshot(): Snapshot {
@@ -331,6 +348,7 @@ export class ControlPlane extends EventEmitter {
     for (const run of this.externalRuns.values()) {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
       if (session?.id !== exceptSessionId && session?.controls.env === "Local" && session.projectId) roots.push(this.platform.managed.project(session).path);
+      if (session?.id !== exceptSessionId && run.remoteRoot) roots.push(run.remoteRoot);
     }
     for (const job of this.projection.jobs.filter((job) => ["cache.install", "project.artifacts.materialize", "project.defaults"].includes(job.kind) && ["running", "waiting_input"].includes(job.status))) {
       if (job.projectId) roots.push(this.platform.managed.project({ projectId: job.projectId, workspaceId: job.workspaceId ?? null }).path);
@@ -392,9 +410,10 @@ export class ControlPlane extends EventEmitter {
     this.commit([{ event_type: "execution.changed", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
       payload: { executionId: id, status: status.status, cancellation: status.cancellation, cleanup: status.cleanup, diagnostic: status.diagnostic, ...(status.workerPid ? { workerPid: status.workerPid } : {}) } }]);
     const run = this.runs.get(execution.sessionId);
-    if (run?.executionId === id && run.planSave?.terminal && status.cleanup !== "pending") {
-      this.finishRun(run, status.status === "unconfirmed" || status.cleanup === "unconfirmed" ? "partial" : run.planSave.terminal.outcome,
-        status.status === "unconfirmed" || status.cleanup === "unconfirmed" ? status.diagnostic : run.planSave.terminal.diagnostic);
+    const terminal = run?.planSave?.terminal ?? run?.mcpControl?.terminal;
+    if (run?.executionId === id && terminal && status.cleanup !== "pending") {
+      this.finishRun(run, status.status === "unconfirmed" || status.cleanup === "unconfirmed" ? "partial" : terminal.outcome,
+        status.status === "unconfirmed" || status.cleanup === "unconfirmed" ? status.diagnostic : terminal.diagnostic);
     }
     queueMicrotask(() => this.pumpAll());
   }
@@ -430,7 +449,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "remote.acknowledge") return finish([{ event_type: "execution.changed", profile_id: this.profileId, project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId,
       payload: { executionId: execution.id, status: execution.status, cancellation: execution.cancellation, cleanup: "acknowledged", diagnostic: "The user acknowledged remote process inspection. This does not retrospectively prove containment or successful cleanup." } }]);
     const inspection = await this.remote.inspect(execution);
-    if (inspection.status.runId !== execution.id || inspection.info.workerDigest !== execution.workerDigest) throw new MoguriError("remote_identity", "Remote inspection changed its owned run/build identity. No result was applied.", 409);
+    if (inspection.status.runId !== execution.id || inspection.info.workerDigest !== execution.workerDigest || inspection.info.root !== execution.workspace) throw new MoguriError("remote_identity", "Remote inspection changed its owned run/build/root identity. No result was applied.", 409);
     const events: EventInput[] = [];
     const session = this.session(execution.sessionId);
     let cursor = execution.lastSequence;
@@ -442,6 +461,25 @@ export class ControlPlane extends EventEmitter {
         const stepId = frame.request.stepId;
         const prior = session.usage.find((usage) => usage.stepId === stepId);
         if (prior?.quality === "unknown" && frame.request.usageReported && assistantMessage(frame.request.message).model === prior.apiModelId) events.push({ ...scope, event_type: "model.late_usage", payload: { usage: this.modelUsage(session, frame.request), executionId: execution.id, sequence: frame.sequence } });
+      }
+      if (frame.request.kind === "mcp.complete") {
+        const call = this.mcpCall(frame.request.result.operationId, session.id), result = this.decodeMcpResult(call, frame.request);
+        if (call.executionId !== execution.id) throw new MoguriError("remote_mcp_authority", "The late MCP frame belongs to a different execution. No result was adopted.", 409);
+        const serialized = JSON.stringify(result), resultDigest = this.store.putBlob(serialized);
+        if (call.resultDigest && call.resultDigest !== resultDigest) throw new MoguriError("remote_mcp_recorded", "A late frame cannot replace this operation's retained result.", 409);
+        if (!call.resultDigest) {
+          const diagnostic = "Late exact Remote MCP result retained after inspection. Original partial/unconfirmed work was not replayed or promoted into a successful turn.";
+          const jobId = call.jobId ?? randomUUID();
+          events.push(this.mcpEvent({ ...call, phase: "settled", status: "partial", accessForwarded: result.accessReceived, resultDigest, jobId,
+            revision: call.revision + 1, updatedAt: new Date().toISOString(), diagnostic }));
+          if (call.jobId) {
+            const job = this.projection.jobs.find((job) => job.id === call.jobId && job.sessionId === session.id);
+            if (!job) throw new MoguriError("remote_mcp_job", "The late MCP frame lost its original external job. No different job was used.", 409);
+            events.push({ ...scope, event_type: "job.finished", payload: { jobId, status: job.status === "completed" ? "completed" : "partial",
+              resultDigest: result.result === undefined ? resultDigest : this.store.putBlob(JSON.stringify(result.result)), error: diagnostic } });
+          } else events.push({ ...scope, event_type: "job.started", payload: { job: { id: jobId, kind: "mcp.result", sessionId: session.id, projectId: call.projectId,
+            workspaceId: null, parentTurnId: call.turnId, status: "partial", progress: "Late exact Remote MCP result retained", resultDigest, error: diagnostic } } });
+        }
       }
       if (frame.request.kind === "user-plan.complete") {
         const call = frame.request.call;
@@ -627,37 +665,75 @@ export class ControlPlane extends EventEmitter {
   }
   private eligibleExternal(sessionId: string, call: ToolCall): Session {
     const session = this.session(sessionId);
-    if (session.projectId && (this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId))) throw new MoguriError("workspace_busy", "A managed install or artifact publication owns this workspace. Wait for it to settle.", 409);
+    if (session.controls.env === "Local" && session.projectId && (this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId))) throw new MoguriError("workspace_busy", "A managed install or artifact publication owns this workspace. Wait for it to settle.", 409);
     if (session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only") throw new MoguriError("subagent_readonly", "Read-only sessions cannot own external tool calls.", 403);
     if (session.turnId || session.queue.length || session.status === "archived") throw new MoguriError("session_busy", "Use an idle, restored session for an external MCP client. The active agent already owns its turn.", 409);
     if (this.otherWriter(session)) throw new MoguriError("workspace_busy", "Another session owns this workspace. Wait for it to settle before requesting an external MCP call.", 409);
     if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and explicitly resume this workspace before requesting new external tool work.", 409);
-    if (session.controls.env !== "Local" || !this.projection.policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.find((capability) => capability.env === "Local")?.ready) throw new MoguriError("mcp_env", "A qualified, policy-allowed MCP execution environment is required; no Local fallback.", 403);
-    const project = session.projectId ? this.platform.managed.project(session) : undefined;
-    const authorization = authorizeTool(this.projection.settings.values, call, project?.path ?? null);
+    const env = session.controls.env;
+    if (!["Local", "Remote"].includes(env) || !this.projection.policy.allowedEnvs.includes(env) || !this.snapshot().capabilities.find((capability) => capability.env === env)?.ready) throw new MoguriError("mcp_env", "A qualified, policy-allowed MCP execution environment is required; no Local fallback.", 403);
+    const root = env === "Remote" ? this.remoteMcpScope(session).root : session.projectId ? this.platform.managed.project(session).path : null;
+    const authorization = authorizeTool(this.projection.settings.values, call, root);
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
     return session;
   }
-  private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): Promise<string> {
+  private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }): Promise<string> {
+    if (session.controls.env === "Remote") {
+      if (!identity) throw new MoguriError("remote_mcp_intent", "Remote MCP needs the original canonical command identity before admission.", 409);
+      const previous = this.projection.remoteMcpCalls.find((entry) => entry.commandId === identity.id);
+      if (previous) throw new MoguriError(previous.commandDigest === identity.digest ? "remote_mcp_recorded" : "idempotency_conflict",
+        "This original Remote MCP command already owns an intent/result. Inspect it; no connector or tool was replayed.", 409);
+    }
     session = this.eligibleExternal(session.id, call);
     const admission = this.admissionSignature(session);
     const captured = await this.platform.repositories.capture(session, AbortSignal.timeout(5000));
     session = this.eligibleExternal(session.id, call);
     if (this.admissionSignature(session) !== admission) throw new MoguriError("mcp_scope_changed", "The exact external MCP root, controls or authority changed before admission. No call was started.", 409);
     const repositoryCapture = this.platform.repositories.finalize(session, captured);
+    const remote = session.controls.env === "Remote" ? await this.prepareRemoteMcpCall(session, call, true) : null;
+    session = this.eligibleExternal(session.id, call);
+    if (this.admissionSignature(session) !== admission) throw new MoguriError("mcp_scope_changed", "The exact MCP root or authority changed during admission. No effect was started.", 409);
     const turnId = randomUUID();
     const stepId = randomUUID();
     const jobId = randomUUID();
     const approvalId = randomUUID();
     const scope = { profile_id: this.profileId, project_id: session.projectId, session_id: session.id, turn_id: turnId, step_id: stepId };
     const external: ExternalRun = { sessionId: session.id, turnId, stepId, jobId, call, approvalId, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision, abort: new AbortController(), execute, started: false };
+    let remoteIntent: RemoteMcpCall | undefined;
+    if (remote) {
+      if (!identity) throw new MoguriError("remote_mcp_intent", "Remote MCP canonical identity disappeared before retention.", 409);
+      const now = new Date().toISOString(), id = randomUUID();
+      const intentDigest = this.store.putBlob(JSON.stringify({ format: "moguri-remote-mcp-intent", version: 1, scope: remote.scope, call, server: remote.server, helperDigest: remote.helperDigest,
+        schemaDigest: remote.cached.digest, requiresAccess: remote.preview.server.auth !== "none" }));
+      remoteIntent = { id, profileId: this.profileId, sessionId: session.id, projectId: remote.scope.projectId, turnId, stepId, callId: call.id, actor: "external",
+        commandId: identity.id, commandDigest: identity.digest, jobId, executionId: null, revision: 0, env: "Remote", root: remote.scope.root,
+        hostFingerprint: remote.preview.host.fingerprint, peerDigest: remote.preview.peerDigest, resourceDigest: remote.preview.resourceDigest,
+        scopeDigest: remote.preview.digest, helperDigest: remote.helperDigest, serverId: remote.server?.id ?? "builtin", tool: String(call.arguments.tool),
+        argumentsDigest: frameDigest(remote.input), intentDigest, accessForwarded: false, resultDigest: null, phase: "intent", status: "waiting_input",
+        createdAt: now, updatedAt: now, diagnostic: null };
+      external.remoteMcpId = id; external.execute = (signal) => this.executeRemoteExternalMcp(external, signal);
+      const root = remoteRootLease(remote.scope.target, remote.scope.root);
+      if (!root) throw new MoguriError("remote_mcp_owner", "Remote MCP has no exact writer-root identity. No intent or connector was admitted.", 409);
+      external.remoteRoot = root;
+    }
     this.externalRuns.set(session.id, external);
-    this.commit([
+    try { this.commit([
       { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}`, attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: this.projection.policy.revision, repositoryCapture } },
       { ...scope, event_type: "job.started", payload: { job: { id: jobId, kind: "mcp.call", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: turnId, status: "waiting_input", progress: "Exact external-tool approval required", resultDigest: null, error: null } } },
       { ...scope, event_type: "tool.requested", payload: { approval: { id: approvalId, stepId, call, policyRevision: external.policyRevision, permissionRevision: external.permissionRevision } } },
-    ]);
+      ...(remoteIntent ? [this.mcpEvent(remoteIntent)] : []),
+    ]); } catch (error) { this.externalRuns.delete(session.id); throw error; }
     return jobId;
+  }
+  private async executeRemoteExternalMcp(external: ExternalRun, signal: AbortSignal): Promise<unknown> {
+    signal.throwIfAborted();
+    const session = this.session(external.sessionId);
+    if (!external.remoteMcpId || session.turnId !== external.turnId || this.runs.has(session.id)) throw new MoguriError("remote_mcp_owner", "This exact external MCP turn lost ownership. No other turn or worker was reused.", 409);
+    const call = this.mcpCall(external.remoteMcpId, session.id);
+    if (call.phase !== "intent" || call.callId !== external.call.id || call.actor !== "external") throw new MoguriError("remote_mcp_recorded", "This external MCP already owns an authorized/result intent. No effect was replayed.", 409);
+    return new Promise((resolve, reject) => {
+      this.launchRun(session, external.turnId, { mcpControl: { id: call.id, operation: { kind: "mcp.call", stepId: external.stepId, call: external.call }, resolve, reject } });
+    });
   }
   private executeExternal(external: ExternalRun): void {
     external.started = true;
@@ -669,19 +745,27 @@ export class ControlPlane extends EventEmitter {
       this.finishExternal(external, failed ? "failed" : "completed", failed ? "The MCP tool returned an error result." : null, result);
     }).catch((error: unknown) => {
       if (!this.externalRuns.has(external.sessionId)) return;
-      this.finishExternal(external, "partial", error instanceof MoguriError ? error.message : "External MCP result/effects are unconfirmed; no automatic retry.");
+      const outcome = error instanceof MoguriError && error.code === "remote_mcp_stopped" ? "stopped" : error instanceof MoguriError && error.code === "remote_mcp_failed" ? "failed" : "partial";
+      const call = external.remoteMcpId ? this.mcpCall(external.remoteMcpId, external.sessionId) : null;
+      const result = call?.resultDigest ? parse(RemoteMcpExecutionResultSchema, JSON.parse(this.store.blob(call.resultDigest))).result : undefined;
+      this.finishExternal(external, outcome, error instanceof MoguriError ? error.message : "External MCP result/effects are unconfirmed; no automatic retry.", result);
+    }).catch((error: unknown) => {
+      console.error("External MCP settlement persistence failed:", error instanceof MoguriError ? error.code : "mcp_settlement");
     });
   }
-  private finishExternal(external: ExternalRun, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null, result?: unknown): void {
+  private finishExternal(external: ExternalRun, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null, result?: unknown, decision?: "denied"): void {
     if (!this.externalRuns.has(external.sessionId)) return;
-    this.externalRuns.delete(external.sessionId);
     const session = this.session(external.sessionId);
     const text = result === undefined ? diagnostic ?? "Tool was not executed." : JSON.stringify(result);
+    const call = external.remoteMcpId ? this.mcpCall(external.remoteMcpId, external.sessionId) : null;
+    const mcpEvents = call && call.phase !== "settled" ? [this.mcpEvent({ ...call, revision: call.revision + 1, phase: "settled", status: decision ?? outcome, diagnostic, updatedAt: new Date().toISOString() })] : [];
     this.commit([
-      this.event(session, "tool.completed", { call: external.call, text: text.slice(0, MAX_TEXT), isError: outcome !== "completed", outcome }, external.stepId),
+      ...mcpEvents,
+      this.event(session, "tool.completed", { call: external.call, text: text.slice(0, MAX_TEXT), isError: outcome !== "completed", outcome: decision ?? outcome }, external.stepId),
       this.event(session, "job.finished", { jobId: external.jobId, status: outcome === "stopped" ? "cancelled" : outcome, resultDigest: result === undefined ? null : this.store.putBlob(JSON.stringify(result)), error: diagnostic }, external.stepId),
       this.event(session, "turn.finished", { outcome, diagnostic }, external.stepId),
     ]);
+    this.externalRuns.delete(external.sessionId);
     if (outcome === "partial" || outcome === "failed") this.paused.add(session.id);
     queueMicrotask(() => this.pumpAll());
   }
@@ -767,6 +851,126 @@ export class ControlPlane extends EventEmitter {
     const token = await this.platform.gateway.accessToken(server, signal); check();
     const tools = await this.remote.mcpTools(scope.target, scope.root, scope.workerDigest, { server, helperDigest, ...(token ? { accessToken: token } : {}) }, signal);
     check(); return { scope, server, preview, helperDigest, tools, token };
+  }
+  private mcpCall(id: string, sessionId: string): RemoteMcpCall {
+    const call = this.projection.remoteMcpCalls.find((call) => call.id === id && call.sessionId === sessionId);
+    if (!call) throw new MoguriError("remote_mcp_missing", "This MCP intent/result is outside the exact owning session/profile.", 404);
+    return call;
+  }
+  private mcpEvent(call: RemoteMcpCall): EventInput {
+    return { event_type: "mcp.remote_recorded", profile_id: this.profileId, project_id: call.projectId, session_id: call.sessionId,
+      turn_id: call.turnId, step_id: call.stepId, payload: { call } };
+  }
+  private recoveredMcp(call: RemoteMcpCall): EventInput {
+    return this.mcpEvent({ ...call, revision: call.revision + 1, phase: "settled", status: call.resultDigest ? "partial" : "unconfirmed",
+      updatedAt: new Date().toISOString(), diagnostic: "Service restarted during this exact MCP operation. Retained result/access uncertainty was preserved; no credential, connector, tool effect or successful turn was replayed." });
+  }
+  private updateMcp(call: RemoteMcpCall, changes: Partial<RemoteMcpCall>, events: EventInput[] = []): RemoteMcpCall {
+    const current = this.mcpCall(call.id, call.sessionId), updated = { ...current, ...changes, revision: current.revision + 1, updatedAt: new Date().toISOString() };
+    this.commit([this.mcpEvent(updated), ...events]); return updated;
+  }
+  private decodeMcpResult(call: RemoteMcpCall, request: Extract<WorkerRequest, { kind: "mcp.complete" }>) {
+    const intent = parse(RemoteMcpIntentSchema, JSON.parse(this.store.blob(call.intentDigest))), scope = intent.scope;
+    const preview = remoteMcpPreview(scope, intent.server, intent.helperDigest), result = parse(RemoteMcpExecutionResultSchema, request.result);
+    const execution = this.projection.executions.find((execution) => execution.id === call.executionId);
+    const authorized = this.history.some((event) => event.event_type === "tool.started" && event.turn_id === call.turnId && event.step_id === call.stepId &&
+      event.session_id === call.sessionId && frameDigest(event.payload.call) === frameDigest(request.call));
+    const access = preview.server.auth !== "none";
+    if (!execution || !authorized || scope.profileId !== call.profileId || scope.sessionId !== call.sessionId || scope.projectId !== call.projectId ||
+      scope.root !== call.root || scope.workerDigest !== execution.workerDigest || execution.sessionId !== call.sessionId || execution.projectId !== call.projectId ||
+      execution.turnId !== call.turnId || execution.workspace !== call.root || remoteMcpPeer(execution.target) !== call.peerDigest ||
+      preview.digest !== call.scopeDigest || preview.peerDigest !== call.peerDigest || preview.resourceDigest !== call.resourceDigest ||
+      intent.helperDigest !== call.helperDigest || preview.server.id !== call.serverId || intent.requiresAccess !== access || access !== result.accessReceived ||
+      frameDigest(intent.call) !== frameDigest(request.call) || intent.call.id !== call.callId || intent.call.name !== "mcp_gateway" ||
+      intent.call.arguments.action !== "call" || intent.call.arguments.serverId !== call.serverId || intent.call.arguments.tool !== call.tool ||
+      frameDigest(intent.call.arguments.arguments) !== call.argumentsDigest || request.stepId !== call.stepId ||
+      result.operationId !== call.id || result.scopeDigest !== call.scopeDigest || call.accessForwarded === true && !result.accessReceived ||
+      !this.history.some((event) => event.event_type === "mcp.remote_recorded" && event.payload.call.id === call.id && event.payload.call.phase === "authorized")) {
+      throw new MoguriError("remote_mcp_authority", "The exact MCP result has no matching retained intent, approval, peer/root/helper, arguments or access receipt. No result was adopted.", 409);
+    }
+    requireRemoteMcpGrant(preview);
+    if (Buffer.byteLength(JSON.stringify(result)) > 2 * 1024 * 1024 + 8192 || result.outcome === "completed" && (result.result === undefined || !result.dispatched)) throw new MoguriError("remote_mcp_result", "MCP result is missing or exceeds its bounded complete shape. No silent truncation or success.", 409);
+    return result;
+  }
+  private async prepareRemoteMcpCall(session: Session, call: ToolCall, external = false) {
+    if (call.name !== "mcp_gateway" || call.arguments.action !== "call" || !isRecord(call.arguments.arguments)) throw new MoguriError("remote_mcp_authorization", "This exact Remote tool request is not eligible for an MCP effect.", 403);
+    const input = call.arguments.arguments;
+    await this.assertCurrentTool(session, call, !external);
+    const scope = this.remoteMcpScope(this.session(session.id)), server = this.platform.server(String(call.arguments.serverId), session.projectId);
+    if (!server && !["grep_logs", "fetch_page"].includes(String(call.arguments.tool))) throw new MoguriError("remote_mcp_unqualified", "Remote Local-script or repository-memory MCP transport is not qualified. No host fallback.", 403);
+    const helperDigest = await this.platform.gateway.workerDigest(), preview = remoteMcpPreview(scope, server, helperDigest);
+    requireRemoteMcpGrant(preview);
+    const cached = this.mcpCatalogs.get(String(call.arguments.schemaDigest));
+    if (!cached || cached.scopeDigest !== preview.digest || cached.helperDigest !== helperDigest || cached.serverId !== (server?.id ?? "builtin") || cached.tool !== call.arguments.tool) throw new MoguriError("remote_mcp_catalog", "Rediscover this exact Remote MCP catalog after restart, eviction or a scope/schema change. No cached authority or Local schema was substituted.", 409);
+    const fresh = this.session(session.id);
+    if (remoteMcpPreview(this.remoteMcpScope(fresh), this.platform.server(server?.id ?? "builtin", fresh.projectId), helperDigest).digest !== preview.digest) throw new MoguriError("remote_mcp_scope", "MCP scope changed while its exact helper/catalog was prepared. No effect was admitted.", 409);
+    return { scope, server, helperDigest, preview, cached, input };
+  }
+  private async authorizeRemoteMcp(run: Run, request: Extract<WorkerRequest, { kind: "delegate" }>): Promise<RemoteMcpAuthorization> {
+    const session = this.session(run.sessionId), call = request.call;
+    if (!run.executionId || run.abort.signal.aborted) throw new MoguriError("remote_mcp_authorization", "This exact Remote worker is not eligible for another MCP effect.", 403);
+    const { scope, server, helperDigest, preview, cached, input } = await this.prepareRemoteMcpCall(session, call, Boolean(run.mcpControl));
+    const execution = this.projection.executions.find((execution) => execution.id === run.executionId);
+    if (!execution || execution.workspace !== scope.root || remoteMcpPeer(execution.target) !== preview.peerDigest) throw new MoguriError("remote_mcp_scope", "MCP authorization does not own the active SSH peer/root.", 409);
+    const recorded = this.projection.remoteMcpCalls.find((entry) => entry.turnId === run.turnId && entry.stepId === request.stepId && entry.callId === call.id);
+    if (recorded && (run.mcpControl?.id !== recorded.id || recorded.phase !== "intent" || recorded.scopeDigest !== preview.digest)) throw new MoguriError("remote_mcp_recorded", "This exact MCP step/call already owns an intent. Inspect its result; no effect or access was replayed.", 409);
+    const id = randomUUID(), now = new Date().toISOString();
+    const intentDigest = recorded?.intentDigest ?? this.store.putBlob(JSON.stringify({ format: "moguri-remote-mcp-intent", version: 1, scope, call, server, helperDigest, schemaDigest: cached.digest, requiresAccess: preview.server.auth !== "none" }));
+    let entry: RemoteMcpCall = recorded ?? { id, profileId: this.profileId, sessionId: session.id, projectId: scope.projectId, turnId: run.turnId, stepId: request.stepId, callId: call.id,
+      actor: "model", commandId: null, commandDigest: null, jobId: null, executionId: run.executionId, revision: 0, env: "Remote", root: scope.root,
+      hostFingerprint: preview.host.fingerprint, peerDigest: preview.peerDigest, resourceDigest: preview.resourceDigest, scopeDigest: preview.digest, helperDigest,
+      serverId: server?.id ?? "builtin", tool: String(call.arguments.tool), argumentsDigest: frameDigest(call.arguments.arguments), intentDigest, accessForwarded: false,
+      resultDigest: null, phase: "intent", status: "running", createdAt: now, updatedAt: now, diagnostic: null };
+    if (!recorded) this.commit([this.mcpEvent(entry)]);
+    try {
+      const check = () => {
+        const current = this.session(session.id), fresh = remoteMcpPreview(this.remoteMcpScope(current), this.platform.server(entry.serverId, current.projectId), helperDigest);
+        if (fresh.digest !== entry.scopeDigest || run.abort.signal.aborted) throw new MoguriError("remote_mcp_scope", "MCP scope/grant changed or cancellation won before access/effect dispatch. No retry.", 409);
+        requireRemoteMcpGrant(fresh);
+      };
+      check();
+      const token = await this.platform.gateway.accessToken(server, run.abort.signal); check();
+      const policy = authorizeTool(this.projection.settings.values, call, scope.root);
+      if (policy.decision === "deny") throw new MoguriError("tool_denied", policy.reason, 403);
+      entry = this.updateMcp(entry, { phase: "authorized", accessForwarded: token ? null : false });
+      const dispatch: McpDispatch = { id: entry.id, scopeDigest: entry.scopeDigest, callDigest: frameDigest(call), hadAccess: Boolean(token), access: token ? [token] : [] };
+      run.mcpDispatches ??= new Map(); run.mcpDispatches.set(call.id, dispatch);
+      return { kind: "remote-mcp", operationId: entry.id, scopeDigest: entry.scopeDigest, stepId: request.stepId, callDigest: dispatch.callDigest, env: "Remote",
+        root: scope.root, helperDigest, server, tool: entry.tool, arguments: input, schemaDigest: cached.digest,
+        reviewedDigest: String(call.arguments.schemaDigest), ...(token ? { accessToken: token } : {}) };
+    } catch (error) {
+      this.updateMcp(entry, { phase: "settled", status: run.abort.signal.aborted ? "stopped" : "failed", diagnostic: error instanceof MoguriError ? error.message : "Remote MCP admission failed; no operation was dispatched." });
+      throw error;
+    }
+  }
+  private completeRemoteMcp(run: Run, request: Extract<WorkerRequest, { kind: "mcp.complete" }>) {
+    const dispatch = run.mcpDispatches?.get(request.call.id), result = parse(RemoteMcpExecutionResultSchema, request.result);
+    const declared = run.calls.get(request.call.id);
+    if (!dispatch || !declared || dispatch.callDigest !== frameDigest(request.call) || frameDigest(declared) !== dispatch.callDigest ||
+      result.operationId !== dispatch.id || result.scopeDigest !== dispatch.scopeDigest || result.accessReceived !== dispatch.hadAccess) throw new MoguriError("remote_mcp_result", "MCP result does not match its exact authorized actor/call/scope/access receipt. Nothing was adopted.", 409);
+    const entry = this.mcpCall(dispatch.id, run.sessionId);
+    if (entry.turnId !== run.turnId || entry.stepId !== request.stepId || entry.executionId !== run.executionId || entry.callId !== request.call.id) throw new MoguriError("remote_mcp_result", "MCP completion does not own the retained turn/step/execution.", 409);
+    if (entry.resultDigest) throw new MoguriError("remote_mcp_recorded", "This MCP result is already retained. No result or tool effect was replayed.", 409);
+    const safe = this.decodeMcpResult(entry, { ...request, result: parse(RemoteMcpExecutionResultSchema, redactSecrets(result, dispatch.access)) }), serialized = JSON.stringify(safe);
+    const resultDigest = this.store.putBlob(serialized), jobId = entry.jobId ?? randomUUID();
+    this.updateMcp(entry, { phase: "result-retained", accessForwarded: safe.accessReceived, resultDigest, jobId, diagnostic: safe.diagnostic }, entry.jobId ? [] : [{
+      event_type: "job.started", profile_id: this.profileId, project_id: entry.projectId, session_id: entry.sessionId, turn_id: entry.turnId, step_id: entry.stepId,
+      payload: { job: { id: jobId, kind: "mcp.result", sessionId: entry.sessionId, projectId: entry.projectId, workspaceId: null, parentTurnId: entry.turnId,
+        status: safe.outcome === "completed" ? "completed" : safe.outcome === "stopped" ? "cancelled" : safe.outcome, progress: "Exact Remote MCP outcome retained", resultDigest, error: safe.diagnostic } },
+    }]);
+    dispatch.access = [];
+    const content = JSON.stringify(safe.result ?? { diagnostic: safe.diagnostic, outcome: safe.outcome });
+    let changed = false;
+    try {
+      const session = this.session(run.sessionId), current = remoteMcpPreview(this.remoteMcpScope(session), this.platform.server(entry.serverId, session.projectId), entry.helperDigest);
+      changed = current.digest !== entry.scopeDigest;
+    } catch (error) {
+      if (!(error instanceof MoguriError)) throw error;
+      changed = true;
+    }
+    return { text: JSON.stringify({ resultId: jobId, operationId: entry.id, content: content.slice(0, 12000), truncated: content.length > 12000,
+      readWith: "mcp_gateway read_result", ...(changed ? { warning: "Original Remote result retained; the current scope changed. No new authority or successful turn was inferred." } : {}) }),
+      isError: changed || safe.outcome !== "completed", outcome: changed ? "partial" : safe.outcome };
   }
   private planScope(session: Session) {
     if (!this.projection.policy.allowedEnvs.includes("Remote")) throw new MoguriError("env_denied", "Remote is excluded by the current allowed-env policy.", 403);
@@ -1121,7 +1325,7 @@ export class ControlPlane extends EventEmitter {
         if (external) {
           if (external.started || external.approvalId !== command.approvalId || external.policyRevision !== this.projection.policy.revision || external.permissionRevision !== this.projection.settings.permissionRevision) throw new MoguriError("approval_stale", "This external tool approval expired or changed.", 409);
           finish([this.event(session, "tool.decided", { approvalId: external.approvalId, allow: command.allow, actor: "user" }, external.stepId)]);
-          if (!command.allow) this.finishExternal(external, "stopped", "External MCP request denied by the user.");
+          if (!command.allow) this.finishExternal(external, "stopped", "External MCP request denied by the user.", undefined, "denied");
           else this.executeExternal(external);
           return {};
         }
@@ -1200,11 +1404,11 @@ export class ControlPlane extends EventEmitter {
       this.launchRun(this.session(session.id), turnId);
     }
   }
-  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "planSave"> = {}): void {
-      const { compaction, planSave } = control;
+  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "planSave" | "mcpControl"> = {}): void {
+      const { compaction, planSave, mcpControl } = control;
       let owned: Run | undefined;
       try {
-        const context = planSave ? [] : compaction?.context ?? this.context(current.id); validateContextSize(context);
+        const context = planSave || mcpControl ? [] : compaction?.context ?? this.context(current.id); validateContextSize(context);
         const project = current.projectId ? this.platform.managed.project(current) : undefined;
         let execution: RemoteExecution | undefined;
         if (current.controls.env === "Remote") {
@@ -1212,13 +1416,20 @@ export class ControlPlane extends EventEmitter {
           execution = { id: randomUUID(), sessionId: current.id, projectId: current.projectId, turnId, target, workspace: this.remoteWorkspace(current), workerDigest: this.remote.readiness.workerDigest!,
             configDigest: frameDigest(target), createdAt: new Date().toISOString(), status: "launching", cancellation: "none", cleanup: "pending", diagnostic: null, lastSequence: 0, workerPid: null };
           const save = planSave ? this.planSave(planSave.id, current.id) : null;
+          const mcp = mcpControl ? this.mcpCall(mcpControl.id, current.id) : null;
           this.commit([{ ...this.event(current, "execution.started", { execution }), turn_id: turnId },
-            ...(save ? [this.planSaveEvent(current, { ...save, executionId: execution.id, revision: save.revision + 1, updatedAt: new Date().toISOString() })] : [])]);
+            ...(save ? [this.planSaveEvent(current, { ...save, executionId: execution.id, revision: save.revision + 1, updatedAt: new Date().toISOString() })] : []),
+            ...(mcp ? [this.mcpEvent({ ...mcp, executionId: execution.id, status: "running", revision: mcp.revision + 1, updatedAt: new Date().toISOString() })] : [])]);
         }
         const child = execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
-        const run: Run = { sessionId: current.id, turnId, child, root: current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, planSave };
+        const run: Run = { sessionId: current.id, turnId, child, root: current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, abort: new AbortController(), calls: new Map(), granted: new Set(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, planSave, mcpControl };
         owned = run;
         if (planSave) { if (!execution) throw new MoguriError("plan_env", "User Remote plan work has no exact SSH execution.", 409); run.stepId = planSave.operation.stepId; }
+        if (mcpControl) {
+          if (!execution) throw new MoguriError("remote_mcp_env", "External Remote MCP has no exact SSH execution.", 409);
+          run.stepId = mcpControl.operation.stepId; run.calls.set(mcpControl.operation.call.id, mcpControl.operation.call);
+          run.granted.add(mcpControl.operation.call.id); run.declaredTools.add("mcp_gateway");
+        }
         this.runs.set(current.id, run);
         child.events.on("stderr", (data) => { run.stderr = (run.stderr + data).slice(-4096); });
         child.events.on("message", (message: unknown, frame) => {
@@ -1248,15 +1459,20 @@ export class ControlPlane extends EventEmitter {
         child.events.on("error", (error) => { this.finishRun(run, execution ? "partial" : "failed", execution ? error.message : "Could not start the agent worker. Rebuild Moguri and check the bundled Node runtime."); if (execution) child.kill("SIGTERM"); });
         child.events.on("exit", (code, signal) => {
           void run.chain.then(() => {
-            if (!run.done && !run.planSave?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
+            if (!run.done && !run.planSave?.terminal && !run.mcpControl?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
         this.reply(run, { kind: "start", root: execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
-          readOnly: current.kind === "subagent" || Boolean(compaction), ...(planSave ? { operation: planSave.operation } : {}) });
+          readOnly: current.kind === "subagent" || Boolean(compaction), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
         const diagnostic = error instanceof MoguriError ? error.message : "Agent worker launch failed. Rebuild Moguri and retry explicitly.";
         if (owned) { this.finishRun(owned, "partial", diagnostic); owned.child.kill("SIGTERM"); return; }
+        if (mcpControl) {
+          try { this.updateMcp(this.mcpCall(mcpControl.id, current.id), { phase: "settled", status: "unconfirmed", diagnostic }); }
+          catch { console.error("External MCP launch/intent persistence failed; preserve its original state for inspection."); }
+          mcpControl.reject(new MoguriError("remote_mcp_launch", diagnostic, 409)); return;
+        }
         const entry = compaction ? this.compaction(current.id, compaction.id) : null;
         const save = planSave ? this.planSave(planSave.id, current.id) : null;
         const execution = this.projection.executions.find((execution) => execution.turnId === turnId);
@@ -1276,9 +1492,9 @@ export class ControlPlane extends EventEmitter {
     return this.projection.sessions.some((other) => other.id !== session.id && this.platform.managed.leaseKey(other) === key && other.turnId && other.kind === "agent" && other.mode === "agent") ||
       Boolean(this.writerReservations.has(key) && this.writerReservations.get(key) !== session.id);
   }
-  private async assertCurrentTool(session: Session, call: ToolCall): Promise<void> {
+  private async assertCurrentTool(session: Session, call: ToolCall, modelOwned = true): Promise<void> {
     const current = this.session(session.id);
-    if (current.controls.modelId === KUPO_MODEL_ID) {
+    if (modelOwned && current.controls.modelId === KUPO_MODEL_ID) {
       const routing = this.projection.routings.find((value) => value.turnId === current.turnId);
       if (!routing?.plan || routing.status !== "running") throw new MoguriError("routing_authority", "No accepted owned solver plan authorizes this tool request.", 403);
       this.checkRoutingSnapshot(current, routing);
@@ -1441,6 +1657,25 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     if (run.planSave) { await this.userPlanMessage(run, request); return; }
+    if (run.mcpControl) {
+      const operation = run.mcpControl;
+      if (request.kind === "finished") {
+        const call = this.mcpCall(operation.id, session.id);
+        const terminal = request.outcome === "completed" && !call.resultDigest ?
+          { ...request, outcome: "partial" as const, diagnostic: "The MCP worker ended without a durable exact result. No successful operation was inferred." } : request;
+        this.commit([]);
+        operation.terminal = terminal;
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
+        operation.cleanupTimer = setTimeout(() => {
+          if (!run.done) { run.child.kill("SIGTERM"); this.finishRun(run, "partial", "Remote MCP worker cleanup was not confirmed after its result. No operation was replayed."); }
+        }, 5000);
+        const execution = this.projection.executions.find((execution) => execution.id === run.executionId);
+        if (execution && execution.cleanup !== "pending") this.finishRun(run, execution.status === "unconfirmed" || execution.cleanup === "unconfirmed" ? "partial" : terminal.outcome,
+          execution.status === "unconfirmed" || execution.cleanup === "unconfirmed" ? execution.diagnostic : terminal.diagnostic);
+        return;
+      }
+      if (request.kind !== "delegate" && request.kind !== "mcp.complete" && request.kind !== "process") throw new MoguriError("remote_mcp_worker", "This external MCP worker requested an unrelated model/tool operation. No extra authority was granted.", 409);
+    }
     if (request.kind === "user-plan.complete") throw new MoguriError("plan_worker_request", "This model turn does not own a user plan operation. No result was adopted.", 409);
     if (request.kind === "finished") {
       this.finishRun(run, request.outcome, request.diagnostic);
@@ -1627,7 +1862,15 @@ export class ControlPlane extends EventEmitter {
     }
     if (request.kind === "process") {
       if (!run.granted.has(request.callId)) throw new Error("Process does not belong to an approved tool.");
-      this.commit([this.event(session, "process.started", { callId: request.callId, pid: request.pid, processGroup: request.pid, env: session.controls.env }, request.stepId)]);
+      const started = this.event(session, "process.started", { callId: request.callId, pid: request.pid, processGroup: request.pid, env: session.controls.env }, request.stepId);
+      const mcp = run.mcpDispatches?.get(request.callId);
+      if (mcp) this.updateMcp(this.mcpCall(mcp.id, session.id), { phase: "dispatched", accessForwarded: mcp.hadAccess }, [started]);
+      else this.commit([started]);
+      return;
+    }
+    if (request.kind === "mcp.complete") {
+      const result = this.completeRemoteMcp(run, request);
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: result });
       return;
     }
     if (request.kind === "delegate") {
@@ -1639,7 +1882,14 @@ export class ControlPlane extends EventEmitter {
         catch (error) { this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Question relay failed; no user answer was recorded.", isError: true, outcome: "failed" } }); }
         return;
       }
-      if (session.controls.env === "Remote" && (request.call.name === "mcp_gateway" || request.call.name === "memory_search" || request.call.name === "moguri_config" && isRecord(request.call.arguments.proposal) && request.call.arguments.proposal.target === "repo-instructions")) {
+      if (session.controls.env === "Remote" && request.call.name === "mcp_gateway" && request.call.arguments.action === "call") {
+        try {
+          const authorization = await this.authorizeRemoteMcp(run, request);
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: authorization });
+        } catch (error) { this.reply(run, { kind: "reply", requestId: request.requestId, error: error instanceof MoguriError ? error.message : "Remote MCP authorization failed; no credential or effect fallback." }); }
+        return;
+      }
+      if (session.controls.env === "Remote" && (request.call.name === "memory_search" || request.call.name === "moguri_config" && isRecord(request.call.arguments.proposal) && request.call.arguments.proposal.target === "repo-instructions")) {
         this.reply(run, { kind: "reply", requestId: request.requestId, error: "This capability has no qualified remote workspace transport. No local host operation or repository fallback was used." }); return;
       }
       void this.platform.delegate(session, request.call, run.abort.signal).then((result) => this.reply(run, { kind: "reply", requestId: request.requestId, value: result })).catch((error: unknown) => {
@@ -1676,7 +1926,15 @@ export class ControlPlane extends EventEmitter {
     if (request.kind === "tool.complete") {
       run.calls.delete(request.call.id);
       run.granted.delete(request.call.id);
-      this.commit([this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome }, request.stepId)]);
+      const completed = this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome }, request.stepId);
+      const mcp = run.mcpDispatches?.get(request.call.id);
+      if (mcp) {
+        const entry = this.mcpCall(mcp.id, session.id), status = request.outcome === "completed" || request.outcome === "failed" ||
+          request.outcome === "stopped" || request.outcome === "partial" || request.outcome === "denied" ? request.outcome : "unconfirmed";
+        if (status === "completed" && !entry.resultDigest) throw new MoguriError("remote_mcp_result", "No MCP result was retained before completed tool acknowledgement.", 409);
+        this.updateMcp(entry, { phase: "settled", status, diagnostic: request.isError ? "Remote MCP tool settled with an error or uncertain result. Inspect its retained outcome." : null }, [completed]);
+        mcp.access = []; run.mcpDispatches?.delete(request.call.id);
+      } else this.commit([completed]);
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
     }
   }
@@ -1690,8 +1948,20 @@ export class ControlPlane extends EventEmitter {
     }
     const external = this.externalRuns.get(sessionId);
     if (external) {
+      if (external.abort.signal.aborted) return;
       external.abort.abort();
+      const run = this.runs.get(sessionId);
+      if (external.started && run?.mcpControl) {
+        try { this.commit([this.event(this.session(sessionId), "turn.stop_requested", {})]); }
+        finally { this.requestWorkerStop(run); }
+        return;
+      }
       this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), this.event(this.session(sessionId), "turn.stop_acknowledged", {})]);
+      if (external.remoteMcpId) {
+        const call = this.mcpCall(external.remoteMcpId, external.sessionId);
+        if (call.phase !== "settled") this.updateMcp(call, { phase: "settled", status: external.started ? "partial" : "stopped",
+          diagnostic: external.started ? "External MCP cancellation requested; exact effects remain unconfirmed." : "External MCP stopped before worker/access dispatch." });
+      }
       this.finishExternal(external, external.started ? "partial" : "stopped", external.started ? "External MCP cancellation requested; remote effects and process cleanup may be unconfirmed." : "Unstarted external MCP request cancelled.");
       return;
     }
@@ -1699,8 +1969,11 @@ export class ControlPlane extends EventEmitter {
     if (!run || run.abort.signal.aborted) return;
     this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), ...this.cancelledQuestions(this.session(sessionId), "Owning turn was stopped. No answer was supplied.")]);
     this.releaseQuestionWaits(sessionId);
-    run.abort.abort();
-    this.reply(run, { kind: "stop" });
+    this.requestWorkerStop(run);
+  }
+  private requestWorkerStop(run: Run): void {
+    if (run.abort.signal.aborted || run.done) return;
+    run.abort.abort(); this.reply(run, { kind: "stop" });
     run.stopTimer = setTimeout(() => {
       if (!run.done) {
         run.child.kill("SIGTERM");
@@ -1711,6 +1984,7 @@ export class ControlPlane extends EventEmitter {
   private finishRun(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
     if (run.done) return;
     if (run.planSave) { this.finishPlanRun(run, outcome, diagnostic); return; }
+    if (run.mcpControl) { this.finishMcpControl(run, outcome, diagnostic); return; }
     run.done = true;
     clearTimeout(run.stopTimer);
     if (run.abort.signal.aborted && outcome === "completed") { outcome = "stopped"; diagnostic = "Stop was requested before the turn settled."; }
@@ -1719,6 +1993,32 @@ export class ControlPlane extends EventEmitter {
       diagnostic = `${diagnostic ?? "Turn interrupted."} The in-flight request's final usage is unavailable.`;
     }
     this.finishModelRun(run, outcome, diagnostic);
+  }
+  private finishMcpControl(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
+    const operation = run.mcpControl;
+    if (!operation || run.done) return;
+    run.done = true; clearTimeout(run.stopTimer); clearTimeout(operation.cleanupTimer);
+    const call = this.mcpCall(operation.id, run.sessionId), execution = this.projection.executions.find((execution) => execution.id === run.executionId);
+    const result = call.resultDigest ? parse(RemoteMcpExecutionResultSchema, JSON.parse(this.store.blob(call.resultDigest))) : null;
+    const clean = execution?.cleanup === "owned-worker-stopped" && execution.status !== "unconfirmed";
+    const possible = result ? result.dispatched || result.accessReceived : ["authorized", "dispatched", "result-retained"].includes(call.phase);
+    if (run.abort.signal.aborted) {
+      outcome = possible ? "partial" : "stopped"; diagnostic = possible ? "Stop arrived after MCP access or dispatch. Actual retained effects are not rollback." : "MCP stopped before a connector or credential was dispatched.";
+    }
+    if (outcome === "completed" && (!clean || result?.outcome !== "completed")) { outcome = "partial"; diagnostic = "Remote MCP result or actual worker cleanup was not confirmed. No successful call was inferred."; }
+    if (!clean && outcome !== "failed") { outcome = "partial"; diagnostic ??= "Remote MCP cleanup remains unconfirmed."; }
+    try {
+      this.updateMcp(call, { phase: "settled", status: outcome, diagnostic: diagnostic ?? result?.diagnostic ?? null });
+    } catch (error) {
+      outcome = "partial"; diagnostic = error instanceof MoguriError ? error.message : "MCP outcome persistence failed. Preserve the existing intent/result for inspection.";
+      console.error("Remote MCP settlement failed; no successful job was inferred.");
+    }
+    for (const dispatch of run.mcpDispatches?.values() ?? []) dispatch.access = [];
+    this.runs.delete(run.sessionId); run.calls.clear(); run.granted.clear();
+    if (outcome === "completed" && result) operation.resolve(result.result);
+    else if (outcome === "failed" && clean && result?.result !== undefined && isRecord(result.result) && result.result.isError === true) operation.resolve(result.result);
+    else operation.reject(new MoguriError(outcome === "stopped" ? "remote_mcp_stopped" : outcome === "failed" && !possible ? "remote_mcp_failed" : "remote_mcp_partial",
+      diagnostic ?? result?.diagnostic ?? "Remote MCP did not settle successfully. No retry.", 409));
   }
   private finishPlanRun(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
       const operation = run.planSave;
@@ -1797,6 +2097,12 @@ export class ControlPlane extends EventEmitter {
       ...this.cancelledQuestions(session, "Owning turn ended. No pending answer was invented."),
       ...this.routingFinished(session, run.turnId, outcome, diagnostic),
       ...compactionEvents,
+      ...[...(run.mcpDispatches?.values() ?? [])].map((dispatch) => {
+        const call = this.mcpCall(dispatch.id, run.sessionId); dispatch.access = [];
+        return this.mcpEvent({ ...call, revision: call.revision + 1, phase: "settled", status: "unconfirmed", updatedAt: new Date().toISOString(),
+          diagnostic: call.resultDigest ? "MCP result was retained, but its owning tool/worker acknowledgement did not settle. No result or effect was replayed." :
+            "MCP access, execution result or cleanup remains unconfirmed. Inspect this exact original operation; no retry." });
+      }),
       ...(session.pendingMode ? [
         ...session.queue.filter((item) => item.mode && item.targetTurnId === run.turnId).map((item) => this.event(session, "queue.removed", { messageId: item.id })),
         this.event(session, "session.mode_changed", { mode: session.pendingMode }),

@@ -42,7 +42,7 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
     .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)
     .filter((tool) => !tool.name.startsWith("propose_") || settings.evolution.enabled)
-    .filter((tool) => scope.env !== "Remote" || !["mcp_gateway", "memory_search"].includes(tool.name))
+    .filter((tool) => scope.env !== "Remote" || tool.name !== "memory_search" && (tool.name !== "mcp_gateway" || scope.project && Boolean(settings.remote?.mcpGrants?.length)))
     .map((tool) => tool.name === "run_command" && scope.env === "Remote" ? { ...tool, description: tool.description.replace("on the Local host, without sandbox isolation", "on the approved SSH host, without SendBox isolation") } : tool);
 }
 export function validateTool(call: ToolCall): void {

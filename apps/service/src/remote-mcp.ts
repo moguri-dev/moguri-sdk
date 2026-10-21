@@ -1,4 +1,7 @@
-import { MoguriError, type McpServerConfig, type RemoteMcpPreview, type RemoteTarget } from "../../../packages/protocol/src/index.ts";
+import { Type } from "typebox";
+import { MoguriError, ToolCallSchema, type McpServerConfig, type RemoteMcpPreview, type RemoteTarget } from "../../../packages/protocol/src/index.ts";
+import { RemoteTargetSchema } from "../../../packages/protocol/src/execution.ts";
+import { McpServerSchema } from "../../../packages/protocol/src/config.ts";
 import { frameDigest } from "./worker-wire.ts";
 import { remoteFingerprint } from "./remote.ts";
 
@@ -7,6 +10,16 @@ export interface RemoteMcpScope {
   settingsRevision: number; permissionRevision: number; policyRevision: number; projectRevision: number;
   mode: "agent" | "read-only"; pendingMode: "agent" | "read-only" | null;
 }
+const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" }), revision = Type.Integer({ minimum: 0 });
+const mode = Type.Union([Type.Literal("agent"), Type.Literal("read-only")]);
+export const RemoteMcpIntentSchema = Type.Object({
+  format: Type.Literal("moguri-remote-mcp-intent"), version: Type.Literal(1),
+  scope: Type.Object({
+    profileId: id, sessionId: id, projectId: id, root: Type.String({ minLength: 1, maxLength: 4096 }), target: RemoteTargetSchema, workerDigest: hash,
+    settingsRevision: revision, permissionRevision: revision, policyRevision: revision, projectRevision: revision, mode, pendingMode: Type.Union([mode, Type.Null()]),
+  }, { additionalProperties: false }),
+  call: ToolCallSchema, server: Type.Union([McpServerSchema, Type.Null()]), helperDigest: hash, schemaDigest: hash, requiresAccess: Type.Boolean(),
+}, { additionalProperties: false });
 export const remoteMcpPeer = (target: Pick<RemoteTarget, "host" | "port" | "user" | "hostKey">) => frameDigest(["moguri-remote-mcp-peer-v1", target.host, target.port, target.user, target.hostKey]);
 export function mcpResource(server: McpServerConfig | null) {
   if (!server) return { id: "builtin", name: "Moguri foundational tools", transport: "builtin" as const, auth: "none" as const,

@@ -22,9 +22,11 @@ const event = (call: RemoteMcpCall): Extract<EventInput, { event_type: "mcp.remo
 test("Remote MCP projection retains exact actor/original identity and cannot rewrite scope, access or a retained result", async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-remote-mcp-state-")), store = new EventStore(join(root, "events.sqlite"), randomBytes(32), "generated-mcp-state-key");
   try {
-    const original = generatedCall();
+    const original = { ...generatedCall(), intentDigest: store.putBlob("Generated retained Remote MCP intent.") };
+    const retained = store.putBlob("Generated retained Remote MCP result.");
     store.commit([event(original)]);
-    store.commit([event({ ...original, revision: 1, phase: "result-retained", status: "running", accessForwarded: true, resultDigest: hash })]);
+    store.commit([event({ ...original, revision: 1, phase: "result-retained", status: "running", accessForwarded: true, resultDigest: retained })]);
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM blob_payloads WHERE digest IN (?,?)").get(original.intentDigest, retained)?.n, 2);
     const history = store.events(), projected = projectEvents(history).remoteMcpCalls[0]!;
     assert.equal(projected.commandId, original.commandId); assert.equal(projected.actor, "external"); assert.equal(projected.accessForwarded, true);
     for (const update of [{ root: "/generated/different-project" }, { actor: "model" as const }, { commandId: "generated-replaced-command" },
@@ -35,8 +37,10 @@ test("Remote MCP projection retains exact actor/original identity and cannot rew
     }
     assert.equal(projectEvents(history, "generated-foreign-profile").remoteMcpCalls.length, 0);
     assert.throws(() => parse(RemoteMcpCallSchema, { ...original, accessToken: "generated-secret-must-not-fit" }), { code: "invalid_request" });
-    store.commit([{ event_type: "session.deleted", profile_id: "default", payload: { deletedSessionId: original.sessionId, usage: [] } }]);
+    store.commit([{ event_type: "session.deleted", profile_id: "default", payload: { deletedSessionId: original.sessionId, usage: [] } }], undefined, { sessions: [original.sessionId] });
     assert.equal(projectEvents(store.events()).remoteMcpCalls.length, 0);
+    assert.throws(() => store.blob(original.intentDigest), /Missing or deleted/);
+    assert.throws(() => store.blob(retained), /Missing or deleted/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

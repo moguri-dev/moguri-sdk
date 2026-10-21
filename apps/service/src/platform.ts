@@ -46,7 +46,7 @@ export interface PlatformHost {
   commit(events: EventInput[], forget?: ForgetRequest): void;
   finish: WorkspaceFinish;
   invalidateApprovals(sessionId?: string): void;
-  externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>): Promise<string>;
+  externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }): Promise<string>;
   repositoryScope(session: Session): RepositoryScope;
   repositoryGit(session: Session, signal: AbortSignal): Promise<string | null>;
   subagent(session: Session, prompt: string): string;
@@ -552,7 +552,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "mcp.call": {
         const session = this.session(command.sessionId);
         const call: ToolCall = { id: randomUUID(), name: "mcp_gateway", arguments: { action: "call", serverId: command.serverId, tool: command.tool, arguments: command.arguments, schemaDigest: command.schemaDigest } };
-        const id = await this.host.externalCall(session, call, (signal) => this.callMcp(this.session(session.id), call.arguments, signal));
+        const id = await this.host.externalCall(session, call, (signal) => this.callMcp(this.session(session.id), call.arguments, signal), finish.intent);
         return finish([], { id });
       }
       case "subagent.run":

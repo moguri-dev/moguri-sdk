@@ -71,6 +71,7 @@ export type Command = CommandEnvelope["command"];
 export type CommandResult = { id?: string; revision?: number };
 
 export interface Project { id: string; name: string; path: string }
+export const ToolCallSchema = Type.Object({ id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()) });
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }
 export interface PublicMessage {
   id: string;

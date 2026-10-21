@@ -28,6 +28,12 @@ process.once("message", (raw: unknown) => {
       const launch = service.controller.remote.launch.bind(service.controller.remote);
       service.controller.remote.launch = (...args) => gate.wrap(launch(...args));
     }
+    if (raw.holdUserMcp === "authorization" || raw.holdUserMcp === "result") {
+      const gate = createRemoteFrameGate(raw.holdUserMcp === "authorization" ? "delegate" : "mcp.complete",
+        (frame) => process.send?.({ kind: "held-user-mcp", executionId: frame?.executionId }));
+      const launch = service.controller.remote.launch.bind(service.controller.remote);
+      service.controller.remote.launch = (...args) => gate.wrap(launch(...args));
+    }
     process.send?.({ kind: "connection", connection: service.connection });
   })().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Generated runtime bootstrap failed."); process.exitCode = 1; process.disconnect?.(); });
 });
