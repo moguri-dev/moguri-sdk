@@ -1,0 +1,60 @@
+import { ClientError } from "../../client/src/index.ts";
+import {
+  GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, LinearCatalogResourceSchema, LinearWorkflowInputSchema,
+  isRecord, parse, type GithubScope, type Session,
+} from "../../protocol/src/index.ts";
+import type { MoguriSdk } from "./index.ts";
+import type { SlashResult } from "./slash.ts";
+
+const result = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+function object(text: string) {
+  const value: unknown = JSON.parse(text);
+  if (!isRecord(value)) throw new ClientError("integration_input", "Use one complete JSON object. No operation was admitted.");
+  return value;
+}
+export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "github" | "linear", argument: string): Promise<SlashResult> {
+  const match = argument.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/), action = match?.[1] ?? "history", tail = match?.[2] ?? "";
+  if (name === "github") {
+    if (action === "history" && !tail) return result(await sdk.github.history({ ...(session.projectId ? { projectId: session.projectId } : {}) }));
+    if (action === "read" && tail) return result(await sdk.github.read(tail));
+    if (action === "wait" && tail) return result(await sdk.github.wait(tail));
+    if (action === "stop" && tail.endsWith(" confirm-stop")) return result(await sdk.github.cancel(tail.slice(0, -" confirm-stop".length)));
+    const inspection = tail.match(/^(\S+)\s+(\d+)\s+([a-f0-9]{64})\s+confirm-inspected$/);
+    if (action === "acknowledge" && inspection) return result(await sdk.github.acknowledge(inspection[1]!, Number(inspection[2]), inspection[3]!, true));
+    if (!session.projectId || session.controls.env !== "Local") throw new ClientError("github_scope", "This operation needs the actual Local project/worktree. Remote/Sandbox cannot borrow a Local source checkout. Independently retained reads/history remain available.");
+    const scope: GithubScope = { env: "Local", projectId: session.projectId, sessionId: session.id, ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}) };
+    if (action === "preview") return result(await sdk.github.preview(scope, parse(GithubActionSchema, JSON.parse(tail))));
+    if (action === "browse") {
+      const input = object(tail);
+      return result(await sdk.github.browse(scope, parse(GithubBrowseSchema, { ...input, page: input.page === undefined ? 1 : input.page, perPage: input.perPage === undefined ? 30 : input.perPage })));
+    }
+    if (action === "execute" && tail.startsWith("confirm-write ")) {
+      const input = object(tail.slice("confirm-write ".length));
+      if (["type", "scope", "confirm"].some((key) => key in input)) throw new ClientError("github_input", "Supply only action, expectedDigest and the exact preview confirmations. This selected session owns the immutable scope; confirm-write is explicit user intent.");
+      return result(await sdk.command(parse(GithubCommandSchema, { ...input, type: "github.execute", scope, confirm: true })));
+    }
+    throw new ClientError("github_command", "Use /github browse REQUEST_JSON, preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, history, read/wait ID, stop ID confirm-stop, or acknowledge ID REV INPUT_SHA confirm-inspected. Inspection never proves cleanup or turns partial work successful.");
+  }
+  if (action === "read" && tail) return result(await sdk.linear.read(tail));
+  if (action === "wait" && tail) return result(await sdk.linear.wait(tail));
+  if (action === "stop" && tail.endsWith(" confirm-stop")) return result(await sdk.linear.cancel(tail.slice(0, -" confirm-stop".length)));
+  if (action === "history" && !tail) return result(await sdk.linear.history(session.projectId ?? undefined));
+  if (!session.projectId) throw new ClientError("project_required", "Choose an actual project with an explicitly enabled Linear team. No previous project/account was reused.");
+  if (action === "status" && !tail) return result(await sdk.linear.status(session.projectId));
+  if (action === "import") return result(await sdk.linear.import(session.projectId, tail || undefined));
+  if (action === "clear-token" && !tail) return result(await sdk.linear.clearToken());
+  if (action === "issue" && tail) return result(await sdk.linear.issue(session.projectId, tail));
+  if (action === "catalog") {
+    const input = object(tail);
+    if (Object.keys(input).some((key) => !["resource", "issueId", "cursor"].includes(key)) ||
+      input.issueId !== undefined && typeof input.issueId !== "string" || input.cursor !== undefined && typeof input.cursor !== "string") throw new ClientError("linear_input", "Catalog JSON supports only resource, optional exact issueId and optional cursor.");
+    return result(await sdk.linear.catalog(session.projectId, parse(LinearCatalogResourceSchema, input.resource), {
+      ...(typeof input.issueId === "string" ? { issueId: input.issueId } : {}), ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {}),
+    }));
+  }
+  const scope = { projectId: session.projectId, sessionId: session.id };
+  if (action === "preview") return result(await sdk.linear.preview(scope, parse(LinearWorkflowInputSchema, JSON.parse(tail))));
+  const execute = tail.match(/^([a-f0-9]{64})\s+confirm-write\s+([\s\S]+)$/);
+  if (action === "execute" && execute) return result(await sdk.linear.execute(scope, parse(LinearWorkflowInputSchema, JSON.parse(execute[2]!)), execute[1]!, true));
+  throw new ClientError("linear_command", "Use /linear status, import [CURSOR], catalog {resource,issueId?,cursor?}, issue UUID, preview INPUT_JSON, execute SHA confirm-write INPUT_JSON, history, read/wait ID, or stop ID confirm-stop. Credentials need the dedicated masked/keychain path, never a prompt.");
+}

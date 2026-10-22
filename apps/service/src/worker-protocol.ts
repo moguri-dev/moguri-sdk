@@ -1,6 +1,6 @@
 import { Type, type Static, type Message, type AssistantMessage, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { CompoundValidationResultSchema, isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, ToolCallSchema, type ToolCall, type SessionMode, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
+import { CompoundValidationResultSchema, HookBindingSchema, isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, ToolCallSchema, type HookBinding, type ToolCall, type SessionMode, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 import type { FolderPolicy } from "./project-policy.ts";
 import type { PreparedModel } from "./provider.ts";
 import { UserPlanInputSchema } from "./user-plan.ts";
@@ -12,6 +12,7 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("boundary"), requestId: Type.String(), stepId: Type.String() }),
   Type.Object({ kind: Type.Literal("model.complete"), requestId: Type.String(), stepId: Type.String(), message: Type.Unknown(), usageReported: Type.Boolean(), generationMs: Type.Number({ minimum: 0 }), stream: Type.Optional(ModelStreamObservationSchema) }),
   Type.Object({ kind: Type.Literal("approval"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
+  Type.Object({ kind: Type.Literal("hook"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("delegate"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: MAX_TEXT + 4096 }), isError: Type.Boolean(), outcome: Type.String() }),
   Type.Object({ kind: Type.Literal("user-plan.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: PlanFileResultSchema }, { additionalProperties: false }),
@@ -33,7 +34,7 @@ export const UserMcpOperationSchema = Type.Object({
   kind: Type.Literal("mcp.call"), stepId: Type.String({ minLength: 1, maxLength: 128 }), call: toolCall,
 }, { additionalProperties: false });
 export type UserMcpOperation = Static<typeof UserMcpOperationSchema>;
-export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; operation?: UserPlanOperation | UserMcpOperation }
+export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; operation?: UserPlanOperation | UserMcpOperation; hooks?: HookBinding[] }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate" | "checkpoint" | "decision" | "steering"; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
 export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean; continue?: true; validation?: CompoundValidationOperation } | DelegatedResult | RemoteMcpAuthorization; error?: string; halt?: true };
@@ -47,6 +48,8 @@ export function parentMessage(value: unknown): ParentMessage {
     (value.error === undefined || typeof value.error === "string") &&
     (value.value === undefined || isRecord(value.value))) return value as ParentMessage;
   if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) {
+    if (value.hooks !== undefined && (!Value.Check(Type.Array(HookBindingSchema, { maxItems: 16 }), value.hooks) || value.readOnly !== false ||
+      value.root === null || value.operation !== undefined || value.publicCompound !== undefined)) throw new Error("Lifecycle hooks need an explicit writable root and ordinary turn owner. Tool-less roles cannot acquire hook execution.");
     if (value.publicCompound !== undefined && (value.publicCompound !== true || value.root !== null || value.readOnly !== true || value.env !== "Local" || value.operation !== undefined)) throw new Error("Public compound models need an explicit Local, root-less, read-only owner. Private roles cannot adopt validation authority.");
     if (value.env !== undefined && !["Local", "Remote", "Sandbox"].includes(String(value.env))) throw new Error("Invalid explicit worker execution environment. No fallback.");
     if (value.operation !== undefined && (!(Value.Check(UserPlanOperationSchema, value.operation) || Value.Check(UserMcpOperationSchema, value.operation)) || value.root === null || value.context.length || value.readOnly !== false)) throw new Error("Invalid owned user operation. No model or filesystem effect was started.");

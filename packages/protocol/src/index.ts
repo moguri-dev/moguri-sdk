@@ -36,10 +36,14 @@ import { projectSandboxPublication, type SandboxWorkspace, type SandboxExecution
 import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger, type CompoundWorkflow } from "./compound.ts";
 import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
 import { DecisionRecordSchema, DecisionEvidenceSchema, projectDecision, validateDecisionLedger, type DecisionRecord, type DecisionEvidence } from "./decisions.ts";
+import { projectKnowledge, type KnowledgeEventPayloads, type KnowledgeRecord } from "./knowledge.ts";
+import { projectGithubOperation, type GithubEventPayloads, type GithubOperation } from "./github-workflows.ts";
+import { projectLinearOperation, type LinearEventPayloads, type LinearOperation } from "./linear-workflows.ts";
+import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 40;
+export const PROTOCOL_VERSION = 41;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -83,8 +87,15 @@ export type Command = CommandEnvelope["command"];
 export type CommandResult = { id?: string; revision?: number };
 
 export interface Project { id: string; name: string; path: string }
-export const ToolCallSchema = Type.Object({ id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()) });
-export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }
+export const ToolCallSchema = Type.Object({
+  id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()),
+  hook: Type.Optional(object({ id, revision, contentDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+    trigger: Type.Union([Type.Literal("turn.start"), Type.Literal("turn.end")]), actor: Type.Literal("user-configured-hook") })),
+});
+export interface ToolCall {
+  id: string; name: string; arguments: Record<string, unknown>;
+  hook?: { id: string; revision: number; contentDigest: string; trigger: "turn.start" | "turn.end"; actor: "user-configured-hook" };
+}
 export interface PublicMessage {
   id: string;
   turnId: string;
@@ -207,7 +218,7 @@ export interface Connection {
   pid: number;
 }
 
-export interface EventPayloads {
+export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads {
   "project.added": { project: Project };
   "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "session.workspace_bound": { workspaceId: string | null };
@@ -276,8 +287,8 @@ export interface EventPayloads {
   "capability.proposed": { proposal: Proposal };
   "proposal.decided": { proposalId: string; approve: boolean; actor: "user" };
   "job.started": { job: CapabilityJob };
-  "job.progress": { jobId: string; progress: string; status?: "running"; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string };
-  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string };
+  "job.progress": { jobId: string; progress: string; status?: "running"; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string; operationId?: string };
+  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string; operationId?: string };
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
@@ -356,6 +367,8 @@ export const eventTypes: readonly EventType[] = [
   "routing.started", "routing.planned", "routing.finished",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
   "candidate.saved", "candidate.generation_recorded", "role.sequence_recorded", "compound.recorded", "winddown.recorded", "decision.recorded",
+  "knowledge.saved", "knowledge.forgotten",
+  "github.operation_recorded", "linear.operation_recorded", "cache.registry.saved", "cache.registry.removed",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -368,6 +381,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   let settings: PlatformSnapshot["settings"] = { revision: 0, permissionRevision: 0, values: defaultSettings(), defaults: defaultSettings() };
   const registry = new Map<string, CapabilityEntry>();
   const proposals = new Map<string, Proposal>();
+  const knowledge = new Map<string, KnowledgeRecord>();
+  const githubOperations = new Map<string, GithubOperation>();
+  const linearOperations = new Map<string, LinearOperation>();
+  const dependencyRegistries = new Map<string, DependencyRegistry>();
   const jobs = new Map<string, CapabilityJob>();
   const oauthAuthorizations = new Map<string, McpAuthorization>();
   const configurationProposals = new Map<string, ConfigurationProposal>();
@@ -412,6 +429,29 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const changeSets = new Map<string, ChangeSet>();
   for (const event of events) {
     if (event.profile_id !== profileId) continue;
+    if (event.event_type === "knowledge.saved") {
+      const record = event.payload.record;
+      if (record.profileId !== profileId || event.artifact_id !== `knowledge/${record.id}` || record.projectId !== (event.project_id ?? null) || record.sessionId !== (event.session_id ?? null)) throw new MoguriError("knowledge_corrupt", "Knowledge event scope disagrees with its original owner.", 409);
+      knowledge.set(record.id, projectKnowledge(knowledge.get(record.id), record));
+    }
+    if (event.event_type === "knowledge.forgotten") knowledge.delete(event.payload.id);
+    if (event.event_type === "github.operation_recorded") {
+      const operation = event.payload.operation;
+      if (operation.profileId !== profileId || operation.projectId !== event.project_id || (event.session_id ?? null) !== operation.originSessionId || event.artifact_id !== operation.id) throw new MoguriError("github_corrupt", "Git/GitHub operation lost its exact independent profile/root retention owner.", 409);
+      githubOperations.set(operation.id, projectGithubOperation(githubOperations.get(operation.id), operation));
+    }
+    if (event.event_type === "linear.operation_recorded") {
+      const operation = event.payload.operation;
+      if (operation.profileId !== profileId || operation.projectId !== event.project_id || (event.session_id ?? null) !== operation.sessionId || event.artifact_id !== operation.id) throw new MoguriError("linear_corrupt", "Linear operation lost its independent profile/workspace retention owner.", 409);
+      linearOperations.set(operation.id, projectLinearOperation(linearOperations.get(operation.id), operation));
+    }
+    if (event.event_type === "cache.registry.saved") {
+      const registry = event.payload.registry, previous = dependencyRegistries.get(registry.id);
+      if (registry.profileId !== profileId || !registry.id || registry.revision !== (previous ? previous.revision + 1 : 0) ||
+        !registry.credentialRevision || previous && previous.profileId !== registry.profileId) throw new MoguriError("cache_registry_corrupt", "Registry configuration changed its exact profile or revision. No credential or archive was adopted.", 409);
+      dependencyRegistries.set(registry.id, structuredClone(registry));
+    }
+    if (event.event_type === "cache.registry.removed") dependencyRegistries.delete(event.payload.registryId);
     if (event.event_type === "mcp.remote_recorded") {
       const call = event.payload.call;
       if (!Value.Check(RemoteMcpCallSchema, call) || call.profileId !== profileId || call.sessionId !== event.session_id ||
@@ -684,6 +724,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "job.started") {
       const job = event.payload.job;
+      if (job.operationId) {
+        const operation = githubOperations.get(job.operationId) ?? linearOperations.get(job.operationId);
+        const sessionId = operation && ("originSessionId" in operation ? operation.originSessionId : operation.sessionId);
+        const kind = operation && ("kind" in operation ? operation.kind : `linear.${operation.action}`);
+        if (!operation || event.artifact_id !== operation.id || operation.jobId !== job.id || operation.projectId !== job.projectId ||
+          operation.projectId !== event.project_id || jobs.has(job.id) || job.sessionId !== sessionId || (event.session_id ?? null) !== sessionId ||
+          (job.workspaceId ?? null) !== operation.workspaceId || job.kind !== kind || job.resultDigest !== null || job.error !== null ||
+          operation.status !== "running" || job.status !== "running") throw new MoguriError("workflow_corrupt", "A workflow job lost its independently retained original intent. No new effects were adopted.", 409);
+      }
       if (job.candidate || ["candidate.stage", "candidate.apply"].includes(job.kind)) {
         const reference = job.candidate;
         if (!reference || !Value.Check(CandidateJobIntentSchema, reference)) throw new MoguriError("candidate_corrupt", "Candidate job has no exact typed original intent.", 409);
@@ -725,6 +774,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "job.progress" || event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
+      if ((event.payload.operationId ?? null) !== (job?.operationId ?? null)) throw new MoguriError("workflow_corrupt", "Workflow lifecycle changed its original independent operation owner.", 409);
+      if (job?.operationId) {
+        const operation = githubOperations.get(job.operationId) ?? linearOperations.get(job.operationId);
+        if (!operation || event.artifact_id !== operation.id || event.project_id !== operation.projectId || (event.session_id ?? null) !== job.sessionId ||
+          (job.workspaceId ?? null) !== operation.workspaceId || job.kind !== ("kind" in operation ? operation.kind : `linear.${operation.action}`) || job.status !== "running" ||
+          event.event_type === "job.finished" && (operation.status !== event.payload.status ||
+            event.payload.status === "completed" && (event.payload.resultDigest !== operation.resultDigest || event.payload.error !== null))) throw new MoguriError("workflow_corrupt", "Workflow job hid its actual terminal state, result or original retention owner.", 409);
+      }
       if ((event.payload.winddownId ?? null) !== (job?.winddownId ?? null)) throw new MoguriError("winddown_corrupt", "Accepted-work job lifecycle changed its original independent artifact owner.", 409);
       if (job?.winddownId) {
         const record = winddowns.get(job.winddownId), intent = record?.commit;
@@ -767,7 +824,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
-      if (job && ["cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply", "compound.validate", "winddown.commit"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
+      if (job && (job.kind.startsWith("git.") || ["cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply", "compound.validate", "winddown.commit"].includes(job.kind)) && event.payload.status === "partial" && job.projectId) {
         if (job.workspaceId) blockedWorkspaces.add(job.workspaceId); else blockedProjects.add(job.projectId);
       }
     }
@@ -1000,7 +1057,9 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       control.payload.promptDigest !== sequence.inputDigest || control.payload.controls.env !== sequence.env) throw new MoguriError("role_sequence_corrupt", "Role metadata lost its exact original owning control turn. No model or root authority was adopted.", 409);
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
-    settings, registry: [...registry.values()], proposals: [...proposals.values()], jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
+    settings, registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
+    githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
+    jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],

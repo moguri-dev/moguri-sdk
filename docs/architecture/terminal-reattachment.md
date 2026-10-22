@@ -94,7 +94,12 @@ reparented descendants.
 ## Volatile bytes and client behavior
 
 Each PTY keeps a UTF-8-safe **128-KiB** volatile output window. Pages advertise
-lost-prefix/base and next offsets, with a **65,536-character** page ceiling.
+lost-prefix/base and next offsets in UTF-16 code units, with a
+**65,536-code-unit** page ceiling. Reads observe the current live window, not a
+frozen multi-page snapshot. New output may advance the base between reads;
+concatenating those independent pages can exceed the retained-window bound
+without the broker retaining excess bytes. A complete-window inspection retries
+when page bases differ, while streaming clients handle the advertised gap.
 Private control frames are limited to **512 KiB**; ordinary worker frame
 behavior is unchanged. At most four live consoles per session and sixteen per
 profile are admitted. Each broker retains at most 32 closed terminal buffers

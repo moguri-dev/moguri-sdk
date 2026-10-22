@@ -5,11 +5,48 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current issue-17 source uses protocol **40** for shared model windows/scoped
+Current source uses protocol **41** for the owner-requested
+[platform workflow extension](architecture/platform-workflows.md).
+The prior issue-17 source used protocol **40** for shared model windows/scoped
 paste, native execution, reviewed Local compound workflows, finite Local
 wind-down and owned bounded decisions. It does not replace the immutable qualified archives listed below.
 See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
 for the actual generated VM evidence and remaining client/environment gates.
+
+## Reviewed platform workflow surface
+
+All commands/queries below use the same authenticated loopback API, immutable
+profile, optimistic review/revision checks and sequenced events. No new public
+network API or credential fallback is added. Root/React imports remain
+browser-safe; Node runtime loading stays explicit.
+
+| SDK surface | Authority and result |
+| --- | --- |
+| `knowledge.save/list/read/history/version` | Exact Sky session/lifetime or Terra project/work item; profile-wide Glacier only after reviewed promotion |
+| `knowledge.promote(id, revision, digest, summary, true)` | Independent user-reviewed compressed copy, never model acceptance or automatic source mutation |
+| `knowledge.rollback/forget` | Exact original note revisions; per-note encryption grants and non-replayable creation intent survive source expiry without retaining its text |
+| `hooks.import(projectId, definition)` | Bounded `turn.start`/`turn.end` definitions, imported disabled |
+| `capabilities.history/version/rollback/useSkill` | Review retained actual bytes, restore disabled content or append a selected skill to an optimistic saved draft without sending it |
+| `marketplace.catalog/preview/install` | Registered repository, full commit and catalog path; complete exact bundle review; atomic disabled install/update/rollback |
+| `github.browse/preview/execute/read/history/wait/cancel` | Explicit Local root and actual selected controller `gh` account; protected Git/GitHub confirmations and independent original effects |
+| `linear.catalog/issue/preview/execute/accept/read/history/wait/cancel` | Explicit enabled board/team, exact account/entity/revision review, two-way local ticket mapping and retained original results |
+| `cache.inspect/prepare/install` | npm/pnpm/python/cargo/go; exact manifests/locks, resource authorization, advisories and verified immutable bytes; executable builds are not implied |
+| `cache.registries.list/save/remove/setToken/clearToken` | Profile-scoped private resources; secrets stay in the explicit keychain and never enter metadata/receipts |
+| `containment.status/requireSandbox(true)` | Truthful process-group limitation or explicit global qualified-SendBox requirement; no launch, inferred PID ownership or Env substitution |
+
+`memory.useTieredContext` defaults off even in older state that already enabled
+source-index context. Imports/enabling cannot grant tools, answer a question,
+authenticate, start paid work, or weaken policy. Session-owned workflow stop
+propagates to its original job while independently retained operation documents
+survive source deletion. Unknown remote writes remain partial, never retried
+from lost receipts or restart.
+
+Desktop Settings, the dedicated CLI and shared TUI/CLI/desktop slash handlers
+all call these APIs. Examples and exact errors/lifecycle limits are in
+[platform workflows](architecture/platform-workflows.md),
+[GitHub](architecture/github-workflows.md),
+[Linear](architecture/linear-workflows.md) and
+[dependency cache scopes](architecture/dependency-cache-scopes.md).
 
 ## Decision-provider development surface
 
@@ -1101,8 +1138,10 @@ A version-1 plugin is a declarative skill bundle:
 
 Enable the plugin before any bundled skill. Disabling the owner prevents its
 contents from entering context. Arbitrary JavaScript entrypoints, dependency
-installation, marketplace updates and unattended self-modification are not
-implemented.
+installation and unattended self-modification are not implemented. Reviewed
+repository-backed marketplace updates and complete disabled bundle rollback use
+the separate protocol-41 `marketplace`/`capabilities` surface above; the legacy
+skill-only `plugins import` format does not silently acquire new capabilities.
 
 Approved custom scripts are Node modules receiving JSON on stdin:
 `{"arguments":{},"projectRoot":"/approved/project"}`. They emit bounded stdout,

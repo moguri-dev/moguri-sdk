@@ -8,6 +8,47 @@ The [protocol-40 source requalification](#protocol-40-source-requalification)
 below adds the actual shared SDK/client lifecycle. Historical protocol-36/37
 receipts remain scoped to their original payloads and are not relabeled.
 
+## Protocol-41 detached-descendant source qualification
+
+The owner explicitly selected qualified SendBox for sessions requiring a
+complete descendant boundary. Protocol-41 source adds a model-free actual VM
+fixture that double-forks, creates a new session/process group, and observes
+the surviving leaf reparented away from its original middle process before
+requesting stop. No host PID is inferred from that guest observation.
+
+The fresh no-cache arm64 workload builds in **34,642.89 ms** with immutable
+digest `sha256:7fdc6876dc2615f56baec381a0cf810f461edb3fb61292eb78c5744385d39d69`.
+Its worker/bridge hashes are
+`53282a0f4bffa822ed74ae9d22e934a6625d3030581b9b377d0c300bb5036553`
+and `3e614daedb6a9043303ed3b1ad733a487782f29bdff77e4ffdf205810b5518dc`.
+Every current payload file matches the receipt before native execution.
+Existing root-owned released host/key/manifest pins below were reverified;
+the user's ordinary Homebrew installation and unrelated workloads were not
+modified or adopted.
+
+The double-fork/setsid/reparenting case passes in **2,902.53 ms**, with
+acknowledged stop, verified absence of the exact owned VM and **zero inference
+calls**. All eight current native adapter/SDK/tool/cancellation/guest-loss/
+controller-SIGKILL cases pass without skips in **31.53 s** against that image.
+Their generated model receipts are not live-provider or billed-usage evidence.
+VM absence establishes descendant containment, not successful source rollback,
+model quality, permission, or prompt-injection resistance.
+
+```sh
+MOGURI_NATIVE_INSTALLATION=.native/sendbox-0.2.3/installation.json \
+MOGURI_NATIVE_WORKLOAD="$WORKLOAD_QUALIFICATION_JSON" \
+node --import tsx --test --test-concurrency=1 \
+  tests/sandbox-containment.test.ts tests/sandbox-runtime.test.ts \
+  tests/sandbox-service.test.ts tests/sandbox-recovery.test.ts
+```
+
+Missing explicit receipts skip those cases and are not qualification.
+Old protocol-40 images remain historical; native Local/SSH process groups
+still do not offer this guarantee. The new global Sandbox-only requirement
+blocks new unqualified turns without selecting an Env/model or relabeling
+already-running Local work. See [platform workflows](platform-workflows.md)
+for cross-client controls and independently retained Git-root inspection.
+
 ## Release and runtime identity
 
 The macOS arm64 archive was downloaded from the

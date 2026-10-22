@@ -59,6 +59,8 @@ import { Winddowns } from "./winddown.ts";
 import { winddownCapability } from "./winddown-policy.ts";
 import { Decisions } from "./decisions.ts";
 import type { DecisionSource } from "../../../packages/protocol/src/decisions.ts";
+import type { HookBinding } from "../../../packages/protocol/src/extensions.ts";
+import { githubRootQuarantined } from "../../../packages/protocol/src/github-workflows.ts";
 
 interface McpDispatch { id: string; scopeDigest: string; callDigest: string; hadAccess: boolean; access: string[] }
 
@@ -84,6 +86,7 @@ interface Run {
   repositoryContext?: string;
   root: string | null;
   mcpDispatches?: Map<string, McpDispatch>;
+  hooks?: { bindings: HookBinding[]; done: Set<string>; calls: Map<string, HookBinding> };
   compaction?: { id: string; context: Message[] };
   generation?: { id: string; context: Message[]; current?: () => void };
   roleSequence?: { id: string; current?: () => void; deadline?: ReturnType<typeof setTimeout>; expired?: boolean };
@@ -282,7 +285,7 @@ export class ControlPlane extends EventEmitter {
       remoteConsoles: new RemoteConsoles(this.remote),
       globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
       foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
-      localRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
+      localRootBusy: (root, exceptJobId, permitRebaseRecovery) => this.ownedWriteRoots(undefined, exceptJobId, permitRebaseRecovery).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
       sharedGlobals: Boolean(this.profileHooks),
     }, platformOptions);
     this.sandboxWorkspaces = new SandboxWorkspaces(store, platformOptions.stateDir ?? dirname(store.path), this.sandbox, {
@@ -486,6 +489,11 @@ export class ControlPlane extends EventEmitter {
   events(after: number): StoredEvent[] { return this.history.filter((event) => event.seq > after && event.profile_id === this.profileId); }
   private commit(events: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest): void {
     if (events.some((event) => event.profile_id !== this.profileId)) throw new MoguriError("profile_event_scope", "An effect attempted to leave its owning profile. No cross-profile event was committed.", 409);
+    const expiredKnowledge = this.platform?.knowledge.expire(events);
+    if (expiredKnowledge?.events.length) {
+      events = [...events, ...expiredKnowledge.events];
+      forget = { ...forget, artifacts: [...new Set([...(forget?.artifacts ?? []), ...(expiredKnowledge.forget.artifacts ?? [])])] };
+    }
     const context = this.workerFrame.getStore();
     if (context && !context.recorded) {
       const execution = context.frame.env === "Sandbox" ? (this.projection.sandboxExecutions ?? []).find((value) => value.id === context.frame.executionId) :
@@ -529,7 +537,7 @@ export class ControlPlane extends EventEmitter {
   }
   wake(): void { queueMicrotask(() => this.pumpAll()); }
   ownedLocalRoots(): string[] { return this.ownedWriteRoots().filter((root) => !root.startsWith("remote/")); }
-  ownedWriteRoots(exceptSessionId?: string, exceptJobId?: string): string[] {
+  ownedWriteRoots(exceptSessionId?: string, exceptJobId?: string, permitRebaseRecovery = false): string[] {
     const reserved = new Set(this.writerReservations.values());
     const roots = [...this.runs.values()].filter((run) => {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
@@ -547,9 +555,16 @@ export class ControlPlane extends EventEmitter {
     }
     roots.push(...this.platform.engagement.writeRoots());
     roots.push(...this.compound?.writeRoots(exceptJobId) ?? []);
+    if (!permitRebaseRecovery) for (const root of new Set(this.projection.githubOperations.map((operation) => operation.root.root))) {
+      if (githubRootQuarantined(this.projection, root)) roots.push(root);
+    }
     for (const execution of this.projection.sandboxExecutions ?? []) if (!["owned-guest-stopped", "acknowledged"].includes(execution.cleanup) || this.nativeReconciliations.has(execution.id)) roots.push(execution.stage.workspace);
-    for (const job of this.projection.jobs.filter((job) => job.id !== exceptJobId && ["cache.install", "project.artifacts.materialize", "project.defaults", "candidate.stage", "candidate.apply", "sandbox.publish", "winddown.commit"].includes(job.kind) && ["running", "waiting_input"].includes(job.status))) {
-      if (job.winddownId) {
+    for (const job of this.projection.jobs.filter((job) => job.id !== exceptJobId && (job.kind.startsWith("git.") || ["cache.install", "project.artifacts.materialize", "project.defaults", "candidate.stage", "candidate.apply", "sandbox.publish", "winddown.commit"].includes(job.kind)) && ["running", "waiting_input"].includes(job.status))) {
+      if (job.operationId) {
+        const operation = this.projection.githubOperations.find((operation) => operation.id === job.operationId);
+        if (!operation) throw new MoguriError("workflow_ownership", "A Git writer lost its independently captured original root. No fallback checkout or PID was inferred.", 409);
+        roots.push(operation.root.root);
+      } else if (job.winddownId) {
         const record = this.projection.winddowns.find((record) => record.id === job.winddownId);
         if (!record?.source) throw new MoguriError("winddown_ownership", "An actual accepted-work writer lost its captured original root. No fallback.", 409);
         roots.push(record.source.root);
@@ -1781,6 +1796,8 @@ export class ControlPlane extends EventEmitter {
         validateTool(approval.call);
         const configuration = this.platform.sessions.projects.values(session.projectId);
         const mode = session.pendingMode === "read-only" ? "read-only" : session.mode;
+        const hook = run.hooks?.calls.get(approval.call.id);
+        if (command.allow && hook) this.platform.extensions.assertHook(session, hook);
         if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null, metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session) }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
         run.approval = undefined;
         const events: EventInput[] = [this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
@@ -1814,7 +1831,7 @@ export class ControlPlane extends EventEmitter {
       } else if (event.event_type === "turn.started" || event.event_type === "steer.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.contextItem(event.payload.item, Date.parse(event.timestamp)) });
       else if (event.event_type === "steering.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.steeringContext(event) });
       else if (event.event_type === "model.completed" && !userWrites.has(event.turn_id) && !["router", "compaction", "draft", "checkpoint", "decision", "steering"].includes(event.payload.usage.role)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
-      else if (event.event_type === "tool.completed" && !userWrites.has(event.turn_id)) entries.push({
+      else if (event.event_type === "tool.completed" && !event.payload.call.hook && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: event.payload.call.name,
           content: [{ type: "text", text: event.payload.text }], isError: event.payload.isError, timestamp: Date.parse(event.timestamp),
@@ -1902,11 +1919,13 @@ export class ControlPlane extends EventEmitter {
             ...(save ? [this.planSaveEvent(current, { ...save, executionId: execution.id, revision: save.revision + 1, updatedAt: new Date().toISOString() })] : []),
             ...(mcp ? [this.mcpEvent({ ...mcp, executionId: execution.id, status: "running", revision: mcp.revision + 1, updatedAt: new Date().toISOString() })] : [])]);
         }
+        const hooks = compaction || generation || roleSequence || compound || planSave || mcpControl ? [] : this.platform.extensions.hooks(current);
         const child = nativeExecution ? this.sandbox.launch(nativeExecution, (changes) => this.sandboxStatus(nativeExecution!.id, changes)) :
           execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
         const run: Run = { sessionId: current.id, turnId, child, root: nativeExecution && current.projectId ? nativeExecution.stage.workspace :
           !generation && !roleSequence && !compound && current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, sandboxExecutionId: nativeExecution?.id,
           abort: new AbortController(), calls: new Map(), granted: new Set(), scopedReadPolicies: new Map(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, roleSequence, compound, planSave, mcpControl };
+        if (hooks.length) run.hooks = { bindings: hooks, done: new Set(), calls: new Map() };
         const winddown = this.winddowns.forTurn(current.id, turnId);
         if (winddown) run.winddown = { id: winddown.id, active: false };
         owned = run;
@@ -1968,6 +1987,7 @@ export class ControlPlane extends EventEmitter {
         });
         this.reply(run, { kind: "start", root: generation || roleSequence || compound ? null : nativeExecution ? nativeExecution.root : execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
           readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation) || Boolean(roleSequence) || Boolean(compound),
+          ...(hooks.length ? { hooks } : {}),
           ...(compound ? { publicCompound: true as const } : {}), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
@@ -2006,7 +2026,9 @@ export class ControlPlane extends EventEmitter {
   }
   private async assertCurrentTool(session: Session, call: ToolCall, modelOwned = true): Promise<void> {
     const current = this.session(session.id);
-    if (modelOwned && current.controls.modelId === KUPO_MODEL_ID) {
+    const hook = this.runs.get(current.id)?.hooks?.calls.get(call.id);
+    if (hook) this.platform.extensions.assertHook(current, hook);
+    if (modelOwned && !hook && current.controls.modelId === KUPO_MODEL_ID) {
       const routing = this.projection.routings.find((value) => value.turnId === current.turnId);
       if (!routing?.plan || routing.status !== "running") throw new MoguriError("routing_authority", "No accepted owned solver plan authorizes this tool request.", 403);
       this.checkRoutingSnapshot(current, routing);
@@ -2027,6 +2049,7 @@ export class ControlPlane extends EventEmitter {
     const execution = this.projection.executions.find((value) => value.id === this.runs.get(current.id)?.executionId);
     if (execution && (execution.workspace !== root || execution.configDigest !== frameDigest(this.projection.settings.values.remote))) throw new MoguriError("remote_changed", "Remote workspace/target changed after turn admission. No new effect was authorized in the old worker.", 409);
     await assertSessionTool(current, root, this.platform.sessions.projects.values(current.projectId), call, current.controls.env === "Local");
+    if (hook) this.platform.extensions.assertHook(this.session(current.id), hook);
     if (this.session(current.id).revision !== current.revision || configuration && this.platform.sessions.projects.configuration(configuration.projectId).revision !== configuration.revision ||
       this.projection.settings.permissionRevision !== permission || this.projection.policy.revision !== policy) throw new MoguriError("policy_changed", "Session or project policy changed during authorization. No new effect was admitted.", 409);
   }
@@ -2443,6 +2466,9 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     if (request.kind === "finished") {
+      if (request.outcome === "completed" && run.hooks?.bindings.some((hook) => (hook.definition.trigger === "turn.start" || !run.winddown?.active) && !run.hooks?.done.has(hook.id))) request = {
+        ...request, outcome: "partial", diagnostic: "A required lifecycle hook has no retained successful result. No complete turn was inferred.",
+      };
       if (run.sandboxExecutionId) {
         const execution = this.sandboxExecution(run.sandboxExecutionId);
         run.nativeTerminal ??= { outcome: request.outcome, diagnostic: request.diagnostic };
@@ -2458,6 +2484,7 @@ export class ControlPlane extends EventEmitter {
     if (request.kind === "boundary") {
       if (run.abort.signal.aborted) { this.reply(run, { kind: "reply", requestId: request.requestId, error: "Turn stopping." }); return; }
       try {
+        if (run.hooks?.bindings.some((hook) => hook.definition.trigger === "turn.start" && !run.hooks?.done.has(hook.id))) throw new MoguriError("hook_required", "Complete the actual user-configured turn-start hooks before model admission. No model reservation or request was started.", 409);
         if (run.winddown?.pending) { await this.winddownBoundary(run, request); return; }
         if (run.winddown?.active) throw new MoguriError("winddown_finished", "This owner already entered its one finishing role. Remaining capacity cannot resume ordinary inference or tools.", 409);
         if (run.sandboxExecutionId) {
@@ -2597,6 +2624,25 @@ export class ControlPlane extends EventEmitter {
         if (!(error instanceof MoguriError) && !run.abort.signal.aborted) console.error("Moguri model preparation failed:", run.roleSequence ? "owned_role_prepare" : run.generation ? "candidate_generation_prepare" : run.compaction ? "compaction_prepare" : "model_prepare");
         this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget || run.winddown?.active || run.compound || run.roleSequence || run.compaction || run.generation || error instanceof MoguriError && (error.code.startsWith("routing_") || error.code.startsWith("decision_")) ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       } finally { const key = this.platform.managed.leaseKey(session); if (key && this.writerReservations.get(key) === session.id) this.writerReservations.delete(key); }
+      return;
+    }
+    if (request.kind === "hook") {
+      try {
+        const origin = request.call.hook, hooks = run.hooks, binding = hooks?.bindings.find((hook) => hook.id === origin?.id);
+        if (!origin || !hooks || !binding || run.abort.signal.aborted || run.inFlight || run.approval || run.calls.size || hooks.done.has(binding.id) ||
+          binding.revision !== origin.revision || binding.contentDigest !== origin.contentDigest || binding.definition.trigger !== origin.trigger ||
+          origin.actor !== "user-configured-hook" || request.call.name !== "run_command" ||
+          run.winddown?.active ||
+          JSON.stringify(request.call.arguments) !== JSON.stringify({ command: binding.definition.command, timeoutMs: binding.definition.timeoutMs })) throw new MoguriError("hook_authority", "The hook does not own this exact enabled command, trigger or turn boundary. Nothing was executed.", 409);
+        const next = hooks.bindings.find((hook) => hook.definition.trigger === origin.trigger && !hooks.done.has(hook.id));
+        if (next?.id !== binding.id || origin.trigger === "turn.start" && this.history.some((event) => event.session_id === session.id && event.turn_id === run.turnId && event.event_type === "model.started") ||
+          origin.trigger === "turn.end" && !this.history.some((event) => event.session_id === session.id && event.turn_id === run.turnId && event.event_type === "model.completed" && event.payload.message.outcome === "stop" && !event.payload.message.toolCalls?.length)) throw new MoguriError("hook_order", "The exact lifecycle hook is out of order or its completed model boundary is missing.", 409);
+        this.platform.extensions.assertHook(session, binding);
+        run.stepId = request.stepId; run.calls.set(request.call.id, request.call); run.declaredTools.add("run_command"); hooks.calls.set(request.call.id, binding);
+        await this.workerMessage(run, { ...request, kind: "approval" });
+      } catch (error) {
+        this.reply(run, { kind: "reply", requestId: request.requestId, halt: true, error: error instanceof MoguriError ? error.message : "Lifecycle-hook authorization failed. No model or command was admitted." });
+      }
       return;
     }
     if (request.stepId !== run.stepId) throw new Error("Worker step does not own this turn.");
@@ -2792,7 +2838,9 @@ export class ControlPlane extends EventEmitter {
         const recommendation = session.controls.autonomy === "Guided" ? session.messages.findLast((message) => message.role === "assistant" && message.id === request.stepId)?.text.trim().slice(0, 1200) : undefined;
         const approval = { id: randomUUID(), stepId: request.stepId, call: request.call, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision,
           ...(recommendation ? { recommendation, recommendationSource: this.modelAdviceSource(session, request) } : {}) };
-        if (authorization.decision === "allow" && authorization.ruleId && session.controls.autonomy === "Autopilot Max" &&
+        const hook = run.hooks?.calls.get(request.call.id);
+        const hookRequiresHuman = Boolean(hook && session.controls.autonomy === "Autopilot Max" && this.projection.settings.values.decisions.reviewDelegatedTools);
+        if (!hook && authorization.decision === "allow" && authorization.ruleId && session.controls.autonomy === "Autopilot Max" &&
           this.projection.settings.values.decisions.reviewDelegatedTools && request.call.name !== "ask_user") {
           run.approval = { ...approval, requestId: request.requestId };
           this.commit([this.event(session, "tool.requested", { approval }, request.stepId)]);
@@ -2803,7 +2851,7 @@ export class ControlPlane extends EventEmitter {
           });
           return;
         }
-        if (authorization.decision === "allow" || request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config") {
+        if (authorization.decision === "allow" && !hookRequiresHuman || request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config") {
           this.grantTool(run, request.call.id);
           this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(this.platform.sessions.projects.values(session.projectId)) } });
@@ -2815,6 +2863,7 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     if (request.kind === "tool.complete") {
+      const hook = run.hooks?.calls.get(request.call.id);
       run.calls.delete(request.call.id);
       run.granted.delete(request.call.id);
       const completed = this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome }, request.stepId);
@@ -2826,6 +2875,10 @@ export class ControlPlane extends EventEmitter {
         this.updateMcp(entry, { phase: "settled", status, diagnostic: request.isError ? "Remote MCP tool settled with an error or uncertain result. Inspect its retained outcome." : null }, [completed]);
         mcp.access = []; run.mcpDispatches?.delete(request.call.id);
       } else this.commit([completed]);
+      if (hook) {
+        if (request.outcome === "completed" && !request.isError) run.hooks?.done.add(hook.id);
+        run.hooks?.calls.delete(request.call.id);
+      }
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
     }
   }

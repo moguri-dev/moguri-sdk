@@ -20,7 +20,7 @@ const send = (message: WorkerRequest) => { if (process.connected) process.send?.
 async function request(message: WorkerRequest & { requestId: string }): Promise<WorkerReply> {
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
   if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
-  const interruptible = message.kind === "boundary" || message.kind === "approval" || message.kind === "validation.boundary";
+  const interruptible = message.kind === "boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary";
   if (interruptible) abort.signal.throwIfAborted();
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible }); send(message); });
 }
@@ -31,6 +31,34 @@ async function finish(outcome: "completed" | "stopped" | "failed" | "partial", d
 async function run(start: WorkerStart): Promise<void> {
   const context: Message[] = start.context;
   let incompleteCleanup = false, mcpDispatched = false;
+  const lifecycle = async (trigger: "turn.start" | "turn.end") => {
+    for (const hook of start.hooks?.filter((hook) => hook.definition.trigger === trigger) ?? []) {
+      abort.signal.throwIfAborted();
+      const stepId = randomUUID(), call: ToolCall = { id: randomUUID(), name: "run_command",
+        arguments: { command: hook.definition.command, timeoutMs: hook.definition.timeoutMs },
+        hook: { id: hook.id, revision: hook.revision, contentDigest: hook.contentDigest, trigger, actor: "user-configured-hook" } };
+      const permission = await request({ kind: "hook", requestId: randomUUID(), stepId, call });
+      if (permission.halt && permission.error) throw new Error(permission.error);
+      let result: DelegatedResult;
+      if (permission.error || !permission.value || !("allow" in permission.value) || !permission.value.allow) result = {
+        text: permission.error ?? "The user denied the lifecycle hook. No command was executed.", isError: true, outcome: "denied",
+      };
+      else {
+        try {
+          result = await executeTool(start.root, call, abort.signal,
+            (text) => send({ kind: "output", stepId, callId: call.id, text }),
+            (pid) => send({ kind: "process", stepId, callId: call.id, pid }), undefined,
+            { mode: permission.value.mode, folders: permission.value.folders });
+        } catch (error) {
+          result = { text: error instanceof Error ? error.message : "Lifecycle hook failed.", isError: true, outcome: abort.signal.aborted ? "partial" : "failed" };
+        }
+      }
+      incompleteCleanup ||= result.outcome === "partial";
+      const retained = await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call, ...result });
+      if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The exact lifecycle-hook result was not durably acknowledged.");
+      if (result.isError || result.outcome !== "completed") throw new Error(`Lifecycle hook ${hook.definition.name} did not complete: ${result.text}`);
+    }
+  };
   const delegate = async (stepId: string, call: ToolCall): Promise<DelegatedResult> => {
     const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call });
     if (reply.error || !reply.value) throw new Error(reply.error ?? "Missing delegated authorization.");
@@ -70,6 +98,7 @@ async function run(start: WorkerStart): Promise<void> {
         abort.signal.aborted && incompleteCleanup ? "Stop arrived after filesystem work. Actual effects were retained; no rollback or complete save was inferred." : result.diagnostic);
       return;
     }
+    await lifecycle("turn.start");
     const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
     models.setProvider(githubCopilotProvider());
     models.setProvider(localProvider());
@@ -164,6 +193,7 @@ async function run(start: WorkerStart): Promise<void> {
         const calls = toolCalls(message);
         if (start.readOnly && calls.length) throw new Error("The read-only subagent requested tools. No tools were executed.");
         if (calls.length === 0) {
+          if (boundary.phase === "solver" || boundary.phase === undefined) await lifecycle("turn.end");
           await finish("completed", null);
           return;
         }

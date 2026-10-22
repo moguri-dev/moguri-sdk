@@ -27,6 +27,8 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "github.operation_recorded" || input.event_type === "linear.operation_recorded" ? input.payload.operation.id :
+  input.event_type === "knowledge.saved" ? `knowledge/${input.payload.record.id}` :
   input.event_type === "sandbox.execution_recorded" ? input.payload.execution.id :
   input.event_type === "sandbox.frame_recorded" ? input.payload.executionId :
   input.event_type === "sandbox.publication_recorded" ? input.payload.publication.id :
@@ -36,8 +38,8 @@ const artifactIdentity = (input: EventInput): string | null => input.event_type 
   input.event_type === "decision.recorded" ? input.payload.decision.id :
   input.event_type === "candidate.generation_recorded" ? input.payload.generation.id :
   input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
-  input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? input.payload.job.compoundWorkflowId ?? input.payload.job.winddownId ?? null :
-  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? input.payload.winddownId ?? null : null;
+  input.event_type === "job.started" ? input.payload.job.operationId ?? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? input.payload.job.compoundWorkflowId ?? input.payload.job.winddownId ?? null :
+  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.operationId ?? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? input.payload.winddownId ?? null : null;
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
   if (artifactId) return artifactScope(input.profile_id, artifactId);
@@ -48,6 +50,9 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "github.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.reviewDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
+    case "linear.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
+    case "knowledge.saved": return [input.payload.record.contentDigest];
     case "sandbox.workspace_recorded": return [input.payload.workspace.inputDigest];
     case "sandbox.execution_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((hash): hash is string => hash !== null);
     case "sandbox.publication_recorded": return [input.payload.publication.inputDigest, input.payload.publication.resultDigest,
@@ -243,6 +248,7 @@ export class EventStore {
       if (version < 40) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('owned_decision_schema','1');
         PRAGMA user_version=40; COMMIT;`);
+      if (version < 41) this.db.exec("BEGIN IMMEDIATE; PRAGMA user_version=41; COMMIT;");
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

@@ -17,17 +17,21 @@ interface WorkspaceHost {
   wake(): void;
   closing(id: string): boolean;
   publicationBusy(projectId: string, workspaceId?: string | null): boolean;
+  assertRoot?(projectId: string, workspaceId: string | undefined, signal: AbortSignal): Promise<void>;
+  onLinearCredentialsChanged?(): void;
+  onLinearBoardChanged?(projectId: string): void;
 }
 export class WorkspaceRuntime {
   readonly cache: DependencyCache;
   readonly integrations: ProjectIntegrations;
   private readonly busyRoots = new Set<string>();
+  private readonly busyPaths = new Set<string>();
   private timer?: ReturnType<typeof setInterval>;
   private refreshing = new Map<string, string>();
   private prAborts = new Map<string, AbortController>();
   private linear = new Map<string, AbortController>();
   constructor(private readonly host: WorkspaceHost, store: EventStore, stateDir: string, private readonly options: WorkspaceOptions = {}) {
-    this.cache = new DependencyCache(store, stateDir, options.cache);
+    this.cache = new DependencyCache(store, stateDir, { ...options.cache, registries: () => this.host.snapshot().dependencyRegistries ?? [] });
     this.integrations = new ProjectIntegrations(options.integrations?.vault ?? new McpKeychain(`dev.moguri.profile.${this.host.snapshot().profileId}.integrations`), options.integrations);
   }
   start(): void {
@@ -40,8 +44,16 @@ export class WorkspaceRuntime {
     }, this.options.integrations?.prRefreshMs ?? 60_000);
     this.timer.unref();
   }
-  close(): void { clearInterval(this.timer); this.timer = undefined; for (const abort of [...this.linear.values(), ...this.prAborts.values()]) abort.abort(); }
-  isBusy(projectId: string, workspaceId?: string | null): boolean { return this.busyRoots.has(`${projectId}:${workspaceId ?? "base"}`); }
+  close(): void { clearInterval(this.timer); this.timer = undefined; this.cache.close(); this.integrations.invalidateLinearCredentials(); for (const abort of [...this.linear.values(), ...this.prAborts.values()]) abort.abort(); }
+  isBusy(projectId: string, workspaceId?: string | null): boolean {
+    if (this.busyRoots.has(`${projectId}:${workspaceId ?? "base"}`)) return true;
+    if (!this.busyPaths.size) return false;
+    const snapshot = this.host.snapshot();
+    const root = workspaceId ? snapshot.managedWorkspaces.find((workspace) => workspace.id === workspaceId && workspace.projectId === projectId)?.path :
+      snapshot.projects.find((project) => project.id === projectId)?.path;
+    if (!root) { console.error("Managed cache lease has no exact registered root metadata."); return true; }
+    return this.busyPaths.has(root);
+  }
   private board(id: string): IssueBoard {
     this.host.project(id);
     return this.host.snapshot().boards.find((board) => board.projectId === id) ?? defaultBoard(id);
@@ -106,11 +118,18 @@ export class WorkspaceRuntime {
   async query(query: WorkspaceQuery): Promise<WorkspaceResponse> {
     switch (query.type) {
       case "board.get": return { type: query.type, board: this.board(query.projectId), issues: this.host.snapshot().issues.filter((issue) => issue.projectId === query.projectId) };
-      case "cache.inspect": return { type: query.type, plan: { ...await this.cache.inspect(this.host.project(query.projectId, query.workspaceId), query.manager), workspaceId: query.workspaceId ?? null } };
+      case "cache.inspect": {
+        const signal = AbortSignal.timeout(30_000);
+        await this.host.assertRoot?.(query.projectId, query.workspaceId, signal);
+        const plan = { ...await this.cache.inspect(this.host.project(query.projectId, query.workspaceId), query.manager), workspaceId: query.workspaceId ?? null };
+        await this.host.assertRoot?.(query.projectId, query.workspaceId, signal);
+        return { type: query.type, plan };
+      }
+      case "cache.registries": return { type: query.type, registries: await this.cache.registries.previews() };
       case "linear.status": {
         const board = this.board(query.projectId);
         const token = await this.integrations.vault.read("linear", AbortSignal.timeout(15_000));
-        return { type: query.type, enabled: board.linear.enabled, credential: token ? "configured" : "required", diagnostic: "Optional read-only import. Local tickets are never uploaded; enable one team and explicitly import a page." };
+        return { type: query.type, enabled: board.linear.enabled, credential: token ? "configured" : "required", diagnostic: "Optional read-only import remains explicit. Separate Linear workflows require exact source review and confirmation; importing a page never uploads local tickets." };
       }
     }
   }
@@ -126,6 +145,8 @@ export class WorkspaceRuntime {
         if (config.linear.enabled && !/^[A-Za-z0-9-]{1,128}$/.test(config.linear.teamId)) throw new MoguriError("linear_team", "Choose the exact Linear team UUID before enabling import.");
         this.linear.get(board.projectId)?.abort();
         this.prAborts.get(board.projectId)?.abort();
+        this.integrations.invalidateLinearProject(board.projectId);
+        this.host.onLinearBoardChanged?.(board.projectId);
         return finish([{ event_type: "board.saved", profile_id: this.host.snapshot().profileId, project_id: board.projectId, payload: { board: { ...config, projectId: board.projectId, revision: board.revision + 1 } } }], { revision: board.revision + 1 });
       }
       case "issue.create": {
@@ -160,33 +181,66 @@ export class WorkspaceRuntime {
         this.observe(board, updated); return result;
       }
       case "issues.refresh": this.host.project(command.projectId); return finish([], { id: this.refresh(command.projectId, true) });
+      case "cache.registry.save": {
+        const previous = command.registryId ? this.cache.registries.get(command.registryId) : undefined;
+        if ((previous?.revision ?? 0) !== command.expectedRevision) throw new MoguriError("cache_registry_conflict", "Another client changed this registry. Reload its exact resources before saving.", 409);
+        const registry = this.cache.registries.validate(command.config, previous);
+        const result = finish([{ event_type: "cache.registry.saved", profile_id: this.host.snapshot().profileId, payload: { registry } }], { id: registry.id, revision: registry.revision });
+        if (previous) await this.cache.registries.revoke(previous);
+        return result;
+      }
+      case "cache.registry.remove": {
+        const registry = this.cache.registries.get(command.registryId);
+        if (registry.revision !== command.expectedRevision) throw new MoguriError("cache_registry_conflict", "Another client changed this registry. Reload before revoking it.", 409);
+        const result = finish([{ event_type: "cache.registry.removed", profile_id: this.host.snapshot().profileId, payload: { registryId: registry.id } }]);
+        await this.cache.registries.revoke(registry);
+        return result;
+      }
+      case "cache.registry.token.set":
+      case "cache.registry.token.clear": {
+        const registry = this.cache.registries.get(command.registryId);
+        let result: CommandResult = {};
+        await this.cache.registries.changeToken(registry, command.type === "cache.registry.token.set" ? command.token : undefined, (next) => {
+          result = finish([{ event_type: "cache.registry.saved", profile_id: this.host.snapshot().profileId, payload: { registry: next } }], { id: next.id, revision: next.revision });
+        });
+        return result;
+      }
       case "cache.prepare":
       case "cache.install": {
         const project = this.host.project(command.projectId, command.workspaceId);
         const snapshot = this.host.snapshot();
         if (!snapshot.policy.allowedEnvs.includes("Local")) throw new MoguriError("cache_env", "Managed cache work has no qualified protected-env broker. It cannot silently run on Local.", 403);
+        if (command.type === "cache.install" && command.manager !== "npm" && command.manager !== "pnpm") throw new MoguriError("cache_only", "Python, Cargo and Go expose verified native-manager caches, not a host environment install or build. Use cache.prepare; executable installation/build requires an explicitly qualified boundary.", 409);
         if (command.type === "cache.install" && command.runScripts) throw new MoguriError("cache_sandbox", "Lifecycle scripts require a qualified real SendBox boundary. It is unavailable; no script, download or host fallback was started.", 409);
         const rootKey = `${project.id}:${command.workspaceId ?? "base"}`;
         const quarantined = command.workspaceId ? snapshot.blockedWorkspaces.includes(command.workspaceId) : snapshot.blockedProjects.includes(project.id);
-        const active = snapshot.sessions.some((session) => session.projectId === project.id && session.workspaceId === (command.workspaceId ?? null) && session.turnId);
-        if (this.busyRoots.has(rootKey) || this.host.publicationBusy(project.id, command.workspaceId) || command.type === "cache.install" && (active || quarantined)) throw new MoguriError("cache_busy", "This workspace is busy or unconfirmed. Inspect and finish owned work first.", 409);
-        if (command.type === "cache.install") this.busyRoots.add(rootKey);
+        const active = snapshot.sessions.some((session) => {
+          if (!session.turnId || session.controls.env !== "Local" || !session.projectId) return false;
+          try { return this.host.project(session.projectId, session.workspaceId ?? undefined).path === project.path; }
+          catch (error) { console.error("Active cache writer root is unconfirmed:", error instanceof MoguriError ? error.code : "cache_root"); return true; }
+        });
+        if (this.busyRoots.has(rootKey) || this.busyPaths.has(project.path) || this.host.publicationBusy(project.id, command.workspaceId) || command.type === "cache.install" && (active || quarantined)) throw new MoguriError("cache_busy", "This workspace is busy or unconfirmed. Inspect and finish owned work first.", 409);
+        if (command.type === "cache.install") { this.busyRoots.add(rootKey); this.busyPaths.add(project.path); }
         const id = this.host.job(command.type, project.id, async (signal, progress) => {
-          const receipt = { ...await (command.type === "cache.install" ? this.cache.install(project, command.manager, command.expectedDigest, signal, progress) : this.cache.prepare(project, command.manager, command.expectedDigest, signal, progress)), workspaceId: command.workspaceId ?? null };
+          const guard = async () => {
+            signal.throwIfAborted();
+            if (!this.host.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("cache_env", "Current policy no longer permits this Local managed operation. No protected-env or source-root fallback.", 403);
+            await this.host.assertRoot?.(project.id, command.workspaceId, signal);
+            signal.throwIfAborted();
+          };
+          const receipt = { ...await (command.type === "cache.install" ? this.cache.install(project, command.manager, command.expectedDigest, signal, progress, guard) : this.cache.prepare(project, command.manager, command.expectedDigest, signal, progress, guard)), workspaceId: command.workspaceId ?? null };
           signal.throwIfAborted();
           this.host.commit([{ event_type: "cache.prepared", profile_id: this.host.snapshot().profileId, project_id: project.id, payload: { receipt } }]);
           return receipt;
-        }, () => { if (command.type === "cache.install") { this.busyRoots.delete(rootKey); this.host.wake(); } }, command.workspaceId);
+        }, () => { if (command.type === "cache.install") { this.busyRoots.delete(rootKey); this.busyPaths.delete(project.path); this.host.wake(); } }, command.workspaceId);
         return finish([], { id });
       }
       case "linear.token.set":
       case "linear.token.clear": {
+        this.host.onLinearCredentialsChanged?.();
         for (const controller of this.linear.values()) controller.abort();
         const signal = AbortSignal.timeout(15_000);
-        if (command.type === "linear.token.set") {
-          if (!/^[\x21-\x7e]+$/.test(command.token)) throw new MoguriError("linear_token", "Use the personal API key without whitespace/control characters.");
-          await this.integrations.vault.write("linear", command.token, signal);
-        } else await this.integrations.vault.remove("linear", signal);
+        await this.integrations.setLinearToken(command.type === "linear.token.set" ? command.token : undefined, signal);
         return finish([]);
       }
       case "linear.import": {

@@ -33,6 +33,14 @@ import { CompoundCommandSchema, CompoundQuerySchema, type CompoundResponse, type
 import { defaultWinddownSettings, WinddownSettingsSchema, WinddownCommandSchema, WinddownQuerySchema, type WinddownRecord, type WinddownResponse } from "./winddown.ts";
 export * from "./winddown.ts";
 import { DecisionSettingsSchema, defaultDecisionSettings, DecisionCommandSchema, DecisionQuerySchema, type DecisionRecord, type DecisionResponse } from "./decisions.ts";
+import { KnowledgeCommandSchema, KnowledgeQuerySchema, type KnowledgeResponse, type KnowledgeSnapshot } from "./knowledge.ts";
+export * from "./knowledge.ts";
+import { ExtensionCommandSchema, ExtensionQuerySchema, type ExtensionResponse, type MarketplaceOrigin } from "./extensions.ts";
+export * from "./extensions.ts";
+import { GithubCommandSchema, GithubQuerySchema, type GithubResponse, type GithubSnapshot } from "./github-workflows.ts";
+import { LinearCommandSchema, LinearQuerySchema, type LinearResponse, type LinearSnapshot } from "./linear-workflows.ts";
+export * from "./github-workflows.ts";
+export * from "./linear-workflows.ts";
 export * from "./decisions.ts";
 export * from "./compound.ts";
 export * from "./candidates.ts";
@@ -86,7 +94,7 @@ export const SettingsSchema = object({
     tools: Type.Array(object({ id, tool: Type.String({ minLength: 1, maxLength: 80 }), decision, pathPrefix: Type.String({ maxLength: 4096 }) }), { maxItems: 100 }),
     commands: Type.Array(object({ id, command: Type.String({ minLength: 1, maxLength: 16384 }), decision }), { maxItems: 100 }),
   }),
-  memory: object({ enabled: Type.Boolean(), useInContext: Type.Boolean(), maxFiles: Type.Integer({ minimum: 1, maximum: 5000 }) }),
+  memory: object({ enabled: Type.Boolean(), useInContext: Type.Boolean(), useTieredContext: Type.Optional(Type.Boolean()), maxFiles: Type.Integer({ minimum: 1, maximum: 5000 }) }),
   subagents: object({ enabled: Type.Boolean(), maxParallel: Type.Integer({ minimum: 1, maximum: 2 }) }),
   evolution: object({ enabled: Type.Boolean() }),
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }),
@@ -110,7 +118,7 @@ export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
   appearance: { theme: "dark" }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "",
   permissions: { tools: [], commands: [] },
-  memory: { enabled: false, useInContext: false, maxFiles: 1000 },
+  memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [],
   voice: { language: "auto", backend: "auto" },
   sandbox: { executable: "sendbox", configPath: null, image: null, bundlePath: null, trustRootPath: null },
@@ -137,6 +145,10 @@ const section = Type.Union([
   Type.Literal("decisions"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  GithubCommandSchema,
+  LinearCommandSchema,
+  ExtensionCommandSchema,
+  KnowledgeCommandSchema,
   DecisionCommandSchema,
   WinddownCommandSchema,
   CompoundCommandSchema,
@@ -160,7 +172,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("skill.import"), projectId: id, path }),
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
   object({ type: Type.Literal("capability.toggle"), capabilityId: id, enabled: Type.Boolean(), expectedRevision: revision }),
-  object({ type: Type.Literal("proposal.create"), projectId: id, kind: Type.Union([Type.Literal("skill"), Type.Literal("script"), Type.Literal("memory")]), name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
+  object({ type: Type.Literal("proposal.create"), projectId: id, kind: Type.Union([Type.Literal("skill"), Type.Literal("script"), Type.Literal("memory"), Type.Literal("hook")]), name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
   object({ type: Type.Literal("proposal.decide"), proposalId: id, approve: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("mcp.token.set"), serverId: id, token: Type.String({ minLength: 1, maxLength: 32768 }), sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("mcp.token.clear"), serverId: id, sessionId: Type.Optional(id) }),
@@ -184,6 +196,10 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  GithubQuerySchema,
+  LinearQuerySchema,
+  ExtensionQuerySchema,
+  KnowledgeQuerySchema,
   DecisionQuerySchema,
   WinddownQuerySchema,
   CompoundQuerySchema,
@@ -228,17 +244,20 @@ export interface MemoryHit { path: string; text: string; digest: string; distanc
 export interface GraphNode { id: string; path: string; label: string; kind: "file" | "symbol" }
 export interface GraphEdge { source: string; target: string; kind: "imports" | "declares" }
 export interface CapabilityEntry {
-  id: string; projectId: string | null; kind: "skill" | "script" | "plugin" | "memory";
+  id: string; projectId: string | null; kind: "skill" | "script" | "plugin" | "memory" | "hook";
   name: string; description: string; contentDigest: string; enabled: boolean; revision: number;
   source: "user" | "approved-proposal"; createdAt: string;
   ownerPluginId?: string;
+  marketplace?: MarketplaceOrigin;
+  retired?: boolean;
 }
 export interface Proposal {
-  id: string; projectId: string; kind: "skill" | "script" | "memory"; name: string;
+  id: string; projectId: string; kind: "skill" | "script" | "memory" | "hook"; name: string;
   contentDigest: string; actor: "user" | "model"; status: "pending" | "approved" | "rejected";
   baseDigest?: string;
 }
 export interface CapabilityJob {
+  operationId?: string;
   workspaceId?: string | null;
   materialization?: ArtifactMaterializationPreview;
   memory?: MemoryIndexIntent;
@@ -250,7 +269,7 @@ export interface CapabilityJob {
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
-export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot {
+export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot {
   candidates: CandidateRecord[];
   remoteMcpCalls: RemoteMcpCall[];
   terminalOwners: TerminalOwner[];
@@ -289,6 +308,10 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse =
+  | GithubResponse
+  | LinearResponse
+  | ExtensionResponse
+  | KnowledgeResponse
   | DecisionResponse
   | WinddownResponse
   | CompoundResponse

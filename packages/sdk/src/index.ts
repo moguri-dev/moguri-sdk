@@ -1,8 +1,13 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
+import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
+import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../protocol/src/knowledge.ts";
+import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../protocol/src/extensions.ts";
+import { createCacheApi } from "./cache.ts";
+import { createGithubApi } from "./github.ts";
+import { createLinearWorkflowApi } from "./linear.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
@@ -14,6 +19,7 @@ export const sessionTitle = (session: Session, limit = 64, fallback = "New sessi
   session.title !== "New session" ? session.title : session.messages.find((message) => message.role === "user")?.text.split("\n")[0]?.slice(0, limit) || fallback;
 
 export class MoguriSdk extends TransportClient {
+  readonly github = createGithubApi(this);
   private sessionRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");
@@ -408,12 +414,43 @@ export class MoguriSdk extends TransportClient {
     state: (sessionId: string) => this.query({ type: "memory.state", sessionId }),
     remember: (projectId: string, text: string) => this.command({ type: "memory.remember", projectId, text }),
   };
+  readonly knowledge = {
+    save: (input: KnowledgeInput, id?: string, expectedRevision = 0) => this.command({ type: "knowledge.save", input, ...(id ? { id } : {}), expectedRevision }),
+    list: (input: Omit<Extract<KnowledgeQuery, { type: "knowledge.list" }>, "type" | "text"> & { text?: string }) => this.query({ type: "knowledge.list", ...input, text: input.text ?? "" }),
+    read: (id: string) => this.query({ type: "knowledge.read", id }),
+    history: (id: string) => this.query({ type: "knowledge.history", id }),
+    version: (id: string, contentDigest: string) => this.query({ type: "knowledge.version", id, contentDigest }),
+    promote: (id: string, expectedRevision: number, expectedDigest: string, input: KnowledgePromotion, confirm: true) =>
+      this.command({ type: "knowledge.promote", id, expectedRevision, expectedDigest, input, confirm }),
+    forget: (id: string, expectedRevision: number, confirm: true) => this.command({ type: "knowledge.forget", id, expectedRevision, confirm }),
+    rollback: (id: string, expectedRevision: number, contentDigest: string, confirm: true) => this.command({ type: "knowledge.rollback", id, expectedRevision, contentDigest, confirm }),
+  };
+  readonly containment = {
+    status: () => this.query({ type: "containment.status" }),
+    requireSandbox: (confirm: true) => {
+      if (confirm !== true) throw new ClientError("containment_review", "Explicitly review the qualified-Sandbox requirement before changing global allowed environments.");
+      return this.command({ type: "policy.set", allowedEnvs: ["Sandbox"] });
+    },
+  };
+  readonly hooks = {
+    import: (projectId: string, definition: HookDefinition) => this.command({ type: "hook.import", projectId, definition }),
+  };
+  readonly marketplace = {
+    catalog: (input: MarketplaceSource) => this.query({ type: "marketplace.catalog", input }),
+    preview: (input: MarketplaceInput) => this.query({ type: "marketplace.preview", input }),
+    install: (input: MarketplaceInput, expectedDigest: string, confirm: true) => this.command({ type: "marketplace.install", input, expectedDigest, confirm }),
+  };
   readonly capabilities = {
     content: (capabilityId: string) => this.query({ type: "capability.content", capabilityId }),
     toggle: (capabilityId: string, enabled: boolean, expectedRevision: number) => this.command({ type: "capability.toggle", capabilityId, enabled, expectedRevision }),
     importSkill: (projectId: string, path: string) => this.command({ type: "skill.import", projectId, path }),
     importPlugin: (projectId: string, path: string) => this.command({ type: "plugin.import", projectId, path }),
-    propose: (projectId: string, kind: "skill" | "script" | "memory", name: string, content: string) => this.command({ type: "proposal.create", projectId, kind, name, content }),
+    propose: (projectId: string, kind: "skill" | "script" | "memory" | "hook", name: string, content: string) => this.command({ type: "proposal.create", projectId, kind, name, content }),
+    history: (capabilityId: string, offset = 0) => this.query({ type: "capability.history", capabilityId, offset }),
+    version: (capabilityId: string, contentDigest: string) => this.query({ type: "capability.version", capabilityId, contentDigest }),
+    rollback: (capabilityId: string, expectedRevision: number, contentDigest: string, confirm: true) => this.command({ type: "capability.rollback", capabilityId, expectedRevision, contentDigest, confirm }),
+    useSkill: (sessionId: string, capabilityId: string, expectedDigest: string, expectedDraftRevision = this.draftRevision(sessionId)) =>
+      this.command({ type: "skill.use", sessionId, capabilityId, expectedDigest, expectedDraftRevision }),
     proposal: (proposalId: string) => this.query({ type: "proposal.content", proposalId }),
     decide: (proposalId: string, approve: boolean, expectedDigest: string) => this.command({ type: "proposal.decide", proposalId, approve, expectedDigest }),
   };
@@ -477,12 +514,9 @@ export class MoguriSdk extends TransportClient {
     archive: (issueId: string, archived: boolean, expectedRevision: number) => this.command({ type: "issue.archive", issueId, archived, expectedRevision }),
     refresh: (projectId: string) => this.command({ type: "issues.refresh", projectId }),
   };
-  readonly cache = {
-    inspect: (projectId: string, manager: PackageManager, workspaceId?: string) => this.query({ type: "cache.inspect", projectId, manager, ...(workspaceId ? { workspaceId } : {}) }),
-    prepare: (projectId: string, manager: PackageManager, expectedDigest: string, acceptMetadataSharing: true, workspaceId?: string) => this.command({ type: "cache.prepare", projectId, manager, expectedDigest, acceptMetadataSharing, ...(workspaceId ? { workspaceId } : {}) }),
-    install: (projectId: string, manager: PackageManager, expectedDigest: string, acceptMetadataSharing: true, runScripts = false, workspaceId?: string) => this.command({ type: "cache.install", projectId, manager, expectedDigest, acceptMetadataSharing, runScripts, ...(workspaceId ? { workspaceId } : {}) }),
-  };
+  readonly cache = createCacheApi(this);
   readonly linear = {
+    ...createLinearWorkflowApi(this),
     status: (projectId: string) => this.query({ type: "linear.status", projectId }),
     setToken: (token: string) => this.command({ type: "linear.token.set", token }),
     clearToken: () => this.command({ type: "linear.token.clear" }),
