@@ -5,6 +5,7 @@ import { setupFixture, waitFor } from "./fixture.ts";
 import { textFilePage } from "../apps/service/src/files.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { holdRemoteFrame } from "./fixtures/remote-frame-gate.ts";
+import { digest } from "../apps/service/src/store.ts";
 
 test("shared send keeps exactly 50 lines inline and retains 51 exact lines as a scoped file, including project-free held queues", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -119,6 +120,45 @@ test("Remote scoped-file reads use authenticated owned frames and a policy chang
     assert.equal(JSON.stringify(fixture.requests).includes("ONLY_IN_SCOPED_FILE"), false);
     assert.equal(fixture.service.controller.snapshot().executions[0]?.workspace, fixture.workspace);
   } finally { gate.release(); gate.restore(); sdk.disconnect(); await fixture.close(); }
+});
+
+test("an actual pinned SSH worker reads only the explicitly approved paste page without any local checkout write", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+  const fixture = await remoteFixture({ readPaste: { search: "Generated selected section", limit: 64 } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.probe(); await fixture.select();
+    const text = Array.from({ length: 51 }, (_, index) => index === 40 ? "Generated selected section REMOTE_PAGE_PROOF" : `Generated retained-only Remote ${index}`).join("\r\n");
+    await fixture.send(text); await fixture.approve();
+    assert.equal((await fixture.terminal()).status, "completed");
+    const result = fixture.session().messages.find((message) => message.role === "tool")!;
+    assert.equal(result.outcome, "completed");
+    const page = JSON.parse(result.text);
+    assert.equal(page.boundary, "scoped-controller-snapshot");
+    assert.ok(Buffer.byteLength(page.text) <= 64);
+    assert.match(page.text, /REMOTE_PAGE_PROOF/);
+    assert.equal(JSON.stringify(fixture.requests[0]).includes("REMOTE_PAGE_PROOF"), false);
+    assert.equal(fixture.service.controller.snapshot().executions[0]?.workspace, fixture.workspace);
+    assert.equal(fixture.requests.length, 2);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("context preview sizes the pending file descriptor without retaining or injecting its large source body", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({ contextWindow: 16384 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const created = await sdk.sessions.create(null, "Generated paste preview", { modelId: fixture.modelId, modelOptions: { contextWindow: 8192 } });
+    const text = Array.from({ length: 51 }, (_, index) => `Generated withheld source ${index} ${"x".repeat(1800)}`).join("\n"), hash = digest(text);
+    await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text, attachments: [] });
+    assert.throws(() => fixture.service.store.blob(hash), /missing|grant/i);
+    const seq = fixture.service.controller.snapshot().seq;
+    const preview = (await sdk.sessions.context(created.id!)).context;
+    assert.equal(fixture.service.controller.snapshot().seq, seq);
+    assert.throws(() => fixture.service.store.blob(hash), /missing|grant/i);
+    await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
+    const session = () => fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)!;
+    await waitFor(() => !session().turnId && session().status === "completed");
+    assert.equal(preview.estimatedTokens, session().usage[0]?.contextEstimate);
+    assert.ok(preview.estimatedTokens + 4096 < 8192);
+    assert.equal(JSON.stringify(fixture.requests).includes("Generated withheld source"), false);
+  } finally { sdk.disconnect(); await fixture.close(); }
 });
 
 test("the shared editor captures a long paste immediately without normalizing CRLF or losing surrounding unsent text", async () => {

@@ -865,9 +865,10 @@ export class ControlPlane extends EventEmitter {
     const project = this.projection.projects.find((project) => project.id === session.projectId);
     const model = this.snapshot().provider.models.find((model) => model.id === session.controls.modelId);
     const messages = this.context(session.id);
-    if (session.draft.text || session.draft.attachments.length) messages.push(this.contextItem({ text: session.draft.text, attachments: session.draft.attachments }));
+    const draft = this.platform.inputs.normalizePaste(session.draft.text, session.draft.attachments, false);
+    if (draft.text || draft.attachments.length) messages.push(this.contextItem(draft));
     const settings = this.platform.sessions.projects.values(project?.id);
-    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: session.draft.attachments.some((item) => item.kind === "paste_file") || this.hasPasteFiles(session) });
+    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: draft.attachments.some((item) => item.kind === "paste_file") || this.hasPasteFiles(session) });
     const systemPrompt = await this.platform.effectivePrompt(session);
     const windows = model && !model.synthetic ? modelContextWindows(model) : null;
     return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools }), contextWindow: model ? session.controls.modelOptions?.contextWindow ?? windows?.values[0] ?? null : null, modelMaximum: model?.contextWindow ?? null, source: "estimated" as const, windows };

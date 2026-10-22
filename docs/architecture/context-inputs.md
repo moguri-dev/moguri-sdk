@@ -47,6 +47,10 @@ under the destination session's existing retention grant. The 128 KiB text-file,
 persistence preserves the complete draft. No source checkout is modified.
 Shared send and queue editing perform capture in the same atomic transaction
 as consumption, so SDK callers cannot bypass it through a plain text draft.
+Context preview sizes that pending descriptor and its available file tool using
+the same calculation, without retaining a blob/grant, consuming the draft or
+calling a model. It does not misleadingly count the whole pending paste as the
+request body.
 Protocol/schema 36 adds the attachment discriminator and optional queue-edit
 attachments without rewriting prior events, receipts, ciphertexts or settings.
 

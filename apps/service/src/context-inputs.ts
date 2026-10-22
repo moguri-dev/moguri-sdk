@@ -23,14 +23,14 @@ interface Capture { preview: Omit<ContextPreview, "destination">; text: string }
 export class ContextInputs {
   private stateRoot?: string;
   constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly integrations: ProjectIntegrations, private readonly host: Host, private readonly stateDir: string) {}
-  normalizePaste(text: string, attachments: Attachment[]): { text: string; attachments: Attachment[] } {
+  normalizePaste(text: string, attachments: Attachment[], retain = true): { text: string; attachments: Attachment[] } {
     const lines = pasteLineCount(text);
     if (lines <= 50) return { text, attachments };
     const bytes = Buffer.byteLength(text);
     if (!text.isWellFormed() || text.includes("\0")) throw new MoguriError("attachment_text", "Pasted files require valid UTF-8 text without NUL. The complete draft was preserved.");
     if (bytes > 128 * 1024) throw new MoguriError("attachment_limit", "Pasted text files are limited to 128 KiB. The complete draft was preserved; no text was truncated or sent.");
     if (attachments.length >= 16 || attachments.reduce((total, item) => total + item.bytes, bytes) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 attachments and 12 MiB of captured content. The complete draft was preserved.");
-    const id = randomUUID(), hash = this.store.putBlob(text);
+    const id = randomUUID(), hash = retain ? this.store.putBlob(text) : digest(text);
     const attachment: Attachment = { id, kind: "paste_file", path: pasteFilePath(id), digest: hash, bytes, lines, source: { kind: "paste", location: "explicit composer text", revision: hash } };
     return { text: "", attachments: [...attachments, attachment] };
   }
