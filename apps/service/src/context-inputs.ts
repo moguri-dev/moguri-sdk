@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { lstat, realpath, readdir } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import sharp from "sharp";
 import { Value } from "typebox/value";
 import {
+  attachmentBytes, documentDescriptor, DocumentDataSchema, DOCUMENT_LIMITS, DocumentListToolSchema, DocumentReadToolSchema, DocumentSearchToolSchema, parse,
   InputCommandSchema, InputQuerySchema, isRecord, MoguriError, pasteFilePath, pasteLineCount, type Attachment, type ContextPreview, type InputCommand, type InputQuery, type InputResponse, type Session, type Snapshot, type StoredEvent,
+  type CommandResult, type DocumentAttachment, type DocumentReadOptions, type DocumentSearchOptions, type DocumentListOptions, type DocumentList, type ToolCall,
 } from "../../../packages/protocol/src/index.ts";
 import { isProtectedProjectPath, readProjectFile, readRegularFile, textFilePage } from "./files.ts";
 import { digest, type EventStore } from "./store.ts";
@@ -14,6 +16,8 @@ import type { ProjectService } from "./project-service.ts";
 import type { ProjectIntegrations } from "./project-integrations.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { MAX_CONTEXT_TEXT_BYTES, MAX_CONTEXT_FOLDER_FILES } from "./input-limits.ts";
+import { DocumentParsers, type DocumentParserOptions } from "./documents.ts";
+import { documentPage, documentSearch } from "./document-reads.ts";
 
 export const isInputCommand = (value: unknown): value is InputCommand => Value.Check(InputCommandSchema, value);
 export const isInputQuery = (value: unknown): value is InputQuery => Value.Check(InputQuerySchema, value);
@@ -22,14 +26,17 @@ interface Host { snapshot(): Snapshot; events(): StoredEvent[]; ownedRoot(path: 
 interface Capture { preview: Omit<ContextPreview, "destination">; text: string }
 export class ContextInputs {
   private stateRoot?: string;
-  constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly integrations: ProjectIntegrations, private readonly host: Host, private readonly stateDir: string) {}
+  private readonly parsers: DocumentParsers;
+  private captures = new Map<string, { sessionId: string; abort: AbortController; done: Promise<CommandResult> }>();
+  private closing = false;
+  constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly integrations: ProjectIntegrations, private readonly host: Host, private readonly stateDir: string, documentOptions: DocumentParserOptions = {}) { this.parsers = new DocumentParsers(documentOptions); }
   normalizePaste(text: string, attachments: Attachment[], retain = true): { text: string; attachments: Attachment[] } {
     const lines = pasteLineCount(text);
     if (lines <= 50) return { text, attachments };
     const bytes = Buffer.byteLength(text);
     if (!text.isWellFormed() || text.includes("\0")) throw new MoguriError("attachment_text", "Pasted files require valid UTF-8 text without NUL. The complete draft was preserved.");
     if (bytes > 128 * 1024) throw new MoguriError("attachment_limit", "Pasted text files are limited to 128 KiB. The complete draft was preserved; no text was truncated or sent.");
-    if (attachments.length >= 16 || attachments.reduce((total, item) => total + item.bytes, bytes) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 attachments and 12 MiB of captured content. The complete draft was preserved.");
+    if (attachments.length >= 16 || attachments.reduce((total, item) => total + attachmentBytes(item), bytes) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 attachments and 12 MiB of captured content. The complete draft was preserved.");
     const id = randomUUID(), hash = retain ? this.store.putBlob(text) : digest(text);
     const attachment: Attachment = { id, kind: "paste_file", path: pasteFilePath(id), digest: hash, bytes, lines, source: { kind: "paste", location: "explicit composer text", revision: hash } };
     return { text: "", attachments: [...attachments, attachment] };
@@ -38,7 +45,7 @@ export class ContextInputs {
     const profileId = this.host.snapshot().profileId;
     return this.host.events().flatMap((event) => {
       if (event.profile_id !== profileId || event.session_id !== sessionId) return [];
-      if (event.event_type === "session.created") return event.payload.pasteFiles ?? [];
+      if (event.event_type === "session.created") return [...(event.payload.pasteFiles ?? []), ...(event.payload.documents ?? [])];
       if (event.event_type === "draft.saved") return event.payload.attachments;
       if (event.event_type === "queue.edited") return event.payload.attachments ?? [];
       return event.event_type === "queue.enqueued" || event.event_type === "turn.started" || event.event_type === "steer.applied" ? event.payload.item.attachments : [];
@@ -51,6 +58,55 @@ export class ContextInputs {
     const admitted = session.messages.flatMap((message) => message.role === "user" ? message.attachments ?? [] : [])
       .filter((attachment): attachment is Extract<Attachment, { kind: "paste_file" }> => attachment.kind === "paste_file");
     return [...new Map([...inherited, ...admitted].map((attachment) => [attachment.id, attachment])).values()];
+  }
+  admittedDocuments(sessionId: string): DocumentAttachment[] {
+    const session = this.session(sessionId, false), profileId = this.host.snapshot().profileId;
+    const inherited = this.host.events().flatMap((event) => event.profile_id === profileId && event.session_id === sessionId && event.event_type === "session.created" ? event.payload.documents ?? [] : []);
+    const admitted = session.messages.flatMap((message) => message.role === "user" ? message.attachments ?? [] : []).filter((attachment): attachment is DocumentAttachment => attachment.kind === "document");
+    return [...new Map([...inherited, ...admitted].map((attachment) => [attachment.id, attachment])).values()];
+  }
+  scopedDocument(sessionId: string, id: string, admitted = true): DocumentAttachment {
+    const attachment = (admitted ? this.admittedDocuments(sessionId) : this.retainedAttachments(sessionId)).find((attachment) => attachment.id === id && attachment.kind === "document");
+    if (attachment?.kind !== "document") throw new MoguriError("attachment_scope", "This exact document has no admitted content grant in this session/profile. Unsent drafts, held queues and workstation paths are unavailable to model tools.", 403);
+    return attachment;
+  }
+  private documentData(attachment: DocumentAttachment) {
+    const content = this.store.blob(attachment.digest);
+    if (digest(content) !== attachment.digest || Buffer.byteLength(content) !== attachment.extractedBytes) throw new MoguriError("attachment_integrity", "Retained document extraction differs from its exact snapshot. No substitute was read.", 409);
+    let document: unknown;
+    try { document = JSON.parse(content); } catch { throw new MoguriError("attachment_integrity", "Retained document extraction is malformed. The original was not reparsed or substituted.", 409); }
+    if (!Value.Check(DocumentDataSchema, document) || document.format !== attachment.format || JSON.stringify(document.summary) !== JSON.stringify(attachment.summary)) throw new MoguriError("attachment_integrity", "Retained document provenance/format differs from its descriptor.", 409);
+    return document;
+  }
+  private listDocuments(sessionId: string, options: DocumentListOptions, admitted = false): DocumentList {
+    const attachments = admitted ? this.admittedDocuments(sessionId) : [...new Map(this.retainedAttachments(sessionId)
+      .filter((attachment): attachment is DocumentAttachment => attachment.kind === "document").map((attachment) => [attachment.id, attachment])).values()];
+    const offset = options.offset ?? 0, limit = options.limit ?? 20, documents: DocumentList["documents"] = [];
+    if (offset > attachments.length) throw new MoguriError("document_list", "Use a returned offset in this session's document inventory.");
+    let index = offset;
+    for (; index < attachments.length && documents.length < limit; index++) {
+      const descriptor = documentDescriptor(attachments[index]!);
+      if (Buffer.byteLength(JSON.stringify([...documents, descriptor])) > DOCUMENT_LIMITS.readBytes - 1024) break;
+      documents.push(descriptor);
+    }
+    if (!documents.length && index < attachments.length) throw new MoguriError("document_list", "This document descriptor exceeds the bounded inventory page. Inspect its exact retained attachment ID instead; no descriptor was truncated.");
+    return { boundary: "scoped-controller-snapshot", untrusted: true, documents, nextOffset: index < attachments.length ? index : null };
+  }
+  documentTool(sessionId: string, call: ToolCall) {
+    if (call.name === "list_documents") return this.listDocuments(sessionId, parse(DocumentListToolSchema, call.arguments), true);
+    if (call.name === "read_document") {
+      const { attachmentId, ...options } = parse(DocumentReadToolSchema, call.arguments);
+      return this.readDocument(sessionId, attachmentId, options, true);
+    }
+    if (call.name !== "search_document") throw new MoguriError("document_tool", "Choose an actual bounded document list/read/search tool. No fallback operation was executed.");
+    const { attachmentId, ...options } = parse(DocumentSearchToolSchema, call.arguments);
+    return this.searchDocument(sessionId, attachmentId, options, true);
+  }
+  private readDocument(sessionId: string, id: string, options: DocumentReadOptions, admitted = false) {
+    return documentPage(this.documentData(this.scopedDocument(sessionId, id, admitted)), options);
+  }
+  private searchDocument(sessionId: string, id: string, options: DocumentSearchOptions, admitted = false) {
+    return documentSearch(this.documentData(this.scopedDocument(sessionId, id, admitted)), options);
   }
   scopedFile(sessionId: string, path: string): Extract<Attachment, { kind: "paste_file" }> {
     const attachment = this.admittedFiles(sessionId).find((attachment) => attachment.path === path);
@@ -159,11 +215,29 @@ export class ContextInputs {
   }
   async query(query: InputQuery): Promise<InputResponse> {
     this.session(query.sessionId, false);
+    if (query.type === "attachment.document.list") {
+      const { sessionId, type, ...options } = query;
+      return { type, result: this.listDocuments(sessionId, options) };
+    }
+    if (query.type === "attachment.document.read") {
+      const { sessionId, attachmentId, type, ...options } = query;
+      return { type, page: this.readDocument(sessionId, attachmentId, options) };
+    }
+    if (query.type === "attachment.document.search") {
+      const { sessionId, attachmentId, type, ...options } = query;
+      return { type, result: this.searchDocument(sessionId, attachmentId, options) };
+    }
+    if (query.type === "attachment.document.original") {
+      const attachment = this.scopedDocument(query.sessionId, query.attachmentId, false), data = this.store.blob(attachment.originalDigest);
+      if (digest(data) !== attachment.originalDigest || Buffer.from(data, "base64").length !== attachment.bytes || Buffer.from(data, "base64").toString("base64") !== data) throw new MoguriError("attachment_integrity", "The exact retained document original is unavailable or corrupt. No host file was reopened.", 409);
+      return { type: query.type, attachment, data };
+    }
     if (query.type === "attachment.folder.preview") return { type: query.type, preview: this.reviewed(query.sessionId, await this.folder(query.path)) };
     if (query.type === "attachment.github.preview") return { type: query.type, preview: this.reviewed(query.sessionId, await this.github(this.session(query.sessionId), query.url, query.access)) };
     if (query.type === "attachment.session.preview") return { type: query.type, preview: this.reviewed(query.sessionId, this.sessionCapture(query.sourceSessionId)) };
     const attachment = this.retainedAttachments(query.sessionId).find((attachment) => attachment.id === query.attachmentId);
     if (!attachment) throw new MoguriError("attachment_scope", "This attachment has no content grant in the selected session.");
+    if (attachment.kind === "document") return { type: query.type, attachment, content: { kind: "document", summary: this.documentData(attachment).summary } };
     const content = this.store.blob(attachment.digest);
     return { type: query.type, attachment, content: attachment.kind === "image" ? { kind: "image", data: content, mimeType: attachment.mimeType } : { kind: "text", text: content } };
   }
@@ -182,8 +256,16 @@ export class ContextInputs {
     return { id: randomUUID(), kind: "image", path: name, digest: contentDigest, bytes: normalized.length, mimeType: "image/png", width, height, source: { ...source, revision: contentDigest } };
   }
   async execute(command: InputCommand, finish: WorkspaceFinish) {
+    if (command.type === "attachment.document.cancel") {
+      this.session(command.sessionId, false);
+      const capture = this.captures.get(`${command.sessionId}\0${command.captureId}`);
+      if (!capture) throw new MoguriError("document_capture", "This exact capture is not active. Inspect the saved draft; no other capture was stopped or replayed.", 409);
+      capture.abort.abort();
+      return finish([], { id: command.captureId });
+    }
     const session = this.session(command.sessionId);
     if (session.draft.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "The destination draft changed. Your selection is preserved; review the current draft.", 409);
+    if (command.type === "attachment.file.add" && command.mode !== "image" && (command.mode === "document" || [".pdf", ".docx", ".xlsx"].includes(extname(command.path).toLowerCase()))) return this.captureDocument(command, finish);
     let attachment: Attachment;
     if (command.type === "attachment.image.add") {
       const data = Buffer.from(command.data, "base64");
@@ -191,7 +273,7 @@ export class ContextInputs {
       attachment = await this.image(data, command.name, { kind: "clipboard", location: "explicit clipboard image" });
     } else if (command.type === "attachment.file.add") {
       const path = await this.clientPath(command.path);
-      if (command.mode === "image") attachment = await this.image(await readRegularFile(path, MAX_IMAGE_BYTES), basename(path), { kind: "client-file", location: path });
+      if (command.mode === "image" || command.mode === "auto" && /\.(png|jpe?g|webp)$/i.test(path)) attachment = await this.image(await readRegularFile(path, MAX_IMAGE_BYTES), basename(path), { kind: "client-file", location: path });
       else {
         const file = await readProjectFile(dirname(path), basename(path));
         attachment = { id: randomUUID(), kind: "local_file", path: basename(path), digest: this.store.putBlob(file.text), bytes: file.bytes, source: { kind: "client-file", location: path, revision: file.digest } };
@@ -201,10 +283,56 @@ export class ContextInputs {
       if (this.reviewed(session.id, captured).digest !== command.expectedDigest) throw new MoguriError("attachment_stale", "The source or destination changed after preview. Review its exact current snapshot and transfer scope before attaching.", 409);
       attachment = { id: randomUUID(), kind: captured.preview.kind, path: captured.preview.label, digest: this.store.putBlob(captured.text), bytes: captured.preview.bytes, source: captured.preview.source };
     }
-    const current = this.session(session.id);
-    if (current.draft.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "The draft changed during capture. No attachment was silently substituted.", 409);
+    return this.attach(session.id, command.expectedRevision, attachment, finish);
+  }
+  private attach(sessionId: string, expectedRevision: number, attachment: Attachment, finish: WorkspaceFinish) {
+    const current = this.session(sessionId);
+    if (current.draft.revision !== expectedRevision) throw new MoguriError("revision_conflict", "The draft changed during capture. No attachment was silently substituted.", 409);
     const attachments = [...current.draft.attachments, attachment];
-    if (attachments.length > 16 || attachments.reduce((total, attachment) => total + attachment.bytes, 0) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 attachments and 12 MiB of captured content.");
+    if (attachments.length > 16 || attachments.reduce((total, attachment) => total + attachmentBytes(attachment), 0) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 attachments and 12 MiB of original plus extracted content. The draft was preserved.");
     return finish([{ event_type: "draft.saved", profile_id: this.host.snapshot().profileId, project_id: current.projectId, session_id: current.id, payload: { text: current.draft.text, attachments } }], { id: attachment.id, revision: current.draft.revision + 1 });
+  }
+  private captureDocument(command: Extract<InputCommand, { type: "attachment.file.add" }>, finish: WorkspaceFinish): Promise<CommandResult> {
+    const format = extname(command.path).slice(1).toLowerCase();
+    if (format !== "pdf" && format !== "docx" && format !== "xlsx") throw new MoguriError("document_format", "Select a .pdf, .docx or .xlsx document; content validation is also required.");
+    const key = `${command.sessionId}\0${command.captureId ?? randomUUID()}`, abort = new AbortController();
+    if (this.closing || this.captures.has(key)) throw new MoguriError("document_capture", "This capture is already active or the service is stopping. The draft was preserved.", 409);
+    const done = Promise.resolve().then(async () => {
+      abort.signal.throwIfAborted();
+      let source: { path: string; bytes: Buffer } | undefined;
+      const { document } = await this.parsers.capture(key, async () => {
+        try {
+          const path = await this.clientPath(command.path), bytes = await readRegularFile(path, DOCUMENT_LIMITS.originalBytes);
+          source = { path, bytes }; return bytes;
+        } catch (error) {
+          if (error instanceof MoguriError) throw error;
+          const code = error instanceof Error && "code" in error ? String(error.code) : "read_failed";
+          throw new MoguriError("document_read", `The selected document could not be read (${code}). Check its availability/access and select it explicitly again. The complete draft was preserved.`);
+        }
+      }, format, abort.signal);
+      abort.signal.throwIfAborted();
+      if (!source) throw new MoguriError("document_read", "The exact source snapshot was not retained by its bounded capture. No substitute file was read.");
+      const { path, bytes } = source;
+      this.sourcePolicy(path);
+      const current = this.session(command.sessionId), extraction = JSON.stringify(document), original = bytes.toString("base64");
+      if (current.draft.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "The draft changed during document extraction. No attachment or text was substituted.", 409);
+      const attachment: DocumentAttachment = { id: randomUUID(), path: basename(path), kind: "document", format, bytes: bytes.length, extractedBytes: Buffer.byteLength(extraction),
+        digest: digest(extraction), originalDigest: digest(original), summary: document.summary, source: { kind: "client-file", location: path, revision: digest(original) } };
+      if (current.draft.attachments.length >= 16 || current.draft.attachments.reduce((total, item) => total + attachmentBytes(item), attachmentBytes(attachment)) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 attachments and 12 MiB of originals plus extraction. The draft was preserved.");
+      this.store.putBlob(extraction); this.store.putBlob(original);
+      return this.attach(command.sessionId, command.expectedRevision, attachment, finish);
+    }).catch((error: unknown) => {
+      if (abort.signal.aborted) throw new MoguriError("document_cancelled", "Document capture was cancelled. The complete draft was preserved.", 409);
+      throw error;
+    }).finally(() => this.captures.delete(key));
+    this.captures.set(key, { sessionId: command.sessionId, abort, done });
+    return done;
+  }
+  stopSession(id: string): void { for (const capture of this.captures.values()) if (capture.sessionId === id) capture.abort.abort(); }
+  async settleSession(id: string): Promise<void> { this.stopSession(id); await Promise.allSettled([...this.captures.values()].filter((capture) => capture.sessionId === id).map((capture) => capture.done)); }
+  async close(): Promise<void> {
+    this.closing = true;
+    for (const capture of this.captures.values()) capture.abort.abort();
+    await Promise.allSettled([...this.captures.values()].map((capture) => capture.done)); await this.parsers.close();
   }
 }

@@ -15,7 +15,7 @@ Unused scope fields are null in checkpoint 1.
 | `session.created`, `session.configured` | Title/controls, optional resolved startup values/source revisions and explicit configuration changes. Running turns cannot be rewritten. |
 | `session.archived`, `session.restored` | Non-destructive lifecycle changes after settling owned work and holding prompts. PR merge does not prevent restoration. |
 | `session.blocked`, `session.resumed` | Admission diagnostic or explicit user resumption. Resumption does not prove prior cleanup. |
-| `draft.saved` | Text and authorized snapshots; increments the draft revision. |
+| `draft.saved` | Text and authorized snapshots; increments the draft revision. Protocol 43 atomically grants both original and extracted document digests, without persisting plaintext document bodies in events. |
 | `queue.enqueued`, `queue.edited`, `queue.removed`, `queue.reordered` | Exact unclaimed message mutation, each with a queue revision. |
 | `queue.delivery_changed` | Explicit conversion of an unclaimed steer into a new queued turn. |
 | `turn.started` | Admitted item, controls, allowed-env revision and optional committed prompt digest; claims the item once. |

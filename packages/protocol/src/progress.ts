@@ -1,4 +1,7 @@
 import { Type, type Static } from "typebox";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmTaskListItem } from "micromark-extension-gfm-task-list-item";
+import { gfmTaskListItemFromMarkdown } from "mdast-util-gfm-task-list-item";
 import type { ModelAdviceSource } from "./questions.ts";
 
 export const TASK_PROGRESS_INTERVAL_MS = 15_000;
@@ -29,18 +32,13 @@ export interface TaskProgress {
 export type ProgressResponse = { type: "session.progress"; progress: TaskProgress };
 
 export function planChecklist(text: string): { completed: number; total: number; percent: number | null } {
-  let completed = 0, total = 0, fence: { character: string; length: number } | null = null;
-  for (const line of text.split(/\r\n|\r|\n/)) {
-    const delimiter = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
-    if (delimiter) {
-      const marker = delimiter[1]!;
-      if (!fence) fence = { character: marker[0]!, length: marker.length };
-      else if (marker[0] === fence.character && marker.length >= fence.length && !delimiter[2]!.trim()) fence = null;
-      continue;
-    }
-    if (fence || /^(?: {4}|\t)/.test(line) && !/^\s+[-+*]\s+\[[ xX]\]/.test(line)) continue;
-    const item = line.match(/^\s*(?:[-+*]|\d+[.)])\s+\[([ xX])\](?:\s|$)/);
-    if (item) { total++; if (item[1]!.toLowerCase() === "x") completed++; }
+  let completed = 0, total = 0;
+  interface Node { type: string; checked?: boolean | null; children?: Node[] }
+  const pending: Node[] = [fromMarkdown(text, { extensions: [gfmTaskListItem()], mdastExtensions: [gfmTaskListItemFromMarkdown()] })];
+  while (pending.length) {
+    const node = pending.pop()!;
+    if (node.type === "listItem" && typeof node.checked === "boolean") { total++; if (node.checked) completed++; }
+    if (node.children) pending.push(...node.children);
   }
   return { completed, total, percent: total ? Math.round(completed * 100 / total) : null };
 }

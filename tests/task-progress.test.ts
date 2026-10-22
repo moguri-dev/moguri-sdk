@@ -6,10 +6,12 @@ import { EventStore, digest } from "../apps/service/src/store.ts";
 import { TaskProgressRuntime } from "../apps/service/src/task-progress.ts";
 import { MoguriSdk, planChecklist, progressBar, type ModelAdviceSource } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { waitFor } from "./fixture.ts";
 
 test("plan progress counts generated nested Markdown checkboxes, not code or ordinary prose", () => {
   assert.deepEqual(planChecklist("- [x] Generated first\n  - [ ] Generated second\n1. [X] Third\r\n````md\n- [x] Not work\n```\n- [x] Still code\n````\n~~~\n- [ ] Also code\n~~~\n[x] Prose\n"), { completed: 2, total: 3, percent: 67 });
   assert.deepEqual(planChecklist("Generated plan without a checklist."), { completed: 0, total: 0, percent: null });
+  assert.deepEqual(planChecklist("    - [x] Generated indented code\n\n- [ ] Actual generated work\n"), { completed: 0, total: 1, percent: 0 });
   assert.equal(progressBar(null, 4), "[????] unknown");
   assert.equal(progressBar(50, 4), "[##--] 50%");
 });
@@ -73,9 +75,33 @@ test("a changed task binding invalidates an in-flight progress read instead of s
     profileId: "default", session: () => session, events: () => [], binding: (value) => value.controls.env,
     plan: async () => { await gate; return { path: "docs/plan.md", text: "- [x] Generated old work", digest: "a".repeat(64), exists: true }; }, commit: () => assert.fail("A read cannot persist a report."),
   });
+
   try {
     const read = runtime.read(session.id);
     session = { ...session, controls: { ...session.controls, env: "Remote" } }; release();
     await assert.rejects(() => read, /binding changed/i);
   } finally { release(); await fixture.close(); }
+});
+
+test("an actual long-running solver reports metered untrusted progress and periodic checklist comparison starts no hidden model", { skip: process.platform !== "darwin", timeout: 85_000 }, async () => {
+  const text = "- [x] Generated initial step\n- [ ] Generated remaining step\n";
+  const fixture = await setupFixture({ holdAfterTool: true, progressDelayMs: 60_100,
+    taskProgress: { action: "report", percent: 85, summary: "Generated model estimate, not task acceptance.", planDigest: digest(text) } });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await mkdir(join(fixture.project, "docs")); const path = join(fixture.project, "docs", "plan.md"); await writeFile(path, text);
+    await fixture.configure(); await fixture.send("generated task progress estimate");
+    await waitFor(() => fixture.service.controller.events(0).some((event) => event.event_type === "task.progress_reported"), 75_000);
+    const reported = (await sdk.sessions.progress(fixture.sessionId)).progress;
+    assert.equal(reported.longRunning, true); assert.equal(reported.checklist.percent, 50); assert.equal(reported.model?.percent, 85);
+    assert.equal(reported.model?.source.modelId, fixture.modelId); assert.equal(reported.model?.source.actor, "model"); assert.equal(reported.disagreement, true);
+    await waitFor(() => fixture.requests.length === 2);
+    const calls = fixture.requests.length; await writeFile(path, text.replace("[ ]", "[x]"));
+    const checked = (await sdk.sessions.progress(fixture.sessionId)).progress;
+    assert.equal(checked.checklist.percent, 100); assert.equal(checked.model?.stale, true); assert.equal(fixture.requests.length, calls);
+    assert.ok(fixture.session().turnId); assert.notEqual(fixture.session().status, "completed");
+    await sdk.command({ type: "session.stop", sessionId: fixture.sessionId }); await fixture.terminal();
+    assert.equal((await sdk.sessions.progress(fixture.sessionId)).progress.model, null);
+    assert.ok(fixture.session().usage.every((usage) => usage.modelId === fixture.modelId));
+  } finally { sdk.disconnect(); await fixture.close(); }
 });

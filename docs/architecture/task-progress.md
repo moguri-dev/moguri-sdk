@@ -7,9 +7,12 @@ Checked items have equal weight; unchecked work can be much larger.
 
 ## Change contract and qualification
 
-Reuse the existing MIT-licensed TypeBox, SDK, React, plan reader and authenticated
-worker delegation. No dependency, background model, scheduler or separate plan
-database is introduced. Generated checklist, ownership, cancellation, recovery,
+Reuse the existing MIT-licensed TypeBox, SDK, React, plan reader, Markdown
+ecosystem and authenticated worker delegation. `mdast-util-from-markdown` 2.1.0,
+`micromark-extension-gfm-task-list-item` 2.1.0 and
+`mdast-util-gfm-task-list-item` 2.0.0 are explicit MIT-licensed dependencies
+already present through the Markdown renderer. No background model, scheduler
+or separate plan database is introduced. Generated checklist, ownership, cancellation, recovery,
 scope and client tests qualify this slice.
 
 Protocol/schema 42 adds `session.progress` and `task.progress_reported`. The
@@ -26,7 +29,7 @@ Local, pinned SSH or qualified native transport. It never substitutes the Local
 checkout. An unavailable plan is unknown, not zero percent or an old cached
 success. Project-free chats do not inherit a plan.
 
-Only Markdown list checkboxes outside fenced code count. Nested items count
+Only parsed GFM list checkboxes outside fenced or indented code count. Nested items count
 individually. No checklist means an indeterminate bar, not fabricated progress.
 The query carries the exact plan digest, path, environment and observation time.
 Binding changes during a read invalidate its result.
@@ -58,6 +61,10 @@ Generated primitive/API qualification passed 4/4 cases in 1.41 s. The hidden
 Electron workflow observed a real 50% to 100% checklist change on the 15-second
 poll without inference or a successful task outcome (16.1 s). Type checks and
 the production build passed. The existing large Ghostty chunk warning remains.
+Generated Markdown parser qualification took 2.14 ms and correctly separated an
+indented checkbox example from an actual task. A red regression exposed the
+earlier line-based false positive before replacing it with the existing parser
+ecosystem.
 
 The required baseline `npm run spike` passed generated Copilot transport
 (1,077.86 ms), SQLite (60.50 ms), known-group PTY cancellation (151.85 ms,

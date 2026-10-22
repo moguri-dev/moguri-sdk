@@ -24,6 +24,12 @@ try {
   const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
+  const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
+  const documentInputs = generatedDocuments ? [
+    ["pdf", generatedDocuments.generatedPdf({ imagePage: true }).toString("base64")],
+    ["docx", generatedDocuments.generatedDocx().toString("base64")],
+    ["xlsx", generatedDocuments.generatedXlsx().toString("base64")],
+  ] : [];
   const retainedRoles = installedProtocol >= 32 ? JSON.parse(execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/role-sequence-export.ts"), join(temporary, "generated-retained-role-state"), String(installedProtocol)], { encoding: "utf8" })) : null;
   if (process.platform === "darwin") {
     const { createSshTarget } = await import("../tests/fixtures/ssh-target.ts");
@@ -46,8 +52,21 @@ try {
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
+    ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     async function typedConsumer() {
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 43 ? `
+      const selection:DocumentReadOptions={sheet:"Generated sheet",range:"A1:C1",offset:0,limit:4096};
+      const literal:DocumentSearchOptions={query:"Generated",limit:2};
+      const descriptors=await sdk.attachments.listDocuments("generated-id",{offset:0,limit:5});void descriptors.result.nextOffset;
+      const capture=await sdk.attachments.document("generated-id","/generated/report.xlsx",{captureId:"generated-typed-capture",expectedRevision:0});
+      const original:DocumentAttachment=(await sdk.attachments.original("generated-id",capture.id!)).attachment;
+      void original.originalDigest;void original.summary.noTextPages;
+      void (await sdk.attachments.readDocument("generated-id",capture.id!,selection)).page.firstLocation?.cell;
+      void (await sdk.attachments.searchDocument("generated-id",capture.id!,literal)).result.nextCursor;
+      await sdk.attachments.cancelDocument("generated-id","generated-typed-capture");
+      const progress:TaskProgress=(await sdk.sessions.progress("generated-id")).progress;void progress.checklist.percent;void useTaskProgress;
+      ` : ""}
       ${installedProtocol >= 34 ? 'const evidence:ModelEvidenceReport=(await sdk.models.evidence("generated-model")).evidence;void evidence.claimed.family;void evidence.source.familyField;' : ""}
       const snapshot = sdk.settings.get();
       if (!snapshot) throw new Error("Not connected");
@@ -331,7 +350,7 @@ try {
       assert.equal(sdk.getState().snapshot.registry.find(entry=>entry.id===hook.id).enabled,false);
       assert.equal((await sdk.capabilities.history(hook.id)).entries.length,1);
       const catalog={schemaVersion:1,packages:[{schemaVersion:1,name:"generated-installed-bundle",version:"1.0.0",description:"Generated installed bundle",license:"MIT",
-        minimumProtocol:41,maximumProtocol:41,skills:["---\\nname: generated-installed-style\\ndescription: Generated installed style\\n---\\nUse generated fixture types."],scripts:[],hooks:[]}]};
+        minimumProtocol:PROTOCOL_VERSION,maximumProtocol:PROTOCOL_VERSION,skills:["---\\nname: generated-installed-style\\ndescription: Generated installed style\\n---\\nUse generated fixture types."],scripts:[],hooks:[]}]};
       await writeFile(join(project,"moguri-marketplace.json"),JSON.stringify(catalog));
       git(["add","--","moguri-marketplace.json"]);git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated installed catalog"]);
       const marketInput={projectId:p.id,sourceProjectId:p.id,commit:git(["rev-parse","HEAD"]).trim(),path:"moguri-marketplace.json",packageName:"generated-installed-bundle",version:"1.0.0"};
@@ -545,6 +564,23 @@ try {
       const source=join(root,"generated-client.txt");await writeFile(source,"Generated external client context.");
       const captured=await sdk.attachments.file(general.id,source);
       assert.equal((await sdk.attachments.read(general.id,captured.id)).content.text,"Generated external client context.");
+      ${installedProtocol >= 43 ? `
+      for(const [format,data] of ${JSON.stringify(documentInputs)}){
+        const path=join(root,"generated-installed."+format);await writeFile(path,Buffer.from(data,"base64"));
+        const captured=await sdk.attachments.document(general.id,path);
+        const descriptor=await sdk.attachments.read(general.id,captured.id);assert.equal(descriptor.content.kind,"document");
+        assert.equal((await sdk.attachments.original(general.id,captured.id)).data,data);
+        const selection=format==="pdf"?{page:1}:format==="docx"?{section:2}:{sheet:"Generated sheet",range:"A1:C1"};
+        const page=(await sdk.attachments.readDocument(general.id,captured.id,{...selection,limit:4096})).page;
+        assert.equal(page.boundary,"scoped-controller-snapshot");assert.equal(page.untrusted,true);assert.match(page.text,/GENERATED_DOCUMENT_SECRET/);
+        assert.ok(Buffer.byteLength(page.text)<=4096);
+        const search=(await sdk.attachments.searchDocument(general.id,captured.id,{query:"GENERATED_DOCUMENT_SECRET",limit:2})).result;
+        assert.equal(search.matches.length,1);
+      }
+      const checked=(await sdk.sessions.progress(general.id)).progress;assert.equal(checked.checklist.percent,null);assert.equal(checked.model,null);
+      const documents=(await sdk.attachments.listDocuments(general.id,{limit:20})).result;assert.equal(documents.documents.length,3);assert.equal(JSON.stringify(documents).includes(root),false);
+      console.log("Installed document worker, encrypted originals, bounded PDF/DOCX/XLSX reads/searches and progress API qualified without inference.");
+      ` : ""}
       const folder=(await sdk.attachments.folderPreview(general.id,project)).preview;
       await sdk.attachments.folder(general.id,project,folder.digest,true);
       assert.deepEqual((await sdk.mcp.tools("builtin","",0,general.id)).tools.map(t=>t.name),["fetch_page"]);

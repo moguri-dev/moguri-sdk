@@ -49,6 +49,14 @@ These decisions define the implementation stack and constraints for the [impleme
 | D25 | Every owned model dispatch has an atomic profile-owned reservation. Finite limits require explicit estimates; unknown completion holds capacity and settings resets cannot lift policy. | Concurrent/late/restart accounting, actual output forwarding, unknown-price handling or role/source retention fails. |
 | D26 | Immutable profile views share one root event authority. Credentials/data stay scoped; global environment policy, startup values and budgets remain root-owned across client switching. | Default migration, cross-client isolation, atomic policy/cap races, resource ownership or external SDK/native preview qualification fails. |
 | D27 | Reviewed platform workflows add independent tiered knowledge, bounded lifecycle hooks, repository-backed catalogs, explicit Git/GitHub/Linear writes and scoped ecosystem caches; whole-descendant guarantees require qualified SendBox. | Exact review, privacy, compatibility, root leases, command/no-replay, migration/recovery, native VM teardown or packed-client qualification fails. |
+| D28 | Plan checklist completion is periodically observed; long-task owning-model estimates stay separate, untrusted advice without hidden inference. | Plan/root ownership, stale reports, cancellation, recovery or cross-client comparison fails. |
+| D29 | Document attachments reuse scoped encrypted snapshots and bounded inspection; PDF.js and streamed ZIP/strict XML parse in restricted resource-bounded processes. | Parser content/resource qualification, grant retention, provenance, worker transport or browser-safe packed SDK checks fail. |
+
+D28's [task progress contract](task-progress.md) records generated checklist and
+hidden-client qualification. D29's [document contract](document-attachments.md)
+records parser licenses, limits and measured Phase 0 results before integration.
+Neither decision expands unrelated roadmap, model authority or unqualified
+execution transports.
 
 ## D01. Build from zero with borrowed libraries
 

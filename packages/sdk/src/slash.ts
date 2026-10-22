@@ -1,6 +1,6 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 
@@ -19,7 +19,12 @@ export type SlashResult =
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
   { name: "progress", description: "Compare the bound plan checklist with optional long-task model estimates" },
-  { name: "attach-file", description: "Capture an explicitly selected local UTF-8 file", argument: "ABSOLUTE_PATH" },
+  { name: "attach-file", description: "Capture a local source/text file, image, PDF, DOCX or XLSX snapshot", argument: "ABSOLUTE_PATH" },
+  { name: "attach-document", description: "Extract a PDF/DOCX/XLSX locally without whole-document model injection", argument: "ABSOLUTE_PATH" },
+  { name: "document-read", description: "Bounded retained page/section/spreadsheet-range inspection", argument: "ID [OPTIONS_JSON]" },
+  { name: "documents", description: "Bounded document descriptor inventory", argument: "[OPTIONS_JSON]" },
+  { name: "document-search", description: "Literal retained-document search with bounded provenance", argument: "ID OPTIONS_JSON" },
+  { name: "document-cancel", description: "Cancel one exact active document capture", argument: "CAPTURE_ID" },
   { name: "attach-image", description: "Capture a local PNG/JPEG/WebP; terminal clipboard images need this fallback", argument: "ABSOLUTE_PATH" },
   { name: "attach-folder", description: "Preview an exact folder snapshot, then confirm its digest", argument: "[SHA256] ABSOLUTE_PATH" },
   { name: "attach-github", description: "Preview a typed GitHub issue/PR reference", argument: "[gh-cli] [SHA256] URL" },
@@ -103,6 +108,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "documents": return { kind: "text", text: JSON.stringify(await sdk.attachments.listDocuments(session.id, parse(DocumentListOptionsSchema, JSON.parse(command.argument || "{}"))), null, 2) };
     case "progress": return { kind: "text", text: JSON.stringify(await sdk.sessions.progress(session.id), null, 2) };
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument);
@@ -588,10 +594,24 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "acknowledge" && id && !extra) { await sdk.remote.acknowledge(id, true); return { kind: "ok", message: "Your remote process-inspection acknowledgement was recorded. This does not prove containment or cleanup." }; }
       throw new ClientError("remote_action", "Use /remote, /remote probe, /remote reconcile ID, or only after process inspection /remote acknowledge ID.");
     }
+    case "document-cancel": {
+      await sdk.attachments.cancelDocument(session.id, command.argument);
+      return { kind: "ok", message: "Stop requested for that exact document capture. Inspect its settled draft; no other task was cancelled." };
+    }
+    case "document-read":
+    case "document-search": {
+      const match = command.argument.match(/^(\S+)(?:\s+([\s\S]+))?$/);
+      if (!match) throw new ClientError("document_input", "Use an exact document ID followed by bounded JSON options.");
+      const value: unknown = JSON.parse(match[2] ?? "{}");
+      return { kind: "text", text: JSON.stringify(command.name === "document-read" ?
+        await sdk.attachments.readDocument(session.id, match[1]!, parse(DocumentReadOptionsSchema, value)) :
+        await sdk.attachments.searchDocument(session.id, match[1]!, parse(DocumentSearchOptionsSchema, value)), null, 2) };
+    }
     case "attach-file":
+    case "attach-document":
     case "attach-image": {
       if (!command.argument) throw new ClientError("attachment_path", "Choose an explicit absolute file path.");
-      const result = await sdk.attachments.file(session.id, command.argument, command.name === "attach-image" ? "image" : "text");
+      const result = await sdk.attachments.file(session.id, command.argument, command.name === "attach-image" ? "image" : command.name === "attach-document" ? "document" : "auto");
       return { kind: "ok", message: `Captured attachment ${result.id}. No prompt was sent.` };
     }
     case "attach-folder":
@@ -613,7 +633,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "attached": {
       if (!command.argument) throw new ClientError("attachment_source", "Use /attached ATTACHMENT_ID.");
       const result = await sdk.attachments.read(session.id, command.argument);
-      return { kind: "text", text: result.content.kind === "text" ? result.content.text : JSON.stringify({ attachment: result.attachment, diagnostic: "Image retained privately. Desktop previews pixels; terminal/CLI may inspect its typed metadata without pretending clipboard support." }, null, 2) };
+      return { kind: "text", text: result.content.kind === "text" ? result.content.text : JSON.stringify({ attachment: result.attachment, diagnostic: result.content.kind === "document" ? "Original and extraction are retained privately. Use /document-read ID with page/section/sheet/range options, or /document-search ID with a literal query. No complete document was injected." : "Image retained privately. Desktop previews pixels; terminal/CLI may inspect its typed metadata without pretending clipboard support." }, null, 2) };
     }
     case "meta": {
       const created = await sdk.metachat.create(session.projectId, session.id, command.argument || undefined);

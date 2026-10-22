@@ -1,6 +1,7 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
+import type { Attachment, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../protocol/src/knowledge.ts";
@@ -17,6 +18,8 @@ export { DraftEditor } from "../../client/src/draft.ts";
 export type { ClientState } from "../../client/src/index.ts";
 export const sessionTitle = (session: Session, limit = 64, fallback = "New session"): string =>
   session.title !== "New session" ? session.title : session.messages.find((message) => message.role === "user")?.text.split("\n")[0]?.slice(0, limit) || fallback;
+export const attachmentStatus = (attachment: Attachment): string => attachment.kind !== "document" ? attachment.kind :
+  `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
   readonly github = createGithubApi(this);
@@ -37,7 +40,13 @@ export class MoguriSdk extends TransportClient {
       return this.command({ type: "draft.paste", sessionId, expectedRevision, text: draft.text, attachments: draft.attachments, pastedText,
         start: selection?.start ?? draft.text.length, end: selection?.end ?? draft.text.length });
     },
-    file: (sessionId: string, path: string, mode: "text" | "image" = "text", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.file.add", sessionId, path, mode, expectedRevision }),
+    file: (sessionId: string, path: string, mode: "text" | "image" | "document" | "auto" = "auto", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.file.add", sessionId, path, mode, expectedRevision }),
+    document: (sessionId: string, path: string, options: { captureId?: string; expectedRevision?: number } = {}) => this.command({ type: "attachment.file.add", sessionId, path, mode: "document", captureId: options.captureId ?? crypto.randomUUID(), expectedRevision: options.expectedRevision ?? this.draftRevision(sessionId) }),
+    cancelDocument: (sessionId: string, captureId: string) => this.command({ type: "attachment.document.cancel", sessionId, captureId }),
+    listDocuments: (sessionId: string, options: DocumentListOptions = {}) => this.query({ ...options, type: "attachment.document.list", sessionId }),
+    readDocument: (sessionId: string, attachmentId: string, options: DocumentReadOptions = {}) => this.query({ ...options, type: "attachment.document.read", sessionId, attachmentId }),
+    searchDocument: (sessionId: string, attachmentId: string, options: DocumentSearchOptions) => this.query({ ...options, type: "attachment.document.search", sessionId, attachmentId }),
+    original: (sessionId: string, attachmentId: string) => this.query({ type: "attachment.document.original", sessionId, attachmentId }),
     image: (sessionId: string, data: string, name = "Clipboard image", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.image.add", sessionId, data, name, expectedRevision }),
     folderPreview: (sessionId: string, path: string) => this.query({ type: "attachment.folder.preview", sessionId, path }),
     folder: (sessionId: string, path: string, expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.folder.add", sessionId, path, expectedDigest, confirm, expectedRevision }),

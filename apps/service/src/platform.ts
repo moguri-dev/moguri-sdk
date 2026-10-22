@@ -70,6 +70,7 @@ import { isGithubCommand, isGithubQuery } from "../../../packages/protocol/src/g
 import { isLinearCommand, isLinearQuery } from "../../../packages/protocol/src/linear-workflows.ts";
 import type { WorkflowHost } from "./workflow-host.ts";
 import { TaskProgressRuntime } from "./task-progress.ts";
+import type { DocumentParserOptions } from "./documents.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -143,7 +144,7 @@ export interface PlatformHost {
   localRootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions }
 export class PlatformRuntime {
   readonly knowledge: TieredKnowledge;
   readonly extensions: Extensions;
@@ -246,7 +247,7 @@ export class PlatformRuntime {
       artifact: (publication) => this.artifacts.nativePublication(publication),
       job: (projectId, workspaceId, execute, start, settled, lifecycle) => this.job("sandbox.publish", projectId, null, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
-    this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);
+    this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir, options.documents);
     this.progress = new TaskProgressRuntime({
       profileId: store.profileId, session: (id) => this.session(id), events: host.events, commit: host.commit,
       binding: (session) => JSON.stringify([session.id, session.turnId, session.controls.env, session.workspaceId, session.sandboxWorkspaceId,
@@ -1018,6 +1019,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     throw new MoguriError("capability_unavailable", "This delegated capability is not available.");
   }
   stopSession(id: string): void {
+    this.inputs.stopSession(id);
     const jobs = [...this.active.entries()].filter(([, job]) => job.sessionId === id);
     const events = jobs.flatMap(([id]) => {
       const candidateId = this.snapshot().jobs.find((job) => job.id === id)?.candidate?.candidateId;
@@ -1026,12 +1028,14 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     try { if (events.length) this.host.commit(events); }
     finally { for (const [, job] of jobs) job.abort.abort(); }
   }
-  async settleSession(id: string): Promise<void> { this.stopSession(id); await Promise.all([...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
+  async settleSession(id: string): Promise<void> { this.stopSession(id); await Promise.all([this.inputs.settleSession(id), ...[...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)]); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
   async cancelProject(id: string): Promise<void> {
+    const sessions = this.snapshot().sessions.filter((session) => session.projectId === id);
+    for (const session of sessions) this.inputs.stopSession(session.id);
     const jobs = [...this.active.entries()].filter(([, job]) => job.projectId === id);
     try { const events = jobs.flatMap(([id]) => this.operationStopEvents(id)); if (events.length) this.host.commit(events); }
     finally { for (const [, job] of jobs) job.abort.abort(); }
-    await Promise.all(jobs.map(([, job]) => job.done));
+    await Promise.all([...sessions.map((session) => this.inputs.settleSession(session.id)), ...jobs.map(([, job]) => job.done)]);
     await this.gateway.cancelRoot(this.project(id).path);
     for (const workspace of this.snapshot().managedWorkspaces.filter((workspace) => workspace.projectId === id && workspace.status !== "removed")) await this.gateway.cancelRoot(workspace.path);
     await this.gateway.oauth.cancelScope(id);
@@ -1042,7 +1046,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     this.workspace.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
-    const settled = await Promise.allSettled([this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);
+    const settled = await Promise.allSettled([this.inputs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Platform cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "platform_cleanup");
     if (failed?.status === "rejected") throw failed.reason;

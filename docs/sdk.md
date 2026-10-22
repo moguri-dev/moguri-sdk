@@ -5,8 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **42** for
-[task completion estimates](architecture/task-progress.md), extending the
+Current source uses protocol **43** for
+[document attachments](architecture/document-attachments.md), including
+protocol-42 [task completion estimates](architecture/task-progress.md), extending the
 protocol-41 owner-requested
 [platform workflow extension](architecture/platform-workflows.md).
 The prior issue-17 source used protocol **40** for shared model windows/scoped
@@ -20,6 +21,46 @@ with optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
 every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
+
+## Document attachments
+
+`attachments.file(sessionId, path)` automatically extends existing source/text
+and image selection with content-validated `.pdf`, `.docx` and `.xlsx`.
+`attachments.document(sessionId, path, { captureId, expectedRevision? })`
+requires a supported document format; `cancelDocument(sessionId, captureId)`
+stops that exact active capture, not a turn or another client's work.
+The service owns admission, extraction and the optimistic draft transaction.
+
+```ts
+const captureId = crypto.randomUUID();
+const captured = await sdk.attachments.document(sessionId, "/explicit/report.xlsx", { captureId });
+const descriptor = await sdk.attachments.read(sessionId, captured.id!);
+const page = await sdk.attachments.readDocument(sessionId, captured.id!, {
+  sheet: "Sheet1", range: "A1:D20", limit: 4096,
+});
+const matches = await sdk.attachments.searchDocument(sessionId, captured.id!, {
+  query: "literal text", limit: 5,
+});
+```
+
+Reads accept a PDF `page`, extracted `section`, or exact XLSX `sheet` with an
+optional ascending A1 `range`. Their UTF-8 `offset` / `nextOffset` applies only
+to that exact selection's JSON-lines view. `firstLocation` / `lastLocation`
+preserve provenance even across a split line. Search `cursor` / `nextCursor`
+and inventory `offset` / `nextOffset` are independent. Reset pagination when
+changing the selection/query.
+
+`listDocuments(sessionId, { offset?, limit? })` returns bounded descriptors,
+without bodies or workstation paths. The model's separately approved
+`list_documents` sees admitted documents only, including after compaction.
+User preview APIs can inspect retained draft/queue documents. `original()`
+explicitly returns the bounded original as canonical base64; ordinary `read()`
+returns a document descriptor/status, never its full extraction or original.
+
+All these schemas, types and calls remain browser-safe. Only explicit Node
+runtime creation loads the parser supervisor; its compiled worker and libraries
+are included in packed consumers. The [document contract](architecture/document-attachments.md)
+defines licenses, resource bounds, encrypted grants, cancellation and migration.
 
 ## Reviewed platform workflow surface
 

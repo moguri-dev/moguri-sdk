@@ -10,7 +10,7 @@ test("importing Node SDK discovery does not load the service, provider, MCP or P
     const runtime=[];
     const hook=registerHooks({resolve(specifier,context,next){
       const result=next(specifier,context);
-      if(/earendil-works|modelcontextprotocol|napi-rs.keyring|node-pty|apps\\/service\\/src\\/server\\.ts/.test(result.url))runtime.push(result.url);
+      if(/earendil-works|modelcontextprotocol|napi-rs.keyring|node-pty|pdfjs-dist|yauzl|\\/sax\\/|apps\\/service\\/src\\/server\\.ts/.test(result.url))runtime.push(result.url);
       return result;
     }});
     await import(${JSON.stringify(pathToFileURL(resolve("packages/sdk/src/node.ts")).href)});
