@@ -91,6 +91,15 @@ rollback invalidates its stage record, rather than leaving a reusable ready
 badge after the root inode changes. Client qualification does not enable
 unproven compound, Max, live-provider or side-capability combinations.
 
+Shutdown signals native preparation, active turns, native runtime and the
+existing platform admissions before awaiting any cleanup. Even an empty
+asynchronous preparation close must not be awaited first: releasing a held
+Remote secret-store write could otherwise race ahead of terminal cancellation
+and start a broker/PTY during shutdown. The full acceptance sweep exposed that
+ordering regression; the actual held-Remote-write case and Local/Remote owner
+recovery gates now pass with synchronous cancellation followed by joined
+cleanup. Failed cleanup still retains its private registry/lock for inspection.
+
 An owned rootless loopback OpenSSH server passed strict generated host-key
 verification and a real worker-originated HTTP request in 175.94 ms. A changed
 host key prevented execution before another request. The server used generated

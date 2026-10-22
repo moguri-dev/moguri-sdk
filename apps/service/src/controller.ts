@@ -2766,13 +2766,14 @@ export class ControlPlane extends EventEmitter {
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
-    await this.sandboxWorkspaces.close();
+    const preparations = this.sandboxWorkspaces.close();
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
-    const local = await Promise.allSettled([this.provider.close(), this.platform.close(options)]);
+    const native = this.sandbox.close();
+    const local = await Promise.allSettled([preparations, this.provider.close(), this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while (this.runs.size && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-    const stopped = await Promise.allSettled([this.remote.close(), this.sandbox.close()]);
+    const stopped = await Promise.allSettled([this.remote.close(), native]);
     const settled = [...local, ...stopped], failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Controller cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "controller_cleanup");
     if (failed?.status === "rejected") throw failed.reason;
