@@ -318,3 +318,13 @@ resolution. All 26 affected candidate/owned-role SIGKILL/cache cases pass,
 without weakening the original guards. A dedicated regression also covers
 active physical aliases with a poisoned resolver. That failed sweep is not
 reported as a full pass; the corrected source receives a complete rerun.
+
+The next sweep passed **1,044 of 1,045 cases in 905.22 s**. All three scope
+guards were restored. Its sole failure was `ENOTEMPTY` while removing an owned
+generated SSH tree after the actual model-connectivity assertions passed.
+Generated fixture teardown now uses Node's bounded filesystem retry
+(`maxRetries: 5`, `retryDelay: 50`) only after service/provider shutdown.
+Five consecutive actual SSH metadata-failure cases pass. This changes no
+production cancellation, remote-effect assertion, cleanup proof or admission
+rule; persistent cleanup failure still throws. The complete sweep is repeated
+again rather than relabeling the failed run.
