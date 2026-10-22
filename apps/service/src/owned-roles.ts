@@ -1,7 +1,7 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import {
-  CandidateGenerationDocumentSchema, CandidateGenerationInputSchema, MoguriError, parse, RoleSequenceStepSchema, sameCandidateRoot, successfulRoleEntry,
+  CandidateGenerationDocumentSchema, CandidateGenerationInputSchema, modelContextWindows, MoguriError, parse, RoleSequenceStepSchema, sameCandidateRoot, successfulRoleEntry,
   type ModelInfo, type RoleSequenceRecord, type Session, type Snapshot, type RetainedArtifact, type StoredEvent, type CandidateRoleProposalRead,
 } from "../../../packages/protocol/src/index.ts";
 import { RoleContractSchema, type RoleContractQuery, type RoleContractRead } from "../../../packages/protocol/src/role-contracts.ts";
@@ -116,7 +116,7 @@ export class OwnedRoles {
       validateContextSize(worst);
       role.inputBound = estimateModelContext({ systemPrompt: role.systemPrompt, messages: worst, tools: [] });
       const options = model.id === session.controls.modelId ? session.controls.modelOptions : undefined;
-      if (role.outputBound > model.maxTokens || role.inputBound + role.outputBound + 4096 > (options?.contextWindow ?? model.contextWindow)) throw new MoguriError("owned_role_bound", "The whole future role context/output cannot fit its selected model. No prefix, truncation or smaller bound was substituted.", 409);
+      if (role.outputBound > model.maxTokens || role.inputBound + role.outputBound + 4096 > (options?.contextWindow ?? modelContextWindows(model).values[0] ?? 0)) throw new MoguriError("owned_role_bound", "The whole future role context/output cannot fit its selected model. No prefix, truncation or smaller bound was substituted.", 409);
     }
     parse(OwnedRoleDocumentSchema, document);
     const text = JSON.stringify(document);

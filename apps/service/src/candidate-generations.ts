@@ -1,6 +1,6 @@
 import type { Message, AssistantMessage } from "@earendil-works/pi-ai";
 import {
-  CandidateDocumentSchema, KUPO_MODEL_ID, MoguriError, parse, sameCandidateRoot,
+  CandidateDocumentSchema, KUPO_MODEL_ID, modelContextWindows, MoguriError, parse, sameCandidateRoot,
   type CandidateDocument, type EventInput, type ModelInfo, type RetainedArtifact, type Session, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 import {
@@ -9,7 +9,7 @@ import {
 } from "../../../packages/protocol/src/candidate-generations.ts";
 import { candidatePatch } from "./candidate-files.ts";
 import type { CandidateRuntime } from "./candidates.ts";
-import { estimateModelContext } from "./model-controls.ts";
+import { estimateModelContext, validateModelOptions } from "./model-controls.ts";
 import { digest, EventStore } from "./store.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { assistantMessage } from "./worker-protocol.ts";
@@ -73,6 +73,7 @@ export class CandidateGenerations {
     const model = snapshot.provider.models.find((model) => model.id === session.controls.modelId);
     if (!model || model.synthetic || model.id === KUPO_MODEL_ID || !model.apiModelId || !model.providerId ||
       !model.environments?.includes("Local") || !Number.isSafeInteger(model.maxTokens) || !model.maxTokens || model.maxTokens < 1) throw new MoguriError("candidate_generation_model", "Select an available fixed model with known actual output bounds. No model, kupo workflow or provider was substituted.", 409);
+    validateModelOptions(model, session.controls.modelOptions);
     const prompt = `${this.host.prompt(session)}\n\n${CANDIDATE_GENERATION_PROMPT}`;
     const binding = digest(JSON.stringify({ model, options: session.controls.modelOptions ?? null, prompt }));
     return { session, model: { ...model, maxTokens: model.maxTokens, apiModelId: model.apiModelId, providerId: model.providerId }, binding, prompt };
@@ -87,7 +88,7 @@ export class CandidateGenerations {
       source: source.source, stage: source.stage, authorityDigest: source.authorityDigest, task: input.task, files: source.files,
       modelId: selected.model.id, modelBindingDigest: selected.binding, systemPrompt: selected.prompt, estimatedInputTokens: 0, maxOutputTokens: 1 };
     document.estimatedInputTokens = estimateModelContext({ systemPrompt: document.systemPrompt, messages: candidateGenerationContext(document), tools: [] });
-    document.maxOutputTokens = Math.min(selected.model.maxTokens, 8192, (selected.session.controls.modelOptions?.contextWindow ?? selected.model.contextWindow) - document.estimatedInputTokens - 4096);
+    document.maxOutputTokens = Math.min(selected.model.maxTokens, 8192, (selected.session.controls.modelOptions?.contextWindow ?? modelContextWindows(selected.model).values[0] ?? 0) - document.estimatedInputTokens - 4096);
     if (!Number.isSafeInteger(document.maxOutputTokens) || document.maxOutputTokens < 1) throw new MoguriError("candidate_generation_context", "The selected source/prompt exceeds this model's working context. Select fewer files or a compatible model; no history was dropped.", 409);
     parse(CandidateGenerationDocumentSchema, document);
     const text = JSON.stringify(document);

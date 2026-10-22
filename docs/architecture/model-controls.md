@@ -45,6 +45,10 @@ choices. Existing pi-ai (MIT), React (MIT), TypeBox (MIT), estimates and event
 authority are reused without a new dependency. No new model role or paid call is
 introduced. Migration/restart coverage must preserve legacy arbitrary settings
 and refuse their use until explicitly corrected, rather than rewriting events.
+Pool eligibility/classifier metadata, candidate-generation previews and complete
+future owned-role bounds use the same actual default working window, not an
+unselectable theoretical maximum. Pool admission includes request headroom;
+none of these calculations authorizes a public compound workflow or a paid call.
 
 The issue's fresh Phase 0 run on macOS arm64 measured generated provider
 cancellation at 31.04 ms, SQLite append p95 at 0.053 ms, crash projection rebuild

@@ -2031,7 +2031,7 @@ export class ControlPlane extends EventEmitter {
               policyDigest, contextDigest: this.routingContextDigest(current), classifierModelId: pool.classifier.id, candidateModelIds: pool.candidates.map((model) => model.id),
               policy: structuredClone(this.projection.settings.values.kupo), status: "planning", classifierStepId: request.stepId, plan: null, diagnostic: null };
           }
-          if (phase === "router") routedContext = [{ role: "user", content: JSON.stringify({ state: canonicalContext.map((message) => ({ ...message, timestamp: 0 })), candidates: pool.candidates.map((model) => ({ id: model.id, name: model.name, source: model.source, endpointBoundary: model.endpointBoundary ?? "network", contextWindow: model.contextWindow, maxTokens: model.maxTokens })) }), timestamp: Date.now() }];
+          if (phase === "router") routedContext = [{ role: "user", content: JSON.stringify({ state: canonicalContext.map((message) => ({ ...message, timestamp: 0 })), candidates: pool.candidates.map((model) => ({ id: model.id, name: model.name, source: model.source, endpointBoundary: model.endpointBoundary ?? "network", contextWindow: modelContextWindows(model).values[0], maxTokens: model.maxTokens })) }), timestamp: Date.now() }];
         }
         const metadata = this.provider.state.models.find((model) => model.id === modelId);
         const configured = modelRequest(phase === "router" ? { ...prepared.model, maxTokens: Math.min(128, prepared.model.maxTokens) } : prepared.model, synthetic ? undefined : current.controls.modelOptions, {

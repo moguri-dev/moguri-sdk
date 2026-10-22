@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { modelContextWindows } from "../packages/protocol/src/index.ts";
+import { defaultKupoSettings, modelContextWindows } from "../packages/protocol/src/index.ts";
 import { validateModelOptions } from "../apps/service/src/model-controls.ts";
+import { kupoAvailability, kupoPool } from "../apps/service/src/routing.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { ownedSequenceFixture } from "./fixtures/owned-sequence-api.ts";
+import { candidateGenerationFixture } from "./fixtures/candidate-generation-api.ts";
 
 test("working windows use the exact maximum and floored half, or only actual provider declarations", () => {
   assert.deepEqual(modelContextWindows({ contextWindow: 32769 }), { source: "maximum-and-half", values: [32769, 16384] });
@@ -17,6 +20,35 @@ test("working windows use the exact maximum and floored half, or only actual pro
   assert.throws(() => validateModelOptions({ contextWindow: 32768 }, { contextWindow: 24576 }), /supported|offered/i);
   assert.throws(() => validateModelOptions(declared, { contextWindow: 131072 }), /supported|offered/i);
   validateModelOptions(declared, { contextWindow: 32768 });
+});
+
+test("pool eligibility and its synthetic capacity use the actual declared default window with request headroom", () => {
+  const model = { id: "generated-window-model", name: "Generated declared windows", contextWindow: 131072, supportedContextWindows: [8192],
+    imageInput: false, maxTokens: 128, source: "local" as const, endpointBoundary: "loopback" as const };
+  const policy = { ...defaultKupoSettings(), enabled: true, classifierModelId: model.id, approvedModelIds: [model.id] };
+  assert.throws(() => kupoPool(policy, [model], "Local", 4000), /fits|context/);
+  assert.equal(kupoPool(policy, [model], "Local", 3000).candidates.length, 1);
+  assert.equal(kupoAvailability(policy, [model], false).model?.contextWindow, 8192);
+});
+
+test("owned-role preview reserves complete future context against the declared window, not the theoretical maximum", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await ownedSequenceFixture({ contextWindow: 131072, supportedContextWindows: [8192] });
+  try {
+    await assert.rejects(() => fixture.execution.preview(fixture.input), /whole future role context|working context/i);
+    assert.equal(fixture.requests.length, 0);
+    assert.equal(fixture.control.snapshot().budgetPlans.length, 0);
+  } finally { await fixture.close(); }
+});
+
+test("generation preview refuses a declared window too small for the exact reviewed instructions before a paid call", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await candidateGenerationFixture(undefined, { contextWindow: 131072, supportedContextWindows: [8192] });
+  try {
+    const settings = structuredClone(fixture.sdk.settings.get()!.values);
+    settings.systemPrompt = "Generated long reviewed system instructions. ".repeat(1200);
+    await fixture.sdk.command({ type: "settings.update", settings, expectedRevision: fixture.sdk.settings.get()!.revision, acknowledgePromptRisk: true });
+    await assert.rejects(() => fixture.sdk.candidates.generatePreview(fixture.sessionId, fixture.workspace.id, fixture.input), /working context/);
+    assert.equal(fixture.requests.length, 0);
+  } finally { await fixture.close(); }
 });
 
 test("SDK context choices bind provider windows, reject stale values and record the actual request window", { skip: process.platform !== "darwin" }, async () => {
