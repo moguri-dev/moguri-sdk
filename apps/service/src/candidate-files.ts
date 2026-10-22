@@ -44,6 +44,7 @@ export function candidateDocument(text: string, record: CandidateRecord): Candid
   try { value = JSON.parse(text); } catch (error) { if (error instanceof SyntaxError) throw new MoguriError("candidate_document", "The retained candidate document is not valid versioned JSON.", 409); throw error; }
   const document = parse(CandidateDocumentSchema, value), patch = candidatePatch(document.patch);
   if (!sameCandidateRoot(document.source, record.source) || !sameCandidateRoot(document.stage, record.stage) || !sameCandidateRoleOrigin(document.roleOrigin, record.roleOrigin) ||
+    JSON.stringify(document.compoundOrigin) !== JSON.stringify(record.compoundOrigin) ||
     JSON.stringify(patch.edits.map(({ path }) => path)) !== JSON.stringify(record.paths)) throw new MoguriError("candidate_document", "Retained candidate roots or ordered paths disagree with their original record.", 409);
   return { ...document, patch };
 }

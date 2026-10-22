@@ -99,6 +99,11 @@ export const successfulRoleEntry = (entry: BudgetEntry | undefined): boolean => 
   entry.outputTokens <= entry.reportedTokens && entry.outputTokens <= entry.outputLimit && entry.outcome === "stop" && !entry.outputLimitViolation;
 
 export function validateRoleSequenceLedger(records: RoleSequenceRecord[], plans: BudgetPlan[], entries: BudgetEntry[]): void {
+  validateRoleLedger(records.map((record) => ({ ...record, active: record.status === "running", complete: record.status === "completed" })), plans, entries, corrupt);
+}
+export type RoleLedgerOwner = Pick<RoleSequenceRecord, "id" | "profileId" | "sessionId" | "ownerSessionId" | "ownerTurnId" | "projectId" | "folderId" |
+  "env" | "commandId" | "authorityDigest" | "steps"> & { active: boolean; complete: boolean };
+export function validateRoleLedger(records: RoleLedgerOwner[], plans: BudgetPlan[], entries: BudgetEntry[], corrupt: (message: string) => never): void {
   const usedPlans = new Set<string>(), usedSteps = new Set<string>(), commands = new Set<string>();
   const planned = new Map(plans.map((plan) => [plan.id, plan])), started = new Map(entries.map((entry) => [entry.id, entry]));
   if (planned.size !== plans.length || started.size !== entries.length) corrupt("Role accounting contains duplicate original plan/step identities.");
@@ -113,7 +118,7 @@ export function validateRoleSequenceLedger(records: RoleSequenceRecord[], plans:
         plan.inputBound !== step.inputBound || plan.outputBound !== step.outputBound) corrupt("An original role lost its exact retained planned capacity/model/owner.");
       usedPlans.add(step.planId);
       if (step.stepId === null) {
-        if (plan.status === "consumed" || record.status === "running" && step.state === "pending" && plan.status !== "held") corrupt("An undispatched role cannot borrow consumed/released capacity.");
+        if (plan.status === "consumed" || record.active && step.state === "pending" && plan.status !== "held") corrupt("An undispatched role cannot borrow consumed/released capacity.");
         continue;
       }
       const entry = started.get(step.stepId);
@@ -125,7 +130,7 @@ export function validateRoleSequenceLedger(records: RoleSequenceRecord[], plans:
       const success = successfulRoleEntry(entry);
       // Raw observations can precede derived settlement, but never authorize the next role by themselves.
       if (step.state === "recorded" && entry.status === "settled" && step.outcome !== entry.outcome || record.steps.slice(index + 1).some((later) => later.stepId !== null) && !success ||
-        record.status === "completed" && !success) corrupt("Unknown/failed model accounting cannot authorize a later role or successful sequence.");
+        record.complete && !success) corrupt("Unknown/failed model accounting cannot authorize a later role or successful sequence.");
     }
   }
 }

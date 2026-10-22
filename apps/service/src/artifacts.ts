@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import {
-  legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
+  activeCompound, legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
   type ArtifactResponse, type ArtifactSource, type ArtifactSourcePreview, type CommandResult, type EventInput, type ProjectArtifactChoice,
   type ProjectArtifactPreview, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type ArtifactMaterializationPreview, type ArtifactMaterialization,
   type ArtifactMaterializeOptions, type CapabilityJob, type Project, type CandidatePatch, type SandboxPublication,
@@ -68,9 +68,9 @@ export class ArtifactRuntime {
       { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "user-imported-proposal", contentDigest: digest(JSON.stringify(patch)) },
     ]);
   }
-  generation(session: Session, text: string, task: string, purpose: "generation" | "roles" = "generation"): RetainedArtifact {
-    return this.create(session, "report", `${purpose === "roles" ? "Roles" : "Generation"}: ${task.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
-      { eventId: null, sessionId: session.id, messageId: null, actor: "user", modelId: null, outcome: purpose === "roles" ? "owned-role-request" : "generation-request", contentDigest: digest(task) },
+  generation(session: Session, text: string, task: string, purpose: "generation" | "roles" | "compound" = "generation"): RetainedArtifact {
+    return this.create(session, "report", `${purpose === "compound" ? "Compound" : purpose === "roles" ? "Roles" : "Generation"}: ${task.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
+      { eventId: null, sessionId: session.id, messageId: null, actor: "user", modelId: null, outcome: purpose === "compound" ? "reviewed-compound-request" : purpose === "roles" ? "owned-role-request" : "generation-request", contentDigest: digest(task) },
       { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "reviewed-source-snapshot", contentDigest: digest(text) },
     ]);
   }
@@ -147,6 +147,11 @@ export class ArtifactRuntime {
   private roleHistory(id: string): StoredEvent[] {
     return this.host.events().filter((event) => event.artifact_id === id && event.event_type === "role.sequence_recorded");
   }
+  private compoundHistory(id: string): StoredEvent[] {
+    return this.host.events().filter((event) => event.artifact_id === id && (event.event_type === "compound.recorded" ||
+      event.event_type === "job.started" && event.payload.job.compoundWorkflowId === id ||
+      (event.event_type === "job.progress" || event.event_type === "job.finished") && event.payload.compoundWorkflowId === id));
+  }
   private nativeHistory(id: string): StoredEvent[] {
     return this.host.events().filter((event) => event.artifact_id === id && (event.event_type === "sandbox.execution_recorded" ||
       event.event_type === "sandbox.frame_recorded" || event.event_type === "sandbox.publication_recorded" ||
@@ -156,9 +161,11 @@ export class ArtifactRuntime {
   private deleted(id: string): EventInput {
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === id);
     const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === id);
+    const compound = this.host.snapshot().compoundWorkflows.find((workflow) => workflow.id === id);
     return { event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: id,
       ...(generation ? { generationIntent: { commandId: generation.commandId, commandDigest: generation.commandDigest } } : {}),
-      ...(sequence ? { roleSequenceIntent: { commandId: sequence.commandId, commandDigest: sequence.commandDigest } } : {}) } };
+      ...(sequence ? { roleSequenceIntent: { commandId: sequence.commandId, commandDigest: sequence.commandDigest } } : {}),
+      ...(compound ? { compoundIntent: { commandId: compound.commandId, commandDigest: compound.commandDigest } } : {}) } };
   }
   private source(sessionId: string, kind: "message" | "tool", id: string): ArtifactSourcePreview {
     this.session(sessionId);
@@ -184,8 +191,10 @@ export class ArtifactRuntime {
       const candidateEvents = this.candidateEvents(artifact.id);
       const generationEvents = this.generationHistory(artifact.id);
       const roleEvents = this.roleHistory(artifact.id);
+      const compoundEvents = this.compoundHistory(artifact.id);
       return { ...artifact, revisions: this.revisions(artifact.id).map(({ revision, contentDigest }) => ({ revision, contentDigest })),
-        ...(candidateEvents.length ? { candidateEvents } : {}), ...(generationEvents.length ? { generationEvents } : {}), ...(roleEvents.length ? { roleEvents } : {}) };
+        ...(candidateEvents.length ? { candidateEvents } : {}), ...(generationEvents.length ? { generationEvents } : {}), ...(roleEvents.length ? { roleEvents } : {}),
+        ...(compoundEvents.length ? { compoundEvents } : {}) };
     }) })) };
   }
   private export(artifacts: RetainedArtifact[], filename: string): ArtifactExport {
@@ -206,6 +215,8 @@ export class ArtifactRuntime {
           if (event.payload.candidate.applyResultDigest) hashes.add(event.payload.candidate.applyResultDigest);
           const origin = event.payload.candidate.roleOrigin;
           if (origin) { hashes.add(origin.sequenceInputDigest); hashes.add(origin.roleInputDigest); hashes.add(origin.resultDigest); }
+          const compound = event.payload.candidate.compoundOrigin;
+          if (compound) { hashes.add(compound.workflowInputDigest); hashes.add(compound.roleInputDigest); hashes.add(compound.resultDigest); }
         }
         if (event.event_type === "job.finished" && event.payload.resultDigest) hashes.add(event.payload.resultDigest);
       }
@@ -229,6 +240,17 @@ export class ArtifactRuntime {
       }
       const roleResults = [...roleHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
       if (roleEvents.length) account(JSON.stringify(roleEvents));
+      const compoundEvents = this.compoundHistory(artifact.id), compoundHashes = new Set<string>();
+      for (const event of compoundEvents) {
+        if (event.event_type === "compound.recorded") {
+          compoundHashes.add(event.payload.workflow.inputDigest);
+          for (const step of event.payload.workflow.steps) for (const hash of [step.inputDigest, step.resultDigest]) if (hash) compoundHashes.add(hash);
+          for (const validation of event.payload.workflow.validations) for (const hash of [validation.documentDigest, validation.resultDigest]) if (hash) compoundHashes.add(hash);
+        }
+        if (event.event_type === "job.finished" && event.payload.resultDigest) compoundHashes.add(event.payload.resultDigest);
+      }
+      const compoundResults = [...compoundHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
+      if (compoundEvents.length) account(JSON.stringify(compoundEvents));
       const nativeEvents = this.nativeHistory(artifact.id), nativeHashes = new Set<string>();
       for (const event of nativeEvents) if (event.event_type === "sandbox.execution_recorded") {
         nativeHashes.add(event.payload.execution.inputDigest);
@@ -243,14 +265,17 @@ export class ArtifactRuntime {
       return { artifact, revisions, ...(events.length ? { candidate: { events, results } } : {}),
         ...(generationEvents.length ? { generation: { events: generationEvents, results: generationResults } } : {}),
         ...(roleEvents.length ? { roles: { events: roleEvents, results: roleResults } } : {}),
+        ...(compoundEvents.length ? { compound: { events: compoundEvents, results: compoundResults } } : {}),
         ...(nativeEvents.length ? { native: { events: nativeEvents, results: nativeResults } } : {}) };
     });
     const roleLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.roleOrigin));
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const compoundLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.compoundOrigin));
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
   async removal(projectId: string, choice?: ProjectArtifactChoice): Promise<{ events: EventInput[]; forget: string[] }> {
+    if (this.host.snapshot().compoundWorkflows.some((workflow) => workflow.projectId === projectId && activeCompound(workflow))) throw new MoguriError("compound_busy", "Stop and settle the actual public workflow before reviewing independent project retention/removal.", 409);
     if ((this.host.snapshot().sandboxPublications ?? []).some((publication) => publication.projectId === projectId && publication.status === "publishing")) throw new MoguriError("sandbox_publication_busy", "Stop and settle original native source publication before reviewing its independent retention or project removal.", 409);
     if ((this.host.snapshot().sandboxExecutions ?? []).some((execution) => execution.projectId === projectId &&
       (!["owned-guest-stopped", "acknowledged"].includes(execution.cleanup) || execution.inspectionIntent?.status === "running"))) throw new MoguriError("sandbox_busy", "Stop/reconcile original native guests and settle their inspection before reviewing project removal or independent report deletion.", 409);
@@ -410,12 +435,14 @@ export class ArtifactRuntime {
     const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === artifact.id);
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === artifact.id);
     const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === artifact.id);
+    const compound = this.host.snapshot().compoundWorkflows.find((workflow) => workflow.id === artifact.id);
     const native = (this.host.snapshot().sandboxExecutions ?? []).find((execution) => execution.id === artifact.id);
     const nativeBusy = native && (!["owned-guest-stopped", "acknowledged"].includes(native.cleanup) || native.inspectionIntent?.status === "running");
     const publication = (this.host.snapshot().sandboxPublications ?? []).find((value) => value.id === artifact.id);
     const activeCandidate = candidate && (["staging", "applying"].includes(candidate.status) ||
       this.host.snapshot().jobs.some((job) => job.candidate?.candidateId === candidate.id && ["running", "waiting_input"].includes(job.status)));
     if (command.type === "artifact.delete") {
+      if (compound && activeCompound(compound)) throw new MoguriError("compound_busy", "Stop and settle this public workflow before deleting its independently retained input, roles and actual tests.", 409);
       if (publication?.status === "publishing") throw new MoguriError("sandbox_publication_busy", "Stop and settle this original source writer before deleting its independently retained review and effects.", 409);
       if (nativeBusy) throw new MoguriError("sandbox_busy", "Stop/reconcile the original native guest before deleting its independent input/result/owner record.", 409);
       if (sequence?.status === "running") throw new MoguriError("role_sequence_busy", "Stop and settle this role sequence before deleting its independent input/result history.", 409);
@@ -424,6 +451,8 @@ export class ArtifactRuntime {
       return finish([this.deleted(artifact.id)], { id: artifact.id }, { artifacts: [artifact.id] });
     }
     if (candidate && command.changes.text !== undefined) throw new MoguriError("candidate_document", "A candidate's exact proposal document is immutable. Export it or create a separately reviewed new proposal; renaming/organizing does not change its bytes.", 409);
+    if (compound && command.changes.text !== undefined) throw new MoguriError("compound_document", "Public workflow input, actual role results and test reviews are immutable. Export them or create a separate document; metadata cannot change provenance.", 409);
+    if (compound && activeCompound(compound) && command.changes.status === "archived") throw new MoguriError("compound_busy", "Settle this exact public workflow before archiving its independently retained report.", 409);
     if (publication && command.changes.text !== undefined) throw new MoguriError("sandbox_document", "Native publication input, actual acceptance and filesystem attempts are immutable. Create a separate document instead.", 409);
     if (publication?.status === "publishing" && command.changes.status === "archived") throw new MoguriError("sandbox_publication_busy", "Settle this exact source writer before archiving its independent report.", 409);
     if (native && command.changes.text !== undefined) throw new MoguriError("sandbox_document", "Native input, actual boundary and retained after-state are immutable. Export them or create a separate document; metadata edits cannot change source provenance.", 409);

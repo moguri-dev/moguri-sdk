@@ -29,6 +29,8 @@ import { RoleSequenceQuerySchema, type RoleSequenceRecord, type RoleSequenceResp
 import { ModelEvidenceQuerySchema, type ModelEvidenceResponse } from "./model-evidence.ts";
 import { RoleContractQuerySchema, type RoleContractRead } from "./role-contracts.ts";
 import { SandboxCommandSchema, SandboxQuerySchema, type SandboxResponse, type SandboxWorkspace, type SandboxExecution, type SandboxReadiness, type SandboxPublication } from "./sandbox.ts";
+import { CompoundCommandSchema, CompoundQuerySchema, type CompoundResponse, type CompoundWorkflow } from "./compound.ts";
+export * from "./compound.ts";
 export * from "./candidates.ts";
 export * from "./candidate-generations.ts";
 export * from "./role-sequences.ts";
@@ -125,6 +127,7 @@ const section = Type.Union([
   Type.Literal("kupo"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  CompoundCommandSchema,
   CandidateCommandSchema,
   CandidateGenerationCommandSchema,
   RemoteMcpCommandSchema,
@@ -169,6 +172,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  CompoundQuerySchema,
   RemoteMcpQuerySchema,
   RepositoryQuerySchema,
   TelemetryQuerySchema,
@@ -226,6 +230,7 @@ export interface CapabilityJob {
   memory?: MemoryIndexIntent;
   candidate?: CandidateJobIntent;
   sandboxPublicationId?: string;
+  compoundWorkflowId?: string;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
@@ -245,6 +250,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   budgetPlans: BudgetPlan[];
   candidateGenerations: CandidateGenerationRecord[];
   roleSequences: RoleSequenceRecord[];
+  compoundWorkflows: CompoundWorkflow[];
   budgetPolicy: { revision: number; limit: BudgetLimit | null };
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
@@ -266,6 +272,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse =
+  | CompoundResponse
   | CandidateResponse
   | CandidateGenerationResponse
   | RoleSequenceResponse

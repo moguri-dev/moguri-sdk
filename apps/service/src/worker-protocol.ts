@@ -1,10 +1,11 @@
 import { Type, type Static, type Message, type AssistantMessage, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, ToolCallSchema, type ToolCall, type SessionMode, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
+import { CompoundValidationResultSchema, isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, ToolCallSchema, type ToolCall, type SessionMode, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 import type { FolderPolicy } from "./project-policy.ts";
 import type { PreparedModel } from "./provider.ts";
 import { UserPlanInputSchema } from "./user-plan.ts";
 import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./remote-mcp-runtime.ts";
+import type { CompoundValidationOperation } from "./compound-validation.ts";
 
 const toolCall = ToolCallSchema;
 export const WorkerRequestSchema = Type.Union([
@@ -15,6 +16,8 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: MAX_TEXT + 4096 }), isError: Type.Boolean(), outcome: Type.String() }),
   Type.Object({ kind: Type.Literal("user-plan.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: PlanFileResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("mcp.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: RemoteMcpExecutionResultSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("validation.boundary"), requestId: Type.String(), stepId: Type.String(), validationId: Type.String() }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("validation.complete"), requestId: Type.String(), stepId: Type.String(), validationId: Type.String(), result: CompoundValidationResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("delta"), stepId: Type.String(), text: Type.String({ maxLength: MAX_TEXT }) }),
   Type.Object({ kind: Type.Literal("output"), stepId: Type.String(), callId: Type.String(), text: Type.String({ maxLength: 16_384 }) }),
   Type.Object({ kind: Type.Literal("process"), stepId: Type.String(), callId: Type.String(), pid: Type.Integer({ minimum: 1 }) }),
@@ -30,10 +33,10 @@ export const UserMcpOperationSchema = Type.Object({
   kind: Type.Literal("mcp.call"), stepId: Type.String({ minLength: 1, maxLength: 128 }), call: toolCall,
 }, { additionalProperties: false });
 export type UserMcpOperation = Static<typeof UserMcpOperationSchema>;
-export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; operation?: UserPlanOperation | UserMcpOperation }
+export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; operation?: UserPlanOperation | UserMcpOperation }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate"; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string };
-export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean; continue?: true } | DelegatedResult | RemoteMcpAuthorization; error?: string; halt?: true };
+export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy } | { accepted: boolean; continue?: true; validation?: CompoundValidationOperation } | DelegatedResult | RemoteMcpAuthorization; error?: string; halt?: true };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" };
 export function parentMessage(value: unknown): ParentMessage {
   if (!isRecord(value)) throw new Error("Invalid parent message.");
@@ -44,6 +47,7 @@ export function parentMessage(value: unknown): ParentMessage {
     (value.error === undefined || typeof value.error === "string") &&
     (value.value === undefined || isRecord(value.value))) return value as ParentMessage;
   if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) {
+    if (value.publicCompound !== undefined && (value.publicCompound !== true || value.root !== null || value.readOnly !== true || value.env !== "Local" || value.operation !== undefined)) throw new Error("Public compound models need an explicit Local, root-less, read-only owner. Private roles cannot adopt validation authority.");
     if (value.env !== undefined && !["Local", "Remote", "Sandbox"].includes(String(value.env))) throw new Error("Invalid explicit worker execution environment. No fallback.");
     if (value.operation !== undefined && (!(Value.Check(UserPlanOperationSchema, value.operation) || Value.Check(UserMcpOperationSchema, value.operation)) || value.root === null || value.context.length || value.readOnly !== false)) throw new Error("Invalid owned user operation. No model or filesystem effect was started.");
     return value as ParentMessage;

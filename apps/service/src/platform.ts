@@ -14,6 +14,7 @@ import {
   isCandidateCommand, isCandidateQuery,
   isCandidateGenerationCommand, isCandidateGenerationQuery, type CandidateGenerationCommand, type CandidateGenerationQuery, type CandidateGenerationResponse,
   isRoleSequenceQuery,
+  isCompoundCommand, isCompoundQuery, type CompoundCommand, type CompoundQuery, type CompoundResponse, type CompoundCandidateProposal,
   isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
@@ -97,6 +98,9 @@ export interface PlatformHost {
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
   generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleProposal(id: string): import("../../../packages/protocol/src/index.ts").CandidateRoleProposalRead;
+  compoundProposal(workflowId: string, stepId: string): CompoundCandidateProposal;
+  compoundQuery(query: CompoundQuery): Promise<CompoundResponse>;
+  compoundCommand(command: CompoundCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleContract(query: import("../../../packages/protocol/src/role-contracts.ts").RoleContractQuery): import("../../../packages/protocol/src/role-contracts.ts").RoleContractRead;
   modelEvidence(id: string): Promise<import("../../../packages/protocol/src/index.ts").ModelEvidenceReport>;
   planSaveQuery(query: PlanSaveQuery): PlanSaveResponse;
@@ -193,6 +197,7 @@ export class PlatformRuntime {
       commit: (events) => this.host.commit(events),       artifact: (session, text, summary, patch, sources) => this.artifacts.candidate(session, text, summary, patch, sources),
       localRootBusy: host.localRootBusy, closingProject: host.closingProject, wake: host.wake,
       roleProposal: host.roleProposal,
+      compoundProposal: host.compoundProposal,
       job: (kind, projectId, sessionId, workspaceId, execute, start, settled, lifecycle) => this.job(kind, projectId, sessionId, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
     this.nativePublications = new SandboxPublications(store, {
@@ -479,6 +484,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isCompoundQuery(query)) return this.host.compoundQuery(query);
     if (isSandboxQuery(query)) return this.host.sandboxQuery(query);
     if (isRoleSequenceQuery(query)) return this.roles.query(query);
     if (query.type === "role.contract.read") return this.host.roleContract(query);
@@ -654,6 +660,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isCompoundCommand(command)) return this.host.compoundCommand(command, finish);
     if (isSandboxCommand(command)) return this.host.sandboxCommand(command, finish);
     if (isCandidateGenerationCommand(command)) return this.host.generationCommand(command, finish);
     if (isCandidateCommand(command)) return this.candidates.execute(command, finish);

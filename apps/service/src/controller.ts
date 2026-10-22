@@ -53,6 +53,8 @@ import { captureSandboxResult, sandboxResult } from "./sandbox-results.ts";
 import { sandboxProviderDestination } from "./sandbox-policy.ts";
 import { readWorkspace } from "./workspace-reads.ts";
 import type { SandboxCommand, SandboxQuery, SandboxResponse, SandboxExecution } from "../../../packages/protocol/src/index.ts";
+import { CompoundWorkflows } from "./compound-workflows.ts";
+import { compoundPool } from "./compound-policy.ts";
 
 interface McpDispatch { id: string; scopeDigest: string; callDigest: string; hadAccess: boolean; access: string[] }
 
@@ -81,6 +83,7 @@ interface Run {
   compaction?: { id: string; context: Message[] };
   generation?: { id: string; context: Message[]; current?: () => void };
   roleSequence?: { id: string; current?: () => void; deadline?: ReturnType<typeof setTimeout>; expired?: boolean };
+  compound?: { id: string; timeoutMs: number; deadline?: ReturnType<typeof setTimeout> };
   planSave?: {
     id: string; operation: UserPlanOperation; finish: WorkspaceFinish;
     resolve(result: CommandResult): void; reject(error: Error): void;
@@ -116,6 +119,7 @@ export class ControlPlane extends EventEmitter {
   readonly platform: PlatformRuntime;
   readonly generations: CandidateGenerations;
   readonly ownedRoles: OwnedRoles;
+  readonly compound: CompoundWorkflows;
   private externalRuns = new Map<string, ExternalRun>();
   private writerReservations = new Map<string, string>();
   private deletingSessions = new Set<string>();
@@ -200,6 +204,8 @@ export class ControlPlane extends EventEmitter {
       subagent: (session, prompt) => this.subagent(session, prompt),
       stopOwnedSession: (id) => this.stop(id),
       cancelExternalJob: (id) => {
+        const compound = this.projection.compoundWorkflows.find((record) => record.validations.some((validation) => validation.jobId === id && ["ready", "running"].includes(validation.status)));
+        if (compound) { this.stop(compound.sessionId); return true; }
         const external = [...this.externalRuns.values()].find((run) => run.jobId === id);
         if (!external) return false;
         this.stop(external.sessionId); return true;
@@ -211,6 +217,7 @@ export class ControlPlane extends EventEmitter {
       removeProject: (id, finish, artifacts) => this.removeProject(id, finish, artifacts),
       validateAdmission: (session, attachments = []) => {
         if (session.status === "archived") throw new MoguriError("archived", "Restore the session before running queued work.");
+        this.assertOrdinaryTurn(session);
         this.available(session.controls, true, session);
         this.imageModel(session, attachments);
         if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and resume this workspace first.", 409);
@@ -223,6 +230,9 @@ export class ControlPlane extends EventEmitter {
       generationQuery: (query) => this.generations.query(query),
       generationCommand: (command, finish) => this.generations.execute(command, finish),
       roleProposal: (id) => this.ownedRoles.proposal(id),
+      compoundProposal: (id, stepId) => this.compound.proposal(id, stepId),
+      compoundQuery: (query) => this.compound.query(query),
+      compoundCommand: (command, finish) => this.compound.execute(command, finish),
       roleContract: (query) => this.ownedRoles.contract(query),
       modelEvidence: (id) => this.provider.evidence(id, AbortSignal.timeout(10_000)),
       planSaveQuery: (query) => this.planSaveQuery(query),
@@ -294,6 +304,16 @@ export class ControlPlane extends EventEmitter {
       artifact: (session, text, task) => this.platform.artifacts.generation(session, text, task, "roles"),
       start: (document, artifact, finish) => this.startOwnedRoles(document, artifact, finish),
     });
+    this.compound = new CompoundWorkflows(store, {
+      snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events) => this.commit(events),
+      candidates: this.platform.candidates, budgets: this.platform.budgets, models: this.provider, repositories: this.platform.repositories,
+      projects: () => this.platform.sessions.projects, prompt: (session) => this.platform.prompt(session),
+      globalLimit: () => this.profileHooks?.globalBudget().limit ?? null, idle: (session) => this.generationIdle(session),
+      artifact: (session, text, task) => this.platform.artifacts.generation(session, text, task, "compound"),
+      launch: (session, id, timeoutMs) => this.launchRun(session, id, { compound: { id, timeoutMs } }),
+      stop: (sessionId, id) => { if (this.session(sessionId).turnId === id && this.runs.get(sessionId)?.compound?.id === id) this.stop(sessionId); },
+      changed: (listener) => { this.on("change", listener); return () => this.off("change", listener); },
+    });
     this.provider.onChange = () => {
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
       const signature = JSON.stringify(metadata);
@@ -310,6 +330,8 @@ export class ControlPlane extends EventEmitter {
     if (legacyOperations.length) this.commit(legacyOperations);
     const interruptedRoles = this.platform.roles.recover();
     if (interruptedRoles.length) this.commit(interruptedRoles);
+    const interruptedCompound = this.compound.recover();
+    if (interruptedCompound.length) this.commit(interruptedCompound);
     await this.platform.recover();
     const interruptedStages = this.sandboxWorkspaces.recover();
     if (interruptedStages.length) this.commit(interruptedStages);
@@ -341,6 +363,7 @@ export class ControlPlane extends EventEmitter {
             diagnostic: "Moguri restarted during this turn. Provider usage and process cleanup may be incomplete. Inspect the workspace before continuing; no operation was retried.",
             ...((this.projection.sandboxExecutions ?? []).some((entry) => entry.sessionId === session.id && entry.turnId === session.turnId) ? { workspaceEffects: "none" as const } :
               (this.projection.candidateGenerations.some((entry) => entry.sessionId === session.id && entry.id === session.turnId) ||
+              this.projection.compoundWorkflows.some((entry) => entry.sessionId === session.id && entry.id === session.turnId && this.compound.noSourceEffects(entry.id)) ||
               this.projection.roleSequences.some((entry) => entry.sessionId === session.id && entry.id === session.turnId)) &&
               !this.history.some((event) => event.turn_id === session.turnId && (event.event_type === "tool.started" || event.event_type === "process.started")) ? { workspaceEffects: "none" as const } : {}),
           }),
@@ -387,7 +410,12 @@ export class ControlPlane extends EventEmitter {
     if (controls.budget.kind === "limited" || this.projection.budgetPolicy.limit || this.profileHooks?.globalBudget().limit ||
       session && this.platform.budgets.status(session.id).limits.length) throw new MoguriError("routing_budget", "kupo finite budgets require qualified reserved wind-down and accepted-work checkpoint paths. This Single alpha cannot lift session/profile/global caps.", 409);
     if (controls.modelOptions && Object.keys(controls.modelOptions).length) throw new MoguriError("routing_options", "Working-context/thinking overrides are not yet qualified across a kupo pool. Pin a fixed model for those options.", 409);
-    kupoPool(this.projection.settings.values.kupo, this.provider.state.models, controls.env);
+    const policy = this.projection.settings.values.kupo;
+    if (policy.workflow === "compound") compoundPool(policy, this.provider.state.models, controls.env);
+    else kupoPool(policy, this.provider.state.models, controls.env);
+  }
+  private assertOrdinaryTurn(session: Session): void {
+    if (session.controls.modelId === KUPO_MODEL_ID && this.projection.settings.values.kupo.workflow === "compound") throw new MoguriError("compound_review_required", "Review the exact task/source, two owned candidate worktrees and configured project test through Compound before starting. Drafts and held prompts were preserved; no Single fallback.", 409);
   }
   private routingContextDigest(session: Session): string {
     const steers = session.queue.filter((item) => item.delivery === "steer" && item.targetTurnId === session.turnId);
@@ -461,6 +489,7 @@ export class ControlPlane extends EventEmitter {
       if (session?.id !== exceptSessionId && run.remoteRoot) roots.push(run.remoteRoot);
     }
     roots.push(...this.platform.engagement.writeRoots());
+    roots.push(...this.compound?.writeRoots(exceptJobId) ?? []);
     for (const execution of this.projection.sandboxExecutions ?? []) if (!["owned-guest-stopped", "acknowledged"].includes(execution.cleanup) || this.nativeReconciliations.has(execution.id)) roots.push(execution.stage.workspace);
     for (const job of this.projection.jobs.filter((job) => job.id !== exceptJobId && ["cache.install", "project.artifacts.materialize", "project.defaults", "candidate.stage", "candidate.apply", "sandbox.publish"].includes(job.kind) && ["running", "waiting_input"].includes(job.status))) {
       if (job.candidate) {
@@ -1582,7 +1611,7 @@ export class ControlPlane extends EventEmitter {
         if (session.queue.length && session.queue.every((item) => item.delivery === "steer") && !this.blocked(session)) {
           throw new MoguriError("unapplied_steer", "An unapplied steer belongs to its old turn. Explicitly queue it as a new turn or remove it.", 409);
         }
-        if (session.queue.some((item) => item.delivery !== "steer")) this.available(session.controls, true, session);
+        if (session.queue.some((item) => item.delivery !== "steer")) { this.assertOrdinaryTurn(session); this.available(session.controls, true, session); }
         this.paused.delete(session.id);
         finish([...session.queue.filter((item) => item.held && item.delivery !== "steer").map((item) => this.event(session, "queue.released", { messageId: item.id })), this.event(session, "session.resumed", {})]);
         this.pumpAll();
@@ -1622,6 +1651,7 @@ export class ControlPlane extends EventEmitter {
         this.revision(session.draft.revision, command.expectedRevision);
         if (command.held && command.delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
         if (!command.held) {
+          this.assertOrdinaryTurn(session);
           this.available(session.controls, true, session);
           this.fileModel(session, session.draft.attachments, session.draft.text);
           this.imageModel(session, session.draft.attachments);
@@ -1711,7 +1741,7 @@ export class ControlPlane extends EventEmitter {
   private originalContextEntries(sessionId: string): ContextEntry[] {
     const entries: ContextEntry[] = [];
     const userWrites = new Set(this.history.filter((event) => event.profile_id === this.profileId && event.session_id === sessionId && event.event_type === "turn.control_started" &&
-      (event.payload.purpose === "plan.save" || event.payload.purpose === "role.sequence")).map((event) => event.turn_id));
+      (event.payload.purpose === "plan.save" || event.payload.purpose === "role.sequence" || event.payload.purpose === "compound.workflow")).map((event) => event.turn_id));
     for (const event of this.history) if (event.profile_id === this.profileId && event.session_id === sessionId) {
       if (event.event_type === "session.created" && event.payload.contextDigest) {
         const context = contextMessages(JSON.parse(this.store.blob(event.payload.contextDigest)));
@@ -1748,6 +1778,7 @@ export class ControlPlane extends EventEmitter {
       if (session.kind === "subagent" && [...this.runs.values()].filter((run) => this.session(run.sessionId).kind === "subagent").length >= this.projection.settings.values.subagents.maxParallel) continue;
       let item = session.queue.find((item) => item.delivery !== "steer" && !item.held)!;
       try {
+        this.assertOrdinaryTurn(session);
         this.available(session.controls, true, session); this.imageModel(session, item.attachments);
         this.fileModel(session, item.attachments, item.text);
         this.attachments(session, item.attachments);
@@ -1764,16 +1795,16 @@ export class ControlPlane extends EventEmitter {
       this.launchRun(this.session(session.id), turnId);
     }
   }
-  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "planSave" | "mcpControl"> = {}): void {
-      const { compaction, generation, roleSequence, planSave, mcpControl } = control;
+  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl"> = {}): void {
+      const { compaction, generation, roleSequence, compound, planSave, mcpControl } = control;
       let owned: Run | undefined;
       try {
-        const context = planSave || mcpControl || roleSequence ? [] : generation?.context ?? compaction?.context ?? this.context(current.id); validateContextSize(context);
+        const context = planSave || mcpControl || roleSequence || compound ? [] : generation?.context ?? compaction?.context ?? this.context(current.id); validateContextSize(context);
         const project = current.projectId ? this.platform.managed.project(current) : undefined;
         let execution: RemoteExecution | undefined;
         let nativeExecution: SandboxExecution | undefined;
         if (current.controls.env === "Sandbox") {
-          if (compaction || generation || roleSequence || planSave || mcpControl) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No Local/SSH worker or alternate root was used.", 409);
+          if (compaction || generation || roleSequence || compound || planSave || mcpControl) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No Local/SSH worker or alternate root was used.", 409);
           const workspace = this.sandboxWorkspaces.current(current), config = this.sandbox.assertReady(), id = randomUUID();
           nativeExecution = { id, profileId: this.profileId, sessionId: current.id, projectId: current.projectId, turnId, workspaceId: workspace.id,
             sourceWorkspaceId: workspace.sourceWorkspaceId,
@@ -1799,8 +1830,8 @@ export class ControlPlane extends EventEmitter {
         const child = nativeExecution ? this.sandbox.launch(nativeExecution, (changes) => this.sandboxStatus(nativeExecution!.id, changes)) :
           execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
         const run: Run = { sessionId: current.id, turnId, child, root: nativeExecution && current.projectId ? nativeExecution.stage.workspace :
-          !generation && !roleSequence && current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, sandboxExecutionId: nativeExecution?.id,
-          abort: new AbortController(), calls: new Map(), granted: new Set(), scopedReadPolicies: new Map(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, roleSequence, planSave, mcpControl };
+          !generation && !roleSequence && !compound && current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, sandboxExecutionId: nativeExecution?.id,
+          abort: new AbortController(), calls: new Map(), granted: new Set(), scopedReadPolicies: new Map(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, roleSequence, compound, planSave, mcpControl };
         owned = run;
         if (planSave) { if (!execution) throw new MoguriError("plan_env", "User Remote plan work has no exact SSH execution.", 409); run.stepId = planSave.operation.stepId; }
         if (mcpControl) {
@@ -1809,6 +1840,12 @@ export class ControlPlane extends EventEmitter {
           run.granted.add(mcpControl.operation.call.id); run.declaredTools.add("mcp_gateway");
         }
         this.runs.set(current.id, run);
+        if (compound) compound.deadline = setTimeout(() => {
+          if (run.done) return;
+          try { this.stop(run.sessionId); }
+          catch (error) { console.error("Public compound deadline stop failed:", error instanceof MoguriError ? error.code : "compound_deadline"); }
+          finally { this.requestWorkerStop(run); }
+        }, compound.timeoutMs);
         if (roleSequence) {
           const timeout = this.ownedRoles.document(this.ownedRoles.record(roleSequence.id)).timeoutMs;
           roleSequence.deadline = setTimeout(() => {
@@ -1852,8 +1889,9 @@ export class ControlPlane extends EventEmitter {
             if (!run.done && !run.planSave?.terminal && !run.mcpControl?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: generation || roleSequence ? null : nativeExecution ? nativeExecution.root : execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
-          readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation) || Boolean(roleSequence), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
+        this.reply(run, { kind: "start", root: generation || roleSequence || compound ? null : nativeExecution ? nativeExecution.root : execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
+          readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation) || Boolean(roleSequence) || Boolean(compound),
+          ...(compound ? { publicCompound: true as const } : {}), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
         const diagnostic = error instanceof MoguriError ? error.message : "Agent worker launch failed. Rebuild Moguri and retry explicitly.";
@@ -1869,9 +1907,10 @@ export class ControlPlane extends EventEmitter {
         const execution = this.projection.executions.find((execution) => execution.turnId === turnId);
         this.commit([...(entry ? [this.compactionEvent(current, { ...entry, revision: entry.revision + 1, status: "failed", completedAt: new Date().toISOString(), diagnostic })] : []),
           ...(proposal ? [this.generations.event({ ...proposal, revision: proposal.revision + 1, status: "failed", updatedAt: new Date().toISOString(), diagnostic })] : []),
+          ...(compound ? this.compound.finish(compound.id, "failed", diagnostic) : []),
           ...(save ? [this.planSaveEvent(current, { ...save, revision: save.revision + 1, status: "failed", phase: "settled", updatedAt: new Date().toISOString(), diagnostic })] : []),
           ...(execution ? [this.event(current, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Worker launch was not confirmed. Inspect this exact remote execution; no replacement was started." })] : []),
-          this.event(current, "turn.finished", { outcome: "failed", diagnostic, ...(generation || roleSequence ? { workspaceEffects: "none" as const } : {}) })]);
+          this.event(current, "turn.finished", { outcome: "failed", diagnostic, ...(generation || roleSequence || compound ? { workspaceEffects: "none" as const } : {}) })]);
         planSave?.reject(new MoguriError("plan_save_failed", diagnostic, 409));
       }
   }
@@ -2189,6 +2228,19 @@ export class ControlPlane extends EventEmitter {
       if (request.kind !== "delegate" && request.kind !== "mcp.complete" && request.kind !== "process") throw new MoguriError("remote_mcp_worker", "This external MCP worker requested an unrelated model/tool operation. No extra authority was granted.", 409);
     }
     if (request.kind === "user-plan.complete") throw new MoguriError("plan_worker_request", "This model turn does not own a user plan operation. No result was adopted.", 409);
+    if (request.kind === "validation.boundary" || request.kind === "validation.complete") {
+      if (!run.compound || request.stepId !== run.stepId) throw new MoguriError("compound_validation_owner", "Only the exact public workflow can own a separately reviewed project test.", 409);
+      try {
+        const value = request.kind === "validation.boundary" ?
+          await this.compound.validationBoundary(run.compound.id, request.validationId, request.stepId, run.abort.signal) :
+          await this.compound.validationComplete(run.compound.id, request.validationId, request.stepId, request.result, run.abort.signal);
+        this.reply(run, { kind: "reply", requestId: request.requestId, value });
+      } catch (error) {
+        if (!(error instanceof MoguriError)) console.error("Public project validation failed: compound_validation");
+        this.reply(run, { kind: "reply", requestId: request.requestId, halt: true, error: error instanceof MoguriError ? error.message : "Original project validation could not be retained or authorized. No candidate success or continuation." });
+      }
+      return;
+    }
     if (request.kind === "finished") {
       if (run.sandboxExecutionId) {
         const execution = this.sandboxExecution(run.sandboxExecutionId);
@@ -2213,6 +2265,11 @@ export class ControlPlane extends EventEmitter {
         if (run.executionId) {
           const execution = this.projection.executions.find((value) => value.id === run.executionId);
           if (!execution || execution.workspace !== this.remoteWorkspace(session) || execution.configDigest !== frameDigest(this.projection.settings.values.remote)) throw new MoguriError("remote_changed", "The target/workspace changed during this turn. No new model access was sent to the old worker.", 409);
+        }
+        if (run.compound) {
+          const value = await this.compound.boundary(run.compound.id, request.stepId, run.abort.signal);
+          run.stepId = request.stepId; run.inFlight = true; run.calls.clear(); run.granted.clear(); run.declaredTools.clear();
+          this.reply(run, { kind: "reply", requestId: request.requestId, value }); return;
         }
         if (run.roleSequence) { await this.ownedRoleBoundary(run, request); return; }
         if (run.generation) { await this.generationBoundary(run, request); return; }
@@ -2282,6 +2339,8 @@ export class ControlPlane extends EventEmitter {
         let routing: RoutingTurn | undefined, routedContext: Message[] | undefined;
         if (synthetic) {
           this.requireKupo(current.controls, current);
+          const singlePolicy = this.projection.settings.values.kupo;
+          if (singlePolicy.workflow !== "single") throw new MoguriError("compound_review_required", "The current public workflow requires its exact independent source/test review. No ordinary Single dispatch.", 409);
           const pool = kupoPool(this.projection.settings.values.kupo, this.provider.state.models, current.controls.env,
             estimateModelContext({ systemPrompt: solverPrompt, messages: canonicalContext, tools: solverTools }));
           if (route) {
@@ -2291,7 +2350,7 @@ export class ControlPlane extends EventEmitter {
             routing = { id: run.turnId, sessionId: current.id, projectId: current.projectId, turnId: run.turnId, env: current.controls.env, createdAt: new Date().toISOString(),
               settingsRevision: this.projection.settings.revision, permissionRevision: this.projection.settings.permissionRevision, policyRevision: this.projection.policy.revision,
               policyDigest, contextDigest: this.routingContextDigest(current), classifierModelId: pool.classifier.id, candidateModelIds: pool.candidates.map((model) => model.id),
-              policy: structuredClone(this.projection.settings.values.kupo), status: "planning", classifierStepId: request.stepId, plan: null, diagnostic: null };
+              policy: structuredClone(singlePolicy), status: "planning", classifierStepId: request.stepId, plan: null, diagnostic: null };
           }
           if (phase === "router") routedContext = [{ role: "user", content: JSON.stringify({ state: canonicalContext.map((message) => ({ ...message, timestamp: 0 })), candidates: pool.candidates.map((model) => ({ id: model.id, name: model.name, source: model.source, endpointBoundary: model.endpointBoundary ?? "network", contextWindow: modelContextWindows(model).values[0], maxTokens: model.maxTokens })) }), timestamp: Date.now() }];
         }
@@ -2327,7 +2386,7 @@ export class ControlPlane extends EventEmitter {
           this.commit([{ event_type: "budget.blocked", profile_id: this.profileId, payload: { sessionId: current.id, ownerSessionId: status.ownerSessionId, stepId: request.stepId, diagnostic: error.message, remainingTokens: status.remainingTokens, remainingUsd: status.remainingUsd } }]);
         }
         if (!(error instanceof MoguriError) && !run.abort.signal.aborted) console.error("Moguri model preparation failed:", run.roleSequence ? "owned_role_prepare" : run.generation ? "candidate_generation_prepare" : run.compaction ? "compaction_prepare" : "model_prepare");
-        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget || run.roleSequence || run.compaction || run.generation || error instanceof MoguriError && error.code.startsWith("routing_") ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
+        this.reply(run, { kind: "reply", requestId: request.requestId, ...(budget || run.compound || run.roleSequence || run.compaction || run.generation || error instanceof MoguriError && error.code.startsWith("routing_") ? { halt: true } : {}), error: error instanceof MoguriError ? error.message : "Model access failed or context is too large. Reconnect, check the selected model, or start a new session. No fallback was used." });
       } finally { const key = this.platform.managed.leaseKey(session); if (key && this.writerReservations.get(key) === session.id) this.writerReservations.delete(key); }
       return;
     }
@@ -2340,6 +2399,16 @@ export class ControlPlane extends EventEmitter {
     if (request.kind === "model.complete") {
       if (!run.inFlight) throw new Error("Duplicate model completion.");
       run.inFlight = false;
+      if (run.compound) {
+        try {
+          const value = await this.compound.complete(run.compound.id, request.stepId, assistantMessage(request.message), this.modelUsage(session, request), run.abort.signal);
+          this.reply(run, { kind: "reply", requestId: request.requestId, value });
+        } catch (error) {
+          if (!(error instanceof MoguriError)) console.error("Public compound completion failed: compound_result");
+          this.reply(run, { kind: "reply", requestId: request.requestId, halt: true, error: error instanceof MoguriError ? error.message : "Public workflow result could not be retained/validated. No continuation or execution was authorized." });
+        }
+        return;
+      }
       if (run.roleSequence) { await this.ownedRoleCompletion(run, request); return; }
       const message = assistantMessage(request.message);
       const safeMessage = { ...message, errorMessage: message.errorMessage ? "Provider request failed." : undefined, diagnostics: undefined };
@@ -2423,12 +2492,14 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     if (request.kind === "output") {
-      if (!run.granted.has(request.callId)) throw new Error("Output does not belong to an approved tool.");
+      if (run.compound) this.compound.assertValidationFrame(run.compound.id, request.stepId, request.callId);
+      else if (!run.granted.has(request.callId)) throw new Error("Output does not belong to an approved tool.");
       this.commit([this.event(session, "tool.output", { callId: request.callId, text: request.text }, request.stepId)]);
       return;
     }
     if (request.kind === "process") {
-      if (!run.granted.has(request.callId)) throw new Error("Process does not belong to an approved tool.");
+      if (run.compound) this.compound.assertValidationFrame(run.compound.id, request.stepId, request.callId);
+      else if (!run.granted.has(request.callId)) throw new Error("Process does not belong to an approved tool.");
       const started = this.event(session, "process.started", { callId: request.callId, pid: request.pid, processGroup: request.pid, env: session.controls.env }, request.stepId);
       const mcp = run.mcpDispatches?.get(request.callId);
       if (mcp) this.updateMcp(this.mcpCall(mcp.id, session.id), { phase: "dispatched", accessForwarded: mcp.hadAccess }, [started]);
@@ -2528,6 +2599,11 @@ export class ControlPlane extends EventEmitter {
     this.sandboxWorkspaces.cancel(sessionId);
     this.platform.stopSession(sessionId);
     const current = this.session(sessionId);
+    const compound = this.projection.compoundWorkflows.find((record) => record.sessionId === sessionId && record.id === current.turnId && ["running", "waiting_validation", "validating"].includes(record.status));
+    if (compound) {
+      if (!compound.stopRequested) this.commit([this.compound.event({ ...compound, revision: compound.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true })]);
+      this.compound.cancel(compound.id);
+    }
     if (current.parentSessionId && !current.turnId && current.queue.length) {
       this.commit(current.kind === "subagent" ? [...current.queue.map((item) => this.event(current, "queue.removed", { messageId: item.id })), this.event(current, "turn.finished", { outcome: "stopped", diagnostic: "Owned subagent cancelled before admission. No model request was started." })] :
         [this.event(current, "queue.held", { messageIds: current.queue.map((item) => item.id) })]);
@@ -2595,6 +2671,7 @@ export class ControlPlane extends EventEmitter {
     run.done = true;
     clearTimeout(run.stopTimer);
     clearTimeout(run.roleSequence?.deadline);
+    clearTimeout(run.compound?.deadline);
     if (run.abort.signal.aborted && outcome === "completed") { outcome = "stopped"; diagnostic = "Stop was requested before the turn settled."; }
     if (run.inFlight) {
       outcome = outcome === "completed" ? "partial" : outcome;
@@ -2693,6 +2770,8 @@ export class ControlPlane extends EventEmitter {
     const compactionEvents: EventInput[] = [];
     const generationEvents: EventInput[] = [];
     const roleEvents: EventInput[] = [];
+    const compoundNoEffects = Boolean(run.compound && this.compound.noSourceEffects(run.compound.id));
+    const compoundEvents = run.compound ? this.compound.finish(run.compound.id, outcome, diagnostic) : [];
     if (run.roleSequence) {
       const entry = this.ownedRoles.record(run.roleSequence.id);
       if (outcome === "completed") {
@@ -2738,6 +2817,7 @@ export class ControlPlane extends EventEmitter {
       ...this.routingFinished(session, run.turnId, outcome, diagnostic),
       ...generationEvents,
       ...roleEvents,
+      ...compoundEvents,
       ...compactionEvents,
       ...[...(run.mcpDispatches?.values() ?? [])].map((dispatch) => {
         const call = this.mcpCall(dispatch.id, run.sessionId); dispatch.access = [];
@@ -2753,13 +2833,13 @@ export class ControlPlane extends EventEmitter {
         call, text: run.granted.has(call.id) ? "Tool execution or cleanup is unconfirmed; no automatic retry." : "Tool was not executed before the turn ended.",
         isError: true, outcome: run.granted.has(call.id) ? "unconfirmed" : "stopped",
       }, run.stepId)),
-      this.event(session, "turn.finished", { outcome, diagnostic, ...(run.sandboxExecutionId || (run.generation || run.roleSequence) && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
+      this.event(session, "turn.finished", { outcome, diagnostic, ...(run.sandboxExecutionId || compoundNoEffects || (run.generation || run.roleSequence) && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
       ...(execution && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) ? [this.event(session, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Turn settled locally; remote worker/descendant cleanup awaits its actual terminal status or explicit reconciliation." })] : []),
     ]);
     this.runs.delete(run.sessionId);
     this.releaseQuestionWaits(run.sessionId);
     if (run.sandboxExecutionId && (outcome === "partial" || outcome === "failed")) this.paused.add(session.id);
-    else if ((!run.generation && !run.roleSequence || run.granted.size) && (outcome === "partial" || outcome === "failed")) for (const current of this.projection.sessions) {
+    else if ((!run.generation && !run.roleSequence && !compoundNoEffects || run.granted.size) && (outcome === "partial" || outcome === "failed")) for (const current of this.projection.sessions) {
       if (session.projectId ? this.platform.managed.leaseKey(current) === this.platform.managed.leaseKey(session) : current.id === session.id) this.paused.add(current.id);
     }
     queueMicrotask(() => this.pumpAll());

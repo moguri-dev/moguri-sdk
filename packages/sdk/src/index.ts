@@ -1,6 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput } from "../../protocol/src/index.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -150,6 +150,19 @@ export class MoguriSdk extends TransportClient {
       const snapshot = this.getState().snapshot;
       if (!snapshot) throw new ClientError("disconnected", "Connect to this immutable profile before inspecting retained role sequences.");
       return snapshot.roleSequences;
+    },
+  };
+  readonly compound = {
+    preview: (input: CompoundInput) => this.query({ type: "compound.preview", input }),
+    start: (input: CompoundInput, expectedDigest: string, confirmCost: true) => this.command({ type: "compound.start", input, expectedDigest, confirmCost }),
+    read: (workflowId: string) => this.query({ type: "compound.read", workflowId }),
+    review: (workflowId: string, validationId: string, expectedRevision: number, expectedDigest: string, allow: boolean) =>
+      this.command({ type: "compound.review", workflowId, validationId, expectedRevision, expectedDigest, allow }),
+    stop: (workflowId: string) => this.command({ type: "compound.stop", workflowId }),
+    list: (sessionId?: string) => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("disconnected", "Connect to the actual immutable profile before reading public workflow history.");
+      return snapshot.compoundWorkflows.filter((workflow) => sessionId === undefined || workflow.sessionId === sessionId);
     },
   };
   readonly candidates = {
