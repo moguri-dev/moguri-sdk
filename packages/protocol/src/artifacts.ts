@@ -15,6 +15,7 @@ export interface ArtifactSource {
   eventId: string | null; sessionId: string | null; messageId: string | null;
   actor: "user" | "model" | "decision-provider" | "tool" | "unknown"; modelId: string | null; outcome: string | null; contentDigest: string;
   boundary?: { env: "Remote"; executionId: string; hostFingerprint: string; root: string; workerDigest: string; path: string; frame?: { sequence: number; digest: string } };
+  decisionOrigin?: { decisionId: string; stepId: string; inputDigest: string; modelInputDigest: string; resultDigest: string; adviceDigest: string };
 }
 export interface RetainedArtifact {
   id: string; projectId: string | null; originSessionId: string | null; workspaceId: string | null;

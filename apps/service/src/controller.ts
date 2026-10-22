@@ -2129,7 +2129,10 @@ export class ControlPlane extends EventEmitter {
     }
     const selected = /^option[0-7]$/.test(choice) ? question.choices[Number(choice.slice(6))] : undefined;
     if (selected === undefined) throw new MoguriError("decision_result", "A decision cannot replace the exact original offered technical alternatives.", 409);
-    const answer = { text: selected, actor: "decision-provider" as const, modelId: record.modelId, providerId: record.providerId, sourceCallId: record.stepId, decisionId: record.id, answeredAt: new Date().toISOString() };
+    if (!record.stepId || !record.actualInputDigest || !record.resultDigest || !record.adviceDigest) throw new MoguriError("decision_result", "The exact actual model/step/input/result evidence is missing. No automated answer was inferred.", 409);
+    const decisionOrigin = { decisionId: record.id, stepId: record.stepId, inputDigest: record.inputDigest, modelInputDigest: record.actualInputDigest, resultDigest: record.resultDigest, adviceDigest: record.adviceDigest };
+    const answer = { text: selected, actor: "decision-provider" as const, modelId: record.modelId, providerId: record.providerId, sourceCallId: record.stepId, decisionId: record.id,
+      decisionOrigin, answeredAt: new Date().toISOString() };
     this.decisions.apply(record.id, choice, [this.event(session, "question.answered", { questionId: question.id, answer }, question.stepId)]);
     this.questionWaits.delete(question.id);
     this.reply(run, { kind: "reply", requestId: waiting.requestId, value: { text: JSON.stringify({ questionId: question.id, answer: selected, actor: "decision-provider",

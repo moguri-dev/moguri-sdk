@@ -1,7 +1,7 @@
 # Owned decisions and Autopilot Max
 
-Status: protocol/database 40 service and SDK source integration. Client
-presentation and final source/native acceptance are separate checkpoints.
+Status: protocol/database 40 shared service/SDK, CLI, actual TUI and desktop
+source integration. Final packed/full/native acceptance remains a separate checkpoint.
 Existing qualified archives are unchanged. This is not live Jev access,
 calibrated decision quality or completed first-milestone acceptance.
 
@@ -88,6 +88,9 @@ human. The answer contains the real decision-model/step/provenance and
 `permissionGrant: false` / `userFact: false` when relayed to the solver.
 Independent retained answers preserve the actual provider actor, not a fake
 human or user-only Core instruction. Answering never consumes a human draft.
+Their canonical original decision/input/result/advice grants are independently
+copied into the answer and its source event; deleting the original decision
+report cannot invalidate the conversation or erase retained evidence.
 
 **Steering.** Optional steering starts off. Only a real safe solver boundary
 after known earlier work can choose one exact bounded user-authored text,
@@ -129,11 +132,12 @@ confidence versus probability, human override, revoked delegation/provider,
 replaced directory identity and actual controller SIGKILL during inference
 and after a clean result before effects.
 
-The focused source set passes **23 checks in 8.32 s**; contract/policy
-prerequisites pass separately. Schema-39 wind-down rollback/reopen and
-schema-38 compound migration remain covered. Hidden desktop, actual TUI,
-packed external SDK, full source and fresh native acceptance are not
-established by this intermediate checkpoint. Generated thresholds/fixtures
+The focused source/SDK/CLI/actual-TUI set passes **34 checks in 8.55 s**,
+including independent answer evidence and finite token/USD rejection without
+a shortened output contract. Six hidden desktop/composer cases pass in
+**8.3 s**. Schema-39 wind-down rollback/reopen and schema-38 compound migration
+remain covered. Packed external SDK, full source and fresh native acceptance
+are not established by this intermediate checkpoint. Generated thresholds/fixtures
 prove mechanics and boundaries, not live reliability, independent training,
 model quality or provider billing.
 

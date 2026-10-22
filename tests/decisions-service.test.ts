@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { waitFor } from "./fixture.ts";
+import { fixtureProvider, waitFor } from "./fixture.ts";
 import { setupDecisions } from "./fixtures/decisions-api.ts";
 import { isRecord } from "../packages/sdk/src/index.ts";
+import { routedFixture } from "./fixtures/single-routing.ts";
+import { generatedAdvice } from "./fixtures/decisions-api.ts";
 
 test("fixed-model Max uses a separately configured bounded System One-compatible role only inside existing exact user delegation, retaining real actor and all-role charges", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
   const f = await setupDecisions(), { sdk, advice } = f;
@@ -84,4 +86,28 @@ test("Max steering runs only after a real safe solver boundary, selects exact us
     assert.deepEqual(f.service.controller.snapshot().budgetEntries.map((entry) => entry.role), ["solver", "steering", "solver"]);
     assert.equal(f.session().controls.modelId, f.modelId); assert.equal(f.session().controls.env, "Local");
   } finally { await f.close(); }
+});
+
+test("kupo Single and Max remain independent: the real routed solver uses the same owned decision authority and all-role ledger without promoting router/advice text into its context", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+  const f = await routedFixture(), advice = await fixtureProvider({ responseMode: "text", exposeModels: true, replyText: generatedAdvice() });
+  try {
+    const settings = structuredClone(f.sdk.settings.get()!.values);
+    settings.permissions.tools.push({ id: "generated-routed-read", tool: "read_file", decision: "allow", pathPrefix: "fixture.txt" });
+    settings.localModels.push({ id: "generated-max-decisions", name: "Generated routed Max decisions", enabled: true, baseUrl: advice.baseUrl + "/v1", auth: "none",
+      models: [{ id: advice.modelId, name: "Generated routed Max decisions", contextWindow: 32768, maxTokens: 2048, imageInput: false }] });
+    await f.sdk.settings.update(settings, f.sdk.settings.get()!.revision); await f.sdk.models.refresh();
+    const model = f.sdk.getState().snapshot!.provider.models.find((model) => model.name === "Generated routed Max decisions"); assert.ok(model);
+    const configured = structuredClone(f.sdk.settings.get()!.values);
+    configured.decisions = { ...configured.decisions, enabled: true, modelId: model.id, outputTokens: 256 };
+    await f.sdk.settings.update(configured, f.sdk.settings.get()!.revision); await f.select();
+    await f.sdk.sessions.configure(f.sessionId, { ...f.session().controls, autonomy: "Autopilot Max" });
+    await f.send("generated tool from actual routed Max"); await f.terminal();
+    assert.equal(f.session().status, "completed"); assert.equal(f.session().controls.modelId, "kupo");
+    assert.equal(f.requests.length, 1); assert.equal(f.solver.requests.length, 2); assert.equal(advice.requests.length, 1);
+    assert.deepEqual(f.service.controller.snapshot().budgetEntries.map((entry) => entry.role), ["router", "solver", "decision", "solver"]);
+    assert.equal((await f.sdk.budgets.status(f.sessionId)).status.totals.reportedTokens, 168);
+    assert.equal(f.service.controller.snapshot().decisions[0]?.status, "applied");
+    assert.equal(JSON.stringify(f.solver.requests.at(-1)?.messages).includes("Generated classifier advice"), false);
+    assert.equal(JSON.stringify(f.solver.requests.at(-1)?.messages).includes('"confidence"'), false);
+  } finally { await f.close(); await advice.close(); }
 });

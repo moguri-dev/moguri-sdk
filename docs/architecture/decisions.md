@@ -366,10 +366,13 @@ authorizer. Local Max can review already-delegated tools, exact user-declared
 technical choices and bounded user-authored safe-boundary steering without
 human impersonation. Actual worker exit, context/policy/human rechecks,
 independent reports and real controller-loss recovery remain required.
-Jev stays unqualified because its current wire cannot enforce the required
-output bound; it never silently substitutes this alternative. Remote/native
-Max, live reliability/calibration and final cross-client/source qualification
-remain distinct gates.
+SDK, CLI, actual TUI and hidden desktop now share explicit configuration,
+service readiness, immutable evidence and real human override. Automated
+answers retain original copied evidence independently of both report and
+source retention. Jev stays unqualified because its current wire cannot enforce
+the required output bound; it never silently substitutes this alternative.
+Remote/native Max, live reliability/calibration and final full/packed/native
+qualification remain distinct gates.
 
 ## D13. Remote SSH execution
 

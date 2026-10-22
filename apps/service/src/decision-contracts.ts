@@ -3,6 +3,14 @@ import { MoguriError } from "../../../packages/protocol/src/index.ts";
 import { DecisionAdviceSchema, DecisionQuestionsSchema, type DecisionQuestions } from "../../../packages/protocol/src/decisions.ts";
 
 const sameKeys = (first: object, second: object) => Object.keys(first).length === Object.keys(second).length && Object.keys(first).every((key) => Object.hasOwn(second, key));
+export function decisionState(value: unknown): string {
+  const text = JSON.stringify(value, (key: string, value: unknown) => {
+    if (!key.isWellFormed() || typeof value === "string" && !value.isWellFormed()) throw new MoguriError("decision_input", "Original decision state/keys contain invalid Unicode. JSON escaping cannot disguise normalization or truncation; the human interaction remains pending.", 409);
+    return value;
+  });
+  if (text === undefined || Buffer.byteLength(text) > 65536) throw new MoguriError("decision_input", "The complete original decision state exceeds lossless 64 KiB. No prefix, truncation or automatic answer was sent; the human interaction remains pending.", 409);
+  return text;
+}
 export function decisionAdvice(text: string, questions: DecisionQuestions, minimumConfidence: number, minimumProbability: number) {
   if (!text.isWellFormed() || Buffer.byteLength(text) > 16384 || !Value.Check(DecisionQuestionsSchema, questions) ||
     ![minimumConfidence, minimumProbability].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new MoguriError("decision_format", "Decision input/output exceeds the exact bounded typed contract. No approval or answer was supplied.", 409);

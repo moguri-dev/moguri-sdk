@@ -5,10 +5,41 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current issue-17 source uses protocol **37** for development native service
-execution. It does not replace the immutable qualified archives listed below.
+Current issue-17 source uses protocol **40** for shared model windows/scoped
+paste, native execution, reviewed Local compound workflows, finite Local
+wind-down and owned bounded decisions. It does not replace the immutable qualified archives listed below.
 See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
 for the actual generated VM evidence and remaining client/environment gates.
+
+## Decision-provider development surface
+
+`decisions.status(sessionId)` reports actual compatible provider readiness,
+privacy and output limits without inference. `decisions.list(sessionId?)`
+reads independently retained requests; `decisions.read(id)` returns the exact
+original rubric/state/policy, real model actor/step, raw result and validated
+advice. `decisions.stop(id)` stops only that original one-shot owner, not
+another parent turn. There is deliberately no public `evaluate`, `answer`,
+`approve`, retry or permission-grant endpoint.
+
+`settings.decisions` defaults disabled with no selected model. Save an explicit
+`bounded-model` policy and available canonical model ID, then separately choose
+Autopilot Max in session controls. Fixed and kupo Single model selection stays
+independent. Hosted inputs require separate consent; the root-less Local worker
+still uses actual all-role token/USD admission and existing finishing holds.
+The dedicated Jev contract remains unqualified because the current API cannot
+enforce a positive output-token bound. Remote/native Max never executes on the
+Local controller as a fallback.
+
+Shared `/decisions status|list|read ID|stop ID confirm-stop|set POLICY_JSON`
+and CLI `moguri decisions status --session ID`, `list`, `read ID`, `stop ID`,
+or `set POLICY.json --confirm-review` use the same authority. Configuration
+starts no inference and grants no tool authority. Desktop exposes
+**Decision providers** settings, service-derived composer readiness and
+**Artifacts / Decision-provider observations**; TUI edits report metadata only.
+Automated technical answers retain actual provider provenance and independent
+original evidence even when the decision report/source session is deleted.
+Unknown charges stay held; scores/confidence are not calibrated permission.
+See [the owned decision contract](architecture/owned-decisions.md).
 
 ## Native SDK development surface
 
@@ -285,6 +316,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `roleSequences` | Read exact independently retained role intent, original input and one selected raw role input/result; never start a model, grant acceptance or resume partial work. |
 | `compound` | Explicit Local source/cost preview/start/read, focused validation preview, actual-user stage/test review/deny and exact stop. Real conditional Cascade/Critique uses the existing root-less worker and all-role ledger. `lineageDraft` prepares an unpersisted exact model/source claim with browser-safe hashing; it does not inspect providers, save policy or prove training/quality. Source application stays in `candidates`. |
 | `winddown` | Canonical readiness, independently retained finishing holds/model input/results, exact stop/decline, and separate actual-user accepted-work/new-local-branch preview/commit/wait. Finite Local Single/Compound use the same all-role ledger; summaries grant no source or Git authority and never resume ordinary work. |
+| `decisions` | Service-derived compatible-provider readiness, independently retained exact request/model/rubric/raw evidence, all-role accounting and exact one-shot stop. No public evaluate, paid retry, answer or approval command. Local Max acts only inside separate explicit user delegation and preserves the real decision-provider actor. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |

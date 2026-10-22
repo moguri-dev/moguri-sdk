@@ -31,11 +31,11 @@ import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 import { MemoryIndexIntentSchema } from "./memory.ts";
 import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord, type CandidateRecord } from "./candidates.ts";
 import { CandidateGenerationRecordSchema, projectCandidateGeneration, type CandidateGenerationRecord } from "./candidate-generations.ts";
-import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedger, type RoleSequenceRecord } from "./role-sequences.ts";
+import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedger, successfulRoleEntry, type RoleSequenceRecord } from "./role-sequences.ts";
 import { projectSandboxPublication, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
 import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger, type CompoundWorkflow } from "./compound.ts";
 import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
-import { DecisionRecordSchema, projectDecision, validateDecisionLedger, type DecisionRecord } from "./decisions.ts";
+import { DecisionRecordSchema, DecisionEvidenceSchema, projectDecision, validateDecisionLedger, type DecisionRecord } from "./decisions.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
@@ -600,13 +600,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "question.answered") {
       const question = questions.get(event.payload.questionId);
       if (event.payload.answer.actor === "decision-provider") {
-        const record = decisions.get(event.payload.answer.decisionId ?? "");
-        if (!record || record.status !== "applied" || record.source.kind !== "question" || record.source.questionId !== question?.id ||
+        const answer = event.payload.answer, record = decisions.get(answer.decisionId ?? ""), origin = answer.decisionOrigin, entry = budgetEntries.get(answer.sourceCallId ?? "");
+        if (!question || question.allowFreeform || question.status !== "open" || !question.choices.includes(answer.text) ||
+          !Value.Check(DecisionEvidenceSchema, origin) || origin.decisionId !== answer.decisionId || origin.stepId !== answer.sourceCallId ||
+          !entry || entry.sessionId !== event.session_id || entry.turnId !== event.turn_id || entry.modelId !== answer.modelId || entry.providerId !== answer.providerId ||
+          entry.role !== "decision" || !successfulRoleEntry(entry) ||
+          record && (record.status !== "applied" || record.source.kind !== "question" || record.source.questionId !== question.id ||
           record.source.questionRevision !== question.revision || record.source.parentStepId !== question.stepId || record.source.callId !== question.callId ||
           record.sessionId !== event.session_id || record.turnId !== event.turn_id || record.stepId !== event.payload.answer.sourceCallId ||
-          record.modelId !== event.payload.answer.modelId || record.providerId !== event.payload.answer.providerId || question.allowFreeform ||
-          question.status !== "open" || !question.choices.includes(event.payload.answer.text)) throw new MoguriError("decision_corrupt", "An automated technical answer lost its exact original pending choice, model actor or independent decision.", 409);
-      } else if (event.payload.answer.decisionId !== undefined) throw new MoguriError("decision_corrupt", "Provider advice cannot impersonate a human answer.", 409);
+          record.modelId !== answer.modelId || record.providerId !== answer.providerId || origin.inputDigest !== record.inputDigest || origin.modelInputDigest !== record.actualInputDigest ||
+          origin.resultDigest !== record.resultDigest || origin.adviceDigest !== record.adviceDigest)) throw new MoguriError("decision_corrupt", "An automated technical answer lost its exact original pending choice, actual known model actor or independently retained evidence.", 409);
+      } else if (event.payload.answer.decisionId !== undefined || event.payload.answer.decisionOrigin !== undefined) throw new MoguriError("decision_corrupt", "Provider advice cannot impersonate a human answer.", 409);
       if (question) Object.assign(question, { answer: structuredClone(event.payload.answer), status: "answered", revision: question.revision + 1 });
     }
     if (event.event_type === "question.cancelled") {
@@ -973,6 +977,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   validateCompoundLedger([...compoundWorkflows.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
   validateWinddownLedger([...winddowns.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
   validateDecisionLedger([...decisions.values()], [...budgetEntries.values()]);
+  for (const artifact of artifacts.values()) for (const source of artifact.sources) if (source.decisionOrigin) {
+    const origin = source.decisionOrigin, entry = budgetEntries.get(origin.stepId);
+    if (!Value.Check(DecisionEvidenceSchema, origin) || source.actor !== "decision-provider" || source.messageId !== origin.stepId ||
+      !source.modelId || entry?.modelId !== source.modelId || entry.sessionId !== source.sessionId || entry.role !== "decision" || !successfulRoleEntry(entry))
+      throw new MoguriError("decision_corrupt", "Independent automated-answer evidence lost its exact actual model/step/known charge, or changed the provider actor into a human.", 409);
+  }
   for (const sequence of roleSequences.values()) if (sessions.has(sequence.sessionId)) {
     const controls = roleSequenceControls.get(sequence.id) ?? [];
     const control = controls[0];

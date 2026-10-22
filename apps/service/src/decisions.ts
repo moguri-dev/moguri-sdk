@@ -4,7 +4,7 @@ import {
   type CommandResult, type DecisionCommand, type DecisionDocument, type DecisionQuery, type DecisionQuestions, type DecisionRecord, type DecisionResponse,
   type DecisionSource, type EventInput, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type Usage, type BudgetLimit,
 } from "../../../packages/protocol/src/index.ts";
-import { decisionAdvice } from "./decision-contracts.ts";
+import { decisionAdvice, decisionState } from "./decision-contracts.ts";
 import { decisionCapability } from "./decision-policy.ts";
 import { estimateModelContext, modelRequest } from "./model-controls.ts";
 import { reportedModelUsage, modelOutputExceeded, type BudgetRuntime } from "./budgets.ts";
@@ -126,8 +126,7 @@ export class Decisions {
     const calls = snapshot.budgetEntries.filter((entry) => entry.sessionId === session.id && entry.turnId === session.turnId && ["decision", "steering"].includes(entry.role)).length +
       snapshot.decisions.filter((record) => record.sessionId === session.id && record.turnId === session.turnId && record.stepId === null).length;
     if (calls >= capability.settings.maxCallsPerTurn) throw new MoguriError("decision_call_limit", "This parent reached its explicit total decision/steering call bound. Ask the actual user; no paid retry or limit reset.", 409);
-    const text = JSON.stringify(state);
-    if (text === undefined || !text.isWellFormed() || Buffer.byteLength(text) > 65536) throw new MoguriError("decision_input", "The complete original decision state exceeds lossless 64 KiB. No prefix, truncation or automatic answer was sent; the human interaction remains pending.", 409);
+    const text = decisionState(state);
     const document: DecisionDocument = { format: "moguri-owned-decision", version: 1, sessionId, turnId: session.turnId, root: this.root(session.id), source, state: text, questions,
       settings: capability.settings, modelJson: JSON.stringify(capability.model), systemPrompt: capability.systemPrompt, inputBound: 0, outputBound: capability.settings.outputTokens,
       bindingDigest, policyDigest: digest(policyJson), policyJson };
@@ -191,7 +190,7 @@ export class Decisions {
     for (const live of this.live.values()) if (this.record(live.id).sessionId === id) this.cancel(live.id, "The actual parent stopped/ended. No decision action or paid continuation was authorized.");
   }
   invalidate(): void {
-    for (const live of this.live.values()) if (!live.abort.signal.aborted && !live.exited) {
+    for (const live of this.live.values()) if (!live.abort.signal.aborted && !live.exited && !live.finished) {
       try { this.checked(live.id); } catch (error) {
         if (!(error instanceof MoguriError)) throw error;
         try { this.cancel(live.id, error.message); } catch (failure) { this.persistence(live, failure); }
@@ -207,7 +206,7 @@ export class Decisions {
     this.host.commit([this.event(next), ...effects]); return next;
   }
   private async message(live: Live, request: WorkerRequest): Promise<void> {
-    if (live.finished) throw new MoguriError("decision_worker", "This exact one-shot decision worker already ended. No extra operation.", 409);
+    if (live.finished && request.kind !== "ack") throw new MoguriError("decision_worker", "This exact one-shot decision worker already ended. No extra operation.", 409);
     if (request.kind === "ack") {
       if (!live.abort.signal.aborted) throw new MoguriError("decision_worker", "Unexpected decision cancellation acknowledgement.", 409);
       const record = this.record(live.id);
@@ -325,7 +324,9 @@ export class Decisions {
       if (effects.length !== 1 || first.event_type !== "question.answered" || first.payload.questionId !== record.source.questionId ||
         first.payload.answer.actor !== "decision-provider" || first.payload.answer.decisionId !== id || first.payload.answer.modelId !== record.modelId ||
         first.payload.answer.sourceCallId !== record.stepId || document.questions.action?.type !== "choice" ||
-        first.payload.answer.text !== document.questions.action.criteria[choice]) throw new MoguriError("decision_effect", "Technical advice must retain its actual actor and one exact user-delegated original alternative.", 409);
+        first.payload.answer.text !== document.questions.action.criteria[choice] || JSON.stringify(first.payload.answer.decisionOrigin) !== JSON.stringify({
+          decisionId: record.id, stepId: record.stepId, inputDigest: record.inputDigest, modelInputDigest: record.actualInputDigest, resultDigest: record.resultDigest, adviceDigest: record.adviceDigest,
+        })) throw new MoguriError("decision_effect", "Technical advice must retain its actual actor and one exact user-delegated original alternative.", 409);
     } else if (choice === "continue" ? effects.length !== 0 : effects.length !== 1 || first.event_type !== "steering.applied" || first.payload.decisionId !== id || first.payload.modelId !== record.modelId ||
       first.payload.providerId !== record.providerId || first.payload.sourceStepId !== record.stepId || document.questions.action?.type !== "choice" ||
       first.payload.text !== document.questions.action.criteria[choice]) throw new MoguriError("decision_effect", "A steer must be one exact bounded original user-configured alternative, not model-authored goal/policy expansion.", 409);

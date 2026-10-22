@@ -1,5 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
+import type { DecisionEvidence } from "./decisions.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 export const UserQuestionSchema = object({
@@ -16,6 +17,7 @@ export interface QuestionRecommendation extends ModelAdviceSource { choice: stri
 export interface QuestionAnswer {
   text: string; actor: "user" | "model" | "decision-provider"; modelId: string | null; sourceCallId: string | null; answeredAt: string;
   decisionId?: string; providerId?: string;
+  decisionOrigin?: DecisionEvidence;
 }
 export interface UserQuestion extends Omit<UserQuestionInput, "recommendation"> {
   id: string; sessionId: string; projectId: string | null; workspaceId: string | null; turnId: string; stepId: string; callId: string; modelId: string;

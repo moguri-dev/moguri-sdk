@@ -67,7 +67,12 @@ function references(input: EventInput): string[] {
     case "capability.saved": return [input.payload.entry.contentDigest];
     case "capability.proposed": return [input.payload.proposal.contentDigest];
     case "artifact.saved": return [input.payload.artifact.contentDigest];
-    case "artifact.revised": return [input.payload.artifact.contentDigest];
+    case "artifact.revised": return [input.payload.artifact.contentDigest, ...(input.payload.artifact.sources ?? []).flatMap((source) => source.decisionOrigin ?
+      [source.decisionOrigin.inputDigest, source.decisionOrigin.modelInputDigest, source.decisionOrigin.resultDigest, source.decisionOrigin.adviceDigest] : [])];
+    case "question.answered": {
+      const origin = input.payload.answer.decisionOrigin;
+      return origin ? [origin.inputDigest, origin.modelInputDigest, origin.resultDigest, origin.adviceDigest] : [];
+    }
     case "candidate.saved": {
       const candidate = input.payload.candidate, origin = candidate.roleOrigin;
       return [candidate.documentDigest, candidate.stageResultDigest, candidate.applyResultDigest,

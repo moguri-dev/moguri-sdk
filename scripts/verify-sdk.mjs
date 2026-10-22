@@ -101,6 +101,11 @@ try {
       const gitResult=await sdk.winddown.waitCommit("generated-finishing");void gitResult.winddown.commit?.publishedCommit;
       await sdk.winddown.decline("generated-finishing",0,true);await sdk.winddown.stop("generated-finishing");void sdk.winddown.list("generated-source");
       ` : ""}
+      ${installedProtocol >= 40 ? `
+      const decisions=await sdk.decisions.status("generated-source");void decisions.provider;void decisions.outputBound;
+      const decision=await sdk.decisions.read("generated-decision");void decision.decision.source;void decision.input.questions;void decision.advice?.answers;
+      await sdk.decisions.stop("generated-decision");void sdk.decisions.list("generated-source");void sdk.settings.get()?.values.decisions.technicalQuestions;
+      ` : ""}
       ${installedProtocol >= 33 ? `
       const roleProposal=await sdk.candidates.roleProposal("generated-sequence");void roleProposal.document.roleOrigin.roleInputDigest;
       const roleReference={roleSequenceId:"generated-sequence"};
@@ -276,6 +281,13 @@ try {
     assert.deepEqual(sdk.winddown.list(),[]);
     await assert.rejects(()=>sdk.winddown.read("generated-missing-budget-checkpoint"),error=>error.code==="winddown_missing");
     console.log("Installed protocol-39 reserved-checkpoint SDK/runtime preserves disabled/no-model defaults and rejects missing independent scope without a model/Git effect.");
+    ` : ""}
+    ${installedProtocol >= 40 ? `
+    assert.equal(sdk.settings.get().values.decisions.enabled,false);assert.equal(sdk.settings.get().values.decisions.modelId,null);
+    assert.deepEqual(sdk.decisions.list(),[]);
+    await assert.rejects(()=>sdk.decisions.read("generated-missing-owned-decision"),error=>error.code==="decision_missing");
+    await assert.rejects(()=>sdk.decisions.status("generated-missing-decision-source"),error=>error.code==="decision_scope");
+    console.log("Installed protocol-40 decisions preserve disabled/no-model defaults and refuse missing immutable source/report scope without paid inference or approval.");
     ` : ""}
     let budgetServer=null,beta=null;
     try {
@@ -919,6 +931,10 @@ try {
     console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/CLI/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
+  if (installedProtocol >= 40 && process.platform === "darwin") {
+    const { qualifyDecisions } = await import("./qualify-decisions.mjs");
+    console.log(await qualifyDecisions({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-decisions") }));
+  }
   if (installedProtocol >= 34) {
     const { qualifyModelEvidence } = await import("./qualify-model-evidence.mjs");
     console.log(await qualifyModelEvidence({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-explicit-model-evidence") }));

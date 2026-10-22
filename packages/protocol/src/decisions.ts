@@ -40,6 +40,8 @@ export const defaultDecisionSettings = (): DecisionSettings => ({ enabled: false
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" }), maybeId = Type.Union([id, Type.Null()]), maybeHash = Type.Union([hash, Type.Null()]);
 const revision = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }), time = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" });
 const diagnostic = Type.Union([Type.String({ minLength: 1, maxLength: 4000 }), Type.Null()]);
+export const DecisionEvidenceSchema = object({ decisionId: id, stepId: id, inputDigest: hash, modelInputDigest: hash, resultDigest: hash, adviceDigest: hash });
+export type DecisionEvidence = Static<typeof DecisionEvidenceSchema>;
 export const DecisionSourceSchema = Type.Union([
   object({ kind: Type.Literal("tool"), parentStepId: id, callId: id, approvalId: id, argumentsDigest: hash, delegationId: id }),
   object({ kind: Type.Literal("question"), parentStepId: id, callId: id, questionId: id, questionRevision: revision, delegationId: id }),

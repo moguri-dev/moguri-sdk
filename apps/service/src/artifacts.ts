@@ -117,9 +117,17 @@ export class ArtifactRuntime {
       const recommendation = question.recommendation;
       const guidance = recommendation ? `\n\n# Model recommendation (not a user answer)\n\n${recommendation.choice}\n\n${recommendation.reason}\n\nModel: ${recommendation.modelId}\nStep: ${recommendation.stepId}\n` : "";
       const modelText = `${question.question}${guidance}`, answer = event.payload.answer, text = `# Question\n\n${modelText}\n\n# Answer\n\n${answer.text}\n`;
+      const decision = answer.actor === "decision-provider" ? snapshot.decisions.find((record) => record.id === answer.decisionId) : undefined;
+      if (answer.actor === "decision-provider" && (!decision || decision.status !== "applied" || decision.source.kind !== "question" ||
+        decision.source.questionId !== question.id || decision.stepId !== answer.sourceCallId || !decision.stepId || !decision.actualInputDigest || !decision.resultDigest ||
+        !decision.adviceDigest || decision.modelId !== answer.modelId)) throw new MoguriError("decision_corrupt", "An automated retained answer lost its exact original decision/model/choice evidence. No fake human or unproved source was copied.", 409);
+      const evidence = decision?.stepId && decision.actualInputDigest && decision.resultDigest && decision.adviceDigest ? {
+        decisionId: decision.id, stepId: decision.stepId, inputDigest: decision.inputDigest, modelInputDigest: decision.actualInputDigest, resultDigest: decision.resultDigest, adviceDigest: decision.adviceDigest,
+      } : undefined;
       const artifact = this.create({ id: question.sessionId, projectId: question.projectId, workspaceId: question.workspaceId }, "answer", `Answer: ${question.question.replace(/\s+/g, " ").slice(0, 140)}`, text, "question", [
         { eventId: question.sourceEventId, sessionId: question.sessionId, messageId: question.callId, actor: "model", modelId: question.modelId, outcome: null, contentDigest: digest(modelText) },
-        { eventId: event.id, sessionId: question.sessionId, messageId: null, actor: answer.actor, modelId: answer.modelId, outcome: null, contentDigest: digest(answer.text) },
+        { eventId: event.id, sessionId: question.sessionId, messageId: evidence?.stepId ?? null, actor: answer.actor, modelId: answer.modelId, outcome: null, contentDigest: digest(answer.text),
+          ...(evidence ? { decisionOrigin: evidence } : {}) },
       ]);
       return [this.event({ ...artifact, questionId: question.id })];
     });
@@ -191,7 +199,7 @@ export class ArtifactRuntime {
     if (!event) throw new MoguriError("artifact_source", "Choose a canonical completed message or terminal tool result. A streamed fragment is not a completed source.", 409);
     let text: string, actor: ArtifactSource["actor"], modelId: string | null = null, outcome: string | null = null;
     if (event.event_type === "tool.completed") { text = event.payload.text; actor = "tool"; outcome = event.payload.outcome; }
-    else if (event.event_type === "model.completed") { text = event.payload.message.text; actor = "model"; modelId = event.payload.usage.modelId; outcome = event.payload.usage.outcome; }
+    else if (event.event_type === "model.completed") { text = event.payload.message.text; actor = ["decision", "steering"].includes(event.payload.usage.role) ? "decision-provider" : "model"; modelId = event.payload.usage.modelId; outcome = event.payload.usage.outcome; }
     else if (event.event_type === "turn.started" || event.event_type === "steer.applied") { text = event.payload.item.text; actor = "user"; }
     else throw new MoguriError("artifact_source", "This source has no supported canonical text.");
     if (Buffer.byteLength(text) > 128 * 1024) throw new MoguriError("artifact_limit", "This source exceeds 128 KiB. Retain an explicitly selected manual excerpt; no source text was silently dropped.");
@@ -283,6 +291,15 @@ export class ArtifactRuntime {
       const decisionResults = [...decisionHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
       const decisionAccounting = this.host.snapshot().budgetEntries.filter((entry) => decisionEvents.some((event) => event.event_type === "decision.recorded" && event.payload.decision.stepId === entry.id));
       if (decisionEvents.length) { account(JSON.stringify(decisionEvents)); account(JSON.stringify(decisionAccounting)); }
+      const decisionEvidence = revisions.flatMap((revision) => revision.artifact.sources.flatMap((source) => source.decisionOrigin ? [source.decisionOrigin] : []))
+        .filter((origin, index, all) => all.findIndex((other) => other.decisionId === origin.decisionId && other.stepId === origin.stepId) === index)
+        .map((origin) => {
+          const results = [...new Set([origin.inputDigest, origin.modelInputDigest, origin.resultDigest, origin.adviceDigest])].map((digest) => {
+            const text = this.store.blob(digest); account(text); return { digest, text };
+          });
+          const accounting = this.host.snapshot().budgetEntries.filter((entry) => entry.id === origin.stepId); account(JSON.stringify(accounting));
+          return { origin, results, accounting };
+        });
       const nativeEvents = this.nativeHistory(artifact.id), nativeHashes = new Set<string>();
       for (const event of nativeEvents) if (event.event_type === "sandbox.execution_recorded") {
         nativeHashes.add(event.payload.execution.inputDigest);
@@ -300,11 +317,12 @@ export class ArtifactRuntime {
         ...(compoundEvents.length ? { compound: { events: compoundEvents, results: compoundResults } } : {}),
         ...(winddownEvents.length ? { winddown: { events: winddownEvents, results: winddownResults } } : {}),
         ...(decisionEvents.length ? { decision: { events: decisionEvents, results: decisionResults, accounting: decisionAccounting } } : {}),
+        ...(decisionEvidence.length ? { decisionEvidence } : {}),
         ...(nativeEvents.length ? { native: { events: nativeEvents, results: nativeResults } } : {}) };
     });
     const roleLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.roleOrigin));
     const compoundLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.compoundOrigin));
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.decision) ? 9 : documents.some((document) => document.winddown) ? 8 : compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.decision || document.decisionEvidence) ? 9 : documents.some((document) => document.winddown) ? 8 : compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
