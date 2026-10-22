@@ -11,6 +11,7 @@ const unsigned = Type.String({ pattern: "^[0-9]+$", maxLength: 40 });
 const nullableHash = Type.Union([hash, Type.Null()]);
 const paths = Type.Array(path, { maxItems: 20, uniqueItems: true });
 const timestamp = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" });
+export const MAX_CANDIDATE_PATCH_BYTES = 32 * 1024;
 export const CandidatePatchSchema = object({
   kind: Type.Literal("patch"), summary: Type.String({ minLength: 1, maxLength: 1200 }),
   edits: Type.Array(object({ path, baseDigest: Type.Union([hash, Type.Literal("absent")]), text: Type.String({ maxLength: 128 * 1024 }) }), { minItems: 1, maxItems: 20 }),

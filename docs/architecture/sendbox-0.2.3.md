@@ -135,3 +135,13 @@ absence and retains a partial outcome plus unknown paid capacity. Signed
 runtime exit and CLI exit remain distinct, including an unreported runtime
 failure. Source publication also survives actual controller SIGKILL before
 copying or after one file, without replay when its original receipt is lost.
+
+The refreshed client-checkpoint workload is
+`sha256:b03ab376659754d5332cbab352ab3637bb8f6be9e7fc5ae1895a5be183c5e067`
+from a **33,354.47 ms** no-cache audited build. Its actual worker and bridge
+digests are respectively
+`4af80251d09028eeb740d2dc4075cc77c0f24d32179e8c6b0e92163e5809607a`
+and `80cc23d91fc4a04bd3c7a48b0edef66e3f643c2466fa8d37ad2570ce35125f0d`.
+The full committed checkpoint passes 874 local checks, 58 hidden desktop cases
+and packed-consumer verification. The older generated image remains an earlier
+receipt, not silently relabeled as this payload.

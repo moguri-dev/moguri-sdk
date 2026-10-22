@@ -42,7 +42,8 @@ it cannot cancel a later turn merely sharing a session. Native project-file
 capture reads the actual private stage, never the Local source checkout.
 
 `sandbox.publicationPreview(executionId, paths)` reviews up to 20 selected
-text outputs/64 KiB against original Local source bases. Separately confirmed
+text outputs with a 32-KiB patch and 64-KiB complete document against original
+Local source bases. Its `limits` exposes both exact byte boundaries. Separately confirmed
 `sandbox.publish(executionId, paths, preview.digest, execution.revision)` starts
 an independently owned user copy job. Inspect it with
 `sandbox.publication(id)`/`sandbox.waitPublication(id)`; stop its actual job

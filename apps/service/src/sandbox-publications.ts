@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  MoguriError, parse, SandboxPublicationDocumentSchema, SandboxPublicationResultSchema, type SandboxCommand, type SandboxQuery,
+  MAX_CANDIDATE_PATCH_BYTES, MoguriError, parse, SandboxPublicationDocumentSchema, SandboxPublicationResultSchema, type SandboxCommand, type SandboxQuery,
   type SandboxPublication, type SandboxPublicationDocument, type SandboxPublicationPreview, type SandboxResponse,
   type EventInput, type Snapshot, type Project, type ProjectSettings, type RetainedArtifact, type CapabilityJob, type CommandResult, type SandboxExecution,
 } from "../../../packages/protocol/src/index.ts";
@@ -107,8 +107,9 @@ export class SandboxPublications {
     };
     await assert(); await candidateBases(document.root, patch); await assert();
     const text = JSON.stringify(document);
-    if (Buffer.byteLength(text) > 64 * 1024) throw new MoguriError("sandbox_publication_limit", "Review at most 20 selected text outputs and 64 KiB per native publication. Nothing was truncated.", 409);
+    if (Buffer.byteLength(text) > 64 * 1024) throw new MoguriError("sandbox_publication_limit", "Review at most 20 selected outputs, a 32-KiB patch and 64-KiB complete document per native publication. Nothing was truncated.", 409);
     const preview: SandboxPublicationPreview = { document, digest: digest(`moguri-native-publication-v1\0${text}`),
+      limits: { files: 20, patchBytes: MAX_CANDIDATE_PATCH_BYTES, documentBytes: 64 * 1024 },
       diagnostic: "Actual-user publication copies only these exact retained bytes to their original Local bases. It never executes code, stages files, changes HEAD/index or treats model provenance as acceptance." };
     return { preview, text, current, assert, execution };
   }

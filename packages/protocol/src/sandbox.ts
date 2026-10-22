@@ -134,6 +134,7 @@ export function projectSandboxPublication(previous: SandboxPublication | undefin
 }
 export interface SandboxPublicationPreview {
   digest: string; document: SandboxPublicationDocument; diagnostic: string;
+  limits: { files: number; patchBytes: number; documentBytes: number };
 }
 export const SandboxPublicationResultSchema = object({
   format: Type.Literal("moguri-native-publication-result"), version: Type.Literal(1), publicationId: id, root: path,

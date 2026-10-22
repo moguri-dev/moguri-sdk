@@ -66,7 +66,7 @@ once, including after actual controller SIGKILL, without adding completed
 model messages, resuming tools or upgrading the original partial turn.
 
 Source publication is a separate user command over up to 20 selected UTF-8
-outputs/64 KiB. It reuses the candidate byte/base validators, scoped atomic
+outputs, a 32-KiB patch and 64-KiB complete review document. It reuses the candidate byte/base validators, scoped atomic
 file writer, directory broker and owned job lifecycle. Current source identity,
 HEAD/branch, hard write denials, folder policy and writer leases are rechecked.
 Its acceptance, attempts, copied paths and result are independently retained.

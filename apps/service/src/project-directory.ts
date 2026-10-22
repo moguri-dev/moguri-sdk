@@ -7,6 +7,7 @@ import { validateProjectPath } from "./project-policy.ts";
 export async function inspectProjectDirectory(root: string, path: string): Promise<void> {
   validateProjectPath(path);
   if (isProtectedProjectPath(path)) throw new MoguriError("project_path", "Review paths cannot enter protected directories.");
+  if (await realpath(root) !== root || !(await lstat(root)).isDirectory()) throw new MoguriError("project_path", "Reviewed directory roots must remain canonical existing directories. No fallback root was used.", 409);
   const parts = path.split("/").slice(0, -1);
   if (parts.length > 256) throw new MoguriError("project_path", "Review paths support at most 256 parent directories.");
   for (let index = 0; index < parts.length; index++) {
