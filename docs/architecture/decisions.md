@@ -371,8 +371,9 @@ service readiness, immutable evidence and real human override. Automated
 answers retain original copied evidence independently of both report and
 source retention. Jev stays unqualified because its current wire cannot enforce
 the required output bound; it never silently substitutes this alternative.
-Remote/native Max, live reliability/calibration and final full/packed/native
-qualification remain distinct gates.
+The final generated full/packed/native sweep passes without changing factory
+defaults or qualified archives. Remote/native Max and live
+reliability/calibration remain distinct gates.
 
 ## D13. Remote SSH execution
 

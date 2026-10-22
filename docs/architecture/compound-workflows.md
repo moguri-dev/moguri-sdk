@@ -1,11 +1,15 @@
 # Reviewed compound workflows
 
-Status: shared service/SDK/client implementation in progress. The public path now
+Status: implemented shared Local source slice. The public path now
 owns real bounded calls, conditional Cascade/Critique and separately approved
 project tests through CLI, actual TUI and desktop. Protocol-39 finite Local
 turns use the separate [owned wind-down contract](budget-winddown.md).
-Final source/native hardening and System One/Max remain qualification gates. Private prototypes and native execution
-checks do not establish this public workflow's acceptance.
+The [final protocol-40 sweep](../setup.md#final-protocol-40-source-acceptance)
+covers actual generated conditional roles, tests and shared clients.
+Local Max has its separate explicit bounded-provider policy; it never replaces
+compound human reviews. Live quality and Remote/native compound remain gates.
+Private prototypes or a native execution check alone do not establish public
+workflow acceptance.
 
 ## Authority and reuse
 

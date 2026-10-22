@@ -1,7 +1,7 @@
 # Owned decisions and Autopilot Max
 
 Status: protocol/database 40 shared service/SDK, CLI, actual TUI and desktop
-source integration. Final packed/full/native acceptance remains a separate checkpoint.
+source integration, included in the final generated full/packed/native sweep.
 Existing qualified archives are unchanged. This is not live Jev access,
 calibrated decision quality or completed first-milestone acceptance.
 
@@ -152,6 +152,15 @@ actual tool/steer report deletion before source deletion and failed
 stop-intent persistence while the real provider request is in flight.
 The latter records its injected failure and still aborts the owned request;
 unknown charges stay held.
+
+Final source acceptance passes **956/956 checks in 854.52 s** and **64/64
+hidden desktop workflows in 2.5 min** against the exact current 0.2.3 native
+image. The actual packed external install exercises its own runtime/worker,
+CLI/shared APIs and one separately configured solver/decision/solver sequence:
+126 reported generated tokens, independent export-9 evidence, source deletion
+and reopen without another paid call. Source/image/consumer audits are clean.
+These final results supersede the intermediate mechanical-only checkpoint,
+not the Jev, live reliability/billing or Remote/native Max restrictions.
 
 The refreshed `node scripts/decision-spike.mjs` prerequisite passes all
 **8 generated wire/failure checks in 395.66 ms**: the actual loopback

@@ -1,8 +1,9 @@
 # Owned budget wind-down and accepted-work checkpoints
 
-Status: protocol/database 39 source integration. This is not a new qualified
-archive or completed milestone. System One/Max and final native/source
-acceptance remain separate gates.
+Status: introduced with protocol/database 39 and included in the
+[protocol-40 full source sweep](../setup.md#final-protocol-40-source-acceptance).
+This is not a new qualified archive or completed milestone. Local Max has
+its separate bounded-provider policy; Remote/native finishing remains blocked.
 
 Reuse maintained pi-ai, TypeBox, Node/abort/crypto and the existing event store,
 worker, ledger, filesystem capture and job supervisor (MIT). Reuse the

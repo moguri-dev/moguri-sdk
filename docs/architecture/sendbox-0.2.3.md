@@ -4,6 +4,9 @@ Issue #17 explicitly reopened native integration for released 0.2.3. These
 measurements are about that release, not the historical 0.2.1 failures.
 They qualify the stated generated primitives, not public Sandbox readiness
 or completion of the first milestone.
+The [protocol-40 source requalification](#protocol-40-source-requalification)
+below adds the actual shared SDK/client lifecycle. Historical protocol-36/37
+receipts remain scoped to their original payloads and are not relabeled.
 
 ## Release and runtime identity
 
@@ -85,7 +88,8 @@ The installation descriptor binds canonical root-owned executable/key/bundle
 paths, SHA-256 identities, trust root, minimum sequence and `version: "0.2.3"`.
 Failed private diagnostics remain under ignored `.native/qualification/`.
 
-Public Sandbox stays unavailable. These probes do not implement or qualify
+At that protocol-36 primitive checkpoint, public Sandbox stayed unavailable.
+Those probes did not implement or qualify
 the SDK/controller-owned Sandbox lifecycle, complete ledger and permission
 integration, real provider completion/late usage, actual controller SIGKILL
 and guest-loss recovery, authenticated reconnect/no replay, or reviewed
@@ -145,3 +149,55 @@ and `80cc23d91fc4a04bd3c7a48b0edef66e3f643c2466fa8d37ad2570ce35125f0d`.
 The full committed checkpoint passes 874 local checks, 58 hidden desktop cases
 and packed-consumer verification. The older generated image remains an earlier
 receipt, not silently relabeled as this payload.
+
+## Protocol-40 source requalification
+
+The final source worker is rebuilt from locked dependencies with the existing
+`container build --no-cache` path. The build passes in **30,194.94 ms** with
+zero audit findings. Rebuilding after the retained-effect correction verifies
+every package/lock/worker/bridge/MCP payload hash unchanged against this exact
+receipt. No prior image, installation, qualified archive or release is replaced.
+
+| Subject | Exact current value |
+| --- | --- |
+| Workload Node / protocol | 26.12.0 / 40 |
+| Immutable image | `docker.io/library/moguri-worker@sha256:6ee97e0ce2d8d318f5aa6aea5243d55dfbe5dad9d7d053e304b38d7d6440dafd` |
+| Worker SHA-256 | `c8db9b6b13f48259cbce5600836a19acee56ae3efd348f82eeaae3321caf2fef` |
+| Bridge SHA-256 | `88f10720a39c112fc4e58128f110360857caa04b98848660313e744faeed45d3` |
+| MCP worker SHA-256 | `b79ffd866ccfc41259888085aed2e4396a5ddafd34d9d1106af5d29a7cec6bd4` |
+| Host/guest release and trust | Unchanged 0.2.3, sequence 7 and `external-release-root` above |
+
+Seven actual native test bodies pass in a combined **21.34 s**:
+
+| Actual gate | Time |
+| --- | --- |
+| Pinned artifacts, real guest controls and verified exact owned VM absence | 1,449.25 ms |
+| Encrypted real worker IPC, withheld access and signed failed after-state despite rollback | 2,930.60 ms |
+| Shared SDK source review, guest model/read/write, Manual approvals, ledger and separate source publication | 3,916.43 ms |
+| Project-free scoped long-paste paging through the authenticated controller broker | 3,256.79 ms |
+| In-flight model cancellation, held unknown metering and replaced/rolled-back stage refusal | 3,215.08 ms |
+| Actual guest loss, partial result and distinct CLI versus runtime exit | 3,168.75 ms |
+| Actual controller SIGKILL and original late metering without another VM/model/context replay | 3,399.09 ms |
+
+The same image passes the actual hidden desktop setup/private source review,
+guest tools and separately accepted output publication in **6.2 s**.
+All **64 hidden Electron workflows pass in 2.5 min**, including default
+unready configuration, long-paste context, real SSH/PTYs, compound reviews,
+reserved wind-down and Local Max. The actual packed external SDK install,
+entrypoints, Node runtime/worker and CLI/shared decisions also pass with zero
+consumer audit findings.
+
+These are real native controls with generated provider responses, not live
+Copilot/Jev entitlement, independent training, calibrated quality or billed
+usage. Actual model output never approves staging/source/Git. Native
+compound/Max/wind-down, consoles, MCP/memory, subagents/evolution and direct plan
+write transports remain unqualified, never mapped to Local. Detached/reparented
+Local/SSH process containment remains unproven; verified native VM absence is
+a separate, narrower cleanup observation.
+
+The previously failed endpoint-only cold-network gate stays failed.
+No alias, broad egress, private-address allowance, personal credential,
+user profile-policy change or controller model fallback was introduced.
+Real provider use still requires its separately reviewed exact network scope.
+This is source acceptance evidence, not a new app/SDK archive, release tag or
+completed first milestone.
