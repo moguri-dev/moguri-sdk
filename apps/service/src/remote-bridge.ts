@@ -1,14 +1,15 @@
-import { createCipheriv, createDecipheriv, createHmac, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { fork, type ChildProcess } from "node:child_process";
 import { createServer, connect, type Socket } from "node:net";
-import { mkdir, lstat, readFile, writeFile, readdir, unlink, realpath, rename } from "node:fs/promises";
+import { mkdir, lstat, readFile, writeFile, unlink, realpath } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Value } from "typebox/value";
 import { isRecord, MoguriError, PROTOCOL_VERSION } from "../../../packages/protocol/src/index.ts";
 import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME, sendFrame } from "./worker-wire.ts";
 import { parentMessage, WorkerRequestSchema, type WorkerRequest } from "./worker-protocol.ts";
-import { BridgeInitSchema, SavedStatusSchema, BridgeEnvelopeSchema, type BridgeInit, type BridgeInfo, type BridgeStatus, type BridgeFrame, type SavedStatus } from "./remote-protocol.ts";
+import { BridgeInitSchema, type BridgeInit, type BridgeInfo, type BridgeStatus, type BridgeFrame } from "./remote-protocol.ts";
+import { ExecutionJournal, journaledForegroundSink, executionFrameName as frameName, saveExecutionStatus as saveStatus, loadExecutionStatus as loadStatus, encryptExecutionFrame as encrypt, readExecutionFrames as frames } from "./execution-journal.ts";
 import { repositoryContext } from "./project-policy.ts";
 import { foregroundWorker } from "./foreground-bridge.ts";
 import { workerCatalog } from "./worker-queries.ts";
@@ -17,12 +18,11 @@ import { discoverRemoteMcp } from "./remote-mcp-runtime.ts";
 import { probeTerminalBuild } from "./terminal-build.ts";
 import { readRepositoryCli } from "./repository-metadata.ts";
 import { captureRepositorySource, SourceRequestSchema, validateRepositorySource } from "./repository-source.ts";
+import { PrivateControl } from "./private-control.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
 const diagnosticCode = (error: unknown) => error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : error instanceof Error ? error.name : "unknown_error";
-const frameName = (sequence: number) => `${String(sequence).padStart(12, "0")}.bin`;
-const proof = (key: Buffer, value: Omit<SavedStatus, "proof">) => createHmac("sha256", key).update(JSON.stringify(value)).digest("hex");
 async function privateDirectory(path: string): Promise<string> {
   if (!isAbsolute(path)) throw new MoguriError("remote_state_path", "Remote state requires an explicit absolute private path.");
   await mkdir(path, { recursive: true, mode: 0o700 });
@@ -41,51 +41,19 @@ async function runtimeInfo(init: BridgeInit): Promise<BridgeInfo> {
     root = await realpath(init.root);
     if (root !== init.root || !(await lstat(root)).isDirectory()) throw new MoguriError("remote_workspace_alias", "Execution workspace moved or is a symlink alias. Approve its canonical path explicitly.");
   }
-  return { protocol: PROTOCOL_VERSION, workerDigest, nodeVersion: process.versions.node, platform: process.platform, root,
+  let native: BridgeInfo["native"];
+  if (process.platform === "linux" && process.argv.includes("--foreground")) {
+    const status = await readFile("/proc/self/status", "utf8"), field = (name: string) => status.match(new RegExp(`^${name}:\\s*(.+)$`, "m"))?.[1];
+    native = { bridgeDigest: createHash("sha256").update(await readFile(ownPath)).digest("hex"), uid: process.getuid!(),
+      noNewPrivs: Number(field("NoNewPrivs")), seccomp: Number(field("Seccomp")), capabilities: field("CapEff") ?? "",
+      enforcedProxy: process.env.NODE_USE_ENV_PROXY === "1" && Boolean(process.env.HTTPS_PROXY && process.env.ALL_PROXY) };
+  }
+  return { protocol: PROTOCOL_VERSION, workerDigest, nodeVersion: process.versions.node, platform: process.platform, root, ...(native ? { native } : {}),
     ...(init.action === "probe" ? await probeTerminalBuild() : {}) };
 }
 function runCredentials(init: BridgeInit): { id: string; key: Buffer } {
   if (!init.runId || !init.key) throw new Error("A remote run needs its exact owned identity and transport key.");
   return { id: init.runId, key: Buffer.from(init.key, "hex") };
-}
-async function saveStatus(directory: string, key: Buffer, status: BridgeStatus, info: BridgeInfo): Promise<void> {
-  const saved = { status, info };
-  const temporary = join(directory, `status-${randomBytes(8).toString("hex")}.tmp`);
-  await writeFile(temporary, JSON.stringify({ ...saved, proof: proof(key, saved) }), { mode: 0o600, flag: "wx" });
-  await rename(temporary, join(directory, "status.json"));
-}
-async function loadStatus(directory: string, key: Buffer): Promise<SavedStatus> {
-  const metadata = await lstat(join(directory, "status.json"));
-  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 64 * 1024) throw new Error("Remote status is not a bounded regular file.");
-  const value: unknown = JSON.parse(await readFile(join(directory, "status.json"), "utf8"));
-  if (!Value.Check(SavedStatusSchema, value)) throw new Error("Remote execution metadata is corrupt; cleanup remains unconfirmed.");
-  const expected = proof(key, { status: value.status, info: value.info });
-  if (!timingSafeEqual(Buffer.from(value.proof, "hex"), Buffer.from(expected, "hex"))) throw new Error("Remote execution identity/key does not match. No worker was created.");
-  return value;
-}
-function encrypt(key: Buffer, value: unknown): Buffer {
-  const nonce = randomBytes(12), cipher = createCipheriv("aes-256-gcm", key, nonce);
-  const content = Buffer.concat([cipher.update(JSON.stringify(value)), cipher.final()]);
-  return Buffer.concat([nonce, cipher.getAuthTag(), content]);
-}
-function decrypt(key: Buffer, value: Buffer): unknown {
-  const decipher = createDecipheriv("aes-256-gcm", key, value.subarray(0, 12));
-  decipher.setAuthTag(value.subarray(12, 28));
-  return JSON.parse(Buffer.concat([decipher.update(value.subarray(28)), decipher.final()]).toString("utf8"));
-}
-async function frames(directory: string, key: Buffer, after: number): Promise<BridgeFrame[]> {
-  const names = (await readdir(directory)).filter((name) => /^\d{12}\.bin$/.test(name) && Number(name.slice(0, 12)) > after).sort();
-  const result: BridgeFrame[] = []; let bytes = 0;
-  for (const name of names) {
-    const path = join(directory, name), metadata = await lstat(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_WORKER_FRAME) throw new Error("Remote replay is not a bounded regular frame.");
-    const content = await readFile(path); bytes += content.length;
-    if (bytes > MAX_WORKER_FRAME / 2 && result.length || result.length >= 128) break;
-    const value = decrypt(key, content);
-    if (!Value.Check(BridgeEnvelopeSchema, value) || value.kind !== "frame" || frameDigest(value.request) !== value.digest) throw new Error("Remote replay frame is corrupt.");
-    result.push(value);
-  }
-  return result;
 }
 async function supervise(init: BridgeInit): Promise<void> {
   const { id, key } = runCredentials(init), info = await runtimeInfo(init), root = await privateDirectory(init.stateDir), directory = join(root, id);
@@ -231,17 +199,33 @@ async function frontend(): Promise<void> {
   const outer = new JsonLineChannel(process.stdin, process.stdout, tty);
   const abort = new AbortController();
   let initialized = false, inner: JsonLineChannel | undefined, foreground: ReturnType<typeof foregroundWorker> | undefined;
-  outer.on("error", () => { inner?.end(); process.exitCode = 1; });
+  let privateControl: PrivateControl | undefined;
+  const foregroundSink = { send: (value: unknown, callback?: (error: Error | null) => void) => outer.send(privateControl ? privateControl.encode(value) : value, callback), end: () => outer.end() };
+  outer.on("error", () => { abort.abort(); inner?.end(); foreground?.disconnect(); process.exitCode = 1; });
   outer.on("close", () => { abort.abort(); inner?.end(); foreground?.disconnect(); process.stdin.destroy(); });
   if (tty) { process.stdout.write("\n"); outer.send({ kind: "bootstrap", protocol: PROTOCOL_VERSION }); }
   let queue = Promise.resolve();
   outer.on("message", (raw) => {
     queue = queue.then(async () => {
-      if (initialized) { if (foreground) { await foreground.receive(raw); return; } if (!inner) throw new Error("Remote control is not attached."); inner.send(raw); return; }
+      if (initialized) { if (foreground) { await foreground.receive(privateControl ? privateControl.decode(raw) : raw); return; } if (!inner) throw new Error("Remote control is not attached."); inner.send(raw); return; }
       initialized = true;
       if (!Value.Check(BridgeInitSchema, raw)) throw new Error("Remote bootstrap does not match this protocol.");
-      const init = raw, info = await runtimeInfo(init);
-      if (init.action === "probe") { outer.send({ kind: "probe", info }, () => outer.end()); return; }
+      const init = raw;
+      if (init.sealed) {
+        if (!init.key || !init.runId || !init.journal || !process.argv.includes("--foreground")) throw new Error("Sealed execution requires its exact foreground journal owner.");
+        privateControl = new PrivateControl(init.runId, Buffer.from(init.key, "hex"), "worker");
+      }
+      const info = await runtimeInfo(init);
+      if (init.journal && (init.action !== "start" || !process.argv.includes("--foreground") || !init.runId || !init.key || !info.root && !info.native ||
+        !init.sealed || init.stateDir !== join(info.root ?? "/workspace", ".moguri", "execution", init.runId))) throw new Error("Foreground journals require the exact protected sealed run directory in their owned staging root. No replay or alternate journal was used.");
+      if (init.nativeNetworkProbe && (init.action !== "probe" || !info.native)) throw new MoguriError("native_network_probe", "Cold native networking can only be qualified inside its actual foreground guest.", 409);
+      if (init.action === "probe") {
+        if (init.nativeNetworkProbe && info.native) {
+          const result = await workerCatalog({ url: "https://api.githubcopilot.com", key: null }, abort.signal);
+          info.native.networkProbe = { url: "https://api.githubcopilot.com", status: result.status };
+        }
+        outer.send({ kind: "probe", info }, () => outer.end()); return;
+      }
       if (init.action === "context") {
         if (!init.context || !info.root) throw new Error("Remote repository context needs its exact approved root and policy.");
         outer.send({ kind: "context", info, text: await repositoryContext(info.root, init.context) }, () => outer.end()); return;
@@ -292,7 +276,13 @@ async function frontend(): Promise<void> {
       }
       if (process.argv.includes("--foreground")) {
         if (init.action !== "start") throw new MoguriError("foreground_ephemeral", "Foreground native runs cannot inspect/reattach another execution. No replay or second worker was started.");
-        foreground = foregroundWorker(workerPath, init, info, outer); return;
+        if (init.journal) {
+          const credentials = runCredentials(init);
+          const status: BridgeStatus = { runId: credentials.id, workerPid: null, port: 0, acknowledged: 0, sequence: 0, status: "launching", cancellation: "none", cleanup: "pending", diagnostic: null };
+          const journal = await ExecutionJournal.create(init.stateDir, credentials.key, info, status);
+          foreground = foregroundWorker(workerPath, init, info, journaledForegroundSink(foregroundSink, journal, () => foreground?.disconnect()));
+        } else foreground = foregroundWorker(workerPath, init, info, outer);
+        return;
       }
       const credentials = runCredentials(init), root = await privateDirectory(init.stateDir), directory = join(root, credentials.id);
       if (init.action === "start") {
@@ -322,7 +312,7 @@ async function frontend(): Promise<void> {
       inner.on("error", () => { outer.send({ kind: "error", message: "Remote control connection failed; cleanup is unconfirmed." }, () => outer.end()); });
       inner.on("close", () => outer.end());
       socket.once("connect", () => inner!.send({ key: init.key, after: init.after ?? 0 }));
-    }).catch((error: unknown) => { console.error("Remote bootstrap/control failed:", diagnosticCode(error)); outer.send({ kind: "error", code: error instanceof MoguriError ? error.code : diagnosticCode(error), message: error instanceof MoguriError ? error.message : "Remote bootstrap/control failed. Check the exact build, host workspace and run identity; no duplicate worker or Local fallback." }, () => outer.end()); process.exitCode = 1; });
+    }).catch((error: unknown) => { console.error("Remote bootstrap/control failed:", diagnosticCode(error)); foregroundSink.send({ kind: "error", code: error instanceof MoguriError ? error.code : diagnosticCode(error), message: error instanceof MoguriError ? error.message : "Remote bootstrap/control failed. Check the exact build, host workspace and run identity; no duplicate worker or Local fallback." }, () => outer.end()); process.exitCode = 1; foreground?.disconnect(); });
   });
 }
 if (process.argv.includes("--supervisor")) {

@@ -7,6 +7,42 @@ separation, not SendBox process isolation.
 
 ## Qualification before capability
 
+The user explicitly resumed Sandbox implementation after correcting the pause.
+The next native integration reuses the qualified 0.2.3 CLI, Node/Node-PTY (MIT),
+SendBox (Apache-2.0), existing worker/foreground bridge and the all-role ledger.
+It must not broaden network policy or contact archived work.
+The host integration remains in development. Shared transport tests do not
+enable production Sandbox readiness or close its SDK lifecycle gates.
+
+The native contract uses an explicitly reviewed, bounded source snapshot in a
+Moguri-owned staging directory, never a live checkout mount. Immutable profile,
+session, source-root, image/worker/release, policy and native-session identities
+bind every dispatch. Project-free execution has an empty private stage, not an
+inherited root. Only reviewed exact network hosts may be configured; alias
+discovery never changes policy. Model credentials remain request-scoped and
+are withheld until actual guest and signed boundary verification.
+
+Native requests/results use the existing authenticated worker protocol.
+Credential-free worker frames and status are encrypted and journaled before
+delivery, with durable cursors committed atomically by the controller.
+After the pinned guest bootstrap, native TTY control also uses AES-256-GCM
+with a domain-separated run key, authenticated owner/direction and monotonic
+cursors. Both directions reject cleartext, tampering, gaps and replay.
+Credential-bearing controller replies are encrypted in transit, never journaled.
+Control/guest loss cannot replay work; unknown accounting remains held.
+Late retained completions may reconcile accounting without resuming a turn.
+The supervisor/VM's actual exit and verified owned guest absence, not transport
+EOF or an acknowledgement alone, determine cleanup. Local and SSH
+detached/reparented containment remain unproven.
+
+Source publication is a separate actual-user byte/base/policy review with
+root leases and durable intent, not a successful model turn or tool approval.
+Partial/stopped results remain independently inspectable; source index/HEAD
+and unrelated edits must survive. Durable native records require an additive
+schema migration and restart coverage. SDK, CLI/TUI and desktop share the
+same preparation, inspection, stop and publication authority; unqualified
+side capabilities fail explicitly rather than using the base checkout.
+
 An owned rootless loopback OpenSSH server passed strict generated host-key
 verification and a real worker-originated HTTP request in 175.94 ms. A changed
 host key prevented execution before another request. The server used generated
