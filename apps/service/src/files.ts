@@ -40,6 +40,21 @@ export async function readProjectFile(root: string, input: string, maxBytes = MA
   const text = content.toString("utf8");
   return { text, digest: digest(text), bytes: content.length, path: relative(await realpath(root), path) };
 }
+export function textFilePage(text: string, args: Record<string, unknown>) {
+  const content = Buffer.from(text), offset = args.offset ?? 0, limit = args.limit ?? 16 * 1024, search = args.search;
+  if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0 || offset > content.length ||
+    typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1 || limit > 16 * 1024 ||
+    search !== undefined && (typeof search !== "string" || !search.length || search.length > 200 || !search.isWellFormed())) throw new MoguriError("file_page", "Use an existing UTF-8 byte offset, a 1..16,384-byte limit and an optional nonempty literal search up to 200 characters.");
+  if (offset < content.length && (content[offset]! & 0xc0) === 0x80) throw new MoguriError("file_page", "The byte offset splits a UTF-8 character. Use the returned nextOffset.");
+  const found = typeof search === "string" ? content.indexOf(Buffer.from(search), offset) : null;
+  if (found === -1) return { text: "", bytes: content.length, offset, nextOffset: null, matchOffset: null, eof: true, search };
+  const start = found ?? offset;
+  let end = Math.min(start + limit, content.length);
+  while (end < content.length && (content[end]! & 0xc0) === 0x80) end--;
+  if (end === start && start < content.length) throw new MoguriError("file_page", "The byte limit cannot contain this UTF-8 character. Increase it, up to 16,384 bytes.");
+  return { text: content.subarray(start, end).toString("utf8"), bytes: content.length, offset: start, nextOffset: end < content.length ? end : null, eof: end === content.length,
+    ...(search !== undefined ? { search, matchOffset: found } : {}) };
+}
 export async function readRegularFile(path: string, maxBytes: number): Promise<Buffer> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {

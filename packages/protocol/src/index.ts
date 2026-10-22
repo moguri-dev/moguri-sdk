@@ -35,7 +35,7 @@ import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedg
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 35;
+export const PROTOCOL_VERSION = 36;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -56,6 +56,8 @@ export const CommandSchema = object({
     object({ type: Type.Literal("session.restore"), ...sessionId }),
     object({ type: Type.Literal("session.resume"), ...sessionId }),
     object({ type: Type.Literal("draft.save"), ...sessionId, expectedRevision: revision, text, attachments }),
+    object({ type: Type.Literal("draft.paste"), ...sessionId, expectedRevision: revision, text, attachments, pastedText: text,
+      start: Type.Integer({ minimum: 0, maximum: MAX_TEXT }), end: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }),
     object({ type: Type.Literal("attachment.add"), ...sessionId, expectedRevision: revision, path: Type.String({ minLength: 1, maxLength: 4096 }) }),
     object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]), held: Type.Optional(Type.Boolean()) }),
     object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text }),
@@ -165,7 +167,7 @@ export interface Session {
   inheritedImages?: boolean;
   activeCompactionId?: string | null;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; imageInput: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
+export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];
@@ -202,7 +204,7 @@ export interface Connection {
 
 export interface EventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
+  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "session.workspace_bound": { workspaceId: string | null };
   "workspace.saved": { workspace: ManagedWorkspace };
   "change_set.saved": { changeSet: ChangeSet };
@@ -216,7 +218,7 @@ export interface EventPayloads {
   "session.blocked": { diagnostic: string };
   "draft.saved": { text: string; attachments: Attachment[] };
   "queue.enqueued": { item: QueueItem };
-  "queue.edited": { messageId: string; text: string };
+  "queue.edited": { messageId: string; text: string; attachments?: Attachment[] };
   "queue.removed": { messageId: string };
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
@@ -719,7 +721,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       case "queue.edited": {
         const item = session.queue.find((item) => item.id === event.payload.messageId);
-        if (item) item.text = event.payload.text;
+        if (item) { item.text = event.payload.text; if (event.payload.attachments) item.attachments = event.payload.attachments; }
         session.queueRevision++;
         break;
       }

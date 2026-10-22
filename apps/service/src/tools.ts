@@ -1,7 +1,7 @@
 import { Type, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { MAX_TEXT, MoguriError, ConfigurationSpecSchema, UserQuestionSchema, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
-import { listProjectFiles, readProjectFile, writeProjectFile } from "./files.ts";
+import { MAX_TEXT, MoguriError, isPasteFilePath, ConfigurationSpecSchema, UserQuestionSchema, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
+import { listProjectFiles, readProjectFile, writeProjectFile, textFilePage } from "./files.ts";
 import { runCommand } from "./supervisor.ts";
 import { assertFolderAccess, matchesFolder, readTools, type FolderPolicy } from "./project-policy.ts";
 
@@ -15,7 +15,10 @@ export const tools: Tool[] = [
     proposal: Type.Optional(ConfigurationSpecSchema),
   }, { additionalProperties: false }) },
   { name: "list_files", description: "List one project directory. Protected paths and symlinks are excluded. Requires human approval.", parameters: Type.Object({ path }, { additionalProperties: false }) },
-  { name: "read_file", description: "Read an approved project UTF-8 file up to 128 KiB. Returns its digest for conflict-safe writes. Requires human approval.", parameters: Type.Object({ path }, { additionalProperties: false }) },
+  { name: "read_file", description: "Read an approved project UTF-8 file up to 128 KiB, or an admitted moguri-attachment/ID.txt scoped snapshot. Scoped files always return at most 16 KiB through the owning controller broker, never a host-path mount. Optional offset/limit are UTF-8 bytes; use nextOffset to page, or search for one literal string. Project reads without options retain their whole-file behavior and digest for conflict-safe writes. Requires approval or explicit read delegation.", parameters: Type.Object({ path,
+    offset: Type.Optional(Type.Integer({ minimum: 0, maximum: MAX_TEXT })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 16 * 1024 })),
+    search: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  }, { additionalProperties: false }) },
   { name: "write_file", description: "Write a complete project text file. expectedDigest must be the digest returned by read_file, or 'absent' for a new file. Requires human approval.", parameters: Type.Object({ path, text: Type.String({ maxLength: MAX_TEXT }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }) }, { additionalProperties: false }) },
   { name: "run_command", description: "Run an exact shell command in the approved project on the Local host, without sandbox isolation. Requires human approval or an explicit exact-command grant, including Git writes. No automatic backgrounding. Output is bounded; timeout cancels the owned process group.", parameters: Type.Object({ command: Type.String({ minLength: 1, maxLength: 16_384 }), timeoutMs: Type.Integer({ minimum: 1000, maximum: 600_000 }) }, { additionalProperties: false }) },
   { name: "memory_search", description: "Search the explicitly enabled lexical-vector memory for the actual execution root. Returns binding/source digests and marks stale snapshots; no embeddings are sent to a hosted model.", parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 4000 }) }, { additionalProperties: false }) },
@@ -32,11 +35,11 @@ export const tools: Tool[] = [
     parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }, { additionalProperties: false }),
   })),
 ];
-export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; metachat?: boolean; env?: Controls["env"] } = { project: true }): Tool[] {
+export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; metachat?: boolean; env?: Controls["env"]; pasteFiles?: boolean } = { project: true }): Tool[] {
   if (readOnly) return [];
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
-    .filter((tool) => scope.project || !["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(tool.name))
+    .filter((tool) => scope.project || scope.pasteFiles && tool.name === "read_file" || !["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(tool.name))
     .filter((tool) => !scope.metachat || tool.name === "moguri_config" || tool.name === "ask_user")
     .filter((tool) => mode !== "read-only" || readTools.has(tool.name))
     .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway"].includes(tool.name))
@@ -53,13 +56,21 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
   signal.throwIfAborted();
   validateTool(call);
   if (safety?.mode === "read-only" && !readTools.has(call.name)) throw new MoguriError("read_only", "Edit and execution tools are disabled for this read-only session.", 403);
+  if (typeof call.arguments.path === "string" && isPasteFilePath(call.arguments.path)) {
+    if (call.name !== "read_file") throw new MoguriError("attachment_read_only", "Scoped pasted files are immutable. No workspace file was accessed.", 403);
+    if (!delegate) throw new MoguriError("attachment_boundary", "This worker has no authenticated scoped-file broker. No host-path fallback was attempted.", 409);
+    return delegate(call);
+  }
   if (!root && ["list_files", "read_file", "write_file", "run_command"].includes(call.name)) throw new MoguriError("project_required", "This chat has no workspace. No file or command operation was executed.");
   if (root && safety && ["list_files", "read_file", "write_file"].includes(call.name)) await assertFolderAccess(root, String(call.arguments.path), call.name === "write_file", safety.folders);
   if (safety && (safety.folders.denied.length || safety.folders.readOnly.length) && ["run_command", "mcp_gateway"].includes(call.name)) throw new MoguriError("folder_containment", "This host execution cannot enforce configured folder restrictions.", 403);
   const args = call.arguments;
   switch (call.name) {
     case "list_files": return { text: JSON.stringify((await listProjectFiles(root!, String(args.path))).filter((path) => !safety || !matchesFolder(path, safety.folders.denied))), isError: false, outcome: "completed" };
-    case "read_file": return { text: JSON.stringify(await readProjectFile(root!, String(args.path))), isError: false, outcome: "completed" };
+    case "read_file": {
+      const file = await readProjectFile(root!, String(args.path));
+      return { text: JSON.stringify(args.offset !== undefined || args.limit !== undefined || args.search !== undefined ? { ...file, ...textFilePage(file.text, args) } : file), isError: false, outcome: "completed" };
+    }
     case "write_file": {
       signal.throwIfAborted();
       const effects = { attempted: false, written: false };

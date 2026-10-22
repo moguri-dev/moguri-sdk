@@ -76,6 +76,19 @@ receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
 `node bin/moguri.mjs service restart`; do not delete its state.
+
+The issue-17 source uses protocol/database **36** for scoped pasted-text file
+descriptors and optional queue-edit attachments. Schema 35 upgrades without
+rewriting historical events, receipts, encrypted grants or arbitrary legacy
+working-window settings. Unsupported legacy windows remain visible and block
+inference until explicitly corrected. `modelContextWindows(model)` and
+`sessions.context(id).context.windows` share maximum/half or genuine declared
+choices. `attachments.paste(id,text,selection?,draftRevision?)` atomically
+captures exact pasted text into the current draft; `DraftEditor.paste` also
+preserves unsent/conflicting local edits. The existing authenticated worker
+`read_file` broker exposes bounded pages/search without injecting the whole
+file into model context. These are source capabilities, not a claim that any
+earlier immutable SDK/app archive was rebuilt or that issue 17 is complete.
 The 0.18 source adds [authoritative Remote MCP](architecture/remote-mcp.md).
 Explicit peer/resource grants are deny-by-default.
 Source SDK model/external calls now use the owned SSH worker, encrypted

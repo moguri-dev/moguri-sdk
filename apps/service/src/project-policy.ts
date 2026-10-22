@@ -1,5 +1,5 @@
 import { isAbsolute, normalize, relative, resolve } from "node:path";
-import { MoguriError, type ProjectSettings, type Session, type ToolCall } from "../../../packages/protocol/src/index.ts";
+import { isPasteFilePath, MoguriError, type ProjectSettings, type Session, type ToolCall } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, scopedPath } from "./files.ts";
 
 export interface FolderPolicy { denied: string[]; readOnly: string[] }
@@ -28,6 +28,10 @@ export async function assertFolderAccess(root: string, input: string, write: boo
 export const readTools = new Set(["list_files", "read_file", "memory_search", "ask_user"]);
 export async function assertSessionTool(session: Session, root: string | null, settings: ProjectSettings, call: ToolCall, inspectFilesystem = true): Promise<void> {
   if ((session.mode === "read-only" || session.pendingMode === "read-only" || session.kind === "side") && !readTools.has(call.name)) throw new MoguriError("read_only", "This session is question/read-only. Edit, shell, MCP execution, Git and evolution tools are disabled.", 403);
+  if (typeof call.arguments.path === "string" && isPasteFilePath(call.arguments.path)) {
+    if (call.name !== "read_file") throw new MoguriError("attachment_read_only", "Scoped pasted files are immutable and are not project paths.", 403);
+    return;
+  }
   const policy = folderPolicy(settings);
   if (!root && ["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(call.name)) throw new MoguriError("project_required", "Select a project for workspace files, commands or repository knowledge. No previous root was reused.", 403);
   if (root && ["list_files", "read_file", "write_file"].includes(call.name)) {

@@ -24,6 +24,12 @@ export class MoguriSdk extends TransportClient {
     return session.draft.revision;
   }
   readonly attachments = {
+    paste: (sessionId: string, pastedText: string, selection?: { start: number; end: number }, expectedRevision = this.draftRevision(sessionId)) => {
+      const draft = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.draft;
+      if (!draft) throw new ClientError("session_missing", "Choose an existing destination session.");
+      return this.command({ type: "draft.paste", sessionId, expectedRevision, text: draft.text, attachments: draft.attachments, pastedText,
+        start: selection?.start ?? draft.text.length, end: selection?.end ?? draft.text.length });
+    },
     file: (sessionId: string, path: string, mode: "text" | "image" = "text", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.file.add", sessionId, path, mode, expectedRevision }),
     image: (sessionId: string, data: string, name = "Clipboard image", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.image.add", sessionId, data, name, expectedRevision }),
     folderPreview: (sessionId: string, path: string) => this.query({ type: "attachment.folder.preview", sessionId, path }),

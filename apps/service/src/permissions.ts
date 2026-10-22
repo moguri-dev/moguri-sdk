@@ -1,6 +1,6 @@
 import { relative, isAbsolute, normalize } from "node:path";
 import type { ToolCall, UserSettings } from "../../../packages/protocol/src/index.ts";
-import { MoguriError } from "../../../packages/protocol/src/index.ts";
+import { isPasteFilePath, MoguriError } from "../../../packages/protocol/src/index.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { validateRemoteTarget } from "./remote.ts";
 
@@ -31,7 +31,7 @@ export function validateSettings(settings: UserSettings): void {
 }
 export function authorizeTool(settings: UserSettings, call: ToolCall, root: string | null): Authorization {
   const value = typeof call.arguments.path === "string" ? call.arguments.path : "";
-  if (!root && ["list_files", "read_file", "write_file", "run_command"].includes(call.name)) return { decision: "deny", reason: "A selected project is required for workspace access." };
+  if (!root && ["list_files", "read_file", "write_file", "run_command"].includes(call.name) && !(call.name === "read_file" && isPasteFilePath(value))) return { decision: "deny", reason: "A selected project is required for workspace access." };
   const scoped = value && root && isAbsolute(value) ? relative(root, value) : value;
   const matched = settings.permissions.tools.filter((rule) => {
     if (rule.tool !== "*" && rule.tool !== call.name) return false;

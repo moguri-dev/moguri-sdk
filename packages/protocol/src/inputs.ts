@@ -5,9 +5,14 @@ const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const revision = Type.Integer({ minimum: 0 });
 const base = { id, path, digest: hash, bytes: Type.Integer({ minimum: 0, maximum: 8 * 1024 * 1024 }) };
 const source = Type.Object({ kind: Type.String({ maxLength: 40 }), location: path, revision: Type.String({ maxLength: 256 }) }, { additionalProperties: false });
+export const PASTE_FILE_PREFIX = "moguri-attachment/";
+export const pasteLineCount = (text: string): number => text.split(/\r\n|\r|\n/).length;
+export const pasteFilePath = (attachmentId: string): string => `${PASTE_FILE_PREFIX}${attachmentId}.txt`;
+export const isPasteFilePath = (path: string): boolean => path.startsWith(PASTE_FILE_PREFIX);
 export const AttachmentSchema = Type.Union([
   Type.Object({ ...base, bytes: Type.Integer({ minimum: 0, maximum: 128 * 1024 }), kind: Type.Literal("project_file") }, { additionalProperties: false }),
   Type.Object({ ...base, kind: Type.Literal("local_file"), source }, { additionalProperties: false }),
+  Type.Object({ ...base, kind: Type.Literal("paste_file"), bytes: Type.Integer({ minimum: 0, maximum: 128 * 1024 }), lines: Type.Integer({ minimum: 51, maximum: 131073 }), source }, { additionalProperties: false }),
   Type.Object({ ...base, kind: Type.Literal("image"), mimeType: Type.Literal("image/png"), width: Type.Integer({ minimum: 1, maximum: 16000 }), height: Type.Integer({ minimum: 1, maximum: 16000 }), source }, { additionalProperties: false }),
   Type.Object({ ...base, kind: Type.Union([Type.Literal("folder"), Type.Literal("github_issue"), Type.Literal("github_pr"), Type.Literal("session")]), source }, { additionalProperties: false }),
 ]);

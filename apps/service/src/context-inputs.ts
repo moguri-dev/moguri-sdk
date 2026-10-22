@@ -4,9 +4,9 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import sharp from "sharp";
 import { Value } from "typebox/value";
 import {
-  InputCommandSchema, InputQuerySchema, isRecord, MoguriError, type Attachment, type ContextPreview, type InputCommand, type InputQuery, type InputResponse, type Session, type Snapshot, type StoredEvent,
+  InputCommandSchema, InputQuerySchema, isRecord, MoguriError, pasteFilePath, pasteLineCount, type Attachment, type ContextPreview, type InputCommand, type InputQuery, type InputResponse, type Session, type Snapshot, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
-import { isProtectedProjectPath, readProjectFile, readRegularFile } from "./files.ts";
+import { isProtectedProjectPath, readProjectFile, readRegularFile, textFilePage } from "./files.ts";
 import { digest, type EventStore } from "./store.ts";
 import { ignoredPath, readIgnoreScope, type IgnoreScope } from "./ignore-rules.ts";
 import { matchesFolder } from "./project-policy.ts";
@@ -23,6 +23,45 @@ interface Capture { preview: Omit<ContextPreview, "destination">; text: string }
 export class ContextInputs {
   private stateRoot?: string;
   constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly integrations: ProjectIntegrations, private readonly host: Host, private readonly stateDir: string) {}
+  normalizePaste(text: string, attachments: Attachment[]): { text: string; attachments: Attachment[] } {
+    const lines = pasteLineCount(text);
+    if (lines <= 50) return { text, attachments };
+    const bytes = Buffer.byteLength(text);
+    if (!text.isWellFormed() || text.includes("\0")) throw new MoguriError("attachment_text", "Pasted files require valid UTF-8 text without NUL. The complete draft was preserved.");
+    if (bytes > 128 * 1024) throw new MoguriError("attachment_limit", "Pasted text files are limited to 128 KiB. The complete draft was preserved; no text was truncated or sent.");
+    if (attachments.length >= 16 || attachments.reduce((total, item) => total + item.bytes, bytes) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 attachments and 12 MiB of captured content. The complete draft was preserved.");
+    const id = randomUUID(), hash = this.store.putBlob(text);
+    const attachment: Attachment = { id, kind: "paste_file", path: pasteFilePath(id), digest: hash, bytes, lines, source: { kind: "paste", location: "explicit composer text", revision: hash } };
+    return { text: "", attachments: [...attachments, attachment] };
+  }
+  retainedAttachments(sessionId: string): Attachment[] {
+    const profileId = this.host.snapshot().profileId;
+    return this.host.events().flatMap((event) => {
+      if (event.profile_id !== profileId || event.session_id !== sessionId) return [];
+      if (event.event_type === "session.created") return event.payload.pasteFiles ?? [];
+      if (event.event_type === "draft.saved") return event.payload.attachments;
+      if (event.event_type === "queue.edited") return event.payload.attachments ?? [];
+      return event.event_type === "queue.enqueued" || event.event_type === "turn.started" || event.event_type === "steer.applied" ? event.payload.item.attachments : [];
+    });
+  }
+  admittedFiles(sessionId: string): Extract<Attachment, { kind: "paste_file" }>[] {
+    const session = this.session(sessionId, false);
+    const profileId = this.host.snapshot().profileId;
+    const inherited = this.host.events().flatMap((event) => event.profile_id === profileId && event.session_id === sessionId && event.event_type === "session.created" ? event.payload.pasteFiles ?? [] : []);
+    const admitted = session.messages.flatMap((message) => message.role === "user" ? message.attachments ?? [] : [])
+      .filter((attachment): attachment is Extract<Attachment, { kind: "paste_file" }> => attachment.kind === "paste_file");
+    return [...new Map([...inherited, ...admitted].map((attachment) => [attachment.id, attachment])).values()];
+  }
+  scopedFile(sessionId: string, path: string): Extract<Attachment, { kind: "paste_file" }> {
+    const attachment = this.admittedFiles(sessionId).find((attachment) => attachment.path === path);
+    if (attachment?.kind !== "paste_file" || attachment.path !== pasteFilePath(attachment.id)) throw new MoguriError("attachment_scope", "This exact scoped file was not admitted to this session. Drafts, queued files, other profiles and host paths are not readable.", 403);
+    return attachment;
+  }
+  readFile(sessionId: string, path: string, args: Record<string, unknown>) {
+    const attachment = this.scopedFile(sessionId, path), text = this.store.blob(attachment.digest);
+    if (digest(text) !== attachment.digest || Buffer.byteLength(text) !== attachment.bytes || pasteLineCount(text) !== attachment.lines) throw new MoguriError("attachment_integrity", "The retained file does not match its exact admitted descriptor. No text was substituted.", 409);
+    return { path, digest: attachment.digest, lines: attachment.lines, boundary: "scoped-controller-snapshot", ...textFilePage(text, args) };
+  }
   private session(id: string, mutate = true): Session {
     const session = this.host.snapshot().sessions.find((session) => session.id === id);
     if (!session || mutate && session.status === "archived") throw new MoguriError("attachment_session", "Choose an existing, unarchived destination for attachment changes.");
@@ -123,7 +162,7 @@ export class ContextInputs {
     if (query.type === "attachment.folder.preview") return { type: query.type, preview: this.reviewed(query.sessionId, await this.folder(query.path)) };
     if (query.type === "attachment.github.preview") return { type: query.type, preview: this.reviewed(query.sessionId, await this.github(this.session(query.sessionId), query.url, query.access)) };
     if (query.type === "attachment.session.preview") return { type: query.type, preview: this.reviewed(query.sessionId, this.sessionCapture(query.sourceSessionId)) };
-    const attachment = this.host.events().flatMap((event) => event.session_id === query.sessionId && event.event_type === "draft.saved" ? event.payload.attachments : []).find((attachment) => attachment.id === query.attachmentId);
+    const attachment = this.retainedAttachments(query.sessionId).find((attachment) => attachment.id === query.attachmentId);
     if (!attachment) throw new MoguriError("attachment_scope", "This attachment has no content grant in the selected session.");
     const content = this.store.blob(attachment.digest);
     return { type: query.type, attachment, content: attachment.kind === "image" ? { kind: "image", data: content, mimeType: attachment.mimeType } : { kind: "text", text: content } };

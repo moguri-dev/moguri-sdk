@@ -43,7 +43,8 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 function references(input: EventInput): string[] {
   switch (input.event_type) {
     case "queue.enqueued": return input.payload.item.attachments.map((entry) => entry.digest);
-    case "session.created": return input.payload.contextDigest ? [input.payload.contextDigest] : [];
+    case "queue.edited": return input.payload.attachments?.map((entry) => entry.digest) ?? [];
+    case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.pasteFiles ?? []).map((entry) => entry.digest)];
     case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.map((entry) => entry.digest)];
     case "turn.prompt_bound": return [input.payload.promptDigest];
     case "turn.control_started": return [input.payload.purpose === "plan.save" ? input.payload.intentDigest : input.payload.promptDigest];
@@ -201,6 +202,9 @@ export class EventStore {
       if (version < 35) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('owned_role_contract_schema','1');
         PRAGMA user_version=35; COMMIT;`);
+      if (version < 36) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('paste_file_schema','1');
+        PRAGMA user_version=36; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

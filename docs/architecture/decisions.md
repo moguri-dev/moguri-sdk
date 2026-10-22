@@ -746,6 +746,15 @@ read-only label, determines when the common writer lease is released.
 
 ## Still open
 
+Issue #17 resumes native SendBox work specifically for released **0.2.3**.
+The [fresh release/worker/network/cancellation measurements](sendbox-0.2.3.md)
+supersede no historical artifact and do not change D10's production admission
+requirements. The signed host/guest and bounded offline worker gates pass;
+endpoint-only cold egress fails, while an explicitly captured alias scope
+passes its separate generated probe. SDK/controller lifecycle, accounting,
+loss/restart and reviewed source publication remain gates. No Local fallback
+or production readiness is enabled by those measurements.
+
 - Package manager and monorepo tooling.
 - Protocol schema tool and code generation. `pi-ai` already uses TypeBox.
 - SQLite driver: `better-sqlite3` or Node.js's built-in `node:sqlite` module.

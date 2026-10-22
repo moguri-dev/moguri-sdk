@@ -39,6 +39,34 @@ Sandbox receive only approved content, never a host home-directory mount.
 
 ## Admission and recovery
 
+Issue #17 adds `paste_file` snapshots for more than 50 logical lines; CRLF is
+one delimiter, CR and LF are also supported, and a trailing delimiter creates
+an empty final line. Exact UTF-8 bytes, including line endings, stay encrypted
+under the destination session's existing retention grant. The 128 KiB text-file,
+16-attachment and 12 MiB aggregate limits apply. Oversized/invalid text or failed
+persistence preserves the complete draft. No source checkout is modified.
+Shared send and queue editing perform capture in the same atomic transaction
+as consumption, so SDK callers cannot bypass it through a plain text draft.
+Protocol/schema 36 adds the attachment discriminator and optional queue-edit
+attachments without rewriting prior events, receipts, ciphertexts or settings.
+
+The scoped file namespace is `moguri-attachment/ID.txt`, not a host path or a
+mount. Model context must contain only its descriptor. The existing `read_file`
+tool obtains bounded exact UTF-8 pages or literal searches through the owning
+worker's authenticated control-plane broker, subject to exact tool approval.
+This deliberately discloses the controller snapshot boundary on both Local
+and core SSH; it does not claim a remote filesystem mount or Local fallback.
+Unsent drafts, other sessions/profiles and arbitrary names cannot be read.
+Sandbox admission remains blocked until its separately qualified transport can
+carry those same owned frames. Only explicit reads may reveal file sections
+to the selected model. The existing MIT-licensed SDK, worker, TypeBox and Node
+primitives are reused without dependencies or additional model calls.
+An explicit user-created child/side context copy retains its own exact file
+grants in `session.created.pasteFiles`; deleting its source cannot erase those
+copies. It still needs separate file-tool approval. Tool-less model-created
+subagents fail explicitly when scoped files would be inaccessible, rather than
+receiving unreadable filenames or an automatic whole-file prompt expansion.
+
 Unsupported image models block admission and preserve the complete draft/queue;
 images are never silently dropped, captioned remotely or sent to another model.
 Folder/reference preview is not inference. A stale preview, credential failure,

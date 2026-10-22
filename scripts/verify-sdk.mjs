@@ -44,6 +44,7 @@ try {
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
+    ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     async function typedConsumer() {
       const sdk = await connectMoguri({autoStart:false});
       ${installedProtocol >= 34 ? 'const evidence:ModelEvidenceReport=(await sdk.models.evidence("generated-model")).evidence;void evidence.claimed.family;void evidence.source.familyField;' : ""}
@@ -102,6 +103,7 @@ try {
       await sdk.sessions.mode("generated-id","read-only");
       await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
       const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
+      ${installedProtocol >= 36 ? 'void context.context.windows?.values;void modelContextWindows({contextWindow:32769});await sdk.attachments.paste("generated-id","Generated typed paste",{start:0,end:0});' : ""}
       ${installedProtocol >= 23 ? `
       const terminal=await sdk.terminal.open("generated-id");
       const consolePage=await sdk.terminal.read(terminal.id!);void consolePage.terminal.binding?.inode;void consolePage.terminal.attachmentId;
@@ -219,7 +221,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
@@ -249,6 +251,26 @@ try {
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);
+      ${installedProtocol >= 36 ? `
+      assert.deepEqual(modelContextWindows({contextWindow:32769}),{source:"maximum-and-half",values:[32769,16384]});
+      const pasteSession=await sdk.sessions.create(null,"Generated installed exact paste");
+      const pasteDraft=sdk.getState().snapshot.sessions.find(session=>session.id===pasteSession.id).draft;
+      const pasteEditor=new DraftEditor(sdk,pasteSession.id,pasteDraft);
+      const exactPaste=Array.from({length:51},(_,index)=>"Generated installed paste "+index+" 🍊").join("\\r\\n");
+      try{
+        await pasteEditor.paste(exactPaste);
+        const captured=sdk.getState().snapshot.sessions.find(session=>session.id===pasteSession.id).draft;
+        assert.equal(captured.text,"");assert.equal(captured.attachments[0].kind,"paste_file");
+        const file=captured.attachments[0];
+        assert.deepEqual((await sdk.attachments.read(pasteSession.id,file.id)).content,{kind:"text",text:exactPaste});
+        await assert.rejects(()=>beta.attachments.read(pasteSession.id,file.id),/session|profile/);
+        await pasteEditor.send("queue",true);
+        const held=sdk.getState().snapshot.sessions.find(session=>session.id===pasteSession.id).queue[0];
+        assert.equal(held.held,true);assert.equal(held.text,"");assert.equal(held.attachments[0].digest,file.digest);
+        await sdk.sessions.delete(pasteSession.id,true);
+        await assert.rejects(()=>sdk.attachments.read(pasteSession.id,file.id),/session|profile/);
+      }finally{pasteEditor.dispose();}
+      ` : ""}
       assert.equal(Reflect.set(sdk,"profileId",profile.id),false);
       assert.equal(sdk.profileId,"default");assert.equal(beta.profileId,profile.id);
       assert.equal(beta.getState().snapshot.projects.length,0);assert.equal(beta.getState().snapshot.sessions.length,0);
