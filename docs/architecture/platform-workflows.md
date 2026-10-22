@@ -328,3 +328,12 @@ Five consecutive actual SSH metadata-failure cases pass. This changes no
 production cancellation, remote-effect assertion, cleanup proof or admission
 rule; persistent cleanup failure still throws. The complete sweep is repeated
 again rather than relabeling the failed run.
+
+The corrected complete native-enabled unit/integration/TUI sweep passes
+**1,045/1,045 cases in 935.17 s, with no skips**. The first complete hidden
+desktop sweep passes 65/67: one legacy consent locator still named the old
+single-root/public-only cache UI, and one model-window assertion sampled the
+DOM before its asynchronous update. Locators now name the exact current
+resource/member consent, and the model assertion waits for the same required
+maximum/half values rather than accepting a proxy. All six affected desktop
+cases pass; no production code or model/permission threshold was relaxed.
