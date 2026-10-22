@@ -16,6 +16,7 @@ import {
   isRoleSequenceQuery,
   isCompoundCommand, isCompoundQuery, type CompoundCommand, type CompoundQuery, type CompoundResponse, type CompoundCandidateProposal,
   isWinddownCommand, isWinddownQuery, type WinddownCommand, type WinddownQuery, type WinddownResponse,
+  isDecisionCommand, isDecisionQuery, type DecisionCommand, type DecisionQuery, type DecisionResponse,
   isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
@@ -105,6 +106,8 @@ export interface PlatformHost {
   compoundCommand(command: CompoundCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   winddownQuery(query: WinddownQuery): Promise<WinddownResponse>;
   winddownCommand(command: WinddownCommand, finish: WorkspaceFinish): Promise<CommandResult>;
+  decisionQuery(query: DecisionQuery): DecisionResponse;
+  decisionCommand(command: DecisionCommand, finish: WorkspaceFinish): CommandResult;
   roleContract(query: import("../../../packages/protocol/src/role-contracts.ts").RoleContractQuery): import("../../../packages/protocol/src/role-contracts.ts").RoleContractRead;
   modelEvidence(id: string): Promise<import("../../../packages/protocol/src/index.ts").ModelEvidenceReport>;
   planSaveQuery(query: PlanSaveQuery): PlanSaveResponse;
@@ -488,6 +491,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isDecisionQuery(query)) return this.host.decisionQuery(query);
     if (isWinddownQuery(query)) return this.host.winddownQuery(query);
     if (isCompoundQuery(query)) return this.host.compoundQuery(query);
     if (isSandboxQuery(query)) return this.host.sandboxQuery(query);
@@ -620,7 +624,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     validateSettings(settings);
     this.budgets.validateSettings(settings);
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
-    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote, settings.kupo, settings.winddown]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown]);
+    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote, settings.kupo, settings.winddown, settings.decisions]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions]);
     return { event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
   }
   private skill(content: string) {
@@ -675,6 +679,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isDecisionCommand(command)) return this.host.decisionCommand(command, finish);
     if (isWinddownCommand(command)) return this.host.winddownCommand(command, finish);
     if (isCompoundCommand(command)) return this.host.compoundCommand(command, finish);
     if (isSandboxCommand(command)) return this.host.sandboxCommand(command, finish);

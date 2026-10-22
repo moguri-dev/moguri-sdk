@@ -15,6 +15,7 @@ export interface ModelAdviceSource {
 export interface QuestionRecommendation extends ModelAdviceSource { choice: string; reason: string }
 export interface QuestionAnswer {
   text: string; actor: "user" | "model" | "decision-provider"; modelId: string | null; sourceCallId: string | null; answeredAt: string;
+  decisionId?: string; providerId?: string;
 }
 export interface UserQuestion extends Omit<UserQuestionInput, "recommendation"> {
   id: string; sessionId: string; projectId: string | null; workspaceId: string | null; turnId: string; stepId: string; callId: string; modelId: string;

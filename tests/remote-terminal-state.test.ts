@@ -110,7 +110,7 @@ test("schema-25 marker failure leaves exact schema-24 metadata/ciphertext usable
   try {
     store.commit([{ event_type: "job.progress", profile_id: "default", payload: { jobId: "generated-schema24", progress: "Generated exact encrypted source." } }]);
     const before = store.db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all();
-    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema','paste_file_schema','native_execution_schema','compound_workflow_schema','budget_winddown_schema'); PRAGMA user_version=24;
+    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema','paste_file_schema','native_execution_schema','compound_workflow_schema','budget_winddown_schema','owned_decision_schema'); PRAGMA user_version=24;
       CREATE TRIGGER generated_remote_terminal_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='remote_terminal_schema'
       BEGIN SELECT RAISE(ABORT,'Generated console migration interruption'); END; COMMIT;`);
     store.close(); store = undefined;

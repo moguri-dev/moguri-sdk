@@ -359,6 +359,18 @@ deterministic authorizer. Migration 15 preserves old questions/keys/receipts
 and defaults legacy advice to null. This does not enable a decision provider,
 Autopilot Max or automated steering.
 
+**Protocol-40 source slice.** The [owned decision integration](owned-decisions.md)
+adds an explicitly selected bounded-model System One-compatible alternative
+over the existing root-less worker, all-role ledger and deterministic
+authorizer. Local Max can review already-delegated tools, exact user-declared
+technical choices and bounded user-authored safe-boundary steering without
+human impersonation. Actual worker exit, context/policy/human rechecks,
+independent reports and real controller-loss recovery remain required.
+Jev stays unqualified because its current wire cannot enforce the required
+output bound; it never silently substitutes this alternative. Remote/native
+Max, live reliability/calibration and final cross-client/source qualification
+remain distinct gates.
+
 ## D13. Remote SSH execution
 
 **Decision.** Include a user-configured **Remote** env in the first release. It runs the agent task, tools, and all router/solver/critic/decision model calls on the SSH machine. The user's local Moguri service still owns durable state and the client API; the remote worker reports through a versioned, run-scoped protocol inside SSH.

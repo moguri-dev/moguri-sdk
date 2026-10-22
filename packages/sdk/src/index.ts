@@ -196,6 +196,17 @@ export class MoguriSdk extends TransportClient {
     stop: (winddownId: string) => this.command({ type: "winddown.stop", winddownId }),
     decline: (winddownId: string, expectedRevision: number, confirm: true) => this.command({ type: "winddown.decline", winddownId, expectedRevision, confirm }),
   };
+  readonly decisions = {
+    status: (sessionId: string) => this.query({ type: "decisions.status", sessionId }),
+    read: (decisionId: string) => this.query({ type: "decisions.read", decisionId }),
+    stop: (decisionId: string) => this.command({ type: "decisions.stop", decisionId }),
+    list: (sessionId?: string) => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("not_ready", "Connect before reading retained decision-provider requests.");
+      if (sessionId !== undefined && !snapshot.sessions.some((session) => session.id === sessionId)) throw new ClientError("session_missing", "Choose an exact session in this immutable profile.");
+      return snapshot.decisions.filter((record) => sessionId === undefined || record.sessionId === sessionId);
+    },
+  };
   readonly candidates = {
     generatePreview: (sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput) => this.query({ type: "candidate.generation.preview", sessionId, stageWorkspaceId, input }),
     generate: (sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput, expectedDigest: string, confirmCost: true) =>

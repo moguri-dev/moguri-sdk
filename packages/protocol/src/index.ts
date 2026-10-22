@@ -35,10 +35,11 @@ import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedg
 import { projectSandboxPublication, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
 import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger, type CompoundWorkflow } from "./compound.ts";
 import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
+import { DecisionRecordSchema, projectDecision, validateDecisionLedger, type DecisionRecord } from "./decisions.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 39;
+export const PROTOCOL_VERSION = 40;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -242,6 +243,7 @@ export interface EventPayloads {
   "compaction.saved": { compaction: ContextCompaction };
   "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string };
   "steer.applied": { item: QueueItem };
+  "steering.applied": { decisionId: string; modelId: string; providerId: string; sourceStepId: string; text: string };
   "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole };
   "routing.started": { routing: RoutingTurn };
   "routing.planned": { routingId: string; classifierStepId: string; plan: SingleRoutingPlan };
@@ -253,7 +255,7 @@ export interface EventPayloads {
   "execution.changed": { executionId: string; status: RemoteExecution["status"]; cancellation: RemoteExecution["cancellation"]; cleanup: RemoteExecution["cleanup"]; diagnostic: string | null; workerPid?: number };
   "execution.frame_recorded": { executionId: string; sequence: number; digest: string };
   "tool.requested": { approval: Approval };
-  "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" | "delegation"; ruleId?: string };
+  "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" | "delegation" | "decision-provider"; ruleId?: string; decisionId?: string };
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
@@ -291,12 +293,13 @@ export interface EventPayloads {
   "session.group_saved": { group: SessionGroup };
   "artifact.saved": { artifact: LegacyRetainedArtifact };
   "artifact.revised": { artifact: LegacyVersionedArtifact };
-  "artifact.deleted": { artifactId: string; generationIntent?: { commandId: string; commandDigest: string }; roleSequenceIntent?: { commandId: string; commandDigest: string }; compoundIntent?: { commandId: string; commandDigest: string } };
+  "artifact.deleted": { artifactId: string; generationIntent?: { commandId: string; commandDigest: string }; roleSequenceIntent?: { commandId: string; commandDigest: string }; compoundIntent?: { commandId: string; commandDigest: string }; decisionIntent?: { sessionId: string; turnId: string; sourceDigest: string } };
   "candidate.saved": { candidate: CandidateRecord };
   "candidate.generation_recorded": { generation: CandidateGenerationRecord };
   "role.sequence_recorded": { sequence: RoleSequenceRecord };
   "compound.recorded": { workflow: CompoundWorkflow };
   "winddown.recorded": { winddown: WinddownRecord };
+  "decision.recorded": { decision: DecisionRecord };
   "budget.recorded": { entry: BudgetEntry };
   "budget.plan_recorded": { plan: BudgetPlan };
   "operation.recorded": { entry: OperationEntry };
@@ -337,7 +340,7 @@ export type StoredEvent = EventInput & {
 export const eventTypes: readonly EventType[] = [
   "project.added", "session.created", "session.configured", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
-  "steer.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
+  "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "policy.updated", "provider.changed", "mcp.oauth_changed",
   "settings.updated", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
@@ -352,7 +355,7 @@ export const eventTypes: readonly EventType[] = [
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
-  "candidate.saved", "candidate.generation_recorded", "role.sequence_recorded", "compound.recorded", "winddown.recorded",
+  "candidate.saved", "candidate.generation_recorded", "role.sequence_recorded", "compound.recorded", "winddown.recorded", "decision.recorded",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -387,6 +390,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const roleSequences = new Map<string, RoleSequenceRecord>();
   const compoundWorkflows = new Map<string, CompoundWorkflow>();
   const winddowns = new Map<string, WinddownRecord>();
+  const decisions = new Map<string, DecisionRecord>();
   const roleSequenceControls = new Map<string, StoredEvent[]>(), roleSequenceTurns = new Set<string>();
   for (const event of events) if (event.profile_id === profileId && event.event_type === "turn.control_started" && (event.payload.purpose === "role.sequence" || event.payload.purpose === "compound.workflow")) {
     const id = event.payload.purpose === "role.sequence" ? event.payload.sequenceId : event.payload.workflowId;
@@ -510,9 +514,23 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (compound && (artifact.kind !== "report" || artifact.contentDigest !== compound.inputDigest)) throw new MoguriError("compound_corrupt", "A retained public workflow cannot replace its original reviewed input.", 409);
       const winddown = winddowns.get(artifact.id);
       if (winddown && (artifact.kind !== "report" || artifact.contentDigest !== winddown.inputDigest)) throw new MoguriError("winddown_corrupt", "A budget checkpoint cannot replace its original retained input.", 409);
+      const decision = decisions.get(artifact.id);
+      if (decision && (artifact.kind !== "report" || artifact.contentDigest !== decision.inputDigest)) throw new MoguriError("decision_corrupt", "Original typed decision input/provenance cannot be replaced through artifact metadata.", 409);
       artifacts.set(artifact.id, artifact);
     }
-    if (event.event_type === "artifact.deleted") { artifacts.delete(event.payload.artifactId); candidates.delete(event.payload.artifactId); roleSequences.delete(event.payload.artifactId); compoundWorkflows.delete(event.payload.artifactId); winddowns.delete(event.payload.artifactId); sandboxExecutions.delete(event.payload.artifactId); sandboxPublications.delete(event.payload.artifactId); }
+    if (event.event_type === "artifact.deleted") { artifacts.delete(event.payload.artifactId); candidates.delete(event.payload.artifactId); roleSequences.delete(event.payload.artifactId); compoundWorkflows.delete(event.payload.artifactId); winddowns.delete(event.payload.artifactId); decisions.delete(event.payload.artifactId); sandboxExecutions.delete(event.payload.artifactId); sandboxPublications.delete(event.payload.artifactId); }
+    if (event.event_type === "decision.recorded") {
+      const value = event.payload.decision;
+      if (!Value.Check(DecisionRecordSchema, value)) throw new MoguriError("decision_corrupt", "Unsupported retained owned decision metadata.", 409);
+      const artifact = artifacts.get(value.id), previous = decisions.get(value.id);
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || event.artifact_id !== value.id || value.profileId !== profileId ||
+        !artifact || artifact.kind !== "report" || artifact.contentDigest !== value.inputDigest ||
+        !previous && (artifact.originSessionId !== value.sessionId || artifact.projectId !== value.projectId || artifact.workspaceId !== value.workspaceId) ||
+        candidates.has(value.id) || roleSequences.has(value.id) || compoundWorkflows.has(value.id) || winddowns.has(value.id) || candidateGenerations.has(value.id) ||
+        [...decisions.values()].some((record) => record.id !== value.id && record.sourceDigest === value.sourceDigest && record.sessionId === value.sessionId && record.turnId === value.turnId))
+        throw new MoguriError("decision_corrupt", "The exact original decision source/model/report must have one independent profile-owned intent. No duplicate paid call or adopted owner.", 409);
+      decisions.set(value.id, projectDecision(previous, value));
+    }
     if (event.event_type === "winddown.recorded") {
       const value = event.payload.winddown;
       if (!Value.Check(WinddownRecordSchema, value)) throw new MoguriError("winddown_corrupt", "Unsupported original budget checkpoint state.", 409);
@@ -581,6 +599,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "question.asked") questions.set(event.payload.question.id, { ...structuredClone(event.payload.question), recommendation: structuredClone(event.payload.question.recommendation ?? null), sourceEventId: event.id });
     if (event.event_type === "question.answered") {
       const question = questions.get(event.payload.questionId);
+      if (event.payload.answer.actor === "decision-provider") {
+        const record = decisions.get(event.payload.answer.decisionId ?? "");
+        if (!record || record.status !== "applied" || record.source.kind !== "question" || record.source.questionId !== question?.id ||
+          record.source.questionRevision !== question.revision || record.source.parentStepId !== question.stepId || record.source.callId !== question.callId ||
+          record.sessionId !== event.session_id || record.turnId !== event.turn_id || record.stepId !== event.payload.answer.sourceCallId ||
+          record.modelId !== event.payload.answer.modelId || record.providerId !== event.payload.answer.providerId || question.allowFreeform ||
+          question.status !== "open" || !question.choices.includes(event.payload.answer.text)) throw new MoguriError("decision_corrupt", "An automated technical answer lost its exact original pending choice, model actor or independent decision.", 409);
+      } else if (event.payload.answer.decisionId !== undefined) throw new MoguriError("decision_corrupt", "Provider advice cannot impersonate a human answer.", 409);
       if (question) Object.assign(question, { answer: structuredClone(event.payload.answer), status: "answered", revision: question.revision + 1 });
     }
     if (event.event_type === "question.cancelled") {
@@ -860,10 +886,18 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         session.queue = session.queue.filter((item) => item.id !== event.payload.item.id); session.queueRevision++;
         addUser(event.payload.item);
         break;
+      case "steering.applied": {
+        const record = decisions.get(event.payload.decisionId);
+        if (!record || record.status !== "applied" || record.kind !== "steering" || record.sessionId !== session.id || record.turnId !== event.turn_id ||
+          record.stepId !== event.payload.sourceStepId || record.modelId !== event.payload.modelId || record.providerId !== event.payload.providerId ||
+          !event.payload.text.trim() || event.payload.text.length > 1024) throw new MoguriError("decision_corrupt", "A steer lost its actual decision-provider owner/provenance.", 409);
+        session.messages.push({ id: event.id, turnId: event.turn_id ?? "", role: "notice", text: `Decision-provider steer (${record.modelId}): ${event.payload.text}`, timestamp: event.timestamp });
+        break;
+      }
       case "model.started":
         for (const routing of routings.values()) if (routing.turnId === event.turn_id && routing.status === "ready" && event.payload.role !== "router") routing.status = "running";
-        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: roleSequenceTurns.has(event.turn_id ?? "") || event.payload.role === "router" || event.payload.role === "compaction" || event.payload.role === "draft" || event.payload.role === "checkpoint" ? "notice" : "assistant",
-          text: roleSequenceTurns.has(event.turn_id ?? "") ? "An owned role is producing untrusted data, not a user answer or approval." : event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : event.payload.role === "checkpoint" ? "Reserved metadata-only budget checkpoint; no source or Git approval." : "", timestamp: event.timestamp });
+        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: roleSequenceTurns.has(event.turn_id ?? "") || ["router", "compaction", "draft", "checkpoint", "decision", "steering"].includes(event.payload.role ?? "") ? "notice" : "assistant",
+          text: roleSequenceTurns.has(event.turn_id ?? "") ? "An owned role is producing untrusted data, not a user answer or approval." : event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : event.payload.role === "checkpoint" ? "Reserved metadata-only budget checkpoint; no source or Git approval." : ["decision", "steering"].includes(event.payload.role ?? "") ? "Bounded decision-provider advice inside explicit policy. Human intervention and deterministic authority win." : "", timestamp: event.timestamp });
         session.usage.push({
           stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: event.payload.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
@@ -893,7 +927,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       }
       case "tool.requested": session.pendingApproval = event.payload.approval; session.status = "waiting_input"; break;
-      case "tool.decided": session.pendingApproval = null; if (session.status !== "stopping") session.status = "running"; break;
+      case "tool.decided":
+        if (event.payload.actor === "decision-provider") {
+          const record = decisions.get(event.payload.decisionId ?? "");
+          if (!record || record.status !== "applied" || record.source.kind !== "tool" || record.source.approvalId !== event.payload.approvalId ||
+            record.source.delegationId !== event.payload.ruleId || record.sessionId !== session.id || record.turnId !== event.turn_id ||
+            record.source.parentStepId !== event.step_id || session.pendingApproval?.id !== event.payload.approvalId ||
+            record.applied?.choice !== (event.payload.allow ? "allow" : "deny")) throw new MoguriError("decision_corrupt", "Tool advice lost its exact pending request, existing delegation or actual model actor.", 409);
+        } else if (event.payload.decisionId !== undefined) throw new MoguriError("decision_corrupt", "A provider decision cannot impersonate human/policy approval.", 409);
+        session.pendingApproval = null; if (session.status !== "stopping") session.status = "running"; break;
       case "tool.started":
         session.messages.push({ id: event.payload.call.id, turnId: event.turn_id ?? "", role: "tool", text: `${event.payload.call.name}\n`, timestamp: event.timestamp, toolCalls: [event.payload.call], outcome: "running" });
         break;
@@ -930,6 +972,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   validateRoleSequenceLedger([...roleSequences.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
   validateCompoundLedger([...compoundWorkflows.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
   validateWinddownLedger([...winddowns.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
+  validateDecisionLedger([...decisions.values()], [...budgetEntries.values()]);
   for (const sequence of roleSequences.values()) if (sessions.has(sequence.sessionId)) {
     const controls = roleSequenceControls.get(sequence.id) ?? [];
     const control = controls[0];
@@ -945,5 +988,6 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     sandboxPublications: [...sandboxPublications.values()].filter((publication) => artifacts.has(publication.id)),
     compoundWorkflows: [...compoundWorkflows.values()].filter((workflow) => artifacts.has(workflow.id)),
     winddowns: [...winddowns.values()].filter((record) => artifacts.has(record.id)),
+    decisions: [...decisions.values()].filter((record) => artifacts.has(record.id)),
     artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), candidateGenerations: [...candidateGenerations.values()].filter((generation) => artifacts.has(generation.id)), roleSequences: [...roleSequences.values()].filter((sequence) => artifacts.has(sequence.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], sandboxWorkspaces: [...sandboxWorkspaces.values()], sandboxExecutions: [...sandboxExecutions.values()].filter((execution) => artifacts.has(execution.id)), managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

@@ -32,6 +32,8 @@ import { SandboxCommandSchema, SandboxQuerySchema, type SandboxResponse, type Sa
 import { CompoundCommandSchema, CompoundQuerySchema, type CompoundResponse, type CompoundWorkflow } from "./compound.ts";
 import { defaultWinddownSettings, WinddownSettingsSchema, WinddownCommandSchema, WinddownQuerySchema, type WinddownRecord, type WinddownResponse } from "./winddown.ts";
 export * from "./winddown.ts";
+import { DecisionSettingsSchema, defaultDecisionSettings, DecisionCommandSchema, DecisionQuerySchema, type DecisionRecord, type DecisionResponse } from "./decisions.ts";
+export * from "./decisions.ts";
 export * from "./compound.ts";
 export * from "./candidates.ts";
 export * from "./candidate-generations.ts";
@@ -98,6 +100,7 @@ export const SettingsSchema = object({
   budgets: BudgetSettingsSchema,
   kupo: KupoSettingsSchema,
   winddown: WinddownSettingsSchema,
+  decisions: DecisionSettingsSchema,
   notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
@@ -116,6 +119,7 @@ export const defaultSettings = (): UserSettings => ({
   budgets: { rates: [], maxPriceAgeDays: 30 },
   kupo: defaultKupoSettings(),
   winddown: defaultWinddownSettings(),
+  decisions: defaultDecisionSettings(),
   notifications: { inApp: true, os: false, previewContent: false },
   localModels: [], startup: { global: {}, profile: {} },
   remote: null,
@@ -130,8 +134,10 @@ const section = Type.Union([
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
   Type.Literal("kupo"),
   Type.Literal("winddown"),
+  Type.Literal("decisions"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  DecisionCommandSchema,
   WinddownCommandSchema,
   CompoundCommandSchema,
   CandidateCommandSchema,
@@ -178,6 +184,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  DecisionQuerySchema,
   WinddownQuerySchema,
   CompoundQuerySchema,
   RemoteMcpQuerySchema,
@@ -260,6 +267,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   roleSequences: RoleSequenceRecord[];
   compoundWorkflows: CompoundWorkflow[];
   winddowns: WinddownRecord[];
+  decisions: DecisionRecord[];
   budgetPolicy: { revision: number; limit: BudgetLimit | null };
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
@@ -281,6 +289,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse =
+  | DecisionResponse
   | WinddownResponse
   | CompoundResponse
   | CandidateResponse

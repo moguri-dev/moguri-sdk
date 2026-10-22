@@ -33,6 +33,7 @@ const artifactIdentity = (input: EventInput): string | null => input.event_type 
   input.event_type === "role.sequence_recorded" ? input.payload.sequence.id :
   input.event_type === "compound.recorded" ? input.payload.workflow.id :
   input.event_type === "winddown.recorded" ? input.payload.winddown.id :
+  input.event_type === "decision.recorded" ? input.payload.decision.id :
   input.event_type === "candidate.generation_recorded" ? input.payload.generation.id :
   input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
   input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? input.payload.job.compoundWorkflowId ?? input.payload.job.winddownId ?? null :
@@ -79,6 +80,7 @@ function references(input: EventInput): string[] {
       ...input.payload.workflow.validations.flatMap((validation) => [validation.documentDigest, validation.resultDigest])].filter((hash): hash is string => hash !== null);
     case "winddown.recorded": return [input.payload.winddown.inputDigest, input.payload.winddown.step.inputDigest, input.payload.winddown.step.resultDigest,
       input.payload.winddown.commitDocumentDigest, input.payload.winddown.commit?.resultDigest ?? null].filter((hash): hash is string => hash !== null);
+    case "decision.recorded": return [input.payload.decision.inputDigest, input.payload.decision.actualInputDigest, input.payload.decision.resultDigest, input.payload.decision.adviceDigest].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
     case "job.finished": return input.payload.resultDigest ? [input.payload.resultDigest] : [];
@@ -228,6 +230,9 @@ export class EventStore {
       if (version < 39) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('budget_winddown_schema','1');
         PRAGMA user_version=39; COMMIT;`);
+      if (version < 40) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('owned_decision_schema','1');
+        PRAGMA user_version=40; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {
