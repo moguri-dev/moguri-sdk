@@ -192,3 +192,23 @@ regression from the expanded progress display. Compacting the bar and moving
 details into its existing modal-visibility contract restores the unchanged
 assertion. All nine focused document/progress/composer/question workflows pass
 in 25.4 s; full hidden-desktop acceptance is recorded below.
+
+## Final source acceptance
+
+| Check | Result |
+| --- | --- |
+| Pinned dependency restore and source audit | PASS, zero vulnerabilities |
+| Type checks and production build | PASS |
+| `npm run spike:documents` | PASS, all six generated groups |
+| `npm test` | PASS, 1,068 passed / 9 native-only skipped / 0 failed, 979.23 s |
+| `npm run test:e2e` | PASS, 70 passed / 1 native-only skipped / 0 failed, 2.8 min |
+| `npm run verify:sdk` | PASS, actual packed external imports/types/install/runtime/worker and existing owned-role probes |
+
+The final desktop follow-up changes only compact presentation and its readonly
+details dialog; the complete desktop suite passes after that change. Its
+question/answer, permissions, document, image, preview and retention assertions
+were not weakened. The nine unit and one Electron skips require a real configured
+protocol-43 SendBox workload; these results do not qualify that missing native
+image, a signed/notarized release, Linux release readiness, OCR or live paid
+provider entitlement. Existing OpenTUI FFI, npm deprecation/script-review and
+large Ghostty chunk notices remain nonfatal.
