@@ -30,6 +30,8 @@ import { ModelEvidenceQuerySchema, type ModelEvidenceResponse } from "./model-ev
 import { RoleContractQuerySchema, type RoleContractRead } from "./role-contracts.ts";
 import { SandboxCommandSchema, SandboxQuerySchema, type SandboxResponse, type SandboxWorkspace, type SandboxExecution, type SandboxReadiness, type SandboxPublication } from "./sandbox.ts";
 import { CompoundCommandSchema, CompoundQuerySchema, type CompoundResponse, type CompoundWorkflow } from "./compound.ts";
+import { defaultWinddownSettings, WinddownSettingsSchema, WinddownCommandSchema, WinddownQuerySchema, type WinddownRecord, type WinddownResponse } from "./winddown.ts";
+export * from "./winddown.ts";
 export * from "./compound.ts";
 export * from "./candidates.ts";
 export * from "./candidate-generations.ts";
@@ -95,6 +97,7 @@ export const SettingsSchema = object({
   artifacts: object({ retainAnswers: Type.Boolean() }),
   budgets: BudgetSettingsSchema,
   kupo: KupoSettingsSchema,
+  winddown: WinddownSettingsSchema,
   notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
@@ -112,6 +115,7 @@ export const defaultSettings = (): UserSettings => ({
   artifacts: { retainAnswers: true },
   budgets: { rates: [], maxPriceAgeDays: 30 },
   kupo: defaultKupoSettings(),
+  winddown: defaultWinddownSettings(),
   notifications: { inApp: true, os: false, previewContent: false },
   localModels: [], startup: { global: {}, profile: {} },
   remote: null,
@@ -125,8 +129,10 @@ const section = Type.Union([
   Type.Literal("localModels"), Type.Literal("startup"),
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
   Type.Literal("kupo"),
+  Type.Literal("winddown"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  WinddownCommandSchema,
   CompoundCommandSchema,
   CandidateCommandSchema,
   CandidateGenerationCommandSchema,
@@ -172,6 +178,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  WinddownQuerySchema,
   CompoundQuerySchema,
   RemoteMcpQuerySchema,
   RepositoryQuerySchema,
@@ -231,6 +238,7 @@ export interface CapabilityJob {
   candidate?: CandidateJobIntent;
   sandboxPublicationId?: string;
   compoundWorkflowId?: string;
+  winddownId?: string;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
@@ -251,6 +259,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   candidateGenerations: CandidateGenerationRecord[];
   roleSequences: RoleSequenceRecord[];
   compoundWorkflows: CompoundWorkflow[];
+  winddowns: WinddownRecord[];
   budgetPolicy: { revision: number; limit: BudgetLimit | null };
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
@@ -272,6 +281,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse =
+  | WinddownResponse
   | CompoundResponse
   | CandidateResponse
   | CandidateGenerationResponse

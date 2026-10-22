@@ -3,7 +3,7 @@ import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import {
   activeCompound, COMPOUND_EVIDENCE_WARNING, COMPOUND_RESULT_BYTES, COMPOUND_VALIDATION_CONTEXT_BYTES,
   CompoundDocumentSchema, CompoundInputSchema, CompoundValidationDocumentSchema, CompoundValidationResultSchema,
-  KUPO_MODEL_ID, modelContextWindows, MoguriError, parse, projectCompoundWorkflow, sameCandidateRoot, successfulRoleEntry,
+  KUPO_MODEL_ID, isRecord, modelContextWindows, MoguriError, parse, projectCompoundWorkflow, sameCandidateRoot, successfulRoleEntry,
   type CommandResult, type CompoundCandidateProposal, type CompoundCommand, type CompoundDocument, type CompoundInput,
   type CompoundQuery, type CompoundResponse, type CompoundValidation, type CompoundValidationDocument, type CompoundValidationResult,
   type CompoundWorkflow,   type EventInput, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type Usage,
@@ -25,6 +25,8 @@ import type { RepositoryTelemetry } from "./repository-telemetry.ts";
 import { assistantMessage, type BoundaryReply, type WorkerReply } from "./worker-protocol.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { digest, type EventStore } from "./store.ts";
+import { winddownCapability } from "./winddown-policy.ts";
+import type { Winddowns } from "./winddown.ts";
 
 const proposalPrompt = `Produce exactly one bounded JSON proposal with plan, architecture and patch.
 Critique and improve the current task plan and architecture as well as its implementation. The patch has kind "patch", summary and edits with path, baseDigest and text.
@@ -48,6 +50,7 @@ interface Host {
   artifact(session: Session, text: string, task: string): RetainedArtifact;
   launch(session: Session, id: string, timeoutMs: number): void; stop(sessionId: string, id: string): void;
   changed(listener: () => void): () => void;
+  prepareWinddown: Winddowns["prepare"];
 }
 export class CompoundWorkflows {
   private readonly waits = new Map<string, { workflowId: string; signal: AbortSignal; resolve(value: Accepted): void; reject(error: Error): void }>();
@@ -74,7 +77,10 @@ export class CompoundWorkflows {
     const state = this.host.snapshot(), session = state.sessions.find((session) => session.id === id);
     if (!session?.projectId || session.controls.env !== "Local" || session.controls.modelId !== KUPO_MODEL_ID || session.kind !== "agent" ||
       session.mode !== "agent" || session.pendingMode === "read-only" || session.status === "archived" || !state.policy.allowedEnvs.includes("Local")) throw new MoguriError("compound_scope", "Public compound work needs the exact restored Local writable project session with kupo selected. No fixed-model, Remote/native or root fallback.", 409);
-    if (session.controls.budget.kind === "limited" || state.budgetPolicy.limit || this.host.globalLimit() || this.host.budgets.status(id).limits.length) throw new MoguriError("compound_budget", "Finite public compound routing still needs the actual-policy wind-down/checkpoint path. Holds alone cannot lift a cap.", 409);
+    if (session.controls.budget.kind === "limited" || state.budgetPolicy.limit || this.host.globalLimit() || this.host.budgets.status(id).limits.length) {
+      try { winddownCapability(state.settings.values.winddown, state.provider.models, "Local"); }
+      catch (error) { if (!(error instanceof MoguriError)) throw error; throw new MoguriError("compound_budget", `Finite compound needs its exact qualified reserved wind-down/checkpoint policy. ${error.message}`, 409); }
+    }
     return session;
   }
   private policy(sessionId: string): string {
@@ -164,9 +170,12 @@ export class CompoundWorkflows {
     if (!value) throw new MoguriError("compound_binding", "That concrete role is outside the complete original eligible binding snapshot.", 409);
     return value;
   }
+  private specifications(id: string, authorityDigest: string, roles: Role[]) {
+    return roles.map((role) => ({ id: randomUUID(), turnId: id, role: role.role, modelId: role.modelId,
+      providerId: role.providerId, apiModelId: role.apiModelId, authorityDigest, inputEstimate: role.inputBound, maxOutputTokens: role.outputBound }));
+  }
   private planned(session: Session, id: string, authorityDigest: string, roles: Role[]) {
-    return this.host.budgets.planBatch(session, roles.map((role) => ({ id: randomUUID(), turnId: id, role: role.role, modelId: role.modelId,
-      providerId: role.providerId, apiModelId: role.apiModelId, authorityDigest, inputEstimate: role.inputBound, maxOutputTokens: role.outputBound })));
+    return this.host.budgets.planBatch(session, this.specifications(id, authorityDigest, roles));
   }
   private steps(plans: ReturnType<CompoundWorkflows["planned"]>["plans"]): CompoundWorkflow["steps"] {
     return plans.map((plan) => {
@@ -197,7 +206,11 @@ export class CompoundWorkflows {
     if (prepared.digest !== command.expectedDigest) throw new MoguriError("compound_review", "The exact reviewed input, model/policy, script or candidate roots changed. No model was called.", 409);
     const session = this.session(command.input.sessionId); this.host.idle(session);
     const artifact = this.host.artifact(session, prepared.text, prepared.document.task.task), router = this.definition(prepared.document, "router", prepared.document.policy.classifierModelId!);
-    const planned = this.planned(session, artifact.id, prepared.document.authorityDigest, [router]), owner = planned.plans[0]!, now = new Date().toISOString();
+    const winddown = this.host.prepareWinddown(session, artifact.id, intent.id, digest(JSON.stringify(prepared.document.task)),
+      this.specifications(artifact.id, prepared.document.authorityDigest, [router]));
+    const planned = winddown ? { plans: winddown.plans.filter((plan) => plan.role !== "checkpoint"), events: winddown.events } :
+      this.planned(session, artifact.id, prepared.document.authorityDigest, [router]);
+    const owner = planned.plans[0]!, now = new Date().toISOString();
     const record: CompoundWorkflow = { version: 1, id: artifact.id, profileId: this.host.snapshot().profileId, sessionId: session.id,
       ownerSessionId: owner.ownerSessionId, ownerTurnId: owner.ownerTurnId, projectId: session.projectId!, workspaceId: session.workspaceId, folderId: owner.folderId, env: "Local",
       draftWorkspaceId: command.input.draftWorkspaceId, alternateWorkspaceId: command.input.alternateWorkspaceId,
@@ -211,7 +224,16 @@ export class CompoundWorkflows {
   }
   async check(id: string, signal: AbortSignal) {
     const record = this.record(id), document = this.document(record), session = this.session(record.sessionId);
-    if (!activeCompound(record) || record.stopRequested || session.turnId !== id || this.policy(session.id) !== document.policyJson) throw new MoguriError("compound_scope", "Original ownership, controls or policy changed/stopped. No paid continuation or test fallback.", 409);
+    if (!activeCompound(record) || record.stopRequested || session.turnId !== id) throw new MoguriError("compound_scope", "Original ownership changed/stopped. No paid continuation or test fallback.", 409);
+    const currentPolicy = this.policy(session.id);
+    if (currentPolicy !== document.policyJson) {
+      const original: unknown = JSON.parse(document.policyJson), current: unknown = JSON.parse(currentPolicy);
+      if (isRecord(original) && isRecord(current)) {
+        delete original.budgetPolicy; delete original.globalBudgetLimit; delete current.budgetPolicy; delete current.globalBudgetLimit;
+        if (JSON.stringify(original) === JSON.stringify(current)) throw new MoguriError("budget_policy_changed", "Actual budget policy changed after the exact compound review. No ordinary role/test continues; only independently held finishing capacity may be considered.", 409);
+      }
+      throw new MoguriError("compound_scope", "Original controls, privacy, model pool or permission policy changed. No paid continuation or test fallback.", 409);
+    }
     const pool = compoundPool(this.host.snapshot().settings.values.kupo, this.host.snapshot().provider.models, "Local");
     for (const role of document.roles) {
       const model = [pool.classifier, ...pool.candidates].find((model) => model.id === role.modelId);

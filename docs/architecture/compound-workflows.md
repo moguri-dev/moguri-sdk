@@ -2,8 +2,9 @@
 
 Status: shared service/SDK/client implementation in progress. The public path now
 owns real bounded calls, conditional Cascade/Critique and separately approved
-project tests through CLI, actual TUI and desktop. Failure/recovery hardening and finite
-wind-down remain qualification gates. Private prototypes and native execution
+project tests through CLI, actual TUI and desktop. Protocol-39 finite Local
+turns use the separate [owned wind-down contract](budget-winddown.md).
+Final source/native hardening and System One/Max remain qualification gates. Private prototypes and native execution
 checks do not establish this public workflow's acceptance.
 
 ## Authority and reuse
@@ -141,9 +142,9 @@ acknowledgement; a stop cannot be relabeled as a completed recommendation.
 
 Reserve every actual model role atomically with its start, and calculate each
 complete same-turn future hold set before yielding. Unknown or lost usage
-retains capacity. Finite public kupo remains blocked until the separately
-authorized wind-down/checkpoint lifecycle is wired; reservation primitives
-alone cannot enable it.
+retains capacity. Without the separately configured qualified Local wind-down/checkpoint
+lifecycle, finite public kupo stays blocked. Reservation primitives alone
+cannot enable it, and no remote/native finishing fallback is available.
 
 Cancellation stops the actual model/validation owners, invalidates pending
 reviews and preserves requested/acknowledged/failed/partial states. Late

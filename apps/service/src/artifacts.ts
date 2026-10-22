@@ -68,9 +68,9 @@ export class ArtifactRuntime {
       { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "user-imported-proposal", contentDigest: digest(JSON.stringify(patch)) },
     ]);
   }
-  generation(session: Session, text: string, task: string, purpose: "generation" | "roles" | "compound" = "generation"): RetainedArtifact {
-    return this.create(session, "report", `${purpose === "compound" ? "Compound" : purpose === "roles" ? "Roles" : "Generation"}: ${task.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
-      { eventId: null, sessionId: session.id, messageId: null, actor: "user", modelId: null, outcome: purpose === "compound" ? "reviewed-compound-request" : purpose === "roles" ? "owned-role-request" : "generation-request", contentDigest: digest(task) },
+  generation(session: Session, text: string, task: string, purpose: "generation" | "roles" | "compound" | "winddown" = "generation"): RetainedArtifact {
+    return this.create(session, "report", `${purpose === "winddown" ? "Wind-down" : purpose === "compound" ? "Compound" : purpose === "roles" ? "Roles" : "Generation"}: ${task.replace(/\s+/g, " ").slice(0, 140)}`, text, "manual", [
+      { eventId: null, sessionId: session.id, messageId: null, actor: "user", modelId: null, outcome: purpose === "winddown" ? "reserved-winddown-policy" : purpose === "compound" ? "reviewed-compound-request" : purpose === "roles" ? "owned-role-request" : "generation-request", contentDigest: digest(task) },
       { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "reviewed-source-snapshot", contentDigest: digest(text) },
     ]);
   }
@@ -152,6 +152,11 @@ export class ArtifactRuntime {
       event.event_type === "job.started" && event.payload.job.compoundWorkflowId === id ||
       (event.event_type === "job.progress" || event.event_type === "job.finished") && event.payload.compoundWorkflowId === id));
   }
+  private winddownHistory(id: string): StoredEvent[] {
+    return this.host.events().filter((event) => event.artifact_id === id && (event.event_type === "winddown.recorded" ||
+      event.event_type === "job.started" && event.payload.job.winddownId === id ||
+      (event.event_type === "job.progress" || event.event_type === "job.finished") && event.payload.winddownId === id));
+  }
   private nativeHistory(id: string): StoredEvent[] {
     return this.host.events().filter((event) => event.artifact_id === id && (event.event_type === "sandbox.execution_recorded" ||
       event.event_type === "sandbox.frame_recorded" || event.event_type === "sandbox.publication_recorded" ||
@@ -192,9 +197,10 @@ export class ArtifactRuntime {
       const generationEvents = this.generationHistory(artifact.id);
       const roleEvents = this.roleHistory(artifact.id);
       const compoundEvents = this.compoundHistory(artifact.id);
+      const winddownEvents = this.winddownHistory(artifact.id);
       return { ...artifact, revisions: this.revisions(artifact.id).map(({ revision, contentDigest }) => ({ revision, contentDigest })),
         ...(candidateEvents.length ? { candidateEvents } : {}), ...(generationEvents.length ? { generationEvents } : {}), ...(roleEvents.length ? { roleEvents } : {}),
-        ...(compoundEvents.length ? { compoundEvents } : {}) };
+        ...(compoundEvents.length ? { compoundEvents } : {}), ...(winddownEvents.length ? { winddownEvents } : {}) };
     }) })) };
   }
   private export(artifacts: RetainedArtifact[], filename: string): ArtifactExport {
@@ -251,6 +257,14 @@ export class ArtifactRuntime {
       }
       const compoundResults = [...compoundHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
       if (compoundEvents.length) account(JSON.stringify(compoundEvents));
+      const winddownEvents = this.winddownHistory(artifact.id), winddownHashes = new Set<string>();
+      for (const event of winddownEvents) {
+        if (event.event_type === "winddown.recorded") for (const hash of [event.payload.winddown.inputDigest, event.payload.winddown.step.inputDigest,
+          event.payload.winddown.step.resultDigest, event.payload.winddown.commitDocumentDigest, event.payload.winddown.commit?.resultDigest]) if (hash) winddownHashes.add(hash);
+        if (event.event_type === "job.finished" && event.payload.resultDigest) winddownHashes.add(event.payload.resultDigest);
+      }
+      const winddownResults = [...winddownHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
+      if (winddownEvents.length) account(JSON.stringify(winddownEvents));
       const nativeEvents = this.nativeHistory(artifact.id), nativeHashes = new Set<string>();
       for (const event of nativeEvents) if (event.event_type === "sandbox.execution_recorded") {
         nativeHashes.add(event.payload.execution.inputDigest);
@@ -266,15 +280,17 @@ export class ArtifactRuntime {
         ...(generationEvents.length ? { generation: { events: generationEvents, results: generationResults } } : {}),
         ...(roleEvents.length ? { roles: { events: roleEvents, results: roleResults } } : {}),
         ...(compoundEvents.length ? { compound: { events: compoundEvents, results: compoundResults } } : {}),
+        ...(winddownEvents.length ? { winddown: { events: winddownEvents, results: winddownResults } } : {}),
         ...(nativeEvents.length ? { native: { events: nativeEvents, results: nativeResults } } : {}) };
     });
     const roleLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.roleOrigin));
     const compoundLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.compoundOrigin));
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.winddown) ? 8 : compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
   async removal(projectId: string, choice?: ProjectArtifactChoice): Promise<{ events: EventInput[]; forget: string[] }> {
+    if (this.host.snapshot().winddowns.some((record) => record.projectId === projectId && ["held", "running", "committing"].includes(record.status))) throw new MoguriError("winddown_busy", "Settle the actual reserved role/Git owner before reviewing project retention/removal. No capacity, ref or report was erased.", 409);
     if (this.host.snapshot().compoundWorkflows.some((workflow) => workflow.projectId === projectId && activeCompound(workflow))) throw new MoguriError("compound_busy", "Stop and settle the actual public workflow before reviewing independent project retention/removal.", 409);
     if ((this.host.snapshot().sandboxPublications ?? []).some((publication) => publication.projectId === projectId && publication.status === "publishing")) throw new MoguriError("sandbox_publication_busy", "Stop and settle original native source publication before reviewing its independent retention or project removal.", 409);
     if ((this.host.snapshot().sandboxExecutions ?? []).some((execution) => execution.projectId === projectId &&
@@ -436,12 +452,14 @@ export class ArtifactRuntime {
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === artifact.id);
     const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === artifact.id);
     const compound = this.host.snapshot().compoundWorkflows.find((workflow) => workflow.id === artifact.id);
+    const winddown = this.host.snapshot().winddowns.find((record) => record.id === artifact.id), winddownBusy = winddown && ["held", "running", "committing"].includes(winddown.status);
     const native = (this.host.snapshot().sandboxExecutions ?? []).find((execution) => execution.id === artifact.id);
     const nativeBusy = native && (!["owned-guest-stopped", "acknowledged"].includes(native.cleanup) || native.inspectionIntent?.status === "running");
     const publication = (this.host.snapshot().sandboxPublications ?? []).find((value) => value.id === artifact.id);
     const activeCandidate = candidate && (["staging", "applying"].includes(candidate.status) ||
       this.host.snapshot().jobs.some((job) => job.candidate?.candidateId === candidate.id && ["running", "waiting_input"].includes(job.status)));
     if (command.type === "artifact.delete") {
+      if (winddownBusy) throw new MoguriError("winddown_busy", "Stop and settle the actual held/finishing/Git owner before deleting its independent checkpoint report.", 409);
       if (compound && activeCompound(compound)) throw new MoguriError("compound_busy", "Stop and settle this public workflow before deleting its independently retained input, roles and actual tests.", 409);
       if (publication?.status === "publishing") throw new MoguriError("sandbox_publication_busy", "Stop and settle this original source writer before deleting its independently retained review and effects.", 409);
       if (nativeBusy) throw new MoguriError("sandbox_busy", "Stop/reconcile the original native guest before deleting its independent input/result/owner record.", 409);
@@ -451,6 +469,8 @@ export class ArtifactRuntime {
       return finish([this.deleted(artifact.id)], { id: artifact.id }, { artifacts: [artifact.id] });
     }
     if (candidate && command.changes.text !== undefined) throw new MoguriError("candidate_document", "A candidate's exact proposal document is immutable. Export it or create a separately reviewed new proposal; renaming/organizing does not change its bytes.", 409);
+    if (winddown && command.changes.text !== undefined) throw new MoguriError("winddown_document", "Original wind-down input, actual role result, user Git review and publication observations are immutable. Export or retain another document.", 409);
+    if (winddownBusy && command.changes.status === "archived") throw new MoguriError("winddown_busy", "Settle the actual original reserved role/Git owner before archiving its independent report.", 409);
     if (compound && command.changes.text !== undefined) throw new MoguriError("compound_document", "Public workflow input, actual role results and test reviews are immutable. Export them or create a separate document; metadata cannot change provenance.", 409);
     if (compound && activeCompound(compound) && command.changes.status === "archived") throw new MoguriError("compound_busy", "Settle this exact public workflow before archiving its independently retained report.", 409);
     if (publication && command.changes.text !== undefined) throw new MoguriError("sandbox_document", "Native publication input, actual acceptance and filesystem attempts are immutable. Create a separate document instead.", 409);

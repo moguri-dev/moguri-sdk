@@ -15,6 +15,7 @@ import {
   isCandidateGenerationCommand, isCandidateGenerationQuery, type CandidateGenerationCommand, type CandidateGenerationQuery, type CandidateGenerationResponse,
   isRoleSequenceQuery,
   isCompoundCommand, isCompoundQuery, type CompoundCommand, type CompoundQuery, type CompoundResponse, type CompoundCandidateProposal,
+  isWinddownCommand, isWinddownQuery, type WinddownCommand, type WinddownQuery, type WinddownResponse,
   isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
@@ -56,6 +57,7 @@ import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { SandboxPublications } from "./sandbox-publications.ts";
+import type { WinddownCommitHost } from "./winddown-commits.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -101,6 +103,8 @@ export interface PlatformHost {
   compoundProposal(workflowId: string, stepId: string): CompoundCandidateProposal;
   compoundQuery(query: CompoundQuery): Promise<CompoundResponse>;
   compoundCommand(command: CompoundCommand, finish: WorkspaceFinish): Promise<CommandResult>;
+  winddownQuery(query: WinddownQuery): Promise<WinddownResponse>;
+  winddownCommand(command: WinddownCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleContract(query: import("../../../packages/protocol/src/role-contracts.ts").RoleContractQuery): import("../../../packages/protocol/src/role-contracts.ts").RoleContractRead;
   modelEvidence(id: string): Promise<import("../../../packages/protocol/src/index.ts").ModelEvidenceReport>;
   planSaveQuery(query: PlanSaveQuery): PlanSaveResponse;
@@ -484,6 +488,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isWinddownQuery(query)) return this.host.winddownQuery(query);
     if (isCompoundQuery(query)) return this.host.compoundQuery(query);
     if (isSandboxQuery(query)) return this.host.sandboxQuery(query);
     if (isRoleSequenceQuery(query)) return this.roles.query(query);
@@ -615,7 +620,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     validateSettings(settings);
     this.budgets.validateSettings(settings);
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
-    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote, settings.kupo]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote, snapshot.settings.values.kupo]);
+    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote, settings.kupo, settings.winddown]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown]);
     return { event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
   }
   private skill(content: string) {
@@ -630,13 +635,23 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
   private entry(projectId: string | null, kind: CapabilityEntry["kind"], name: string, description: string, content: string, source: CapabilityEntry["source"], enabled = false): CapabilityEntry {
     return { id: randomUUID(), projectId, kind, name, description, contentDigest: this.store.putBlob(content), source, enabled, revision: 0, createdAt: new Date().toISOString() };
   }
+  winddownJob(...[projectId, sessionId, workspaceId, execute, start, lifecycle]: Parameters<WinddownCommitHost["job"]>): string {
+    return this.job("winddown.commit", projectId, sessionId, execute, undefined, start, workspaceId ?? undefined, lifecycle);
+  }
+  stopWinddownJob(id: string): void {
+    if (!this.snapshot().jobs.some((job) => job.id === id && job.kind === "winddown.commit" && job.status === "running")) return;
+    const owner = this.active.get(id);
+    if (!owner) throw new MoguriError("winddown_cleanup_unconfirmed", "This retained Git job has no live owned process/abort handle. Inspect the original ref/intent; no stop or retry was fabricated.", 409);
+    owner.abort.abort();
+  }
   private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void, start?: (job: CapabilityJob) => void, workspaceId?: string, lifecycle?: CandidateJobLifecycle): string {
     if (projectId && this.host.closingProject(projectId)) throw new MoguriError("project_removing", "No new job can start while this project is being removed.", 409);
     const id = randomUUID();
     const job: CapabilityJob = { id, kind, projectId, sessionId, workspaceId: workspaceId ?? (sessionId ? this.session(sessionId).workspaceId : null), parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
     if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job } }]);
     const owner = this.snapshot().jobs.find((job) => job.id === id), candidateId = owner?.candidate?.candidateId;
-    const retention = { ...(candidateId ? { candidateId } : {}), ...(owner?.sandboxPublicationId ? { sandboxPublicationId: owner.sandboxPublicationId } : {}) };
+    const retention = { ...(candidateId ? { candidateId } : {}), ...(owner?.sandboxPublicationId ? { sandboxPublicationId: owner.sandboxPublicationId } : {}),
+      ...(owner?.winddownId ? { winddownId: owner.winddownId } : {}) };
     const abort = new AbortController();
     const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
@@ -660,6 +675,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isWinddownCommand(command)) return this.host.winddownCommand(command, finish);
     if (isCompoundCommand(command)) return this.host.compoundCommand(command, finish);
     if (isSandboxCommand(command)) return this.host.sandboxCommand(command, finish);
     if (isCandidateGenerationCommand(command)) return this.host.generationCommand(command, finish);

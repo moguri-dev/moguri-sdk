@@ -92,6 +92,15 @@ try {
         sourceKind:"reviewed-training-report",sourceUrl:"https://generated.example.invalid/source",sourceText:"Generated synthetic policy evidence.",validUntil:new Date(Date.now()+3600000).toISOString(),limitations:"Generated claim, not quality or training proof."});
       void lineage.review.draftBindingDigest;void lineage.warning;
       ` : ""}
+      ${installedProtocol >= 39 ? `
+      const finishingStatus=await sdk.winddown.status("generated-source");void finishingStatus.inputBound;void finishingStatus.usdReady;
+      const finishing=await sdk.winddown.read("generated-finishing");void finishing.winddown.step.planId;void finishing.roleInput;void finishing.commitDocument;
+      const gitInput={winddownId:"generated-finishing",sessionId:"generated-source",candidateIds:["generated-accepted"],branch:"moguri/generated-installed-checkpoint",message:"chore: checkpoint accepted work"};
+      const gitReview=await sdk.winddown.commitPreview(gitInput);void gitReview.preview.document.files[0]?.mode;
+      await sdk.winddown.commit(gitInput,gitReview.preview.revision,gitReview.preview.digest,true);
+      const gitResult=await sdk.winddown.waitCommit("generated-finishing");void gitResult.winddown.commit?.publishedCommit;
+      await sdk.winddown.decline("generated-finishing",0,true);await sdk.winddown.stop("generated-finishing");void sdk.winddown.list("generated-source");
+      ` : ""}
       ${installedProtocol >= 33 ? `
       const roleProposal=await sdk.candidates.roleProposal("generated-sequence");void roleProposal.document.roleOrigin.roleInputDigest;
       const roleReference={roleSequenceId:"generated-sequence"};
@@ -261,6 +270,12 @@ try {
       input:{task:"Generated installed fail-closed public scope.",files:[{path:"generated.ts",baseDigest:"absent"}]},requestPlan:null,requestArchitecture:null,validationScriptId:"generated-script",validationTimeoutMs:1000}),
       error=>error.code==="compound_scope");
     console.log("Installed protocol-38 public workflow SDK/runtime is present and rejects missing source/report scope without inference or a Local fallback.");
+    ` : ""}
+    ${installedProtocol >= 39 ? `
+    assert.equal(sdk.settings.get().values.winddown.enabled,false);assert.equal(sdk.settings.get().values.winddown.modelId,null);
+    assert.deepEqual(sdk.winddown.list(),[]);
+    await assert.rejects(()=>sdk.winddown.read("generated-missing-budget-checkpoint"),error=>error.code==="winddown_missing");
+    console.log("Installed protocol-39 reserved-checkpoint SDK/runtime preserves disabled/no-model defaults and rejects missing independent scope without a model/Git effect.");
     ` : ""}
     let budgetServer=null,beta=null;
     try {

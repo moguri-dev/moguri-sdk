@@ -34,10 +34,11 @@ import { CandidateGenerationRecordSchema, projectCandidateGeneration, type Candi
 import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedger, type RoleSequenceRecord } from "./role-sequences.ts";
 import { projectSandboxPublication, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
 import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger, type CompoundWorkflow } from "./compound.ts";
+import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 38;
+export const PROTOCOL_VERSION = 39;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -273,8 +274,8 @@ export interface EventPayloads {
   "capability.proposed": { proposal: Proposal };
   "proposal.decided": { proposalId: string; approve: boolean; actor: "user" };
   "job.started": { job: CapabilityJob };
-  "job.progress": { jobId: string; progress: string; status?: "running"; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string };
-  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string };
+  "job.progress": { jobId: string; progress: string; status?: "running"; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string };
+  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string };
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
@@ -295,6 +296,7 @@ export interface EventPayloads {
   "candidate.generation_recorded": { generation: CandidateGenerationRecord };
   "role.sequence_recorded": { sequence: RoleSequenceRecord };
   "compound.recorded": { workflow: CompoundWorkflow };
+  "winddown.recorded": { winddown: WinddownRecord };
   "budget.recorded": { entry: BudgetEntry };
   "budget.plan_recorded": { plan: BudgetPlan };
   "operation.recorded": { entry: OperationEntry };
@@ -350,7 +352,7 @@ export const eventTypes: readonly EventType[] = [
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
-  "candidate.saved", "candidate.generation_recorded", "role.sequence_recorded", "compound.recorded",
+  "candidate.saved", "candidate.generation_recorded", "role.sequence_recorded", "compound.recorded", "winddown.recorded",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -384,6 +386,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const candidateGenerations = new Map<string, CandidateGenerationRecord>();
   const roleSequences = new Map<string, RoleSequenceRecord>();
   const compoundWorkflows = new Map<string, CompoundWorkflow>();
+  const winddowns = new Map<string, WinddownRecord>();
   const roleSequenceControls = new Map<string, StoredEvent[]>(), roleSequenceTurns = new Set<string>();
   for (const event of events) if (event.profile_id === profileId && event.event_type === "turn.control_started" && (event.payload.purpose === "role.sequence" || event.payload.purpose === "compound.workflow")) {
     const id = event.payload.purpose === "role.sequence" ? event.payload.sequenceId : event.payload.workflowId;
@@ -505,9 +508,22 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (sequence && (artifact.kind !== "report" || artifact.contentDigest !== sequence.inputDigest)) throw new MoguriError("role_sequence_corrupt", "A retained role input cannot be replaced through generic artifact editing.", 409);
       const compound = compoundWorkflows.get(artifact.id);
       if (compound && (artifact.kind !== "report" || artifact.contentDigest !== compound.inputDigest)) throw new MoguriError("compound_corrupt", "A retained public workflow cannot replace its original reviewed input.", 409);
+      const winddown = winddowns.get(artifact.id);
+      if (winddown && (artifact.kind !== "report" || artifact.contentDigest !== winddown.inputDigest)) throw new MoguriError("winddown_corrupt", "A budget checkpoint cannot replace its original retained input.", 409);
       artifacts.set(artifact.id, artifact);
     }
-    if (event.event_type === "artifact.deleted") { artifacts.delete(event.payload.artifactId); candidates.delete(event.payload.artifactId); roleSequences.delete(event.payload.artifactId); compoundWorkflows.delete(event.payload.artifactId); sandboxExecutions.delete(event.payload.artifactId); sandboxPublications.delete(event.payload.artifactId); }
+    if (event.event_type === "artifact.deleted") { artifacts.delete(event.payload.artifactId); candidates.delete(event.payload.artifactId); roleSequences.delete(event.payload.artifactId); compoundWorkflows.delete(event.payload.artifactId); winddowns.delete(event.payload.artifactId); sandboxExecutions.delete(event.payload.artifactId); sandboxPublications.delete(event.payload.artifactId); }
+    if (event.event_type === "winddown.recorded") {
+      const value = event.payload.winddown;
+      if (!Value.Check(WinddownRecordSchema, value)) throw new MoguriError("winddown_corrupt", "Unsupported original budget checkpoint state.", 409);
+      const artifact = artifacts.get(value.id);
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || event.artifact_id !== value.id || value.profileId !== profileId ||
+        !artifact || artifact.kind !== "report" || artifact.contentDigest !== value.inputDigest ||
+        !winddowns.has(value.id) && (artifact.originSessionId !== value.sessionId || artifact.projectId !== value.projectId || artifact.workspaceId !== value.workspaceId) ||
+        candidates.has(value.id) || roleSequences.has(value.id) || compoundWorkflows.has(value.id) ||
+        [...winddowns.values()].some((record) => record.id !== value.id && record.sessionId === value.sessionId && record.turnId === value.turnId)) throw new MoguriError("winddown_corrupt", "One original profile/owner/turn must retain the exact independent checkpoint report.", 409);
+      winddowns.set(value.id, projectWinddown(winddowns.get(value.id), value));
+    }
     if (event.event_type === "compound.recorded") {
       const value = event.payload.workflow;
       if (!Value.Check(CompoundWorkflowSchema, value)) throw new MoguriError("compound_corrupt", "Unsupported retained public compound metadata.", 409);
@@ -664,6 +680,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           job.sessionId !== null || (event.session_id ?? null) !== null || (job.workspaceId ?? null) !== publication.workspaceId ||
           job.status !== "running" || job.resultDigest !== null || job.error !== null) throw new MoguriError("sandbox_publication_corrupt", "Native publication job lost its original independently retained user/root intent.", 409);
       }
+      if (job.winddownId) {
+        const record = winddowns.get(job.winddownId), intent = record?.commit;
+        if (!record || !intent || record.status !== "committing" || job.candidate || job.memory || job.sandboxPublicationId || jobs.has(job.id) ||
+          job.kind !== "winddown.commit" || job.id !== intent.jobId || event.artifact_id !== record.id ||
+          job.projectId !== record.projectId || event.project_id !== record.projectId || job.sessionId !== record.sessionId || event.session_id !== record.sessionId ||
+          (job.workspaceId ?? null) !== record.workspaceId || job.status !== "running" || job.resultDigest !== null || job.error !== null) throw new MoguriError("winddown_corrupt", "Accepted-work Git job lost its exact separate actual-user source/ref intent.", 409);
+      }
       if (job.memory && ([...jobs.values()].some((entry) => entry.id !== job.id && entry.memory?.commandId === job.memory?.commandId) ||
         jobs.get(job.id)?.memory && JSON.stringify(jobs.get(job.id)!.memory) !== JSON.stringify(job.memory))) {
         throw new MoguriError("memory_corrupt", "Original repository memory command intent was duplicated or changed.", 409);
@@ -672,6 +695,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "job.progress" || event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
+      if ((event.payload.winddownId ?? null) !== (job?.winddownId ?? null)) throw new MoguriError("winddown_corrupt", "Accepted-work job lifecycle changed its original independent artifact owner.", 409);
+      if (job?.winddownId) {
+        const record = winddowns.get(job.winddownId), intent = record?.commit;
+        if (!record || !intent || event.artifact_id !== record.id || event.project_id !== record.projectId || event.session_id !== record.sessionId ||
+          job.status !== "running" || event.event_type === "job.finished" && (event.payload.status === "completed" &&
+            (record.status !== "completed" || intent.resultDigest === null || intent.resultDigest !== event.payload.resultDigest || event.payload.error !== null) ||
+            ["failed", "cancelled"].includes(event.payload.status) && intent.publicationAttempted)) throw new MoguriError("winddown_corrupt", "Accepted-work job replayed terminal state or hid possible ref publication/unknown cleanup.", 409);
+      }
       if ((event.payload.sandboxPublicationId ?? null) !== (job?.sandboxPublicationId ?? null)) throw new MoguriError("sandbox_publication_corrupt", "Native publication lifecycle changed its artifact owner.", 409);
       if (job?.sandboxPublicationId) {
         const publication = sandboxPublications.get(job.sandboxPublicationId);
@@ -706,7 +737,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
-      if (job && ["cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply", "compound.validate"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
+      if (job && ["cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply", "compound.validate", "winddown.commit"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
         if (job.workspaceId) blockedWorkspaces.add(job.workspaceId); else blockedProjects.add(job.projectId);
       }
     }
@@ -831,8 +862,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       case "model.started":
         for (const routing of routings.values()) if (routing.turnId === event.turn_id && routing.status === "ready" && event.payload.role !== "router") routing.status = "running";
-        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: roleSequenceTurns.has(event.turn_id ?? "") || event.payload.role === "router" || event.payload.role === "compaction" || event.payload.role === "draft" ? "notice" : "assistant",
-          text: roleSequenceTurns.has(event.turn_id ?? "") ? "An owned role is producing untrusted data, not a user answer or approval." : event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : "", timestamp: event.timestamp });
+        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: roleSequenceTurns.has(event.turn_id ?? "") || event.payload.role === "router" || event.payload.role === "compaction" || event.payload.role === "draft" || event.payload.role === "checkpoint" ? "notice" : "assistant",
+          text: roleSequenceTurns.has(event.turn_id ?? "") ? "An owned role is producing untrusted data, not a user answer or approval." : event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : event.payload.role === "checkpoint" ? "Reserved metadata-only budget checkpoint; no source or Git approval." : "", timestamp: event.timestamp });
         session.usage.push({
           stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: event.payload.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
@@ -898,6 +929,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   validateBudgetPlanEntries([...budgetPlans.values()], [...budgetEntries.values()]);
   validateRoleSequenceLedger([...roleSequences.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
   validateCompoundLedger([...compoundWorkflows.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
+  validateWinddownLedger([...winddowns.values()], [...budgetPlans.values()], [...budgetEntries.values()]);
   for (const sequence of roleSequences.values()) if (sessions.has(sequence.sessionId)) {
     const controls = roleSequenceControls.get(sequence.id) ?? [];
     const control = controls[0];
@@ -912,5 +944,6 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
     sandboxPublications: [...sandboxPublications.values()].filter((publication) => artifacts.has(publication.id)),
     compoundWorkflows: [...compoundWorkflows.values()].filter((workflow) => artifacts.has(workflow.id)),
+    winddowns: [...winddowns.values()].filter((record) => artifacts.has(record.id)),
     artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), candidateGenerations: [...candidateGenerations.values()].filter((generation) => artifacts.has(generation.id)), roleSequences: [...roleSequences.values()].filter((sequence) => artifacts.has(sequence.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], sandboxWorkspaces: [...sandboxWorkspaces.values()], sandboxExecutions: [...sandboxExecutions.values()].filter((execution) => artifacts.has(execution.id)), managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

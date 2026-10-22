@@ -32,10 +32,11 @@ const artifactIdentity = (input: EventInput): string | null => input.event_type 
   input.event_type === "sandbox.publication_recorded" ? input.payload.publication.id :
   input.event_type === "role.sequence_recorded" ? input.payload.sequence.id :
   input.event_type === "compound.recorded" ? input.payload.workflow.id :
+  input.event_type === "winddown.recorded" ? input.payload.winddown.id :
   input.event_type === "candidate.generation_recorded" ? input.payload.generation.id :
   input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
-  input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? input.payload.job.compoundWorkflowId ?? null :
-  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? null : null;
+  input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? input.payload.job.compoundWorkflowId ?? input.payload.job.winddownId ?? null :
+  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? input.payload.winddownId ?? null : null;
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
   if (artifactId) return artifactScope(input.profile_id, artifactId);
@@ -76,6 +77,8 @@ function references(input: EventInput): string[] {
     case "role.sequence_recorded": return [input.payload.sequence.inputDigest, ...input.payload.sequence.steps.flatMap((step) => [step.inputDigest, step.resultDigest])].filter((hash): hash is string => hash !== null);
     case "compound.recorded": return [input.payload.workflow.inputDigest, ...input.payload.workflow.steps.flatMap((step) => [step.inputDigest, step.resultDigest]),
       ...input.payload.workflow.validations.flatMap((validation) => [validation.documentDigest, validation.resultDigest])].filter((hash): hash is string => hash !== null);
+    case "winddown.recorded": return [input.payload.winddown.inputDigest, input.payload.winddown.step.inputDigest, input.payload.winddown.step.resultDigest,
+      input.payload.winddown.commitDocumentDigest, input.payload.winddown.commit?.resultDigest ?? null].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
     case "job.finished": return input.payload.resultDigest ? [input.payload.resultDigest] : [];
@@ -222,6 +225,9 @@ export class EventStore {
       if (version < 38) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('compound_workflow_schema','1');
         PRAGMA user_version=38; COMMIT;`);
+      if (version < 39) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('budget_winddown_schema','1');
+        PRAGMA user_version=39; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {
