@@ -17,7 +17,7 @@ import {
   PlanFileResultSchema, type RetainedArtifact, type RepositoryScope, type RuntimeCloseOptions, type McpServerConfig, type RemoteMcpCall,
   type RepositoryRemoteBoundary,
   type MemoryTarget, type BudgetEntry,
-  type RoleSequenceRecord, projectRoleSequence, successfulRoleEntry,
+  type RoleSequenceRecord, projectRoleSequence, successfulRoleEntry, decisionEvidence,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -2103,7 +2103,7 @@ export class ControlPlane extends EventEmitter {
       this.decisions.reject(record.id, "The exact existing user delegation was revoked or denied. No model authority."); return;
     }
     const allow = choice === "allow", mode = current.pendingMode === "read-only" ? "read-only" : current.mode;
-    this.decisions.apply(record.id, choice, [this.event(current, "tool.decided", { approvalId: approval.id, allow, actor: "decision-provider", ruleId: source.delegationId, decisionId: record.id }, source.parentStepId),
+    this.decisions.apply(record.id, choice, [this.event(current, "tool.decided", { approvalId: approval.id, allow, actor: "decision-provider", ruleId: source.delegationId, decisionId: record.id, decisionOrigin: decisionEvidence(record) }, source.parentStepId),
       ...(allow ? [this.event(current, "tool.started", { call }, source.parentStepId)] : [])]);
     run.approval = undefined;
     if (allow) this.grantTool(run, call.id);
@@ -2129,8 +2129,7 @@ export class ControlPlane extends EventEmitter {
     }
     const selected = /^option[0-7]$/.test(choice) ? question.choices[Number(choice.slice(6))] : undefined;
     if (selected === undefined) throw new MoguriError("decision_result", "A decision cannot replace the exact original offered technical alternatives.", 409);
-    if (!record.stepId || !record.actualInputDigest || !record.resultDigest || !record.adviceDigest) throw new MoguriError("decision_result", "The exact actual model/step/input/result evidence is missing. No automated answer was inferred.", 409);
-    const decisionOrigin = { decisionId: record.id, stepId: record.stepId, inputDigest: record.inputDigest, modelInputDigest: record.actualInputDigest, resultDigest: record.resultDigest, adviceDigest: record.adviceDigest };
+    const decisionOrigin = decisionEvidence(record);
     const answer = { text: selected, actor: "decision-provider" as const, modelId: record.modelId, providerId: record.providerId, sourceCallId: record.stepId, decisionId: record.id,
       decisionOrigin, answeredAt: new Date().toISOString() };
     this.decisions.apply(record.id, choice, [this.event(session, "question.answered", { questionId: question.id, answer }, question.stepId)]);
@@ -2173,8 +2172,9 @@ export class ControlPlane extends EventEmitter {
     if (choice === "continue") { this.decisions.apply(record.id, choice, []); return; }
     const selected = settings.steeringChoices.find((entry) => entry.id === choice);
     if (!selected) throw new MoguriError("decision_result", "The model cannot invent or replace an original bounded steering alternative.", 409);
+    const decisionOrigin = decisionEvidence(record);
     this.decisions.apply(record.id, choice, [this.event(current, "steering.applied", { decisionId: record.id, modelId: record.modelId, providerId: record.providerId,
-      sourceStepId: record.stepId!, text: selected.text }, request.stepId)]);
+      sourceStepId: decisionOrigin.stepId, text: selected.text, decisionOrigin }, request.stepId)]);
   }
   private answerQuestion(command: QuestionCommand, finish: WorkspaceFinish): CommandResult {
     const question = this.projection.questions.find((question) => question.id === command.questionId);

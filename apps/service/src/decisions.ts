@@ -1,6 +1,6 @@
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  activeDecision, DecisionDocumentSchema, MoguriError, parse, projectDecision, successfulRoleEntry,
+  activeDecision, decisionEvidence, DecisionDocumentSchema, MoguriError, parse, projectDecision, successfulRoleEntry,
   type CommandResult, type DecisionCommand, type DecisionDocument, type DecisionQuery, type DecisionQuestions, type DecisionRecord, type DecisionResponse,
   type DecisionSource, type EventInput, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type Usage, type BudgetLimit,
 } from "../../../packages/protocol/src/index.ts";
@@ -317,6 +317,7 @@ export class Decisions {
     if (record.source.kind === "tool") {
       if (!["allow", "deny"].includes(choice) || first.event_type !== "tool.decided" || first.payload.actor !== "decision-provider" ||
         first.payload.decisionId !== id || first.payload.approvalId !== record.source.approvalId || first.payload.ruleId !== record.source.delegationId ||
+        JSON.stringify(first.payload.decisionOrigin) !== JSON.stringify(decisionEvidence(record)) ||
         first.payload.allow !== (choice === "allow") || effects.length !== (choice === "allow" ? 2 : 1) ||
         effects[1] && (effects[1].event_type !== "tool.started" || effects[1].payload.call.id !== record.source.callId ||
           digest(JSON.stringify(effects[1].payload.call.arguments)) !== record.source.argumentsDigest)) throw new MoguriError("decision_effect", "Tool advice cannot grant new permission or replace exact delegated arguments.", 409);
@@ -324,12 +325,12 @@ export class Decisions {
       if (effects.length !== 1 || first.event_type !== "question.answered" || first.payload.questionId !== record.source.questionId ||
         first.payload.answer.actor !== "decision-provider" || first.payload.answer.decisionId !== id || first.payload.answer.modelId !== record.modelId ||
         first.payload.answer.sourceCallId !== record.stepId || document.questions.action?.type !== "choice" ||
-        first.payload.answer.text !== document.questions.action.criteria[choice] || JSON.stringify(first.payload.answer.decisionOrigin) !== JSON.stringify({
-          decisionId: record.id, stepId: record.stepId, inputDigest: record.inputDigest, modelInputDigest: record.actualInputDigest, resultDigest: record.resultDigest, adviceDigest: record.adviceDigest,
-        })) throw new MoguriError("decision_effect", "Technical advice must retain its actual actor and one exact user-delegated original alternative.", 409);
+        first.payload.answer.text !== document.questions.action.criteria[choice] || JSON.stringify(first.payload.answer.decisionOrigin) !== JSON.stringify(decisionEvidence(record)))
+        throw new MoguriError("decision_effect", "Technical advice must retain its actual actor and one exact user-delegated original alternative.", 409);
     } else if (choice === "continue" ? effects.length !== 0 : effects.length !== 1 || first.event_type !== "steering.applied" || first.payload.decisionId !== id || first.payload.modelId !== record.modelId ||
       first.payload.providerId !== record.providerId || first.payload.sourceStepId !== record.stepId || document.questions.action?.type !== "choice" ||
-      first.payload.text !== document.questions.action.criteria[choice]) throw new MoguriError("decision_effect", "A steer must be one exact bounded original user-configured alternative, not model-authored goal/policy expansion.", 409);
+      first.payload.text !== document.questions.action.criteria[choice] || JSON.stringify(first.payload.decisionOrigin) !== JSON.stringify(decisionEvidence(record)))
+      throw new MoguriError("decision_effect", "A steer must be one exact bounded original user-configured alternative, not model-authored goal/policy expansion.", 409);
     this.update(record, { status: "applied", applied: { actor: "decision-provider", choice, effectDigest: digest(JSON.stringify(effects)), at: now() } }, effects);
   }
   reject(id: string, diagnostic: string): void { const record = this.record(id); if (record.status === "ready") this.update(record, { status: "rejected", diagnostic }); }

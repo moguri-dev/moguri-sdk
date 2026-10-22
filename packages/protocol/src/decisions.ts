@@ -72,6 +72,11 @@ export const DecisionRecordSchema = object({
   applied: Type.Union([object({ actor: Type.Literal("decision-provider"), choice: name, effectDigest: hash, at: time }), Type.Null()]), diagnostic,
 });
 export type DecisionRecord = Static<typeof DecisionRecordSchema>;
+export function decisionEvidence(record: DecisionRecord): DecisionEvidence {
+  if (!["ready", "applied"].includes(record.status) || !record.stepId || !record.actualInputDigest || !record.resultDigest || !record.adviceDigest)
+    throw new MoguriError("decision_evidence", "The original complete model step/input/result/advice evidence is missing. No actor or authority was inferred.", 409);
+  return { decisionId: record.id, stepId: record.stepId, inputDigest: record.inputDigest, modelInputDigest: record.actualInputDigest, resultDigest: record.resultDigest, adviceDigest: record.adviceDigest };
+}
 export const activeDecision = (record: DecisionRecord) => ["pending", "running", "ready"].includes(record.status);
 function corrupt(message: string): never { throw new MoguriError("decision_corrupt", `${message} State was preserved; no decision, human actor, permission or replay was adopted.`, 409); }
 export function projectDecision(previous: DecisionRecord | undefined, value: unknown): DecisionRecord {

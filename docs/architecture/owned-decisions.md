@@ -115,6 +115,12 @@ archived/deleted. Version-9 artifact exports contain exact decision history,
 raw evidence and retained accounting. Deletion keeps the original source
 intent tombstone, not authority for another paid call.
 
+Applied tool and steering receipts also carry their own canonical original
+input/result/advice grants. Their still-retained conversation and actual model
+actor cannot depend on a report the user may independently delete. Rebuilding
+history validates the surviving exact known model entry and copied origin;
+it never fabricates a user actor, another result or an effect replay.
+
 The additive `owned_decision_schema` marker preserves schema-39 wind-down,
 older compound state, ciphertext, receipts and model settings. No state reset
 is required. Recovery rejects unapplied ready advice or records interrupted
@@ -140,6 +146,12 @@ remain covered. Packed external SDK, full source and fresh native acceptance
 are not established by this intermediate checkpoint. Generated thresholds/fixtures
 prove mechanics and boundaries, not live reliability, independent training,
 model quality or provider billing.
+
+Follow-up retention/cancellation checks pass **22 cases in 9.49 s**, including
+actual tool/steer report deletion before source deletion and failed
+stop-intent persistence while the real provider request is in flight.
+The latter records its injected failure and still aborts the owned request;
+unknown charges stay held.
 
 The refreshed `node scripts/decision-spike.mjs` prerequisite passes all
 **8 generated wire/failure checks in 395.66 ms**: the actual loopback

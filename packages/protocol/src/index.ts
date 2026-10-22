@@ -35,7 +35,7 @@ import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedg
 import { projectSandboxPublication, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
 import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger, type CompoundWorkflow } from "./compound.ts";
 import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
-import { DecisionRecordSchema, DecisionEvidenceSchema, projectDecision, validateDecisionLedger, type DecisionRecord } from "./decisions.ts";
+import { DecisionRecordSchema, DecisionEvidenceSchema, projectDecision, validateDecisionLedger, type DecisionRecord, type DecisionEvidence } from "./decisions.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
@@ -243,7 +243,7 @@ export interface EventPayloads {
   "compaction.saved": { compaction: ContextCompaction };
   "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string };
   "steer.applied": { item: QueueItem };
-  "steering.applied": { decisionId: string; modelId: string; providerId: string; sourceStepId: string; text: string };
+  "steering.applied": { decisionId: string; modelId: string; providerId: string; sourceStepId: string; text: string; decisionOrigin: DecisionEvidence };
   "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole };
   "routing.started": { routing: RoutingTurn };
   "routing.planned": { routingId: string; classifierStepId: string; plan: SingleRoutingPlan };
@@ -255,7 +255,7 @@ export interface EventPayloads {
   "execution.changed": { executionId: string; status: RemoteExecution["status"]; cancellation: RemoteExecution["cancellation"]; cleanup: RemoteExecution["cleanup"]; diagnostic: string | null; workerPid?: number };
   "execution.frame_recorded": { executionId: string; sequence: number; digest: string };
   "tool.requested": { approval: Approval };
-  "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" | "delegation" | "decision-provider"; ruleId?: string; decisionId?: string };
+  "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" | "delegation" | "decision-provider"; ruleId?: string; decisionId?: string; decisionOrigin?: DecisionEvidence };
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
@@ -891,11 +891,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         addUser(event.payload.item);
         break;
       case "steering.applied": {
-        const record = decisions.get(event.payload.decisionId);
-        if (!record || record.status !== "applied" || record.kind !== "steering" || record.sessionId !== session.id || record.turnId !== event.turn_id ||
-          record.stepId !== event.payload.sourceStepId || record.modelId !== event.payload.modelId || record.providerId !== event.payload.providerId ||
+        const { decisionOrigin: origin } = event.payload, record = decisions.get(event.payload.decisionId), entry = budgetEntries.get(event.payload.sourceStepId);
+        if (!Value.Check(DecisionEvidenceSchema, origin) || origin.decisionId !== event.payload.decisionId || origin.stepId !== event.payload.sourceStepId ||
+          !entry || entry.sessionId !== session.id || entry.turnId !== event.turn_id || entry.role !== "steering" || !successfulRoleEntry(entry) ||
+          entry.modelId !== event.payload.modelId || entry.providerId !== event.payload.providerId ||
+          record && (record.status !== "applied" || record.kind !== "steering" || record.sessionId !== session.id || record.turnId !== event.turn_id ||
+            record.stepId !== origin.stepId || record.inputDigest !== origin.inputDigest || record.actualInputDigest !== origin.modelInputDigest ||
+            record.resultDigest !== origin.resultDigest || record.adviceDigest !== origin.adviceDigest) ||
           !event.payload.text.trim() || event.payload.text.length > 1024) throw new MoguriError("decision_corrupt", "A steer lost its actual decision-provider owner/provenance.", 409);
-        session.messages.push({ id: event.id, turnId: event.turn_id ?? "", role: "notice", text: `Decision-provider steer (${record.modelId}): ${event.payload.text}`, timestamp: event.timestamp });
+        session.messages.push({ id: event.id, turnId: event.turn_id ?? "", role: "notice", text: `Decision-provider steer (${entry.modelId}): ${event.payload.text}`, timestamp: event.timestamp });
         break;
       }
       case "model.started":
@@ -933,12 +937,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "tool.requested": session.pendingApproval = event.payload.approval; session.status = "waiting_input"; break;
       case "tool.decided":
         if (event.payload.actor === "decision-provider") {
-          const record = decisions.get(event.payload.decisionId ?? "");
-          if (!record || record.status !== "applied" || record.source.kind !== "tool" || record.source.approvalId !== event.payload.approvalId ||
+          const origin = event.payload.decisionOrigin, record = decisions.get(event.payload.decisionId ?? ""), entry = budgetEntries.get(origin?.stepId ?? "");
+          if (!Value.Check(DecisionEvidenceSchema, origin) || origin.decisionId !== event.payload.decisionId ||
+            !entry || entry.sessionId !== session.id || entry.turnId !== event.turn_id || entry.role !== "decision" || !successfulRoleEntry(entry) ||
+            session.pendingApproval?.id !== event.payload.approvalId || session.pendingApproval.stepId !== event.step_id || !event.payload.ruleId ||
+            record && (record.status !== "applied" || record.source.kind !== "tool" || record.source.approvalId !== event.payload.approvalId ||
             record.source.delegationId !== event.payload.ruleId || record.sessionId !== session.id || record.turnId !== event.turn_id ||
-            record.source.parentStepId !== event.step_id || session.pendingApproval?.id !== event.payload.approvalId ||
-            record.applied?.choice !== (event.payload.allow ? "allow" : "deny")) throw new MoguriError("decision_corrupt", "Tool advice lost its exact pending request, existing delegation or actual model actor.", 409);
-        } else if (event.payload.decisionId !== undefined) throw new MoguriError("decision_corrupt", "A provider decision cannot impersonate human/policy approval.", 409);
+            record.source.parentStepId !== event.step_id || record.applied?.choice !== (event.payload.allow ? "allow" : "deny") ||
+            record.stepId !== origin.stepId || record.inputDigest !== origin.inputDigest || record.actualInputDigest !== origin.modelInputDigest ||
+            record.resultDigest !== origin.resultDigest || record.adviceDigest !== origin.adviceDigest || record.modelId !== entry.modelId || record.providerId !== entry.providerId))
+            throw new MoguriError("decision_corrupt", "Tool advice lost its exact pending request, existing delegation or actual model actor.", 409);
+        } else if (event.payload.decisionId !== undefined || event.payload.decisionOrigin !== undefined) throw new MoguriError("decision_corrupt", "A provider decision cannot impersonate human/policy approval.", 409);
         session.pendingApproval = null; if (session.status !== "stopping") session.status = "running"; break;
       case "tool.started":
         session.messages.push({ id: event.payload.call.id, turnId: event.turn_id ?? "", role: "tool", text: `${event.payload.call.name}\n`, timestamp: event.timestamp, toolCalls: [event.payload.call], outcome: "running" });

@@ -113,3 +113,23 @@ test("an identical pathname with a replaced actual Local directory cannot adopt 
     assert.equal(f.service.controller.events(0).some((event) => event.event_type === "tool.started"), false);
   } finally { await f.close(); }
 });
+
+test("failed decision stop-intent persistence still aborts the actual owned request, preserves unknown charges and never authorizes a tool", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+  const f = await setupDecisions({ advice: { stream: { chunks: [generatedAdvice()], delayMs: 1500 } } });
+  const commit = f.service.store.commit.bind(f.service.store); let injected = false;
+  try {
+    await f.send("generated tool failed decision cancellation journal"); await waitFor(() => f.advice.requests.length === 1);
+    f.service.store.commit = (events, ...rest) => {
+      if (!injected && events.some((event) => event.event_type === "decision.recorded" && event.payload.decision.cancellation === "requested")) {
+        injected = true; throw new Error("Generated decision stop-intent persistence failure.");
+      }
+      return commit(events, ...rest);
+    };
+    await f.sdk.command({ type: "session.stop", sessionId: f.sessionId }); await f.terminal();
+    const record = await waitFor(() => f.service.controller.snapshot().decisions.find((record) => record.status === "partial"));
+    assert.equal(injected, true); assert.equal(record.cleanup, "owned-worker-stopped"); assert.equal(record.applied, null);
+    assert.equal(f.service.controller.snapshot().budgetEntries.find((entry) => entry.id === record.stepId)?.status, "unknown");
+    assert.equal(f.service.controller.events(0).some((event) => event.event_type === "tool.started"), false);
+    assert.notEqual(f.session().status, "completed"); assert.equal(f.advice.requests.length, 1);
+  } finally { f.service.store.commit = commit; await f.close(); }
+});

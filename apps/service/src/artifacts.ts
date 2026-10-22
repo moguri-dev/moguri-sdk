@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import {
-  activeCompound, activeDecision, legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
+  activeCompound, activeDecision, decisionEvidence, legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
   type ArtifactResponse, type ArtifactSource, type ArtifactSourcePreview, type CommandResult, type EventInput, type ProjectArtifactChoice,
   type ProjectArtifactPreview, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type ArtifactMaterializationPreview, type ArtifactMaterialization,
   type ArtifactMaterializeOptions, type CapabilityJob, type Project, type CandidatePatch, type SandboxPublication,
@@ -121,9 +121,7 @@ export class ArtifactRuntime {
       if (answer.actor === "decision-provider" && (!decision || decision.status !== "applied" || decision.source.kind !== "question" ||
         decision.source.questionId !== question.id || decision.stepId !== answer.sourceCallId || !decision.stepId || !decision.actualInputDigest || !decision.resultDigest ||
         !decision.adviceDigest || decision.modelId !== answer.modelId)) throw new MoguriError("decision_corrupt", "An automated retained answer lost its exact original decision/model/choice evidence. No fake human or unproved source was copied.", 409);
-      const evidence = decision?.stepId && decision.actualInputDigest && decision.resultDigest && decision.adviceDigest ? {
-        decisionId: decision.id, stepId: decision.stepId, inputDigest: decision.inputDigest, modelInputDigest: decision.actualInputDigest, resultDigest: decision.resultDigest, adviceDigest: decision.adviceDigest,
-      } : undefined;
+      const evidence = decision ? decisionEvidence(decision) : undefined;
       const artifact = this.create({ id: question.sessionId, projectId: question.projectId, workspaceId: question.workspaceId }, "answer", `Answer: ${question.question.replace(/\s+/g, " ").slice(0, 140)}`, text, "question", [
         { eventId: question.sourceEventId, sessionId: question.sessionId, messageId: question.callId, actor: "model", modelId: question.modelId, outcome: null, contentDigest: digest(modelText) },
         { eventId: event.id, sessionId: question.sessionId, messageId: evidence?.stepId ?? null, actor: answer.actor, modelId: answer.modelId, outcome: null, contentDigest: digest(answer.text),

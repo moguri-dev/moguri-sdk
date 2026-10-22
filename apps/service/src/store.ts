@@ -73,6 +73,11 @@ function references(input: EventInput): string[] {
       const origin = input.payload.answer.decisionOrigin;
       return origin ? [origin.inputDigest, origin.modelInputDigest, origin.resultDigest, origin.adviceDigest] : [];
     }
+    case "tool.decided":
+    case "steering.applied": {
+      const origin = input.payload.decisionOrigin;
+      return origin ? [origin.inputDigest, origin.modelInputDigest, origin.resultDigest, origin.adviceDigest] : [];
+    }
     case "candidate.saved": {
       const candidate = input.payload.candidate, origin = candidate.roleOrigin;
       return [candidate.documentDigest, candidate.stageResultDigest, candidate.applyResultDigest,
