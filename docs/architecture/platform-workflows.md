@@ -308,3 +308,13 @@ authority. The first packed consumer run found duplicate local variable names
 in its new typed fixture; its lexical scope was corrected before the pass.
 Existing npm deprecation/script-review notices, experimental OpenTUI FFI and
 the lazy Ghostty bundle-size warning remain nonfatal.
+
+The first complete sweep passed **1,041 of 1,044 cases in 899.09 s** and
+failed three existing no-source-probe guards. The new physical-alias cache
+busy check unnecessarily called the Local project resolver even with no
+install lease, including during root-less owned-role recovery. The correction
+uses only retained project/workspace path metadata and does no filesystem
+resolution. All 26 affected candidate/owned-role SIGKILL/cache cases pass,
+without weakening the original guards. A dedicated regression also covers
+active physical aliases with a poisoned resolver. That failed sweep is not
+reported as a full pass; the corrected source receives a complete rerun.

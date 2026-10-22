@@ -5,8 +5,32 @@ import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { createCacheApi } from "../packages/sdk/src/cache.ts";
 import { startService } from "../apps/service/src/server.ts";
+import { WorkspaceRuntime } from "../apps/service/src/workspace.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { dependencyArchive, dependencyProject } from "./fixtures/dependencies.ts";
+
+test("cache lease checks use retained root metadata without resolving a Local source, including active physical aliases", async () => {
+  const fixture = await setupFixture(), base = fixture.service.controller.snapshot(), project = base.projects[0]!;
+  const alias = { ...project, id: "generated-physical-alias", name: "Generated alias" };
+  const snapshot = { ...base, projects: [...base.projects, alias] };
+  let resolveAllowed = false, resolutions = 0;
+  const runtime = new WorkspaceRuntime({
+    snapshot: () => snapshot,
+    project: () => { resolutions++; if (!resolveAllowed) throw new Error("Lease inspection must not probe a Local source."); return project; },
+    commit: () => {}, job: () => "generated-held-cache-job", wake: () => {}, closing: () => false, publicationBusy: () => false,
+  }, fixture.service.controller.store, join(fixture.directory, "cache-lease-state"));
+  try {
+    assert.equal(runtime.isBusy(project.id), false); assert.equal(resolutions, 0);
+    resolveAllowed = true;
+    await runtime.execute({ type: "cache.install", projectId: project.id, manager: "npm", expectedDigest: "a".repeat(64), acceptMetadataSharing: true, runScripts: false },
+      (_events, result = {}) => result);
+    resolveAllowed = false;
+    const before = resolutions;
+    assert.equal(runtime.isBusy(alias.id), true);
+    assert.equal(resolutions, before);
+    assert.equal(fixture.requests.length, 0);
+  } finally { runtime.close(); await fixture.close(); }
+});
 
 test("registry commands retain reviewed scope and masked generations, survive restart and never replay interrupted installs", { timeout: 30_000 }, async () => {
   const secrets = new Map<string, string>();

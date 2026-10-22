@@ -1138,8 +1138,10 @@ A version-1 plugin is a declarative skill bundle:
 
 Enable the plugin before any bundled skill. Disabling the owner prevents its
 contents from entering context. Arbitrary JavaScript entrypoints, dependency
-installation, marketplace updates and unattended self-modification are not
-implemented.
+installation and unattended self-modification are not implemented. Reviewed
+repository-backed marketplace updates and complete disabled bundle rollback use
+the separate protocol-41 `marketplace`/`capabilities` surface above; the legacy
+skill-only `plugins import` format does not silently acquire new capabilities.
 
 Approved custom scripts are Node modules receiving JSON on stdin:
 `{"arguments":{},"projectRoot":"/approved/project"}`. They emit bounded stdout,

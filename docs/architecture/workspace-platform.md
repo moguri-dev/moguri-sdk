@@ -81,15 +81,19 @@ Linking a GitHub PR authorizes bounded read-only observation while the service
 runs. Only a verified `merged` response advances a phase. Closed-without-merge,
 missing auth and network failures do not. Concurrent local edits/changed links
 win over stale responses. A board can disable observation or use an explicitly
-selected GitHub CLI account for private repositories. No merge, push or CI
-operation is exposed.
+selected GitHub CLI account for private repositories. This original observation
+API exposes no merge, push or CI action. The later
+[GitHub workflow surface](github-workflows.md) provides separately reviewed
+actual-user operations, never a write hidden inside observation.
 
 Linear is optional and off by default. A user supplies a personal API key
 through a dedicated masked/keychain path and enables one team on a board.
 Explicit bounded imports retain remote provenance and do not export local
 issues, read an assignee, upload repository data or overwrite local edits.
 GraphQL errors, including partial HTTP-200 responses, are failures. Interactive
-OAuth and unattended two-way sync are not implied.
+OAuth and unattended two-way sync are not implied. Protocol 41's separate
+[Linear workflows](linear-workflows.md) add explicit reviewed writes and
+directional local-ticket pull/push without changing this import's behavior.
 
 ## Durability, cancellation and acceptance
 

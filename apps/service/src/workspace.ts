@@ -47,8 +47,12 @@ export class WorkspaceRuntime {
   close(): void { clearInterval(this.timer); this.timer = undefined; this.cache.close(); this.integrations.invalidateLinearCredentials(); for (const abort of [...this.linear.values(), ...this.prAborts.values()]) abort.abort(); }
   isBusy(projectId: string, workspaceId?: string | null): boolean {
     if (this.busyRoots.has(`${projectId}:${workspaceId ?? "base"}`)) return true;
-    try { return this.busyPaths.has(this.host.project(projectId, workspaceId ?? undefined).path); }
-    catch (error) { console.error("Managed cache root lookup is unconfirmed:", error instanceof MoguriError ? error.code : "cache_root"); return true; }
+    if (!this.busyPaths.size) return false;
+    const snapshot = this.host.snapshot();
+    const root = workspaceId ? snapshot.managedWorkspaces.find((workspace) => workspace.id === workspaceId && workspace.projectId === projectId)?.path :
+      snapshot.projects.find((project) => project.id === projectId)?.path;
+    if (!root) { console.error("Managed cache lease has no exact registered root metadata."); return true; }
+    return this.busyPaths.has(root);
   }
   private board(id: string): IssueBoard {
     this.host.project(id);
