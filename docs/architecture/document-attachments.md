@@ -183,3 +183,12 @@ rejection is exercised without consuming the draft or queue. The corrected
 document-focused sweep passes 27/27 cases in 19.40 s and all six parser spike
 groups pass again (PDF 238.38 ms / 131.89 MiB, DOCX 166.40 ms / 104.03 MiB,
 XLSX 171.67 ms / 103.75 MiB).
+
+The repeated full unit/integration/native-TUI sweep passes 1,068 cases with
+zero failures (1,077 total; nine actual native-workload cases skip because this
+host has no configured current-protocol workload receipt), in 979.23 s.
+The first full desktop sweep found a compact-window answer-button clipping
+regression from the expanded progress display. Compacting the bar and moving
+details into its existing modal-visibility contract restores the unchanged
+assertion. All nine focused document/progress/composer/question workflows pass
+in 25.4 s; full hidden-desktop acceptance is recorded below.

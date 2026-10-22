@@ -57,6 +57,11 @@ CLI and `/progress` expose the same observation and provenance.
 The TUI checklist occupies its existing reserved footer row rather than
 shrinking raw-result views. A reported long-task estimate gets one additional
 compact row; `/progress` exposes the complete explanation and provenance.
+Desktop keeps the bar in a compact single row, with a keyboard-accessible
+native details dialog for explanations, errors and provenance. That dialog
+participates in the composer's existing native-preview visibility gate. The
+original compact-window question/answer and tool-decision assertions remain
+unchanged and pass with the answer controls fully visible.
 
 ## Source qualification
 
