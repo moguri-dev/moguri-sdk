@@ -53,6 +53,16 @@ its unsupported-effort negative case passed in **55.32 ms**; retained-compartmen
 and hidden Ghostty spikes passed in **123.95 ms** and **25.80 ms** respectively.
 The real pinned speech binary's version/help passed without audio or weights.
 
+Source qualification passed the locked install, type checks and production build,
+**1,074 unit/native checks with 9 gated skips in 977.11 s**, and the final hidden
+desktop suite with **76 passes and 1 native-Sandbox skip in 3.1 min**. All four
+packed external SDK entrypoints and installed-worker probes passed; the audit
+reported **zero vulnerabilities**. The nine generated speech checks include
+3.3-second finalization, repeated stop, cancellation, bounded stderr and the
+separate 30-second deadline. Hidden desktop coverage additionally holds a real
+settings request while stopping/discarding generated dictation, preserving the
+draft and rejecting a subsequent native signal failure.
+
 The original Phase 0 script still explicitly reports unavailable live provider,
 Rust/Linux, notarized packaging, native SendBox, evaluated multi-model quality,
 live decision-provider and configured SSH checks. Its historical initial-slice
