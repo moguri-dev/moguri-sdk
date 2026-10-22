@@ -392,7 +392,25 @@ export class MoguriSdk extends TransportClient {
     insert: (sessionId: string, jobId: string, expectedRevision: number) => this.command({ type: "voice.insert", sessionId, jobId, expectedRevision }),
   };
   readonly subagents = { run: (sessionId: string, prompt: string) => this.command({ type: "subagent.run", sessionId, prompt }) };
-  readonly sandbox = { status: () => this.query({ type: "sandbox.status" }) };
+  readonly sandbox = {
+    status: () => this.query({ type: "sandbox.status" }),
+    probe: () => this.command({ type: "sandbox.probe", confirm: true }),
+    preview: (sessionId: string, paths: string[]) => this.query({ type: "sandbox.preview", sessionId, paths }),
+    prepare: (sessionId: string, paths: string[], expectedDigest: string, expectedRevision: number) =>
+      this.command({ type: "sandbox.prepare", sessionId, paths, expectedDigest, expectedRevision, confirm: true }),
+    execution: (executionId: string) => this.query({ type: "sandbox.execution", executionId }),
+    result: (executionId: string) => this.query({ type: "sandbox.result", executionId }),
+    reconcile: (executionId: string) => this.command({ type: "sandbox.reconcile", executionId, confirm: true }),
+    publicationPreview: (executionId: string, paths: string[]) => this.query({ type: "sandbox.publication.preview", executionId, paths }),
+    publish: (executionId: string, paths: string[], expectedDigest: string, expectedRevision: number) =>
+      this.command({ type: "sandbox.publish", executionId, paths, expectedDigest, expectedRevision, confirm: true }),
+    publication: (publicationId: string) => this.query({ type: "sandbox.publication", publicationId }),
+    waitPublication: async (publicationId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Extract<PlatformResponse, { type: "sandbox.publication" }>> => {
+      const before = await this.sandbox.publication(publicationId);
+      await this.jobs.wait(before.publication.jobId, options);
+      return this.sandbox.publication(publicationId);
+    },
+  };
   readonly issues = {
     board: (projectId: string) => this.query({ type: "board.get", projectId }),
     configure: (projectId: string, config: BoardConfig, expectedRevision: number) => this.command({ type: "board.save", projectId,

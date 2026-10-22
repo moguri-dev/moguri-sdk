@@ -92,3 +92,36 @@ and guest-loss recovery, authenticated reconnect/no replay, or reviewed
 publication back to source. They never use personal login state, real model
 credentials, paid inference, a live source-checkout mount or a Local retry.
 An SSH or Local result cannot be relabeled as a Sandbox pass.
+
+## Protocol-37 SDK lifecycle source work
+
+The later native adapter now extends those primitives through the actual
+SDK/controller rather than claiming the original probe did so. Its generated
+protocol-37 workload uses immutable image
+`sha256:58c38dfb294aecbdf839a40b642108e785f04595cbfc045ababd018ccbc41a10`;
+the no-cache build takes **32,646.05 ms**, with locked audited dependencies.
+Installed release paths/hashes above remain unchanged.
+
+The actual adapter verifies Linux/Node/worker/bridge/process controls and
+signed plan/image/workspace/argv identity before provider access. The current
+six-case sequence passes in **19.59 s**, including real service SIGKILL.
+That loss produces signed `runtime_execution_failed`, failed finalization and
+successful rollback, without a reported runtime exit. The reader keeps that
+exit null; it never invents 0, 130 or a completed turn. Original encrypted
+model-completion frames reconcile one 42-token generated receipt exactly once,
+without adding completed model context or dispatching another request.
+
+The ordinary SDK gate includes actual guest read/write tools, two Manual
+approvals and three independently metered generated model calls. Native
+changes leave the Local source untouched until a separate exact-user
+publication, which preserves staged index bytes, HEAD and unrelated edits.
+Project-free 51-line-plus pastes are read through the bounded encrypted
+controller broker, not copied into the VM or uploaded wholesale.
+Cancellation retains unknown model capacity and verified VM absence; a
+rolled-back stage is refused before consuming the next draft.
+
+These are actual native execution with generated provider responses, not live
+provider completion, public compound/Max/wind-down or full client qualification.
+Production readiness still requires the explicit pinned configuration and a
+passing fresh provider-network scope. No user settings, alias grants, ordinary
+0.2.1 installation or previous archive was replaced.

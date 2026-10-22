@@ -99,7 +99,7 @@ async function run(start: WorkerStart): Promise<void> {
         }, {
           apiKey: boundary.auth.apiKey, headers: boundary.auth.headers, signal: abort.signal,
           maxTokens: boundary.maxTokens, maxRetries: 0, timeoutMs: 120_000,
-          ...(model.provider === "moguri-local" ? { fetch: localModelFetch } : {}),
+          ...(model.provider === "moguri-local" || start.env === "Sandbox" ? { fetch: localModelFetch } : {}),
           ...(boundary.thinkingEffort && boundary.thinkingEffort !== "off" ? { reasoning: boundary.thinkingEffort } : {}),
           sessionId: process.env.MOGURI_TURN_ID,
           onProviderStreamEvent: (event) => { usageReported ||= usagePresent(event); metrics.provider(event); },

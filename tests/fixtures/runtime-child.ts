@@ -20,11 +20,21 @@ process.once("message", (raw: unknown) => {
       prepare: async (id, signal) => { signal.throwIfAborted(); if (id !== model.id) throw new Error("Generated model mismatch."); return { model, auth: { apiKey: "generated-test-only", baseUrl: model.baseUrl } }; },
     };
     const vault = new GeneratedFileVault(raw.vaultPath);
+    if (raw.nativeCommand !== undefined && (!Array.isArray(raw.nativeCommand) || !raw.nativeCommand.every((part) => typeof part === "string"))) throw new Error("Invalid generated native command.");
     const service = await startService({ stateDir: raw.stateDir, provider, retentionKey: GENERATED_RETENTION_KEY, platform: {
-      remote: { vault, modelsVault: vault }, terminal: raw.rawTerminal === true ?
+      remote: { vault, modelsVault: vault }, ...(Array.isArray(raw.nativeCommand) ? { sandbox: { vault, command: raw.nativeCommand } } : {}), terminal: raw.rawTerminal === true ?
         { vault, executable: process.execPath, args: ["-e", "process.stdin.setRawMode(true); process.stdin.on('data',d=>process.stdout.write(d)); process.stdout.write('GENERATED_CHILD_TERMINAL_READY\\n');"] } :
         { vault, executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CHILD_TERMINAL_READY\\n'; exec cat"] },
     } });
+    if (raw.holdNativeResult === true) {
+      const gate = createRemoteFrameGate("model.complete", (frame) => process.send?.({ kind: "held-native-model", executionId: frame?.executionId }));
+      const launch = service.controller.sandbox.launch.bind(service.controller.sandbox);
+      service.controller.sandbox.launch = (...args) => {
+        const connection = launch(...args);
+        return { ...gate.wrap(connection), acknowledge: connection.acknowledge.bind(connection), verified: connection.verified, finished: connection.finished,
+          query: connection.query.bind(connection) };
+      };
+    }
     if (raw.holdUserPlan === "approval" || raw.holdUserPlan === "result") {
       const gate = createRemoteFrameGate(raw.holdUserPlan === "approval" ? "approval" : "user-plan.complete",
         (frame) => process.send?.({ kind: "held-user-plan", executionId: frame?.executionId }));

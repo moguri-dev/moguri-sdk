@@ -1,4 +1,5 @@
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
+import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { MAX_TEXT, MoguriError, isRecord } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, readRegularFile, scopedPath, isProtectedProjectPath } from "./files.ts";
@@ -131,4 +132,10 @@ export async function inspectNativeStage(stage: NativeStage): Promise<{ workspac
   const current = await directory(stage.workspace, true);
   if (!equalIdentity(current, stage.workspaceIdentity)) invalid("The private workspace was replaced. Retain rollback evidence; do not reuse this execution binding.");
   return { workspace: stage.workspace, identity: current };
+}
+export function assertNativeWorkspaceIdentity(stage: NativeStage): void {
+  const metadata = lstatSync(stage.workspace, { bigint: true });
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || realpathSync(stage.workspace) !== stage.workspace ||
+    metadata.uid !== BigInt(process.getuid?.() ?? -1) || metadata.mode & 0o077n ||
+    !equalIdentity(identity(metadata), stage.workspaceIdentity)) invalid("The private workspace was replaced or changed ownership. Retain its actual after-state; prepare a newly reviewed stage before another turn.");
 }

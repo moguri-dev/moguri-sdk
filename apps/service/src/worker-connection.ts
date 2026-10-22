@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { fork } from "node:child_process";
 import type { ParentMessage } from "./worker-protocol.ts";
 
-export interface WorkerFrame { executionId: string; sequence: number; digest: string }
+export interface WorkerFrame { executionId: string; sequence: number; digest: string; env?: "Sandbox" }
 export type WorkerConnectionEvents = {
   message: [unknown, WorkerFrame?]; error: [Error]; exit: [number | null, NodeJS.Signals | null]; stderr: [string];
 };

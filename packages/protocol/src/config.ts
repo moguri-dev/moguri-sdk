@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+export { SandboxConfigurationSchema as SandboxSchema } from "./sandbox.ts";
 
 export const McpServerSchema = Type.Object({
   id: Type.String({ minLength: 1, maxLength: 128 }), name: Type.String({ minLength: 1, maxLength: 120 }), enabled: Type.Boolean(),
@@ -9,10 +10,3 @@ export const McpServerSchema = Type.Object({
   ]),
 }, { additionalProperties: false });
 export type McpServerConfig = Static<typeof McpServerSchema>;
-export const SandboxSchema = Type.Object({
-  executable: Type.String({ minLength: 1, maxLength: 4096 }),
-  configPath: Type.Union([Type.String({ minLength: 1, maxLength: 4096 }), Type.Null()]),
-  image: Type.Union([Type.String({ minLength: 1, maxLength: 4096 }), Type.Null()]),
-  bundlePath: Type.Union([Type.String({ minLength: 1, maxLength: 4096 }), Type.Null()]),
-  trustRootPath: Type.Union([Type.String({ minLength: 1, maxLength: 4096 }), Type.Null()]),
-}, { additionalProperties: false });

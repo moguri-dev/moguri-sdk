@@ -28,6 +28,7 @@ import { CandidateGenerationCommandSchema, CandidateGenerationQuerySchema, type 
 import { RoleSequenceQuerySchema, type RoleSequenceRecord, type RoleSequenceResponse } from "./role-sequences.ts";
 import { ModelEvidenceQuerySchema, type ModelEvidenceResponse } from "./model-evidence.ts";
 import { RoleContractQuerySchema, type RoleContractRead } from "./role-contracts.ts";
+import { SandboxCommandSchema, SandboxQuerySchema, type SandboxResponse, type SandboxWorkspace, type SandboxExecution, type SandboxReadiness, type SandboxPublication } from "./sandbox.ts";
 export * from "./candidates.ts";
 export * from "./candidate-generations.ts";
 export * from "./role-sequences.ts";
@@ -48,6 +49,7 @@ export * from "./execution.ts";
 export * from "./worktrees.ts";
 export * from "./workspace.ts";
 export * from "./config.ts";
+export * from "./sandbox.ts";
 export * from "./sessions.ts";
 export * from "./oauth.ts";
 export * from "./engagement.ts";
@@ -161,6 +163,7 @@ export const PlatformCommandSchema = Type.Union([
   EngagementCommandSchema,
   InputCommandSchema,
   ExecutionCommandSchema,
+  SandboxCommandSchema,
   ManagedWorkspaceCommandSchema,
 ]);
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
@@ -193,6 +196,7 @@ export const QuerySchema = Type.Union([
   EngagementQuerySchema,
   InputQuerySchema,
   ExecutionQuerySchema,
+  SandboxQuerySchema,
   ManagedWorkspaceQuerySchema,
   ArtifactQuerySchema,
   CandidateQuerySchema,
@@ -221,6 +225,7 @@ export interface CapabilityJob {
   materialization?: ArtifactMaterializationPreview;
   memory?: MemoryIndexIntent;
   candidate?: CandidateJobIntent;
+  sandboxPublicationId?: string;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
@@ -249,6 +254,9 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   configurationProposals: ConfigurationProposal[];
   attention: Attention[];
   executions: RemoteExecution[];
+  sandboxWorkspaces?: SandboxWorkspace[];
+  sandboxExecutions?: SandboxExecution[];
+  sandboxPublications?: SandboxPublication[];
   managedWorkspaces: ManagedWorkspace[];
   changeSets: ChangeSet[];
 }
@@ -256,7 +264,7 @@ export interface VoiceStatus {
   runtimeReady: boolean; modelReady: boolean; diagnostic: string | null; modelId: string;
   bytes: number; license: string; languageLocales: { code: string; tier: "ready" | "broad" | "adaptation" }[];
 }
-export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
+export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse =
   | CandidateResponse
   | CandidateGenerationResponse
@@ -289,6 +297,7 @@ export type PlatformResponse =
   | { type: "result.read"; text: string; nextOffset: number | null }
   | { type: "voice.status"; voice: VoiceStatus }
   | { type: "sandbox.status"; sandbox: SandboxStatus }
+  | SandboxResponse
   | { type: "capability.content"; content: string; digest: string }
   | { type: "proposal.content"; content: string; digest: string };
 export const SYSTEM_PROMPT_WARNING = "Editing the system prompt can break tool use and application behavior. Hard permissions still apply. Do not put secrets in it. Restore defaults is always available.";

@@ -37,7 +37,9 @@ import type { OAuthOptions } from "./mcp-oauth.ts";
 import { Engagement, isEngagementCommand, isEngagementQuery } from "./engagement.ts";
 import type { ModelRegistryOptions } from "./model-registry.ts";
 import { ContextInputs, isInputCommand, isInputQuery } from "./context-inputs.ts";
+import { isSandboxCommand, isSandboxQuery, type SandboxCommand, type SandboxQuery, type SandboxResponse, type SandboxReadiness } from "../../../packages/protocol/src/index.ts";
 import type { RemoteOptions } from "./remote.ts";
+import type { SandboxOptions } from "./sandbox-runtime.ts";
 import { ManagedWorkspaces } from "./managed-workspaces.ts";
 import { ArtifactRuntime } from "./artifacts.ts";
 import { BudgetRuntime } from "./budgets.ts";
@@ -51,6 +53,8 @@ import { frameDigest } from "./worker-wire.ts";
 import { MemoryPreparedSchema, type MemoryPrepared } from "./memory-mcp.ts";
 import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
+import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
+import { SandboxPublications } from "./sandbox-publications.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -102,6 +106,10 @@ export interface PlatformHost {
   modelCredential(endpointId: string, token: string | undefined, finish: WorkspaceFinish): Promise<CommandResult>;
   remoteStatus(): RemoteReadiness;
   remoteCommand(command: ExecutionCommand, finish: WorkspaceFinish): Promise<CommandResult>;
+  sandboxStatus(): SandboxReadiness;
+  sandboxQuery(query: SandboxQuery): Promise<SandboxResponse>;
+  sandboxCommand(command: SandboxCommand, finish: WorkspaceFinish): Promise<CommandResult>;
+  nativeRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   repositoryContext(session: Session): Promise<string>;
   remoteRead: SessionWorkspaceHost["remoteRead"];
   remotePlanBinding: SessionWorkspaceHost["remotePlanBinding"];
@@ -113,7 +121,7 @@ export interface PlatformHost {
   localRootBusy(root: string, exceptJobId?: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault } }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions }
 export class PlatformRuntime {
   readonly engagement: Engagement;
   readonly inputs: ContextInputs;
@@ -125,6 +133,7 @@ export class PlatformRuntime {
   readonly managed: ManagedWorkspaces;
   readonly artifacts: ArtifactRuntime;
   readonly candidates: CandidateRuntime;
+  readonly nativePublications: SandboxPublications;
   readonly budgets: BudgetRuntime;
   readonly roles: RoleSequences;
   readonly telemetry: OperationTelemetry;
@@ -151,15 +160,16 @@ export class PlatformRuntime {
     });
     this.managed = new ManagedWorkspaces(stateDir, {
       snapshot: () => this.snapshot(), project: (id) => this.project(id), commit: (events) => this.host.commit(events), wake: host.wake,
-      writeBusy: (projectId, workspaceId) => this.candidates.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.snapshot().managedWorkspaces.find((workspace) => workspace.id === workspaceId)?.path ?? ""),
+      writeBusy: (projectId, workspaceId) => this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.snapshot().managedWorkspaces.find((workspace) => workspace.id === workspaceId)?.path ?? ""),
       remoteRead: host.remoteRead,
+      nativeRead: host.nativeRead,
       job: (kind, projectId, execute, start, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, start, workspaceId),
     }, () => this.sessions.projects);
     this.workspace = new WorkspaceRuntime({
       snapshot: () => this.snapshot(), project: (id, workspaceId) => this.managed.project({ projectId: id, workspaceId: workspaceId ?? null }), commit: (events) => this.host.commit(events),
       job: (kind, projectId, execute, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, undefined, workspaceId), wake: () => this.host.wake(),
       closing: host.closingProject,
-      publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId ?? null) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path),
+      publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId ?? null) || this.nativePublications.isBusy(projectId, workspaceId ?? null) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path),
     }, store, stateDir, options);
     this.sessions = new SessionWorkspace({
       snapshot: () => this.snapshot(), commit: (events, forget) => this.host.commit(events, forget),
@@ -168,11 +178,12 @@ export class PlatformRuntime {
       contextPreview: host.contextPreview,
       startup: host.startup,
       remoteRead: host.remoteRead,
+      nativeRead: host.nativeRead,
       remotePlanBinding: host.remotePlanBinding,
       remoteConsoles: host.remoteConsoles,
       retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session) => this.managed.project(session),
-      rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
+      rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
@@ -183,6 +194,15 @@ export class PlatformRuntime {
       localRootBusy: host.localRootBusy, closingProject: host.closingProject, wake: host.wake,
       roleProposal: host.roleProposal,
       job: (kind, projectId, sessionId, workspaceId, execute, start, settled, lifecycle) => this.job(kind, projectId, sessionId, execute, settled, start, workspaceId ?? undefined, lifecycle),
+    });
+    this.nativePublications = new SandboxPublications(store, {
+      snapshot: () => this.snapshot(), commit: (events) => this.host.commit(events), wake: host.wake,
+      root: (projectId, workspaceId) => this.managed.project({ projectId, workspaceId }),
+      assertRoot: (projectId, workspaceId) => this.managed.assert({ projectId, workspaceId }),
+      settings: (projectId) => this.sessions.projects.configuration(projectId),
+      rootBusy: host.localRootBusy, closing: host.closingProject,
+      artifact: (publication) => this.artifacts.nativePublication(publication),
+      job: (projectId, workspaceId, execute, start, settled, lifecycle) => this.job("sandbox.publish", projectId, null, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
     this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);
     this.repositories = new RepositoryTelemetry({
@@ -379,10 +399,11 @@ export class PlatformRuntime {
       payload: { candidate: { ...candidate, revision: candidate.revision + 1, status: "partial", updatedAt: new Date().toISOString(),
         diagnostic: "Service restarted during candidate work. Original intent/effects remain unconfirmed; inspect the retained source and owned staging root. Nothing was replayed." } },
     }));
-    if (interrupted.length || candidates.length) this.host.commit([...candidates, ...interrupted.map((job): EventInput => ({
+    const native = this.nativePublications.recover();
+    if (interrupted.length || candidates.length || native.length) this.host.commit([...candidates, ...native, ...interrupted.map((job): EventInput => ({
       event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
       payload: { jobId: job.id, status: "partial", resultDigest: null, error: "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed.",
-        ...(job.candidate ? { candidateId: job.candidate.candidateId } : {}) },
+        ...(job.candidate ? { candidateId: job.candidate.candidateId } : {}), ...(job.sandboxPublicationId ? { sandboxPublicationId: job.sandboxPublicationId } : {}) },
     }))]);
     this.workspace.start();
     await this.sessions.recover();
@@ -458,6 +479,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isSandboxQuery(query)) return this.host.sandboxQuery(query);
     if (isRoleSequenceQuery(query)) return this.roles.query(query);
     if (query.type === "role.contract.read") return this.host.roleContract(query);
     if (isCandidateGenerationQuery(query)) return this.host.generationQuery(query);
@@ -542,11 +564,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "result.read": return { type: query.type, ...this.readResult(query.resultId, query.offset, query.limit) };
       case "voice.status": return { type: query.type, voice: await this.voice.status() };
       case "sandbox.status": {
-        const sandbox = this.snapshot().settings.values.sandbox;
-        return { type: query.type, sandbox: {
-          ready: false, configured: Boolean(sandbox.configPath && sandbox.image && sandbox.bundlePath && sandbox.trustRootPath),
-          diagnostic: "SendBox transport/guest qualification is not complete on this host. Configure the signed guest bundle, digest-pinned workload and native CLI; no Local fallback is permitted.",
-        } };
+        return { type: query.type, sandbox: this.host.sandboxStatus() };
       }
       case "capability.content": {
         const entry = this.snapshot().registry.find((entry) => entry.id === query.capabilityId);
@@ -611,7 +629,8 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     const id = randomUUID();
     const job: CapabilityJob = { id, kind, projectId, sessionId, workspaceId: workspaceId ?? (sessionId ? this.session(sessionId).workspaceId : null), parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
     if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job } }]);
-    const candidateId = this.snapshot().jobs.find((job) => job.id === id)?.candidate?.candidateId, retention = candidateId ? { candidateId } : {};
+    const owner = this.snapshot().jobs.find((job) => job.id === id), candidateId = owner?.candidate?.candidateId;
+    const retention = { ...(candidateId ? { candidateId } : {}), ...(owner?.sandboxPublicationId ? { sandboxPublicationId: owner.sandboxPublicationId } : {}) };
     const abort = new AbortController();
     const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
@@ -635,6 +654,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isSandboxCommand(command)) return this.host.sandboxCommand(command, finish);
     if (isCandidateGenerationCommand(command)) return this.host.generationCommand(command, finish);
     if (isCandidateCommand(command)) return this.candidates.execute(command, finish);
     if (isRemoteMcpCommand(command)) return this.mcpRemoteCommand(command, finish);
@@ -809,7 +829,8 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         if (this.host.cancelExternalJob(command.jobId)) return finish([]);
         const job = snapshot.jobs.find((job) => job.id === command.jobId);
         if (!job) throw new MoguriError("job_not_found", "This job is outside the current profile.", 404);
-        try { return finish(job.candidate && ["running", "waiting_input"].includes(job.status) ? this.candidates.stopEvents(job.candidate.candidateId, job.id) : []); }
+        try { return finish(job.candidate && ["running", "waiting_input"].includes(job.status) ? this.candidates.stopEvents(job.candidate.candidateId, job.id) :
+          job.sandboxPublicationId && ["running", "waiting_input"].includes(job.status) ? this.nativePublications.stopEvents(job.sandboxPublicationId, job.id) : []); }
         finally { this.active.get(command.jobId)?.abort.abort(); }
       }
     }

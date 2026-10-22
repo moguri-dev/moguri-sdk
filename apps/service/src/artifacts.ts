@@ -6,7 +6,7 @@ import {
   legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
   type ArtifactResponse, type ArtifactSource, type ArtifactSourcePreview, type CommandResult, type EventInput, type ProjectArtifactChoice,
   type ProjectArtifactPreview, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type ArtifactMaterializationPreview, type ArtifactMaterialization,
-  type ArtifactMaterializeOptions, type CapabilityJob, type Project, type CandidatePatch,
+  type ArtifactMaterializeOptions, type CapabilityJob, type Project, type CandidatePatch, type SandboxPublication,
 } from "../../../packages/protocol/src/index.ts";
 import { digest, EventStore } from "./store.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -74,6 +74,22 @@ export class ArtifactRuntime {
       { eventId: null, sessionId: session.id, messageId: null, actor: "unknown", modelId: null, outcome: "reviewed-source-snapshot", contentDigest: digest(text) },
     ]);
   }
+  nativeExecution(session: Session, id: string, inputDigest: string): RetainedArtifact {
+    const text = JSON.stringify({ format: "moguri-native-execution-report", version: 1, executionId: id, inputDigest,
+      notice: "Original source/result grants are independently retained. Execution, approval, code quality and actual-user publication remain separate." });
+    return { ...this.create(session, "report", "Sandbox execution", text, "manual", [
+      { eventId: null, sessionId: session.id, messageId: null, actor: "user", modelId: null, outcome: "reviewed-native-execution", contentDigest: inputDigest },
+    ]), id };
+  }
+  nativePublication(publication: SandboxPublication): RetainedArtifact {
+    const text = JSON.stringify({ format: "moguri-native-publication-report", version: 1, publicationId: publication.id,
+      executionId: publication.executionId, documentDigest: publication.documentDigest,
+      notice: "Actual user accepted this exact byte/base/policy review. Source copying, model quality and Git commits remain separate. Inspect original attempts and verified paths before retrying." });
+    return { ...this.create({ id: null, projectId: publication.projectId, workspaceId: publication.workspaceId }, "report", "Sandbox source publication", text, "manual", [
+      { eventId: null, sessionId: publication.sourceSessionId, messageId: null, actor: "user", modelId: null,
+        outcome: "reviewed-native-source-publication", contentDigest: publication.documentDigest },
+    ]), id: publication.id };
+  }
   generationEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
     return events.flatMap((event) => {
       if (event.event_type !== "model.completed" || event.payload.usage.role !== "draft") return [];
@@ -130,6 +146,12 @@ export class ArtifactRuntime {
   }
   private roleHistory(id: string): StoredEvent[] {
     return this.host.events().filter((event) => event.artifact_id === id && event.event_type === "role.sequence_recorded");
+  }
+  private nativeHistory(id: string): StoredEvent[] {
+    return this.host.events().filter((event) => event.artifact_id === id && (event.event_type === "sandbox.execution_recorded" ||
+      event.event_type === "sandbox.frame_recorded" || event.event_type === "sandbox.publication_recorded" ||
+      (event.event_type === "job.started" || event.event_type === "job.progress" || event.event_type === "job.finished") &&
+        (event.event_type === "job.started" ? event.payload.job.sandboxPublicationId === id : event.payload.sandboxPublicationId === id)));
   }
   private deleted(id: string): EventInput {
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === id);
@@ -207,16 +229,31 @@ export class ArtifactRuntime {
       }
       const roleResults = [...roleHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
       if (roleEvents.length) account(JSON.stringify(roleEvents));
+      const nativeEvents = this.nativeHistory(artifact.id), nativeHashes = new Set<string>();
+      for (const event of nativeEvents) if (event.event_type === "sandbox.execution_recorded") {
+        nativeHashes.add(event.payload.execution.inputDigest);
+        if (event.payload.execution.resultDigest) nativeHashes.add(event.payload.execution.resultDigest);
+      }
+      for (const event of nativeEvents) if (event.event_type === "sandbox.publication_recorded") {
+        const publication = event.payload.publication;
+        for (const hash of [publication.inputDigest, publication.resultDigest, publication.documentDigest, publication.operationDigest]) if (hash) nativeHashes.add(hash);
+      }
+      const nativeResults = [...nativeHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
+      if (nativeEvents.length) account(JSON.stringify(nativeEvents));
       return { artifact, revisions, ...(events.length ? { candidate: { events, results } } : {}),
         ...(generationEvents.length ? { generation: { events: generationEvents, results: generationResults } } : {}),
-        ...(roleEvents.length ? { roles: { events: roleEvents, results: roleResults } } : {}) };
+        ...(roleEvents.length ? { roles: { events: roleEvents, results: roleResults } } : {}),
+        ...(nativeEvents.length ? { native: { events: nativeEvents, results: nativeResults } } : {}) };
     });
     const roleLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.roleOrigin));
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
   async removal(projectId: string, choice?: ProjectArtifactChoice): Promise<{ events: EventInput[]; forget: string[] }> {
+    if ((this.host.snapshot().sandboxPublications ?? []).some((publication) => publication.projectId === projectId && publication.status === "publishing")) throw new MoguriError("sandbox_publication_busy", "Stop and settle original native source publication before reviewing its independent retention or project removal.", 409);
+    if ((this.host.snapshot().sandboxExecutions ?? []).some((execution) => execution.projectId === projectId &&
+      (!["owned-guest-stopped", "acknowledged"].includes(execution.cleanup) || execution.inspectionIntent?.status === "running"))) throw new MoguriError("sandbox_busy", "Stop/reconcile original native guests and settle their inspection before reviewing project removal or independent report deletion.", 409);
     if (this.host.snapshot().roleSequences.some((sequence) => sequence.projectId === projectId && sequence.status === "running")) throw new MoguriError("role_sequence_busy", "Stop and settle the exact owning role sequence before reviewing its independent retention.", 409);
     if (this.host.snapshot().candidateGenerations.some((generation) => generation.projectId === projectId && generation.status === "running")) throw new MoguriError("candidate_generation_busy", "Stop active generation before reviewing its independent report retention.", 409);
     if (this.host.snapshot().jobs.some((job) => job.projectId === projectId && job.candidate && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("candidate_busy", "Stop the project's active candidate work before reviewing retention or removal. Its independent grants were preserved.", 409);
@@ -373,15 +410,24 @@ export class ArtifactRuntime {
     const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === artifact.id);
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === artifact.id);
     const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === artifact.id);
+    const native = (this.host.snapshot().sandboxExecutions ?? []).find((execution) => execution.id === artifact.id);
+    const nativeBusy = native && (!["owned-guest-stopped", "acknowledged"].includes(native.cleanup) || native.inspectionIntent?.status === "running");
+    const publication = (this.host.snapshot().sandboxPublications ?? []).find((value) => value.id === artifact.id);
     const activeCandidate = candidate && (["staging", "applying"].includes(candidate.status) ||
       this.host.snapshot().jobs.some((job) => job.candidate?.candidateId === candidate.id && ["running", "waiting_input"].includes(job.status)));
     if (command.type === "artifact.delete") {
+      if (publication?.status === "publishing") throw new MoguriError("sandbox_publication_busy", "Stop and settle this original source writer before deleting its independently retained review and effects.", 409);
+      if (nativeBusy) throw new MoguriError("sandbox_busy", "Stop/reconcile the original native guest before deleting its independent input/result/owner record.", 409);
       if (sequence?.status === "running") throw new MoguriError("role_sequence_busy", "Stop and settle this role sequence before deleting its independent input/result history.", 409);
       if (generation?.status === "running") throw new MoguriError("candidate_generation_busy", "Stop generation before deleting its independently retained input/result report.", 409);
       if (activeCandidate) throw new MoguriError("candidate_busy", "Stop the candidate's active owned job before deleting its independent document/history.", 409);
       return finish([this.deleted(artifact.id)], { id: artifact.id }, { artifacts: [artifact.id] });
     }
     if (candidate && command.changes.text !== undefined) throw new MoguriError("candidate_document", "A candidate's exact proposal document is immutable. Export it or create a separately reviewed new proposal; renaming/organizing does not change its bytes.", 409);
+    if (publication && command.changes.text !== undefined) throw new MoguriError("sandbox_document", "Native publication input, actual acceptance and filesystem attempts are immutable. Create a separate document instead.", 409);
+    if (publication?.status === "publishing" && command.changes.status === "archived") throw new MoguriError("sandbox_publication_busy", "Settle this exact source writer before archiving its independent report.", 409);
+    if (native && command.changes.text !== undefined) throw new MoguriError("sandbox_document", "Native input, actual boundary and retained after-state are immutable. Export them or create a separate document; metadata edits cannot change source provenance.", 409);
+    if (nativeBusy && command.changes.status === "archived") throw new MoguriError("sandbox_busy", "Settle the original native owner before archiving its independent report.", 409);
     if (sequence && command.changes.text !== undefined) throw new MoguriError("role_sequence_document", "Role input and actual per-role results are immutable. Export them or retain a separate document; metadata editing does not change provenance.", 409);
     if (sequence?.status === "running" && command.changes.status === "archived") throw new MoguriError("role_sequence_busy", "Settle the exact owning role sequence before archiving its independent report.", 409);
     if (generation && command.changes.text !== undefined) throw new MoguriError("candidate_generation_document", "Generation input/result documents are immutable. Export them or generate a separately reviewed proposal; metadata changes do not rewrite model provenance.", 409);

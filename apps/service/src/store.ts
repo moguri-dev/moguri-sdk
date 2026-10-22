@@ -27,11 +27,14 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "sandbox.execution_recorded" ? input.payload.execution.id :
+  input.event_type === "sandbox.frame_recorded" ? input.payload.executionId :
+  input.event_type === "sandbox.publication_recorded" ? input.payload.publication.id :
   input.event_type === "role.sequence_recorded" ? input.payload.sequence.id :
   input.event_type === "candidate.generation_recorded" ? input.payload.generation.id :
   input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
-  input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? null :
-  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? null : null;
+  input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? null :
+  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? null : null;
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
   if (artifactId) return artifactScope(input.profile_id, artifactId);
@@ -42,6 +45,10 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "sandbox.workspace_recorded": return [input.payload.workspace.inputDigest];
+    case "sandbox.execution_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((hash): hash is string => hash !== null);
+    case "sandbox.publication_recorded": return [input.payload.publication.inputDigest, input.payload.publication.resultDigest,
+      input.payload.publication.documentDigest, input.payload.publication.operationDigest].filter((hash): hash is string => hash !== null);
     case "queue.enqueued": return input.payload.item.attachments.map((entry) => entry.digest);
     case "queue.edited": return input.payload.attachments?.map((entry) => entry.digest) ?? [];
     case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.pasteFiles ?? []).map((entry) => entry.digest)];
@@ -205,6 +212,9 @@ export class EventStore {
       if (version < 36) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('paste_file_schema','1');
         PRAGMA user_version=36; COMMIT;`);
+      if (version < 37) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('native_execution_schema','1');
+        PRAGMA user_version=37; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

@@ -23,7 +23,7 @@ discovery never changes policy. Model credentials remain request-scoped and
 are withheld until actual guest and signed boundary verification.
 
 Native requests/results use the existing authenticated worker protocol.
-Credential-free worker frames and status are encrypted and journaled before
+Worker-origin frames and status are encrypted and journaled before
 delivery, with durable cursors committed atomically by the controller.
 After the pinned guest bootstrap, native TTY control also uses AES-256-GCM
 with a domain-separated run key, authenticated owner/direction and monotonic
@@ -42,6 +42,44 @@ and unrelated edits must survive. Durable native records require an additive
 schema migration and restart coverage. SDK, CLI/TUI and desktop share the
 same preparation, inspection, stop and publication authority; unqualified
 side capabilities fail explicitly rather than using the base checkout.
+
+### Protocol 37 native service checkpoint
+
+The service/SDK adapter now verifies the exact root-owned 0.2.3 release,
+immutable workload, signed run plan and actual Linux process controls before
+request-scoped access. Qualification uses create-only command-owned staging;
+replaying its original identity cannot launch another VM. Only explicit
+Copilot access enables its credential-free cold network check. A failed
+endpoint/alias scope stays blocked; discovery never adds hosts.
+
+Native text stages are reviewed explicitly, capped at 200 files/2 MiB, and
+never mount a source checkout. The model sees `/workspace`, or null for a
+project-free chat. Session file/plan reads use that exact stage. Git views,
+console/MCP/memory/subagent/evolution delegates and native plan saves remain
+unqualified rather than routing to the Local source.
+
+Each turn owns an independent report and source/result grants. VM absence,
+CLI exit and acknowledged worker outcome must agree; transport EOF cannot
+finish a successful turn. Signed failed finalization may omit a runtime exit,
+which stays null. Retained encrypted receipts can then reconcile known usage
+once, including after actual controller SIGKILL, without adding completed
+model messages, resuming tools or upgrading the original partial turn.
+
+Source publication is a separate user command over up to 20 selected UTF-8
+outputs/64 KiB. It reuses the candidate byte/base validators, scoped atomic
+file writer, directory broker and owned job lifecycle. Current source identity,
+HEAD/branch, hard write denials, folder policy and writer leases are rechecked.
+Its acceptance, attempts, copied paths and result are independently retained.
+It never stages/commits files or modifies index/HEAD; a partial copy is not
+rolled back or replayed. Retained publication data survives source session and
+execution-report deletion. Deleted/binary/excluded outputs cannot be silently
+treated as supported file publication.
+
+The additive `native_execution_schema` marker preserves existing ciphertext,
+receipts and scoped files through migration failure/reopen. This checkpoint
+does not yet qualify every client or the remaining compound/Max/wind-down
+milestone gates. Private native directories and SendBox's separate snapshot
+store are not encrypted-retention deletion or reclaimed-space claims.
 
 An owned rootless loopback OpenSSH server passed strict generated host-key
 verification and a real worker-originated HTTP request in 175.94 ms. A changed

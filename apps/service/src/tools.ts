@@ -41,12 +41,15 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
     .filter((tool) => scope.project || scope.pasteFiles && tool.name === "read_file" || !["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(tool.name))
     .filter((tool) => !scope.metachat || tool.name === "moguri_config" || tool.name === "ask_user")
+    .filter((tool) => scope.env !== "Sandbox" || ["ask_user", "list_files", "read_file", "write_file", "run_command"].includes(tool.name))
     .filter((tool) => mode !== "read-only" || readTools.has(tool.name))
     .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)
     .filter((tool) => !tool.name.startsWith("propose_") || settings.evolution.enabled)
     .filter((tool) => scope.env !== "Remote" || tool.name !== "mcp_gateway" || scope.project && Boolean(settings.remote?.mcpGrants?.length))
-    .map((tool) => tool.name === "run_command" && scope.env === "Remote" ? { ...tool, description: tool.description.replace("on the Local host, without sandbox isolation", "on the approved SSH host, without SendBox isolation") } : tool);
+    .map((tool) => tool.name === "run_command" && scope.env !== "Local" && scope.env !== undefined ? { ...tool,
+      description: tool.description.replace("on the Local host, without sandbox isolation", scope.env === "Remote" ?
+        "on the approved SSH host, without SendBox isolation" : "inside the verified SendBox guest and its private staging workspace, never the Local source checkout") } : tool);
 }
 export function validateTool(call: ToolCall): void {
   const tool = tools.find((tool) => tool.name === call.name);

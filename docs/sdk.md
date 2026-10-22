@@ -5,6 +5,53 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
+Current issue-17 source uses protocol **37** for development native service
+execution. It does not replace the immutable qualified archives listed below.
+See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
+for the actual generated VM evidence and remaining client/environment gates.
+
+## Native SDK development surface
+
+`sandbox.status()` reports actual configuration-bound readiness.
+Explicit `sandbox.probe()` verifies the root-owned SendBox 0.2.3 release,
+immutable workload and real guest controls/cleanup. Configure `settings.sandbox`
+only with independently reviewed executable/bundle/key paths, SHA-256 pins,
+release/trust-root/sequence, workload/worker/bridge digests, resource caps and
+exact DNS hosts. `configPath` must be null to select the managed deny-first
+policy; legacy policies are never silently replaced. Copilot access is opt-in,
+with a separate actual cold guest networking check. An observed alias is not
+a grant and is never added automatically.
+
+After explicitly selecting Sandbox in a session, use
+`sandbox.preview(sessionId, paths)` to inspect an exact source set, then
+`sandbox.prepare(sessionId, paths, preview.digest, session.revision)` only after
+user review. A project-free chat uses `[]` and retains a null model root. The
+physical stage is private and independent of the source checkout. Ordinary
+SDK send/queue/stop/approval APIs retain their shared authority. Qualified native
+`read_file` calls can page scoped pasted files through the controller broker.
+
+`sandbox.execution(id)` and `sandbox.result(id)` inspect the independently
+retained original owner and bounded signed after-state. `sandbox.reconcile(id)`
+explicitly stops/inspects only that original signed guest and reconciles
+authenticated late receipts; it never launches a VM, repeats a model/tool call,
+adds completed solver context or upgrades a partial turn. Unknown telemetry
+continues holding capacity. Private output files are capped at 200/2 MiB;
+excluded, protected, binary and oversized paths remain disclosed, not truncated.
+
+`sandbox.publicationPreview(executionId, paths)` reviews up to 20 selected
+text outputs/64 KiB against original Local source bases. Separately confirmed
+`sandbox.publish(executionId, paths, preview.digest, execution.revision)` starts
+an independently owned user copy job. Inspect it with
+`sandbox.publication(id)`/`sandbox.waitPublication(id)`; stop its actual job
+with `jobs.cancel(jobId)`. This is explicit user text publication, not a Local
+agent fallback or a model acceptance/permission decision. Current root, branch,
+HEAD, folder rules, hard write denials and leases win races; index/HEAD and
+unrelated edits are preserved. Partial writes remain inspectable and cannot be
+replayed. Publication snapshots survive original session/report deletion.
+There is no implicit commit, branch, source deletion or binary/deleted-file
+publication. Native console/MCP/memory/subagent/evolution and plan-write
+transports remain unqualified rather than falling back to Local.
+
 This is an alpha API. Qualified **0.29.0-alpha.1 uses protocol 35**. Qualified
 **0.28.0-alpha.1 uses protocol 34**; the frozen qualified
 **0.27.0-alpha.1 uses protocol 33**. Both deliberately reject incompatible
