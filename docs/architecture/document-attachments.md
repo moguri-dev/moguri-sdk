@@ -143,3 +143,29 @@ concurrency/cancellation in 197.35 ms and forced deadline/memory rejection in
 The first CPU test exposed an inherited `--input-type=module` fixture flag,
 not a relaxed parser limit; the fixture now starts the real worker entrypoint
 with its own explicit worker arguments.
+
+## Focused source and packed-consumer qualification
+
+The final document-focused sweep passed 29/29 cases in 19.44 s, including actual
+CLI/TUI operations, browser-safe imports, Local/SSH model tools, compaction
+inventory, retention, restart, failed persistence, refused kill acknowledgement,
+pre-load concurrency and generated hostile-input/resource limits. Seventeen
+affected legacy migration/recovery selectors also passed in 4.15 s. Legacy
+fixture demotion removes only future markers so rollback checks still compare
+the original ciphertext, identities and receipts.
+
+The actual packed 0.30.0-alpha.1 external consumer passes all root/React/Node/MCP
+imports/types, approved install/audit and installed document-worker checks.
+It captures and privately retrieves all three originals, performs bounded
+provenance-bearing reads/searches, and checks descriptor inventory and progress
+without inference. Existing installed roles, budget holds, compaction, profiles,
+SSH, terminal and retention checks remain intact. Both source and consumer
+dependency audits report zero vulnerabilities.
+
+The first packed sweep found a generated marketplace fixture pinned to protocol
+41; it now binds the actual installed protocol, without weakening compatibility
+checks. The next sweep correctly rejected an 8,192-token mock-model request:
+its 4,311-token fresh input plus the unchanged 4,096-token headroom did not fit.
+The repetitive compaction fixture now uses 64 rather than 80 repetitions and
+asserts that exact input/headroom bound before each dispatch. No production
+budget/context limit or no-truncation check was relaxed.
