@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readNativeBoundary, readNativeRollback } from "../apps/service/src/native-evidence.ts";
+import { readNativeBoundary, readNativeCompletion, readNativeRollback } from "../apps/service/src/native-evidence.ts";
 
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const ordered = (values: Record<string, string>) => Object.keys(values).sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)))
@@ -40,7 +40,7 @@ async function evidenceFixture() {
   const proofDirectory = join(snapshots, "objects", proofDigest.slice(0, 2)); await mkdir(proofDirectory, { mode: 0o700 });
   const proofPath = join(proofDirectory, proofDigest.slice(2)); await writeFile(proofPath, proof, { mode: 0o600 });
   const after = await snapshot([{ path: "generated-proof.json", mode: 0o600, kind: { type: "regular", content_hash: proofDigest, size: proof.length } }], proof.length);
-  const events = [
+  const events: Array<{ action: string; subject: string; result: string; metadata: Record<string, string> }> = [
     { action: "before_snapshot_captured", subject: before.id, result: "success", metadata: {} },
     { action: "runtime_execution_finished", subject: "persistent", result: "error", metadata: { exit_code: "130" } },
     { action: "session_finalized", subject: "failed", result: "error", metadata: {} },
@@ -78,6 +78,54 @@ test("native launch identity can bind a live owned VM before an audit or final r
     assert.equal(result.sessionId, fixture.input.sessionId); assert.equal(result.workspace, fixture.input.workspace);
     assert.equal(result.image, fixture.input.image); assert.equal(result.signerFingerprint, fixture.identity.fingerprint);
     await assert.rejects(() => readNativeBoundary({ ...fixture.input, workspace: join(fixture.directory, "foreign-root") }), /another workspace/);
+  } finally { await fixture.close(); }
+});
+
+test("general native completion verifies successful exit and retained after-state without inventing rollback", async () => {
+  const fixture = await evidenceFixture();
+  try {
+    await fixture.writeAudit([
+      fixture.events[0]!,
+      { action: "runtime_execution_finished", subject: "persistent", result: "success", metadata: { exit_code: "0" } },
+      { action: "session_finalized", subject: "completed", result: "success", metadata: {} },
+    ]);
+    const binding = await readNativeBoundary(fixture.input);
+    const evidence = await readNativeCompletion({ ...fixture.input, exitCode: 0, planDigest: binding.planDigest, signerFingerprint: binding.signerFingerprint });
+    assert.equal(evidence.exitCode, 0); assert.equal(evidence.rollback, "not-requested");
+    assert.equal(evidence.afterBinding, "unique-private-store"); assert.equal(evidence.afterId, fixture.after.id);
+    assert.deepEqual((await evidence.read("generated-proof.json")).content, fixture.proof);
+    await assert.rejects(() => readNativeCompletion({ ...fixture.input, exitCode: 0, planDigest: "f".repeat(64) }), /bound plan/);
+    await assert.rejects(() => readNativeCompletion(fixture.input), /matching execution exit/);
+  } finally { await fixture.close(); }
+});
+
+test("native completion rejects missing or ambiguous signed terminal evidence without assuming a successful run", async () => {
+  const fixture = await evidenceFixture();
+  try {
+    for (const values of [
+      fixture.events.filter((event) => event.action !== "runtime_execution_finished"),
+      [...fixture.events, fixture.events[1]!],
+      fixture.events.filter((event) => event.action !== "session_finalized"),
+    ]) {
+      await fixture.writeAudit(values);
+      await assert.rejects(() => readNativeCompletion(fixture.input), /unique matching execution/);
+    }
+  } finally { await fixture.close(); }
+});
+
+test("actual control-loss audit shape retains failed rollback without inventing an unreported runtime exit code", async () => {
+  const fixture = await evidenceFixture();
+  try {
+    await fixture.writeAudit([
+      fixture.events[0]!,
+      { action: "runtime_execution_failed", subject: "agent_run", result: "error", metadata: { error: "Generated cancelled native control." } },
+      fixture.events[2]!, fixture.events[3]!,
+    ]);
+    const { exitCode: _exit, ...unknown } = fixture.input;
+    const result = await readNativeCompletion(unknown);
+    assert.equal(result.exitCode, null); assert.equal(result.rollback, "confirmed");
+    assert.deepEqual((await result.read("generated-proof.json")).content, fixture.proof);
+    await assert.rejects(() => readNativeCompletion(fixture.input), /matching execution exit/);
   } finally { await fixture.close(); }
 });
 

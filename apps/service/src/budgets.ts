@@ -279,6 +279,7 @@ export class BudgetRuntime {
   }
   consumePlan(session: Session, id: string, input: ModelReservationInput & { authorityDigest: string }): { events: EventInput[]; maxTokens: number } {
     session = this.session(session.id);
+    this.assertHeldCapacity(session);
     const snapshot = this.host.snapshot(), plan = snapshot.budgetPlans.find((plan) => plan.id === id), owner = this.owner(session);
     if (!plan || plan.status !== "held" || plan.sessionId !== session.id || plan.ownerSessionId !== owner.id || plan.turnId !== input.turnId ||
       plan.ownerTurnId !== (owner.id === session.id ? input.turnId : owner.turnId) || plan.projectId !== session.projectId ||
@@ -307,6 +308,11 @@ export class BudgetRuntime {
     const status = this.status(session.id, input.modelId), limits = this.limits(owner);
     if (status.diagnostics.length) throw new MoguriError("budget_unavailable", status.diagnostics.join(" "), 409);
     if (limits.some(({ limit }) => limit.usd !== undefined) && !sameBudgetRate(entry.rate, this.rate(input.modelId))) throw new MoguriError("budget_reservation", "The captured USD estimate changed before reserved dispatch. Review a new policy; no repricing or free call was invented.", 409);
+    this.assertHeldCapacity(session);
+    return entry.outputLimit;
+  }
+  private assertHeldCapacity(session: Session): void {
+    const snapshot = this.host.snapshot(), owner = this.owner(session), limits = this.limits(owner);
     for (const { scope, limit } of limits) {
       const scoped = scope === "session" ? this.owned(snapshot.budgetEntries, owner.id) : snapshot.budgetEntries, global = scope === "global" ? this.host.global?.() : undefined;
       const charges = budgetCharges(scoped, snapshot.budgetPlans.filter((plan) => scope !== "session" || plan.ownerSessionId === owner.id)),
@@ -314,7 +320,6 @@ export class BudgetRuntime {
       if (limit.tokens !== undefined && (tokens === null || tokens > limit.tokens) ||
         limit.usd !== undefined && (usd === null || usd > micros(limit.usd))) throw new MoguriError("budget_exhausted", "The latest cumulative policy is below actual/held usage. Reserved wind-down cannot override a stricter cap; work and its hold were preserved.", 409);
     }
-    return entry.outputLimit;
   }
   estimated(usage: Usage): Usage {
     const entry = this.host.snapshot().budgetEntries.find((entry) => entry.id === usage.stepId);

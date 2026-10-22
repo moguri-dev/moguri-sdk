@@ -1,5 +1,9 @@
 # Planned wind-down capacity
 
+The current [owned wind-down lifecycle](budget-winddown.md) uses these same
+plans for explicit finite Local turns. Historical qualification boundaries
+below remain scoped to their original checkpoints.
+
 Initial foundation: **0.23 development / protocol and database 30**. This adds durable
 planned holds and shared inspection, not public finite kupo, compound worker
 orchestration or automatic Git approval. The qualified immutable

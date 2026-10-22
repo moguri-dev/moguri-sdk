@@ -5,6 +5,98 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
+Current issue-17 source uses protocol **40** for shared model windows/scoped
+paste, native execution, reviewed Local compound workflows, finite Local
+wind-down and owned bounded decisions. It does not replace the immutable qualified archives listed below.
+See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
+for the actual generated VM evidence and remaining client/environment gates.
+
+## Decision-provider development surface
+
+`decisions.status(sessionId)` reports actual compatible provider readiness,
+privacy and output limits without inference. `decisions.list(sessionId?)`
+reads independently retained requests; `decisions.read(id)` returns the exact
+original rubric/state/policy, real model actor/step, raw result and validated
+advice. `decisions.stop(id)` stops only that original one-shot owner, not
+another parent turn. There is deliberately no public `evaluate`, `answer`,
+`approve`, retry or permission-grant endpoint.
+
+`settings.decisions` defaults disabled with no selected model. Save an explicit
+`bounded-model` policy and available canonical model ID, then separately choose
+Autopilot Max in session controls. Fixed and kupo Single model selection stays
+independent. Hosted inputs require separate consent; the root-less Local worker
+still uses actual all-role token/USD admission and existing finishing holds.
+The dedicated Jev contract remains unqualified because the current API cannot
+enforce a positive output-token bound. Remote/native Max never executes on the
+Local controller as a fallback.
+
+Shared `/decisions status|list|read ID|stop ID confirm-stop|set POLICY_JSON`
+and CLI `moguri decisions status --session ID`, `list`, `read ID`, `stop ID`,
+or `set POLICY.json --confirm-review` use the same authority. Configuration
+starts no inference and grants no tool authority. Desktop exposes
+**Decision providers** settings, service-derived composer readiness and
+**Artifacts / Decision-provider observations**; TUI edits report metadata only.
+Automated technical answers retain actual provider provenance and independent
+original evidence even when the decision report/source session is deleted.
+Unknown charges stay held; scores/confidence are not calibrated permission.
+See [the owned decision contract](architecture/owned-decisions.md).
+
+## Native SDK development surface
+
+`sandbox.status()` reports actual configuration-bound readiness.
+Explicit `sandbox.probe()` verifies the root-owned SendBox 0.2.3 release,
+immutable workload and real guest controls/cleanup. Configure `settings.sandbox`
+only with independently reviewed executable/bundle/key paths, SHA-256 pins,
+release/trust-root/sequence, workload/worker/bridge digests, resource caps and
+exact DNS hosts. `configPath` must be null to select the managed deny-first
+policy; legacy policies are never silently replaced. Copilot access is opt-in,
+with a separate actual cold guest networking check. An observed alias is not
+a grant and is never added automatically.
+
+After explicitly selecting Sandbox in a session, use
+`sandbox.preview(sessionId, paths)` to inspect an exact source set, then
+`sandbox.prepare(sessionId, paths, preview.digest, session.revision)` only after
+user review. A project-free chat uses `[]` and retains a null model root. The
+physical stage is private and independent of the source checkout. Ordinary
+SDK send/queue/stop/approval APIs retain their shared authority. Qualified native
+`read_file` calls can page scoped pasted files through the controller broker.
+
+`sandbox.execution(id)` and `sandbox.result(id)` inspect the independently
+retained original owner and bounded signed after-state. `sandbox.reconcile(id)`
+explicitly stops/inspects only that original signed guest and reconciles
+authenticated late receipts; it never launches a VM, repeats a model/tool call,
+adds completed solver context or upgrades a partial turn. Unknown telemetry
+continues holding capacity. Private output files are capped at 200/2 MiB;
+excluded, protected, binary and oversized paths remain disclosed, not truncated.
+`sandbox.stop(executionId)` stops only that exact currently owned native turn;
+it cannot cancel a later turn merely sharing a session. Native project-file
+capture reads the actual private stage, never the Local source checkout.
+
+`sandbox.publicationPreview(executionId, paths)` reviews up to 20 selected
+text outputs with a 32-KiB patch and 64-KiB complete document against original
+Local source bases. Its `limits` exposes both exact byte boundaries. Separately confirmed
+`sandbox.publish(executionId, paths, preview.digest, execution.revision)` starts
+an independently owned user copy job. Inspect it with
+`sandbox.publication(id)`/`sandbox.waitPublication(id)`; stop its actual job
+with `jobs.cancel(jobId)`. This is explicit user text publication, not a Local
+agent fallback or a model acceptance/permission decision. Current root, branch,
+HEAD, folder rules, hard write denials and leases win races; index/HEAD and
+unrelated edits are preserved. Partial writes remain inspectable and cannot be
+replayed. Publication snapshots survive original session/report deletion.
+There is no implicit commit, branch, source deletion or binary/deleted-file
+publication. Native console/MCP/memory/subagent/evolution and plan-write
+transports remain unqualified rather than falling back to Local.
+
+CLI `sandbox preview/prepare PATHS.json --session ID` reads an explicit bounded
+JSON path array. Preparation needs its exact `--digest`, session `--revision`
+and `--confirm-review`. Publication uses `sandbox publish-preview RUN_ID
+PATHS.json`, followed separately by `sandbox publish RUN_ID PATHS.json
+--digest SHA --revision EXECUTION_REV --confirm-write`; Ctrl+C requests the
+original copy job's stop. `publication`, `publication-stop` and
+`publication-wait` inspect/cancel that retained owner. Shared CLI/TUI/desktop
+`/sandbox` commands print exact `confirm-stage`/`confirm-publish` commands after
+preview. No text prefix or model answer is treated as confirmation.
+
 This is an alpha API. Qualified **0.29.0-alpha.1 uses protocol 35**. Qualified
 **0.28.0-alpha.1 uses protocol 34**; the frozen qualified
 **0.27.0-alpha.1 uses protocol 33**. Both deliberately reject incompatible
@@ -76,6 +168,19 @@ receipts, blobs, indexes and retention compartments. Migration 5 adds optional
 model controls without resetting prior defaults. Migration 6 adds nullable project
 scope, reviewed configuration and OAuth/attention state. Restart a previously running alpha service explicitly with
 `node bin/moguri.mjs service restart`; do not delete its state.
+
+The issue-17 source uses protocol/database **36** for scoped pasted-text file
+descriptors and optional queue-edit attachments. Schema 35 upgrades without
+rewriting historical events, receipts, encrypted grants or arbitrary legacy
+working-window settings. Unsupported legacy windows remain visible and block
+inference until explicitly corrected. `modelContextWindows(model)` and
+`sessions.context(id).context.windows` share maximum/half or genuine declared
+choices. `attachments.paste(id,text,selection?,draftRevision?)` atomically
+captures exact pasted text into the current draft; `DraftEditor.paste` also
+preserves unsent/conflicting local edits. The existing authenticated worker
+`read_file` broker exposes bounded pages/search without injecting the whole
+file into model context. These are source capabilities, not a claim that any
+earlier immutable SDK/app archive was rebuilt or that issue 17 is complete.
 The 0.18 source adds [authoritative Remote MCP](architecture/remote-mcp.md).
 Explicit peer/resource grants are deny-by-default.
 Source SDK model/external calls now use the owned SSH worker, encrypted
@@ -209,19 +314,22 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
 | `roleSequences` | Read exact independently retained role intent, original input and one selected raw role input/result; never start a model, grant acceptance or resume partial work. |
+| `compound` | Explicit Local source/cost preview/start/read, focused validation preview, actual-user stage/test review/deny and exact stop. Real conditional Cascade/Critique uses the existing root-less worker and all-role ledger. `lineageDraft` prepares an unpersisted exact model/source claim with browser-safe hashing; it does not inspect providers, save policy or prove training/quality. Source application stays in `candidates`. |
+| `winddown` | Canonical readiness, independently retained finishing holds/model input/results, exact stop/decline, and separate actual-user accepted-work/new-local-branch preview/commit/wait. Finite Local Single/Compound use the same all-role ledger; summaries grant no source or Git authority and never resume ordinary work. |
+| `decisions` | Service-derived compatible-provider readiness, independently retained exact request/model/rubric/raw evidence, all-role accounting and exact one-shot stop. No public evaluate, paid retry, answer or approval command. Local Max acts only inside separate explicit user delegation and preserves the real decision-provider actor. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
-| `routing` | Opt-in scoped Single policy/configure with an observed settings revision and session-owned plan history. Actual router/solver roles use the existing worker/ledger; finite caps, images and model tuning remain blocked. |
+| `routing` | Opt-in scoped Single or declared Compound policy/configure with an observed settings revision. Ordinary Single history remains separate from retained public compound reports. Finite Local turns need explicit qualified reserved wind-down; images and synthetic-model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, terminal/owner reconciliation and explicit process-inspection acknowledgements. Immutable env/peer/root and authenticated per-profile ownership survive explicit restart. Input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
-| `models` | Explicit Copilot/local catalog refresh, informational `evidence(modelId)`, synthetic Single availability and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download, automatic evidence read or model substitution. |
+| `models` | Explicit Copilot/local catalog refresh, informational `evidence(modelId)`, eligible synthetic Single/Compound availability and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download, automatic evidence read or model substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
 

@@ -57,6 +57,9 @@ export const BridgeInitSchema = Type.Object({
   protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
   stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
   runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
+  journal: Type.Optional(Type.Literal(true)),
+  sealed: Type.Optional(Type.Literal(true)),
+  nativeNetworkProbe: Type.Optional(Type.Literal(true)),
   catalog: Type.Optional(catalog),
   context: Type.Optional(ProjectSettingsSchema),
   workspace: Type.Optional(WorkspaceReadRequestSchema),
@@ -65,6 +68,9 @@ export const BridgeInitSchema = Type.Object({
   mcpTools: Type.Optional(RemoteMcpToolsRequestSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,
+  native: Type.Optional(Type.Object({ bridgeDigest: hash, uid: Type.Integer({ minimum: 0 }), noNewPrivs: Type.Integer({ minimum: 0 }), seccomp: Type.Integer({ minimum: 0 }),
+    capabilities: Type.String({ pattern: "^[a-fA-F0-9]{1,64}$" }), enforcedProxy: Type.Boolean(),
+    networkProbe: Type.Optional(Type.Object({ url: Type.Literal("https://api.githubcopilot.com"), status: Type.Integer({ minimum: 100, maximum: 599 }) }, { additionalProperties: false })) }, { additionalProperties: false })),
   terminalBuild: Type.Optional(RemoteTerminalBuildSchema), terminalDiagnostic: Type.Optional(Type.String({ maxLength: 4096 })) }, { additionalProperties: false });
 const SavedBridgeInfoSchema = Type.Object({
   ...BridgeInfoSchema.properties, protocol: Type.Integer({ minimum: 16, maximum: PROTOCOL_VERSION }),

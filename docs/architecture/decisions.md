@@ -359,6 +359,22 @@ deterministic authorizer. Migration 15 preserves old questions/keys/receipts
 and defaults legacy advice to null. This does not enable a decision provider,
 Autopilot Max or automated steering.
 
+**Protocol-40 source slice.** The [owned decision integration](owned-decisions.md)
+adds an explicitly selected bounded-model System One-compatible alternative
+over the existing root-less worker, all-role ledger and deterministic
+authorizer. Local Max can review already-delegated tools, exact user-declared
+technical choices and bounded user-authored safe-boundary steering without
+human impersonation. Actual worker exit, context/policy/human rechecks,
+independent reports and real controller-loss recovery remain required.
+SDK, CLI, actual TUI and hidden desktop now share explicit configuration,
+service readiness, immutable evidence and real human override. Automated
+answers retain original copied evidence independently of both report and
+source retention. Jev stays unqualified because its current wire cannot enforce
+the required output bound; it never silently substitutes this alternative.
+The final generated full/packed/native sweep passes without changing factory
+defaults or qualified archives. Remote/native Max and live
+reliability/calibration remain distinct gates.
+
 ## D13. Remote SSH execution
 
 **Decision.** Include a user-configured **Remote** env in the first release. It runs the agent task, tools, and all router/solver/critic/decision model calls on the SSH machine. The user's local Moguri service still owns durable state and the client API; the remote worker reports through a versioned, run-scoped protocol inside SSH.
@@ -745,6 +761,15 @@ rewriting durable payloads. Effective mode/acquisition, not a requested
 read-only label, determines when the common writer lease is released.
 
 ## Still open
+
+Issue #17 resumes native SendBox work specifically for released **0.2.3**.
+The [fresh release/worker/network/cancellation measurements](sendbox-0.2.3.md)
+supersede no historical artifact and do not change D10's production admission
+requirements. The signed host/guest and bounded offline worker gates pass;
+endpoint-only cold egress fails, while an explicitly captured alias scope
+passes its separate generated probe. SDK/controller lifecycle, accounting,
+loss/restart and reviewed source publication remain gates. No Local fallback
+or production readiness is enabled by those measurements.
 
 - Package manager and monorepo tooling.
 - Protocol schema tool and code generation. `pi-ai` already uses TypeBox.

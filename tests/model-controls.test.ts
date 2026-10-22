@@ -18,11 +18,11 @@ test("transport capability lists reject silently ignored or unsupported thinking
   const supported = catalog.find((model) => model.api === "openai-responses" && model.reasoning)!;
   assert.ok(supportedThinking(supported).includes("low"));
   assert.throws(() => modelRequest(supported, { contextWindow: supported.contextWindow + 1 }, { messages: [] }), /supported maximum/);
-  assert.throws(() => modelRequest(supported, { contextWindow: 8192 }, { systemPrompt: "x".repeat(50000), messages: [] }), /working context/);
+  assert.throws(() => modelRequest({ ...supported, contextWindow: 16384 }, { contextWindow: 8192 }, { systemPrompt: "x".repeat(50000), messages: [] }), /working context/);
 });
 
 test("historical usage cannot undercut the fresh source estimate or output headroom after stable context reconstruction", () => {
-  const base = githubCopilotProvider().getModels().find((model) => hasApi(model, "openai-completions"))!;
+  const base = { ...githubCopilotProvider().getModels().find((model) => hasApi(model, "openai-completions"))!, contextWindow: 16384 };
   const prior: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "github-copilot", model: base.id, timestamp: 2, stopReason: "stop",
     content: [{ type: "text", text: "Generated prior result." }], usage: { input: 30, output: 12, cacheRead: 0, cacheWrite: 0, totalTokens: 42, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
   const context: Context = { systemPrompt: "Generated current system contract.", messages: [
@@ -43,7 +43,7 @@ test("historical usage cannot undercut the fresh source estimate or output headr
 
 test("reasoning cannot expand the output ceiling beyond the configured context room", async () => {
   const catalog = githubCopilotProvider().getModels();
-  const base = catalog.find((model) => hasApi(model, "anthropic-messages") && model.reasoning && !model.compat?.forceAdaptiveThinking)!;
+  const base = { ...catalog.find((model) => hasApi(model, "anthropic-messages") && model.reasoning && !model.compat?.forceAdaptiveThinking)!, contextWindow: 16384 };
   const request = modelRequest(base, { contextWindow: 8192, thinkingEffort: "high" }, { systemPrompt: "Generated policy.", messages: [{ role: "user", content: "Generated question.", timestamp: 0 }] });
   let payload: unknown;
   const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
@@ -59,7 +59,7 @@ test("reasoning cannot expand the output ceiling beyond the configured context r
 });
 
 test("context/effort settings share the SDK, remain independent of autonomy and bind actual worker requests", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
-  const fixture = await setupFixture({ reasoning: true });
+  const fixture = await setupFixture({ reasoning: true, contextWindow: 32768 });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, autonomy: "Guided" });
@@ -86,7 +86,7 @@ test("context/effort settings share the SDK, remain independent of autonomy and 
 });
 
 test("overfull working context stops before any model call and preserves the full admitted prompt", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
-  const fixture = await setupFixture();
+  const fixture = await setupFixture({ contextWindow: 16384 });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await fixture.configure(); await sdk.refresh();
@@ -101,7 +101,7 @@ test("overfull working context stops before any model call and preserves the ful
 });
 
 test("schema-4 state upgrades without changing events, receipts or encrypted content and model options survive restart", async () => {
-  const fixture = await setupFixture();
+  const fixture = await setupFixture({ contextWindow: 65536 });
   let sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {

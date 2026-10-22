@@ -11,6 +11,7 @@ const unsigned = Type.String({ pattern: "^[0-9]+$", maxLength: 40 });
 const nullableHash = Type.Union([hash, Type.Null()]);
 const paths = Type.Array(path, { maxItems: 20, uniqueItems: true });
 const timestamp = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" });
+export const MAX_CANDIDATE_PATCH_BYTES = 32 * 1024;
 export const CandidatePatchSchema = object({
   kind: Type.Literal("patch"), summary: Type.String({ minLength: 1, maxLength: 1200 }),
   edits: Type.Array(object({ path, baseDigest: Type.Union([hash, Type.Literal("absent")]), text: Type.String({ maxLength: 128 * 1024 }) }), { minItems: 1, maxItems: 20 }),
@@ -23,6 +24,12 @@ export const CandidateRoleOriginSchema = object({
   stepId: id, modelId: id, providerId: id, apiModelId: id,
 });
 export type CandidateRoleOrigin = Static<typeof CandidateRoleOriginSchema>;
+export const CandidateCompoundOriginSchema = object({
+  workflowId: id, workflowInputDigest: hash, roleInputDigest: hash, resultDigest: hash, observationEventId: id,
+  role: Type.Union([Type.Literal("draft"), Type.Literal("revision"), Type.Literal("escalation")]),
+  stepId: id, modelId: id, providerId: id, apiModelId: id,
+});
+export type CandidateCompoundOrigin = Static<typeof CandidateCompoundOriginSchema>;
 export interface CandidateRoleReference { roleSequenceId: string }
 export const CandidateRootSchema = object({
   env: Type.Literal("Local"), projectId: id, workspaceId: Type.Union([id, Type.Null()]),
@@ -34,6 +41,7 @@ export const CandidateDocumentSchema = object({
   format: Type.Literal("moguri-candidate"), version: Type.Literal(1),
   source: CandidateRootSchema, stage: CandidateRootSchema, authorityDigest: hash, patch: CandidatePatchSchema,
   roleOrigin: Type.Optional(CandidateRoleOriginSchema),
+  compoundOrigin: Type.Optional(CandidateCompoundOriginSchema),
 });
 export type CandidateDocument = Static<typeof CandidateDocumentSchema>;
 const intent = object({ commandId: id, commandDigest: hash, jobId: id, sessionId: Type.Optional(id) });
@@ -44,6 +52,7 @@ export type CandidateJobIntent = Static<typeof CandidateJobIntentSchema>;
 export const CandidateRecordSchema = object({
   version: Type.Literal(1), id, profileId: id, projectId: id, originSessionId: Type.Union([id, Type.Null()]),
   generationId: Type.Optional(id), roleOrigin: Type.Optional(CandidateRoleOriginSchema),
+  compoundOrigin: Type.Optional(CandidateCompoundOriginSchema),
   source: CandidateRootSchema, stage: CandidateRootSchema, documentDigest: hash, proposalDigest: hash,
   paths: Type.Array(path, { minItems: 1, maxItems: 20, uniqueItems: true }),
   revision: Type.Integer({ minimum: 0 }), status: Type.Union([
@@ -89,7 +98,8 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
     !prefix(next.stagedPaths, next.paths) || !prefix(next.attemptedPaths, next.paths) || !prefix(next.appliedPaths, next.attemptedPaths) ||
     next.stageAttemptedPaths && (!prefix(next.stageAttemptedPaths, next.paths) || !prefix(next.stagedPaths, next.stageAttemptedPaths))) corrupt("Candidate path/effect ordering is invalid or contains aliases.");
   if (next.stageIntent.sessionId && next.stageIntent.sessionId !== next.originSessionId) corrupt("Candidate staging lost its actual origin-session owner.");
-  if (next.generationId && next.roleOrigin || next.roleOrigin?.sequenceId === next.id) corrupt("Candidate model origin must be one exact independent source, not itself or conflicting assertions.");
+  if ([next.generationId, next.roleOrigin, next.compoundOrigin].filter(Boolean).length > 1 || next.roleOrigin?.sequenceId === next.id ||
+    next.compoundOrigin?.workflowId === next.id) corrupt("Candidate model origin must be one exact independent source, not itself or conflicting assertions.");
   if (!validTime(next.createdAt) || !validTime(next.updatedAt) || next.acceptance && !validTime(next.acceptance.at)) corrupt("Candidate timestamps are not exact valid UTC observations.");
   if (["staged", "applying", "applied", "rejected"].includes(next.status) && (next.stagedPaths.length !== next.paths.length || next.stageResultDigest === null)) corrupt("Candidate readiness requires the complete retained stage result.");
   if (next.status === "staging" && next.stageResultDigest !== null ||
@@ -114,6 +124,7 @@ export function projectCandidateRecord(previous: CandidateRecord | undefined, va
     if (next.revision !== previous.revision + 1 || immutable.some((key) => next[key] !== previous[key]) || !sameCandidateRoot(previous.source, source) || !sameCandidateRoot(previous.stage, stage) ||
       !sameIntent(previous.stageIntent, next.stageIntent) || JSON.stringify(previous.paths) !== JSON.stringify(next.paths) ||
       !sameCandidateRoleOrigin(previous.roleOrigin, next.roleOrigin) ||
+      JSON.stringify(previous.compoundOrigin) !== JSON.stringify(next.compoundOrigin) ||
       !transitions[previous.status].includes(next.status)) corrupt("Candidate revision, original ownership/base or lifecycle was changed/replayed.");
     if (!prefix(previous.stagedPaths, next.stagedPaths) || !prefix(previous.attemptedPaths, next.attemptedPaths) || !prefix(previous.appliedPaths, next.appliedPaths) ||
       previous.stageAttemptedPaths && (!next.stageAttemptedPaths || !prefix(previous.stageAttemptedPaths, next.stageAttemptedPaths)) ||
@@ -144,12 +155,13 @@ const stageInput = { sessionId: id, stageWorkspaceId: id, patch: CandidatePatchS
 export const CandidateCommandSchema = Type.Union([
   object({ type: Type.Literal("candidate.stage"), ...stageInput, expectedDigest: hash, generationId: Type.Optional(id), confirm: Type.Literal(true) }),
   object({ type: Type.Literal("candidate.stage"), ...stageInput, roleSequenceId: id, expectedDigest: hash, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("candidate.stage"), ...stageInput, compoundWorkflowId: id, compoundStepId: id, expectedDigest: hash, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("candidate.apply"), candidateId: id, sessionId: id, expectedRevision: Type.Integer({ minimum: 0 }), expectedDigest: hash, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("candidate.reject"), candidateId: id, expectedRevision: Type.Integer({ minimum: 0 }), confirm: Type.Literal(true) }),
 ]);
 export type CandidateCommand = Static<typeof CandidateCommandSchema>;
 export const CandidateQuerySchema = Type.Union([
-  object({ type: Type.Literal("candidate.preview"), ...stageInput, roleSequenceId: Type.Optional(id) }),
+  object({ type: Type.Literal("candidate.preview"), ...stageInput, roleSequenceId: Type.Optional(id), compoundWorkflowId: Type.Optional(id), compoundStepId: Type.Optional(id) }),
   object({ type: Type.Literal("candidate.role.proposal"), sequenceId: id }),
   object({ type: Type.Literal("candidate.apply.preview"), candidateId: id, sessionId: id }),
   object({ type: Type.Literal("candidate.read"), candidateId: id }),

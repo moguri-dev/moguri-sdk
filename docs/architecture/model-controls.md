@@ -35,6 +35,32 @@ it does not change actual usage, prices or billed-cost provenance.
 
 ## Domain and persistence
 
+Issue #17 replaces arbitrary numeric windows with one browser-safe SDK contract:
+use the exact model maximum and its integer-floored half, excluding choices below
+the 8,192-token working minimum. A genuine provider-declared window list replaces
+those derived choices. Explicit unsupported/stale values are errors, never
+clamped, and retained history and settings remain unchanged. The service rechecks
+the actual prepared model before each request; both clients consume the same
+choices. Existing pi-ai (MIT), React (MIT), TypeBox (MIT), estimates and event
+authority are reused without a new dependency. No new model role or paid call is
+introduced. Migration/restart coverage must preserve legacy arbitrary settings
+and refuse their use until explicitly corrected, rather than rewriting events.
+Pool eligibility/classifier metadata, candidate-generation previews and complete
+future owned-role bounds use the same actual default working window, not an
+unselectable theoretical maximum. Pool admission includes request headroom;
+none of these calculations authorizes a public compound workflow or a paid call.
+
+The issue's fresh Phase 0 run on macOS arm64 measured generated provider
+cancellation at 31.04 ms, SQLite append p95 at 0.053 ms, crash projection rebuild
+at 0.54 ms, known PTY-group cancellation at 151.84 ms, OpenTUI updates at
+17.23 ms, hidden Electron cold start at 195.44 ms and aggregate memory at
+449.52 MiB. The actual model-control, compound-transport, decision and budget-plan
+primitives passed again. These generated results do not qualify live model
+quality, complete detached-process containment, System One/Max, or Sandbox.
+Installed SendBox reports 0.2.1; released 0.2.3 needs separate attested-artifact
+and native worker/network/loss qualification. Historical static unavailable
+labels in the original spike are not current runtime discovery.
+
 Protocol/database migration 5 adds optional typed session model options and
 advertised supported thinking levels. Legacy controls retain their defaults and
 all schema-1/2/3/4 data, encrypted grants and immutable event identities survive.

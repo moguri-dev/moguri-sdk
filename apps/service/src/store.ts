@@ -27,11 +27,17 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "sandbox.execution_recorded" ? input.payload.execution.id :
+  input.event_type === "sandbox.frame_recorded" ? input.payload.executionId :
+  input.event_type === "sandbox.publication_recorded" ? input.payload.publication.id :
   input.event_type === "role.sequence_recorded" ? input.payload.sequence.id :
+  input.event_type === "compound.recorded" ? input.payload.workflow.id :
+  input.event_type === "winddown.recorded" ? input.payload.winddown.id :
+  input.event_type === "decision.recorded" ? input.payload.decision.id :
   input.event_type === "candidate.generation_recorded" ? input.payload.generation.id :
   input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
-  input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? null :
-  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? null : null;
+  input.event_type === "job.started" ? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? input.payload.job.compoundWorkflowId ?? input.payload.job.winddownId ?? null :
+  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? input.payload.winddownId ?? null : null;
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
   if (artifactId) return artifactScope(input.profile_id, artifactId);
@@ -42,8 +48,13 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "sandbox.workspace_recorded": return [input.payload.workspace.inputDigest];
+    case "sandbox.execution_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((hash): hash is string => hash !== null);
+    case "sandbox.publication_recorded": return [input.payload.publication.inputDigest, input.payload.publication.resultDigest,
+      input.payload.publication.documentDigest, input.payload.publication.operationDigest].filter((hash): hash is string => hash !== null);
     case "queue.enqueued": return input.payload.item.attachments.map((entry) => entry.digest);
-    case "session.created": return input.payload.contextDigest ? [input.payload.contextDigest] : [];
+    case "queue.edited": return input.payload.attachments?.map((entry) => entry.digest) ?? [];
+    case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.pasteFiles ?? []).map((entry) => entry.digest)];
     case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.map((entry) => entry.digest)];
     case "turn.prompt_bound": return [input.payload.promptDigest];
     case "turn.control_started": return [input.payload.purpose === "plan.save" ? input.payload.intentDigest : input.payload.promptDigest];
@@ -56,14 +67,30 @@ function references(input: EventInput): string[] {
     case "capability.saved": return [input.payload.entry.contentDigest];
     case "capability.proposed": return [input.payload.proposal.contentDigest];
     case "artifact.saved": return [input.payload.artifact.contentDigest];
-    case "artifact.revised": return [input.payload.artifact.contentDigest];
+    case "artifact.revised": return [input.payload.artifact.contentDigest, ...(input.payload.artifact.sources ?? []).flatMap((source) => source.decisionOrigin ?
+      [source.decisionOrigin.inputDigest, source.decisionOrigin.modelInputDigest, source.decisionOrigin.resultDigest, source.decisionOrigin.adviceDigest] : [])];
+    case "question.answered": {
+      const origin = input.payload.answer.decisionOrigin;
+      return origin ? [origin.inputDigest, origin.modelInputDigest, origin.resultDigest, origin.adviceDigest] : [];
+    }
+    case "tool.decided":
+    case "steering.applied": {
+      const origin = input.payload.decisionOrigin;
+      return origin ? [origin.inputDigest, origin.modelInputDigest, origin.resultDigest, origin.adviceDigest] : [];
+    }
     case "candidate.saved": {
       const candidate = input.payload.candidate, origin = candidate.roleOrigin;
       return [candidate.documentDigest, candidate.stageResultDigest, candidate.applyResultDigest,
-        ...(origin ? [origin.sequenceInputDigest, origin.roleInputDigest, origin.resultDigest] : [])].filter((hash): hash is string => hash !== null);
+        ...(origin ? [origin.sequenceInputDigest, origin.roleInputDigest, origin.resultDigest] : []),
+        ...(candidate.compoundOrigin ? [candidate.compoundOrigin.workflowInputDigest, candidate.compoundOrigin.roleInputDigest, candidate.compoundOrigin.resultDigest] : [])].filter((hash): hash is string => hash !== null);
     }
     case "candidate.generation_recorded": return [input.payload.generation.inputDigest, input.payload.generation.resultDigest, input.payload.generation.proposalDocumentDigest].filter((hash): hash is string => hash !== null);
     case "role.sequence_recorded": return [input.payload.sequence.inputDigest, ...input.payload.sequence.steps.flatMap((step) => [step.inputDigest, step.resultDigest])].filter((hash): hash is string => hash !== null);
+    case "compound.recorded": return [input.payload.workflow.inputDigest, ...input.payload.workflow.steps.flatMap((step) => [step.inputDigest, step.resultDigest]),
+      ...input.payload.workflow.validations.flatMap((validation) => [validation.documentDigest, validation.resultDigest])].filter((hash): hash is string => hash !== null);
+    case "winddown.recorded": return [input.payload.winddown.inputDigest, input.payload.winddown.step.inputDigest, input.payload.winddown.step.resultDigest,
+      input.payload.winddown.commitDocumentDigest, input.payload.winddown.commit?.resultDigest ?? null].filter((hash): hash is string => hash !== null);
+    case "decision.recorded": return [input.payload.decision.inputDigest, input.payload.decision.actualInputDigest, input.payload.decision.resultDigest, input.payload.decision.adviceDigest].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
     case "job.finished": return input.payload.resultDigest ? [input.payload.resultDigest] : [];
@@ -201,6 +228,21 @@ export class EventStore {
       if (version < 35) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('owned_role_contract_schema','1');
         PRAGMA user_version=35; COMMIT;`);
+      if (version < 36) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('paste_file_schema','1');
+        PRAGMA user_version=36; COMMIT;`);
+      if (version < 37) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('native_execution_schema','1');
+        PRAGMA user_version=37; COMMIT;`);
+      if (version < 38) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('compound_workflow_schema','1');
+        PRAGMA user_version=38; COMMIT;`);
+      if (version < 39) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('budget_winddown_schema','1');
+        PRAGMA user_version=39; COMMIT;`);
+      if (version < 40) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('owned_decision_schema','1');
+        PRAGMA user_version=40; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

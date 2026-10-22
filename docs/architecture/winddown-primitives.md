@@ -1,5 +1,9 @@
 # Reserved checkpoint prerequisites
 
+Current source integration is documented separately in
+[owned budget wind-down](budget-winddown.md). Measurements and unavailable
+features below describe this historical prerequisite, not the current source.
+
 Measured at **0.23 development**, protocol/database **29**, before the
 [protocol-30 planned-hold foundation](budget-plans.md). These are private D11
 mechanical prerequisites, not public finite kupo budgets, a compound scheduler

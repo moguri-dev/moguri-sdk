@@ -82,7 +82,7 @@ test("routing policy starts disabled, stays profile-scoped and needs an observed
 });
 
 test("shared slash configuration and model selection use the same scoped SDK without inference or carrying fixed-model options", async () => {
-  const fixture = await setupFixture({ maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ maxOutputTokens: 128, contextWindow: 32768 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await fixture.configure(); await sdk.refresh(); await sdk.sessions.modelOptions(fixture.sessionId, { contextWindow: 16384 });
     const policy = { ...defaultKupoSettings(), enabled: true, classifierModelId: fixture.modelId, approvedModelIds: [fixture.modelId], allowHosted: true };

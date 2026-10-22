@@ -33,6 +33,22 @@ export async function readGitBinding(root: string, signal: AbortSignal): Promise
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head)) throw new MoguriError("workspace_git_base", "Git returned no exact committed candidate base.", 409);
   return { gitCommonDir, head, branch };
 }
+export async function optionalGitBinding(root: string, signal: AbortSignal) {
+  try { return await readGitBinding(root, signal); }
+  catch (error) {
+    if (error instanceof MoguriError && (error.code === "workspace_git_root" || error.code === "program_failed" && /not a git repository/i.test(error.message))) return null;
+    throw error;
+  }
+}
+export async function candidateGitState(root: string, signal: AbortSignal): Promise<string> {
+  const filters = await gitReadFilters(root, signal), read = (args: string[]) => git(root, args, signal, filters);
+  const [status, worktree, index] = await Promise.all([
+    read(["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+    read(["diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--"]),
+    read(["diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--"]),
+  ]);
+  return JSON.stringify({ status, worktree, index });
+}
 
 export async function readWorkspaceGit(root: string, policy: { upstream: string; deniedFolders: string[] }, includeDiff: boolean, signal: AbortSignal, checkoutFilters?: string[]): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
   const filters = checkoutFilters ?? await gitReadFilters(root, signal), read = (args: string[]) => git(root, args, signal, filters);

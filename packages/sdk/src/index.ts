@@ -1,6 +1,7 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
+import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -24,6 +25,12 @@ export class MoguriSdk extends TransportClient {
     return session.draft.revision;
   }
   readonly attachments = {
+    paste: (sessionId: string, pastedText: string, selection?: { start: number; end: number }, expectedRevision = this.draftRevision(sessionId)) => {
+      const draft = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.draft;
+      if (!draft) throw new ClientError("session_missing", "Choose an existing destination session.");
+      return this.command({ type: "draft.paste", sessionId, expectedRevision, text: draft.text, attachments: draft.attachments, pastedText,
+        start: selection?.start ?? draft.text.length, end: selection?.end ?? draft.text.length });
+    },
     file: (sessionId: string, path: string, mode: "text" | "image" = "text", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.file.add", sessionId, path, mode, expectedRevision }),
     image: (sessionId: string, data: string, name = "Clipboard image", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.image.add", sessionId, data, name, expectedRevision }),
     folderPreview: (sessionId: string, path: string) => this.query({ type: "attachment.folder.preview", sessionId, path }),
@@ -144,6 +151,60 @@ export class MoguriSdk extends TransportClient {
       const snapshot = this.getState().snapshot;
       if (!snapshot) throw new ClientError("disconnected", "Connect to this immutable profile before inspecting retained role sequences.");
       return snapshot.roleSequences;
+    },
+  };
+  readonly compound = {
+    lineageDraft: (input: CompoundLineageInput) => lineageDraft(() => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("disconnected", "Connect to the actual profile before preparing an unpersisted source-backed lineage review.");
+      return snapshot.provider.models;
+    }, input),
+    preview: (input: CompoundInput) => this.query({ type: "compound.preview", input }),
+    start: (input: CompoundInput, expectedDigest: string, confirmCost: true) => this.command({ type: "compound.start", input, expectedDigest, confirmCost }),
+    read: (workflowId: string) => this.query({ type: "compound.read", workflowId }),
+    validationPreview: async (workflowId: string) => {
+      const value = await this.compound.read(workflowId);
+      if (!value.pendingValidation) throw new ClientError("compound_validation_missing", "This exact workflow has no current undecided validation review. Read its retained status; no review or command was replayed.");
+      return { workflowId: value.workflow.id, sessionId: value.workflow.sessionId, revision: value.workflow.revision, review: value.pendingValidation };
+    },
+    review: (workflowId: string, validationId: string, expectedRevision: number, expectedDigest: string, allow: boolean) =>
+      this.command({ type: "compound.review", workflowId, validationId, expectedRevision, expectedDigest, allow }),
+    stop: (workflowId: string) => this.command({ type: "compound.stop", workflowId }),
+    list: (sessionId?: string) => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("disconnected", "Connect to the actual immutable profile before reading public workflow history.");
+      return snapshot.compoundWorkflows.filter((workflow) => sessionId === undefined || workflow.sessionId === sessionId);
+    },
+  };
+  readonly winddown = {
+    status: (sessionId: string) => this.query({ type: "winddown.status", sessionId }),
+    list: (sessionId?: string) => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("disconnected", "Connect to the actual immutable profile before reading budget checkpoint history.");
+      return snapshot.winddowns.filter((record) => sessionId === undefined || record.sessionId === sessionId);
+    },
+    read: (winddownId: string) => this.query({ type: "winddown.read", winddownId }),
+    commitPreview: (input: Omit<Extract<WinddownQuery, { type: "winddown.commit.preview" }>, "type">) => this.query({ type: "winddown.commit.preview", ...input }),
+    commit: (input: Omit<Extract<WinddownQuery, { type: "winddown.commit.preview" }>, "type">, expectedRevision: number, expectedDigest: string, confirm: true) =>
+      this.command({ type: "winddown.commit", ...input, expectedRevision, expectedDigest, confirm }),
+    waitCommit: async (winddownId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
+      const value = await this.winddown.read(winddownId);
+      if (!value.winddown.commit) throw new ClientError("winddown_commit_missing", "No original actual-user commit job is retained. Preview and review it explicitly; nothing was retried.");
+      await this.jobs.wait(value.winddown.commit.jobId, options);
+      return this.winddown.read(winddownId);
+    },
+    stop: (winddownId: string) => this.command({ type: "winddown.stop", winddownId }),
+    decline: (winddownId: string, expectedRevision: number, confirm: true) => this.command({ type: "winddown.decline", winddownId, expectedRevision, confirm }),
+  };
+  readonly decisions = {
+    status: (sessionId: string) => this.query({ type: "decisions.status", sessionId }),
+    read: (decisionId: string) => this.query({ type: "decisions.read", decisionId }),
+    stop: (decisionId: string) => this.command({ type: "decisions.stop", decisionId }),
+    list: (sessionId?: string) => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("not_ready", "Connect before reading retained decision-provider requests.");
+      if (sessionId !== undefined && !snapshot.sessions.some((session) => session.id === sessionId)) throw new ClientError("session_missing", "Choose an exact session in this immutable profile.");
+      return snapshot.decisions.filter((record) => sessionId === undefined || record.sessionId === sessionId);
     },
   };
   readonly candidates = {
@@ -386,7 +447,26 @@ export class MoguriSdk extends TransportClient {
     insert: (sessionId: string, jobId: string, expectedRevision: number) => this.command({ type: "voice.insert", sessionId, jobId, expectedRevision }),
   };
   readonly subagents = { run: (sessionId: string, prompt: string) => this.command({ type: "subagent.run", sessionId, prompt }) };
-  readonly sandbox = { status: () => this.query({ type: "sandbox.status" }) };
+  readonly sandbox = {
+    status: () => this.query({ type: "sandbox.status" }),
+    probe: () => this.command({ type: "sandbox.probe", confirm: true }),
+    preview: (sessionId: string, paths: string[]) => this.query({ type: "sandbox.preview", sessionId, paths }),
+    prepare: (sessionId: string, paths: string[], expectedDigest: string, expectedRevision: number) =>
+      this.command({ type: "sandbox.prepare", sessionId, paths, expectedDigest, expectedRevision, confirm: true }),
+    execution: (executionId: string) => this.query({ type: "sandbox.execution", executionId }),
+    result: (executionId: string) => this.query({ type: "sandbox.result", executionId }),
+    reconcile: (executionId: string) => this.command({ type: "sandbox.reconcile", executionId, confirm: true }),
+    stop: (executionId: string) => this.command({ type: "sandbox.stop", executionId }),
+    publicationPreview: (executionId: string, paths: string[]) => this.query({ type: "sandbox.publication.preview", executionId, paths }),
+    publish: (executionId: string, paths: string[], expectedDigest: string, expectedRevision: number) =>
+      this.command({ type: "sandbox.publish", executionId, paths, expectedDigest, expectedRevision, confirm: true }),
+    publication: (publicationId: string) => this.query({ type: "sandbox.publication", publicationId }),
+    waitPublication: async (publicationId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Extract<PlatformResponse, { type: "sandbox.publication" }>> => {
+      const before = await this.sandbox.publication(publicationId);
+      await this.jobs.wait(before.publication.jobId, options);
+      return this.sandbox.publication(publicationId);
+    },
+  };
   readonly issues = {
     board: (projectId: string) => this.query({ type: "board.get", projectId }),
     configure: (projectId: string, config: BoardConfig, expectedRevision: number) => this.command({ type: "board.save", projectId,

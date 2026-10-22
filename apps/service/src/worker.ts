@@ -10,6 +10,7 @@ import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 import { streamMetrics } from "./stream-metrics.ts";
 import { executeUserPlan } from "./user-plan.ts";
 import { executeRemoteMcp } from "./remote-mcp-runtime.ts";
+import { executeCompoundValidation } from "./compound-validation.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -19,7 +20,7 @@ const send = (message: WorkerRequest) => { if (process.connected) process.send?.
 async function request(message: WorkerRequest & { requestId: string }): Promise<WorkerReply> {
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
   if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
-  const interruptible = message.kind === "boundary" || message.kind === "approval";
+  const interruptible = message.kind === "boundary" || message.kind === "approval" || message.kind === "validation.boundary";
   if (interruptible) abort.signal.throwIfAborted();
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible }); send(message); });
 }
@@ -95,11 +96,11 @@ async function run(start: WorkerStart): Promise<void> {
       try {
         const stream = models.streamSimple(model, {
           systemPrompt: boundary.systemPrompt,
-          messages: boundary.context ?? context, tools: start.readOnly || boundary.phase === "router" || boundary.phase === "compaction" || boundary.phase === "candidate" ? [] : boundary.tools,
+          messages: boundary.context ?? context, tools: start.readOnly || boundary.phase === "router" || boundary.phase === "compaction" || boundary.phase === "candidate" || boundary.phase === "checkpoint" ? [] : boundary.tools,
         }, {
           apiKey: boundary.auth.apiKey, headers: boundary.auth.headers, signal: abort.signal,
           maxTokens: boundary.maxTokens, maxRetries: 0, timeoutMs: 120_000,
-          ...(model.provider === "moguri-local" ? { fetch: localModelFetch } : {}),
+          ...(model.provider === "moguri-local" || start.env === "Sandbox" ? { fetch: localModelFetch } : {}),
           ...(boundary.thinkingEffort && boundary.thinkingEffort !== "off" ? { reasoning: boundary.thinkingEffort } : {}),
           sessionId: process.env.MOGURI_TURN_ID,
           onProviderStreamEvent: (event) => { usageReported ||= usagePresent(event); metrics.provider(event); },
@@ -114,13 +115,29 @@ async function run(start: WorkerStart): Promise<void> {
         flush();
         const tail = redactor.finish(); if (tail) send({ kind: "delta", stepId, text: tail });
         const message = assistantMessage(redactSecrets(await stream.result(), secrets));
-        const accepted = await request({
+        let accepted = await request({
           kind: "model.complete", requestId: randomUUID(), stepId, message,
           usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started, stream: metrics.snapshot(),
         });
         if (accepted.halt && accepted.error) { await finish(abort.signal.aborted ? "stopped" : "partial", accepted.error); return; }
         if (accepted.error) throw new Error(accepted.error);
         if (!accepted.value || !("accepted" in accepted.value) || accepted.value.accepted !== true) throw new Error("Model completion was not durably acknowledged. No success or next role was inferred.");
+        if ("validation" in accepted.value && accepted.value.validation) {
+          if (start.publicCompound !== true || start.readOnly !== true || start.root !== null || boundary.phase !== "candidate" ||
+            message.stopReason !== "stop" || toolCalls(message).length || !usageReported ||
+            !Number.isSafeInteger(message.usage.totalTokens) || !Number.isSafeInteger(message.usage.output) || message.usage.output < 0 ||
+            message.usage.output > message.usage.totalTokens || message.usage.output > boundary.maxTokens) throw new Error("Only a complete metered public compound role may enter a separately reviewed validation operation. Private roles and model tools cannot grant it.");
+          const validation = accepted.value.validation;
+          const permission = await request({ kind: "validation.boundary", requestId: randomUUID(), stepId, validationId: validation.validationId });
+          if (permission.error || !permission.value || !("accepted" in permission.value) || permission.value.accepted !== true) throw new Error(permission.error ?? "The exact actual-user validation was not durably admitted.");
+          const result = await executeCompoundValidation(validation, abort.signal,
+            (text) => send({ kind: "output", stepId, callId: validation.validationId, text }),
+            (pid) => send({ kind: "process", stepId, callId: validation.validationId, pid }));
+          incompleteCleanup ||= result.outcome === "partial";
+          accepted = await request({ kind: "validation.complete", requestId: randomUUID(), stepId, validationId: validation.validationId, result });
+          if (accepted.halt && accepted.error) { await finish(abort.signal.aborted ? "stopped" : "partial", accepted.error); return; }
+          if (accepted.error || !accepted.value || !("accepted" in accepted.value) || accepted.value.accepted !== true) throw new Error(accepted.error ?? "Actual validation was not durably acknowledged. No candidate, successful test or next role was inferred.");
+        }
         if ("continue" in accepted.value && accepted.value.continue === true) {
           abort.signal.throwIfAborted();
           if (boundary.phase !== "router" && boundary.phase !== "candidate") throw new Error("Only an owned router or tool-less candidate stage may request a continuation.");

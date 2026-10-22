@@ -7,6 +7,99 @@ separation, not SendBox process isolation.
 
 ## Qualification before capability
 
+The user explicitly resumed Sandbox implementation after correcting the pause.
+The next native integration reuses the qualified 0.2.3 CLI, Node/Node-PTY (MIT),
+SendBox (Apache-2.0), existing worker/foreground bridge and the all-role ledger.
+It must not broaden network policy or contact archived work.
+The host integration remains in development. Shared transport tests do not
+enable production Sandbox readiness or close its SDK lifecycle gates.
+
+The native contract uses an explicitly reviewed, bounded source snapshot in a
+Moguri-owned staging directory, never a live checkout mount. Immutable profile,
+session, source-root, image/worker/release, policy and native-session identities
+bind every dispatch. Project-free execution has an empty private stage, not an
+inherited root. Only reviewed exact network hosts may be configured; alias
+discovery never changes policy. Model credentials remain request-scoped and
+are withheld until actual guest and signed boundary verification.
+
+Native requests/results use the existing authenticated worker protocol.
+Worker-origin frames and status are encrypted and journaled before
+delivery, with durable cursors committed atomically by the controller.
+After the pinned guest bootstrap, native TTY control also uses AES-256-GCM
+with a domain-separated run key, authenticated owner/direction and monotonic
+cursors. Both directions reject cleartext, tampering, gaps and replay.
+Credential-bearing controller replies are encrypted in transit, never journaled.
+Control/guest loss cannot replay work; unknown accounting remains held.
+Late retained completions may reconcile accounting without resuming a turn.
+The supervisor/VM's actual exit and verified owned guest absence, not transport
+EOF or an acknowledgement alone, determine cleanup. Local and SSH
+detached/reparented containment remain unproven.
+
+Source publication is a separate actual-user byte/base/policy review with
+root leases and durable intent, not a successful model turn or tool approval.
+Partial/stopped results remain independently inspectable; source index/HEAD
+and unrelated edits must survive. Durable native records require an additive
+schema migration and restart coverage. SDK, CLI/TUI and desktop share the
+same preparation, inspection, stop and publication authority; unqualified
+side capabilities fail explicitly rather than using the base checkout.
+
+### Protocol 37 native service checkpoint
+
+The service/SDK adapter now verifies the exact root-owned 0.2.3 release,
+immutable workload, signed run plan and actual Linux process controls before
+request-scoped access. Qualification uses create-only command-owned staging;
+replaying its original identity cannot launch another VM. Only explicit
+Copilot access enables its credential-free cold network check. A failed
+endpoint/alias scope stays blocked; discovery never adds hosts.
+
+Native text stages are reviewed explicitly, capped at 200 files/2 MiB, and
+never mount a source checkout. The model sees `/workspace`, or null for a
+project-free chat. Session file/plan reads use that exact stage. Git views,
+console/MCP/memory/subagent/evolution delegates and native plan saves remain
+unqualified rather than routing to the Local source.
+
+Each turn owns an independent report and source/result grants. VM absence,
+CLI exit and acknowledged worker outcome must agree; transport EOF cannot
+finish a successful turn. Signed failed finalization may omit a runtime exit,
+which stays null. Retained encrypted receipts can then reconcile known usage
+once, including after actual controller SIGKILL, without adding completed
+model messages, resuming tools or upgrading the original partial turn.
+
+Source publication is a separate user command over up to 20 selected UTF-8
+outputs, a 32-KiB patch and 64-KiB complete review document. It reuses the candidate byte/base validators, scoped atomic
+file writer, directory broker and owned job lifecycle. Current source identity,
+HEAD/branch, hard write denials, folder policy and writer leases are rechecked.
+Its acceptance, attempts, copied paths and result are independently retained.
+It never stages/commits files or modifies index/HEAD; a partial copy is not
+rolled back or replayed. Retained publication data survives source session and
+execution-report deletion. Deleted/binary/excluded outputs cannot be silently
+treated as supported file publication.
+
+The additive `native_execution_schema` marker preserves existing ciphertext,
+receipts and scoped files through migration failure/reopen. This checkpoint
+does not yet qualify every client or the remaining compound/Max/wind-down
+milestone gates. Private native directories and SendBox's separate snapshot
+store are not encrypted-retention deletion or reclaimed-space claims.
+
+The subsequent shared CLI/TUI/desktop checkpoint exposes explicit qualification,
+exact source previews, stage preparation, original-run stop/reconciliation and
+separate publication review. A native stop binds execution and turn ownership,
+not only a session ID. File views and legacy project-file capture use the
+private stage; unsupported delegate/plan writes are rejected before resolving
+the Local source. Retained report editors expose metadata only. A confirmed
+rollback invalidates its stage record, rather than leaving a reusable ready
+badge after the root inode changes. Client qualification does not enable
+unproven compound, Max, live-provider or side-capability combinations.
+
+Shutdown signals native preparation, active turns, native runtime and the
+existing platform admissions before awaiting any cleanup. Even an empty
+asynchronous preparation close must not be awaited first: releasing a held
+Remote secret-store write could otherwise race ahead of terminal cancellation
+and start a broker/PTY during shutdown. The full acceptance sweep exposed that
+ordering regression; the actual held-Remote-write case and Local/Remote owner
+recovery gates now pass with synchronous cancellation followed by joined
+cleanup. Failed cleanup still retains its private registry/lock for inspection.
+
 An owned rootless loopback OpenSSH server passed strict generated host-key
 verification and a real worker-originated HTTP request in 175.94 ms. A changed
 host key prevented execution before another request. The server used generated

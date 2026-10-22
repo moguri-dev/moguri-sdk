@@ -92,8 +92,11 @@ test("a held plan refuses changed scope, canonical provider/model, context, auth
       { providerId: "generated-different-provider" }, { apiModelId: "generated-different-model" }, { inputEstimate: 11 }, { maxOutputTokens: 19 },
     ]) assert.throws(() => f.budget.consumePlan(f.session(), plan.id, { ...f.request, ...changes, stepId: randomUUID() }), { code: "budget_plan_changed" });
     await f.sdk.budgets.policy({ basis: "estimate", tokens: 20 }, 0, true);
-    assert.throws(() => f.consume(plan.id), { code: "budget_plan_capacity" });
-    assert.equal(f.control.snapshot().budgetPlans[0]?.status, "held");
+    assert.throws(() => f.consume(plan.id), { code: "budget_exhausted" });
+    assert.deepEqual(f.control.snapshot().budgetPlans[0], plan);
+    assert.equal(f.control.snapshot().budgetEntries.length, 0);
+    assert.equal(f.budget.status(f.sessionId).totals.heldTokens, 30);
+    assert.equal(f.budget.status(f.sessionId).remainingTokens, 0);
   } finally { await f.close(); }
 });
 

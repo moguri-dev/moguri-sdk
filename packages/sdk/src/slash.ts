@@ -1,8 +1,8 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
 
-export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention";
+export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
 export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
 export type SlashResult =
@@ -40,6 +40,9 @@ export const slashCommands = [
   { name: "candidate", description: "Read retained role proposals, generate unaccepted data or stage reviewed bytes; application stays separate", argument: "[role-proposal ID|generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
   { name: "model-evidence", description: "Explicitly inspect provider-declared family/version, not independence or approval; no inference", argument: "[MODEL_ID]" },
   { name: "roles", description: "Inspect retained role intent, calls, raw data and declared contracts; never dispatch or approve", argument: "[SEQUENCE_ID [ROLE_INDEX]|contract SEQUENCE_ID ROLE_INDEX]" },
+  { name: "compound", description: "Review bounded Cascade/Critique and separately approve owned project tests; source application stays separate", argument: "[list|preview INPUT_JSON|start SHA confirm-cost INPUT_JSON|read ID|validation ID|review ID VALIDATION REV SHA confirm-stage-and-test|deny ID VALIDATION REV SHA confirm-deny|stop ID confirm-stop]" },
+  { name: "winddown", description: "Inspect reserved finishing models and separately review actual-user accepted-work Git checkpoints", argument: "[status|list|read ID|commit-preview JSON|commit REV SHA confirm-git JSON|decline ID REV confirm-decline|stop ID confirm-stop]" },
+  { name: "decisions", description: "Configure bounded decision advice and inspect actual actor/charges; never answer or approve", argument: "[status|list|read ID|stop ID confirm-stop|set POLICY_JSON]" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
@@ -58,8 +61,10 @@ export const slashCommands = [
   { name: "run", description: "Release a held prompt", argument: "ID" },
   { name: "settings", description: "Open shared settings" },
   { name: "models", description: "Choose an available model" },
+  { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
+  { name: "sandbox", description: "Review native source staging, exact owned runs and separate user publication", argument: "[status|probe confirm-native|preview PATHS_JSON|prepare REVIEW_JSON confirm-stage|execution ID|result ID|stop ID confirm-stop|reconcile ID confirm-inspect|publish-preview ID PATHS_JSON|publish REVIEW_JSON confirm-publish|publication ID|stop-publication ID confirm-stop]" },
   { name: "mcp-remote", description: "Review exact Remote MCP grants and retained calls; never authenticate or approve a tool", argument: "[servers|preview SERVER|grant SERVER SHA256 REV confirm-reviewed [forward-access]|revoke SERVER REV confirm-revoke|calls|inspect OPERATION_ID]" },
   { name: "workspace", description: "Manage an explicit isolated Local checkout", argument: "[list|discover|create BRANCH [BASE]|new ID|bind ID|inspect ID|remove ID|reconcile ID]" },
   { name: "files", description: "Read the session's actual bound directory", argument: "[PATH]" },
@@ -87,6 +92,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "model-settings": {
+      if (!command.argument) return { kind: "text", text: JSON.stringify({ options: session.controls.modelOptions ?? {}, context: (await sdk.sessions.context(session.id)).context }, null, 2) };
+      if (command.argument === "reset") {
+        const { modelOptions: _, ...controls } = session.controls;
+        await sdk.sessions.configure(session.id, controls, session.revision);
+      } else await sdk.sessions.modelOptions(session.id, parse(ModelOptionsSchema, JSON.parse(command.argument)), session.revision);
+      return { kind: "ok", message: "Model tuning saved. Supported windows are rechecked before dispatch; history was not truncated." };
+    }
     case "model-evidence": {
       const modelId = command.argument.trim() || session.controls.modelId;
       if (!modelId || modelId === KUPO_MODEL_ID || /\s/.test(modelId)) throw new ClientError("model_evidence_model", "Name one actual concrete model ID, or select a fixed model first. No family, account or provider was guessed.");
@@ -167,7 +180,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!model) throw new ClientError("model_unavailable", "Choose an exact available model ID for this env. Inspect /models and /kupo status; no provider or policy fallback was used.");
       const { modelOptions: _, ...controls } = session.controls;
       await sdk.sessions.configure(session.id, { ...controls, modelId: model.id }, session.revision);
-      return { kind: "ok", message: model.synthetic ? "kupo Single selected. Router and solver calls are metered separately; no inference started and no permission changed." : `${model.name} selected explicitly. Previous model-specific options were cleared; no inference started.` };
+      return { kind: "ok", message: model.synthetic ? `kupo ${sdk.routing.policy()?.workflow === "compound" ? "Compound" : "Single"} selected. Actual roles are metered separately; no inference started and no permission changed.` : `${model.name} selected explicitly. Previous model-specific options were cleared; no inference started.` };
     }
     case "roles": {
       if (!command.argument) return { kind: "text", text: JSON.stringify(sdk.roleSequences.list(), null, 2) };
@@ -179,12 +192,97 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (parts.length > 2 || parts[1] !== undefined && !/^\d+$/.test(parts[1])) throw new ClientError("role_sequence_command", "Use /roles SEQUENCE_ID [ROLE_INDEX] to inspect retained data; this command cannot run a model.");
       return { kind: "text", text: JSON.stringify(await sdk.roleSequences.read(parts[0]!, parts[1] === undefined ? undefined : Number(parts[1])), null, 2) };
     }
+    case "decisions": {
+      if (!command.argument || command.argument === "status") return { kind: "text", text: JSON.stringify(await sdk.decisions.status(session.id), null, 2) };
+      if (command.argument === "list") return { kind: "text", text: JSON.stringify(sdk.decisions.list(session.id), null, 2) };
+      if (command.argument.startsWith("set ")) {
+        const policy = parse(DecisionSettingsSchema, JSON.parse(command.argument.slice(4))), settings = sdk.settings.get();
+        if (!settings) throw new ClientError("decision_scope", "Connect to the exact immutable profile before reviewing decision policy.");
+        await sdk.settings.update({ ...settings.values, decisions: policy }, settings.revision);
+        return { kind: "ok", message: "Explicit decision-provider policy saved. No solver, Env, model call, answer, permission or steer was selected/applied. Max remains a separate explicit choice." };
+      }
+      const [action, id, confirmation, ...extra] = command.argument.split(/\s+/);
+      if (action === "read" && id && confirmation === undefined) return { kind: "text", text: JSON.stringify(await sdk.decisions.read(id), null, 2) };
+      if (action === "stop" && id && confirmation === "confirm-stop" && !extra.length) {
+        const record = (await sdk.decisions.read(id)).decision;
+        if (record.sessionId !== session.id) throw new ClientError("decision_scope", "Select the original actual parent before stopping this exact decision. No other session or root was adopted.");
+        await sdk.decisions.stop(id);
+        return { kind: "ok", message: "Only this original decision stop was requested. Actual human interaction and unknown charges remain; no answer, grant or retry was inferred." };
+      }
+      throw new ClientError("decision_command", "Use /decisions status/list/read ID, stop ID confirm-stop or set POLICY_JSON. This surface cannot run a model or supply an answer/approval.");
+    }
+    case "winddown": {
+      if (!command.argument) return client === "desktop" ? { kind: "panel", panel: "Candidates" } : { kind: "text", text: JSON.stringify(sdk.winddown.list(session.id), null, 2) };
+      if (command.argument === "status") return { kind: "text", text: JSON.stringify(await sdk.winddown.status(session.id), null, 2) };
+      if (command.argument === "list") return { kind: "text", text: JSON.stringify(sdk.winddown.list(session.id), null, 2) };
+      const preview = command.argument.match(/^commit-preview\s+([\s\S]+)$/), commit = command.argument.match(/^commit\s+(\d+)\s+([a-f0-9]{64})\s+confirm-git\s+([\s\S]+)$/);
+      if (preview || commit) {
+        const value: unknown = JSON.parse(preview?.[1] ?? commit![3]!);
+        if (!isRecord(value) || Object.hasOwn(value, "sessionId")) throw new ClientError("winddown_scope", "The shared command binds this exact actual source session. Do not include session/profile/root/actor overrides.");
+        if (preview) {
+          const result = await sdk.query(parse(WinddownQuerySchema, { ...value, type: "winddown.commit.preview", sessionId: session.id }));
+          if (result.type !== "winddown.commit.preview") throw new ClientError("winddown_preview", "The exact accepted-work preview changed its requested type. No fallback.");
+          return { kind: "text", text: JSON.stringify({ ...result, confirmCommand: `/winddown commit ${result.preview.revision} ${result.preview.digest} confirm-git ${JSON.stringify(value)}` }, null, 2) };
+        }
+        const input = parse(WinddownCommandSchema, { ...value, type: "winddown.commit", sessionId: session.id, expectedRevision: Number(commit![1]), expectedDigest: commit![2], confirm: true });
+        const created = await sdk.command(input);
+        if (!created.id) throw new ClientError("winddown_intent", "No original user/Git intent was acknowledged. Inspect its retained record before another review.");
+        return { kind: "text", text: JSON.stringify(await sdk.winddown.waitCommit(created.id), null, 2) };
+      }
+      const [action, id, revision, confirmation, ...extra] = command.argument.split(/\s+/);
+      if (action === "read" && id && revision === undefined) return { kind: "text", text: JSON.stringify(await sdk.winddown.read(id), null, 2) };
+      if (action === "stop" && id && revision === "confirm-stop" && confirmation === undefined) {
+        await sdk.winddown.stop(id); return { kind: "ok", message: "Original finishing model/Git stop requested. Actual cleanup/publication may remain partial; no replay or rollback." };
+      }
+      if (action === "decline" && id && revision && /^\d+$/.test(revision) && confirmation === "confirm-decline" && !extra.length) {
+        await sdk.winddown.decline(id, Number(revision), true); return { kind: "ok", message: "Actual user declined this exact checkpoint's Git publication. No extra model or branch was created." };
+      }
+      throw new ClientError("winddown_command", "Use /winddown status/list/read ID, commit-preview JSON, its exact commit REV SHA confirm-git JSON, decline ID REV confirm-decline or stop ID confirm-stop.");
+    }
+    case "compound": {
+      if (!command.argument) return client === "desktop" ? { kind: "panel", panel: "Candidates" } : { kind: "text", text: JSON.stringify(sdk.compound.list(session.id), null, 2) };
+      if (command.argument === "list") return { kind: "text", text: JSON.stringify(sdk.compound.list(session.id), null, 2) };
+      const preview = command.argument.match(/^preview\s+([\s\S]+)$/), start = command.argument.match(/^start\s+([a-f0-9]{64})\s+confirm-cost\s+([\s\S]+)$/);
+      if (preview || start) {
+        const value: unknown = JSON.parse(preview?.[1] ?? start![2]!);
+        if (!isRecord(value) || Object.hasOwn(value, "sessionId")) throw new ClientError("compound_scope", "The shared command binds this exact current session. Do not pass session/profile/root/actor overrides.");
+        const input = parse(CompoundInputSchema, { ...value, sessionId: session.id });
+        if (preview) {
+          const result = await sdk.compound.preview(input);
+          return { kind: "text", text: JSON.stringify({ ...result, confirmCommand: `/compound start ${result.preview.digest} confirm-cost ${JSON.stringify(value)}` }, null, 2) };
+        }
+        return { kind: "text", text: JSON.stringify(await sdk.compound.start(input, start![1]!, true), null, 2) };
+      }
+      const parts = command.argument.split(/\s+/), [action, id, validationId, revision, digest, confirmation] = parts;
+      if (action === "read" && id && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.compound.read(id), null, 2) };
+      if (action === "validation" && id && parts.length === 2) {
+        const value = await sdk.compound.validationPreview(id);
+        return { kind: "text", text: JSON.stringify({ type: "compound.validation.preview",
+          confirmCommand: `/compound review ${value.workflowId} ${value.review.validationId} ${value.revision} ${value.review.digest} confirm-stage-and-test`,
+          denyCommand: `/compound deny ${value.workflowId} ${value.review.validationId} ${value.revision} ${value.review.digest} confirm-deny`, ...value }, null, 2) };
+      }
+      if (action === "stop" && id && validationId === "confirm-stop" && parts.length === 3) {
+        const record = (await sdk.compound.read(id)).workflow;
+        if (record.sessionId !== session.id) throw new ClientError("compound_scope", "Select the actual owning session before stopping its exact workflow.");
+        await sdk.compound.stop(id); return { kind: "ok", message: "Stop requested for the original public workflow. Inspect actual model/test cleanup; nothing was replayed." };
+      }
+      if ((action === "review" || action === "deny") && id && validationId && revision && /^\d+$/.test(revision) && digest && /^[a-f0-9]{64}$/.test(digest) &&
+        confirmation === (action === "review" ? "confirm-stage-and-test" : "confirm-deny") && parts.length === 6) {
+        const record = (await sdk.compound.read(id)).workflow;
+        if (record.sessionId !== session.id) throw new ClientError("compound_scope", "Select the exact original owning session before deciding staging/test execution.");
+        await sdk.compound.review(id, validationId, Number(revision), digest, action === "review");
+        return { kind: "ok", message: action === "review" ? "Actual-user staging and exact project tests authorized. No source application, quality or Git permission was inferred." : "Actual user denied this exact staging/test operation. No next model or source acceptance was authorized." };
+      }
+      throw new ClientError("compound_command", "Use /compound preview INPUT_JSON, start SHA confirm-cost INPUT_JSON, read ID, validation ID, review ID VALIDATION REV SHA confirm-stage-and-test, deny ID VALIDATION REV SHA confirm-deny, or stop ID confirm-stop.");
+    }
     case "kupo": {
-      if (!command.argument || command.argument === "status") return { kind: "text", text: JSON.stringify({ policy: sdk.routing.policy(), models: sdk.getState().snapshot!.provider.models, diagnostics: sdk.getState().snapshot!.routingDiagnostics, warning: "Experimental Single only, explicit hosted-data consent, no automatic fallback. Finite budgets, images, cascade and critique/revision remain unavailable." }, null, 2) };
+      if (!command.argument || command.argument === "status") return { kind: "text", text: JSON.stringify({ policy: sdk.routing.policy(), models: sdk.getState().snapshot!.provider.models, diagnostics: sdk.getState().snapshot!.routingDiagnostics, warning: sdk.routing.policy()?.workflow === "compound" ?
+        "Reviewed Local Cascade/Critique requires exact source/stages/test input through /compound and actual-user source application. Lineage and quality remain limited claims, not permission. Finite Local turns additionally require explicit reserved wind-down; inspect /winddown status." :
+        "Experimental Single only in this saved policy, explicit hosted-data consent, no automatic fallback. Finite Local turns require explicit reserved wind-down; inspect /winddown status. Compound uses its separately reviewed policy; images remain unavailable." }, null, 2) };
       if (command.argument === "history") return { kind: "text", text: JSON.stringify(sdk.routing.history(session.id), null, 2) };
       if (command.argument.startsWith("set ")) {
         await sdk.routing.configure(parse(KupoSettingsSchema, JSON.parse(command.argument.slice(4))), sdk.settings.get()!.revision);
-        return { kind: "ok", message: "Explicit scoped routing policy saved. No model or inference was selected/started. Hosted data needs its separate flag; Single alpha cannot lift hard budgets." };
+        return { kind: "ok", message: "Explicit scoped routing policy saved. No model or inference was selected/started. Hosted data and concrete compound routes need their explicit review; policy cannot lift hard budgets." };
       }
       throw new ClientError("routing_command", "Use /kupo status, history or set POLICY_JSON. Configure the actual scoped pool before explicitly selecting /model kupo.");
     }
@@ -408,6 +506,59 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "file": {
       if (!command.argument) throw new ClientError("file_path", "Use /file PROJECT_RELATIVE_PATH.");
       return { kind: "text", text: (await sdk.workspaces.file(session.id, command.argument)).text };
+    }
+    case "sandbox": {
+      const [action = "", ...parts] = command.argument.split(/\s+/).filter(Boolean), [id, confirmation, extra] = parts;
+      const text = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+      if (!action && client === "desktop") return { kind: "panel", panel: "Sandbox" };
+      if (!action || action === "status" && !id) {
+        const snapshot = sdk.getState().snapshot!;
+        return text({ ...(await sdk.sandbox.status()), workspace: (snapshot.sandboxWorkspaces ?? []).find((value) => value.id === session.sandboxWorkspaceId) ?? null,
+          executions: (snapshot.sandboxExecutions ?? []).filter((value) => value.sessionId === session.id).map(({ id, status, cleanup, cancellation, revision, resultDigest }) => ({ id, status, cleanup, cancellation, revision, resultDigest })),
+          publications: (snapshot.sandboxPublications ?? []).map(({ id, executionId, status, revision, publishedPaths, diagnostic }) => ({ id, executionId, status, revision, publishedPaths, diagnostic })) });
+      }
+      if (action === "probe" && id === "confirm-native" && !confirmation) { await sdk.sandbox.probe(); return text(await sdk.sandbox.status()); }
+      if (action === "preview") {
+        const input = parse(SandboxQuerySchema, { type: "sandbox.preview", sessionId: session.id, paths: JSON.parse(command.argument.slice(action.length).trim()) });
+        const result = await sdk.query(input);
+        if (result.type !== "sandbox.preview") throw new ClientError("sandbox_command", "Native preview changed its exact response type.");
+        return text({ ...result, confirmCommand: `/sandbox prepare ${JSON.stringify({ paths: result.preview.paths, expectedDigest: result.preview.digest,
+          expectedRevision: sdk.getState().snapshot!.sessions.find((value) => value.id === session.id)!.revision })} confirm-stage` });
+      }
+      if (action === "prepare" || action === "publish") {
+        const suffix = action === "prepare" ? " confirm-stage" : " confirm-publish";
+        let input = command.argument.slice(action.length).trim();
+        if (!input.endsWith(suffix)) throw new ClientError("sandbox_review", `Review the exact native bytes/root/policy and append ${suffix.trim()}. No native stage or source effect was started.`);
+        input = input.slice(0, -suffix.length);
+        const value: unknown = JSON.parse(input), allowed = action === "prepare" ? ["paths", "expectedDigest", "expectedRevision"] : ["executionId", "paths", "expectedDigest", "expectedRevision"];
+        if (!isRecord(value) || Object.keys(value).some((key) => !allowed.includes(key))) throw new ClientError("sandbox_review", "Use only exact paths, review digest/revision and the publication's original execution ID; root, profile and actual actor are not client input.");
+        const request = parse(SandboxCommandSchema, { ...value, type: action === "prepare" ? "sandbox.prepare" : "sandbox.publish",
+          ...(action === "prepare" ? { sessionId: session.id } : {}), confirm: true });
+        const created = await sdk.command(request);
+        if (action !== "publish") return text({ ...created, notice: "Exact reviewed private native stage prepared. Source unchanged; no model turn was started." });
+        const published = await sdk.sandbox.waitPublication(created.id!);
+        if (published.publication.status !== "completed") throw new ClientError("sandbox_publication_partial", `Native source publication ${published.publication.status}: ${published.publication.diagnostic ?? "Inspect its original attempts."} Use /sandbox publication ${created.id}. No successful copy or retry was inferred.`);
+        return text(published);
+      }
+      if (action === "execution" && id && !confirmation) return text(await sdk.sandbox.execution(id));
+      if (action === "result" && id && !confirmation) return text(await sdk.sandbox.result(id));
+      if (action === "publication" && id && !confirmation) return text(await sdk.sandbox.publication(id));
+      if (action === "stop" && id && confirmation === "confirm-stop" && !extra) { await sdk.sandbox.stop(id); return text(await sdk.sandbox.execution(id)); }
+      if (action === "reconcile" && id && confirmation === "confirm-inspect" && !extra) { await sdk.sandbox.reconcile(id); return text(await sdk.sandbox.execution(id)); }
+      if (action === "stop-publication" && id && confirmation === "confirm-stop" && !extra) {
+        const record = (await sdk.sandbox.publication(id)).publication;
+        await sdk.jobs.cancel(record.jobId); return text(await sdk.sandbox.publication(id));
+      }
+      if (action === "publish-preview" && id) {
+        const requested = command.argument.slice(action.length).trim().slice(id.length).trim();
+        const input = parse(SandboxQuerySchema, { type: "sandbox.publication.preview", executionId: id, paths: JSON.parse(requested) });
+        const result = await sdk.query(input);
+        if (result.type !== "sandbox.publication.preview") throw new ClientError("sandbox_command", "Native publication preview changed its requested response type.");
+        const execution = (await sdk.sandbox.execution(id)).execution;
+        return text({ ...result, confirmCommand: `/sandbox publish ${JSON.stringify({ executionId: id, paths: result.preview.document.patch.edits.map((edit) => edit.path),
+          expectedDigest: result.preview.digest, expectedRevision: execution.revision })} confirm-publish` });
+      }
+      throw new ClientError("sandbox_command", "Use /sandbox status; probe confirm-native; preview PATHS_JSON; prepare REVIEW_JSON confirm-stage; execution/result/publication ID; stop/reconcile ID confirm-stop|confirm-inspect; or publish-preview ID PATHS_JSON and publish REVIEW_JSON confirm-publish. No Local fallback or automatic acceptance.");
     }
     case "remote": {
       const [action, id, extra] = command.argument.split(/\s+/);

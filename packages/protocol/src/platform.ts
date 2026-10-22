@@ -28,6 +28,13 @@ import { CandidateGenerationCommandSchema, CandidateGenerationQuerySchema, type 
 import { RoleSequenceQuerySchema, type RoleSequenceRecord, type RoleSequenceResponse } from "./role-sequences.ts";
 import { ModelEvidenceQuerySchema, type ModelEvidenceResponse } from "./model-evidence.ts";
 import { RoleContractQuerySchema, type RoleContractRead } from "./role-contracts.ts";
+import { SandboxCommandSchema, SandboxQuerySchema, type SandboxResponse, type SandboxWorkspace, type SandboxExecution, type SandboxReadiness, type SandboxPublication } from "./sandbox.ts";
+import { CompoundCommandSchema, CompoundQuerySchema, type CompoundResponse, type CompoundWorkflow } from "./compound.ts";
+import { defaultWinddownSettings, WinddownSettingsSchema, WinddownCommandSchema, WinddownQuerySchema, type WinddownRecord, type WinddownResponse } from "./winddown.ts";
+export * from "./winddown.ts";
+import { DecisionSettingsSchema, defaultDecisionSettings, DecisionCommandSchema, DecisionQuerySchema, type DecisionRecord, type DecisionResponse } from "./decisions.ts";
+export * from "./decisions.ts";
+export * from "./compound.ts";
 export * from "./candidates.ts";
 export * from "./candidate-generations.ts";
 export * from "./role-sequences.ts";
@@ -48,6 +55,7 @@ export * from "./execution.ts";
 export * from "./worktrees.ts";
 export * from "./workspace.ts";
 export * from "./config.ts";
+export * from "./sandbox.ts";
 export * from "./sessions.ts";
 export * from "./oauth.ts";
 export * from "./engagement.ts";
@@ -91,6 +99,8 @@ export const SettingsSchema = object({
   artifacts: object({ retainAnswers: Type.Boolean() }),
   budgets: BudgetSettingsSchema,
   kupo: KupoSettingsSchema,
+  winddown: WinddownSettingsSchema,
+  decisions: DecisionSettingsSchema,
   notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
@@ -108,6 +118,8 @@ export const defaultSettings = (): UserSettings => ({
   artifacts: { retainAnswers: true },
   budgets: { rates: [], maxPriceAgeDays: 30 },
   kupo: defaultKupoSettings(),
+  winddown: defaultWinddownSettings(),
+  decisions: defaultDecisionSettings(),
   notifications: { inApp: true, os: false, previewContent: false },
   localModels: [], startup: { global: {}, profile: {} },
   remote: null,
@@ -121,8 +133,13 @@ const section = Type.Union([
   Type.Literal("localModels"), Type.Literal("startup"),
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
   Type.Literal("kupo"),
+  Type.Literal("winddown"),
+  Type.Literal("decisions"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  DecisionCommandSchema,
+  WinddownCommandSchema,
+  CompoundCommandSchema,
   CandidateCommandSchema,
   CandidateGenerationCommandSchema,
   RemoteMcpCommandSchema,
@@ -161,11 +178,15 @@ export const PlatformCommandSchema = Type.Union([
   EngagementCommandSchema,
   InputCommandSchema,
   ExecutionCommandSchema,
+  SandboxCommandSchema,
   ManagedWorkspaceCommandSchema,
 ]);
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  DecisionQuerySchema,
+  WinddownQuerySchema,
+  CompoundQuerySchema,
   RemoteMcpQuerySchema,
   RepositoryQuerySchema,
   TelemetryQuerySchema,
@@ -193,6 +214,7 @@ export const QuerySchema = Type.Union([
   EngagementQuerySchema,
   InputQuerySchema,
   ExecutionQuerySchema,
+  SandboxQuerySchema,
   ManagedWorkspaceQuerySchema,
   ArtifactQuerySchema,
   CandidateQuerySchema,
@@ -221,6 +243,9 @@ export interface CapabilityJob {
   materialization?: ArtifactMaterializationPreview;
   memory?: MemoryIndexIntent;
   candidate?: CandidateJobIntent;
+  sandboxPublicationId?: string;
+  compoundWorkflowId?: string;
+  winddownId?: string;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
@@ -240,6 +265,9 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   budgetPlans: BudgetPlan[];
   candidateGenerations: CandidateGenerationRecord[];
   roleSequences: RoleSequenceRecord[];
+  compoundWorkflows: CompoundWorkflow[];
+  winddowns: WinddownRecord[];
+  decisions: DecisionRecord[];
   budgetPolicy: { revision: number; limit: BudgetLimit | null };
   settings: { revision: number; permissionRevision: number; values: UserSettings; defaults: UserSettings };
   registry: CapabilityEntry[];
@@ -249,6 +277,9 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   configurationProposals: ConfigurationProposal[];
   attention: Attention[];
   executions: RemoteExecution[];
+  sandboxWorkspaces?: SandboxWorkspace[];
+  sandboxExecutions?: SandboxExecution[];
+  sandboxPublications?: SandboxPublication[];
   managedWorkspaces: ManagedWorkspace[];
   changeSets: ChangeSet[];
 }
@@ -256,8 +287,11 @@ export interface VoiceStatus {
   runtimeReady: boolean; modelReady: boolean; diagnostic: string | null; modelId: string;
   bytes: number; license: string; languageLocales: { code: string; tier: "ready" | "broad" | "adaptation" }[];
 }
-export interface SandboxStatus { ready: boolean; diagnostic: string; configured: boolean }
+export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse =
+  | DecisionResponse
+  | WinddownResponse
+  | CompoundResponse
   | CandidateResponse
   | CandidateGenerationResponse
   | RoleSequenceResponse
@@ -289,6 +323,7 @@ export type PlatformResponse =
   | { type: "result.read"; text: string; nextOffset: number | null }
   | { type: "voice.status"; voice: VoiceStatus }
   | { type: "sandbox.status"; sandbox: SandboxStatus }
+  | SandboxResponse
   | { type: "capability.content"; content: string; digest: string }
   | { type: "proposal.content"; content: string; digest: string };
 export const SYSTEM_PROMPT_WARNING = "Editing the system prompt can break tool use and application behavior. Hard permissions still apply. Do not put secrets in it. Restore defaults is always available.";

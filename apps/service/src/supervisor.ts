@@ -22,7 +22,7 @@ export async function stopGroup(pid: number): Promise<boolean> {
   for (let i = 0; i < 20 && groupExists(pid); i++) await sleep(30);
   return !groupExists(pid);
 }
-export async function runCommand(root: string, command: string, timeoutMs: number, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void): Promise<{ text: string; isError: boolean; outcome: string }> {
+export async function runCommand(root: string, command: string, timeoutMs: number, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void): Promise<{ text: string; isError: boolean; outcome: string; exitCode: number; signal: number | null }> {
   signal.throwIfAborted();
   const terminal = pty.spawn("/bin/sh", ["-c", command], {
     cwd: root, cols: 120, rows: 30,
@@ -47,16 +47,17 @@ export async function runCommand(root: string, command: string, timeoutMs: numbe
     const exit = await new Promise<{ exitCode: number; signal?: number }>((resolve) => terminal.onExit(resolve));
     const hadBackgroundSurvivors = !stopped && signalGroup(terminal.pid, 0) === "present";
     const clean = stopped ? await stopped : await stopGroup(terminal.pid);
+    const observed = { exitCode: exit.exitCode, signal: exit.signal || null };
     const cancelled = signal.aborted || timedOut;
     const suffix = `${clipped ? "\n[Output truncated to 128 KiB.]" : ""}${timedOut ? "\n[Command deadline exceeded.]" : ""}`;
-    if (!clean) return { text: text + suffix + `\n[Process group ${terminal.pid} cleanup is unconfirmed.]`, isError: true, outcome: "partial" };
-    if (hadBackgroundSurvivors) return { text: text + suffix + "\n[Background descendants survived their shell and were stopped. Background execution is unsupported.]", isError: true, outcome: "partial" };
+    if (!clean) return { ...observed, text: text + suffix + `\n[Process group ${terminal.pid} cleanup is unconfirmed.]`, isError: true, outcome: "partial" };
+    if (hadBackgroundSurvivors) return { ...observed, text: text + suffix + "\n[Background descendants survived their shell and were stopped. Background execution is unsupported.]", isError: true, outcome: "partial" };
     if (cancelled) return {
       text: text + suffix + `\n[Process group ${terminal.pid} stopped. Detached/reparented descendants cannot be fully verified by this checkpoint's supervisor. Inspect processes before resuming.]`,
-      isError: true, outcome: "partial",
+      ...observed, isError: true, outcome: "partial",
     };
     return {
-      text: text + suffix + `\n[exit=${exit.exitCode}${exit.signal ? ` signal=${exit.signal}` : ""}]`,
+      ...observed, text: text + suffix + `\n[exit=${exit.exitCode}${exit.signal ? ` signal=${exit.signal}` : ""}]`,
       isError: exit.exitCode !== 0 || Boolean(exit.signal),
       outcome: exit.exitCode === 0 && !exit.signal ? "completed" : "failed",
     };

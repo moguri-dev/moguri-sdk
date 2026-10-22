@@ -2,10 +2,11 @@ import { fork } from "node:child_process";
 import { Value } from "typebox/value";
 import { isRecord } from "../../../packages/protocol/src/index.ts";
 import { parentMessage, WorkerRequestSchema, type WorkerRequest } from "./worker-protocol.ts";
-import { frameDigest, JsonLineChannel, MAX_WORKER_FRAME } from "./worker-wire.ts";
+import { frameDigest, MAX_WORKER_FRAME } from "./worker-wire.ts";
 import { ForegroundQuerySchema, type BridgeInfo, type BridgeInit, type BridgeStatus } from "./remote-protocol.ts";
 import { workerCatalog } from "./worker-queries.ts";
 import { repositoryContext } from "./project-policy.ts";
+import type { ForegroundSink } from "./execution-journal.ts";
 
 const proxyVariables = ["ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "NODE_USE_ENV_PROXY"] as const;
 export function foregroundEnvironment(runId: string): NodeJS.ProcessEnv {
@@ -13,7 +14,7 @@ export function foregroundEnvironment(runId: string): NodeJS.ProcessEnv {
   for (const key of proxyVariables) if (process.env[key] !== undefined) env[key] = process.env[key];
   return env;
 }
-export function foregroundWorker(workerPath: string, init: BridgeInit, info: BridgeInfo, wire: JsonLineChannel): { receive(raw: unknown): Promise<void>; disconnect(): void } {
+export function foregroundWorker(workerPath: string, init: BridgeInit, info: BridgeInfo, wire: ForegroundSink): { receive(raw: unknown): Promise<void>; disconnect(): void } {
   if (!init.runId || !init.key) throw new Error("Foreground execution needs its exact run identity.");
   const status: BridgeStatus = { runId: init.runId, workerPid: null, port: 0, acknowledged: 0, sequence: 0, status: "launching", cancellation: "none", cleanup: "pending", diagnostic: null };
   const child = fork(workerPath, [], { execPath: process.execPath, execArgv: process.execArgv, stdio: ["ignore", "ignore", "pipe", "ipc"], env: foregroundEnvironment(init.runId) });
@@ -84,6 +85,7 @@ export function foregroundWorker(workerPath: string, init: BridgeInit, info: Bri
       if (raw.kind === "ack") {
         if (typeof raw.sequence !== "number" || !Number.isSafeInteger(raw.sequence) || raw.sequence < status.acknowledged || raw.sequence > status.sequence) { fail("Invalid foreground durable cursor."); return; }
         for (const [sequence, bytes] of pending) if (sequence <= raw.sequence) { queued -= bytes; pending.delete(sequence); }
+        await wire.acknowledge?.(raw.sequence);
         status.acknowledged = raw.sequence; return;
       }
       if (raw.kind !== "parent" || lost || settled) { fail("Foreground authority is disconnected or incompatible. No effect was replayed."); return; }

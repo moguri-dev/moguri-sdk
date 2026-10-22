@@ -1,11 +1,11 @@
 import { AsyncEntry } from "@napi-rs/keyring";
 import { createModels, type AuthOperationOptions, type Credential, type CredentialStore, type Model, type Api, type ModelAuth } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { isRecord, MoguriError, PROFILE_ID, type ProviderState, type ModelEvidenceReport } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, PROFILE_ID, type ProviderState, type ModelEvidenceReport, type ModelWindowCapability } from "../../../packages/protocol/src/index.ts";
 import { supportedThinking } from "./model-controls.ts";
 import { readCopilotModelEvidence } from "./model-evidence.ts";
 
-export interface PreparedModel { model: Model<Api>; auth: ModelAuth }
+export interface PreparedModel { model: Model<Api> & Pick<ModelWindowCapability, "supportedContextWindows">; auth: ModelAuth }
 export interface ProviderAdapter {
   state: ProviderState;
   onChange: () => void;

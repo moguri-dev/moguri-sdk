@@ -44,6 +44,7 @@ try {
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
+    ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     async function typedConsumer() {
       const sdk = await connectMoguri({autoStart:false});
       ${installedProtocol >= 34 ? 'const evidence:ModelEvidenceReport=(await sdk.models.evidence("generated-model")).evidence;void evidence.claimed.family;void evidence.source.familyField;' : ""}
@@ -78,6 +79,33 @@ try {
       const roleGate=await sdk.roleSequences.contract("generated-sequence",1);
       void roleGate.contract;void roleGate.contextRoleIndices;void roleGate.result.status;
       ` : ""}
+      ${installedProtocol >= 38 ? `
+      const compoundInput:Parameters<typeof sdk.compound.preview>[0]={sessionId:"generated-source",draftWorkspaceId:"generated-draft",alternateWorkspaceId:"generated-alternate",
+        input:{task:"Generated typed public workflow.",files:[{path:"generated.ts",baseDigest:"absent"}]},requestPlan:null,requestArchitecture:null,validationScriptId:"generated-script",validationTimeoutMs:1000};
+      const compoundPreview=await sdk.compound.preview(compoundInput);void compoundPreview.preview.document.roles[0]?.inputBound;
+      const compoundStart=await sdk.compound.start(compoundInput,compoundPreview.preview.digest,true);
+      const compoundRead=await sdk.compound.read(compoundStart.id!);void compoundRead.roles[0]?.result;void compoundRead.workflow.validations[0]?.dispatched;
+      const compoundValidation=await sdk.compound.validationPreview(compoundStart.id!);
+      await sdk.compound.review(compoundStart.id!,compoundValidation.review.validationId,compoundValidation.revision,compoundValidation.review.digest,false);
+      await sdk.compound.stop(compoundStart.id!);void sdk.compound.list("generated-source");
+      const lineage=await sdk.compound.lineageDraft({draftModelId:"generated-draft-model",criticModelId:"generated-critic-model",draftLineage:"generated-alpha",criticLineage:"generated-beta",
+        sourceKind:"reviewed-training-report",sourceUrl:"https://generated.example.invalid/source",sourceText:"Generated synthetic policy evidence.",validUntil:new Date(Date.now()+3600000).toISOString(),limitations:"Generated claim, not quality or training proof."});
+      void lineage.review.draftBindingDigest;void lineage.warning;
+      ` : ""}
+      ${installedProtocol >= 39 ? `
+      const finishingStatus=await sdk.winddown.status("generated-source");void finishingStatus.inputBound;void finishingStatus.usdReady;
+      const finishing=await sdk.winddown.read("generated-finishing");void finishing.winddown.step.planId;void finishing.roleInput;void finishing.commitDocument;
+      const gitInput={winddownId:"generated-finishing",sessionId:"generated-source",candidateIds:["generated-accepted"],branch:"moguri/generated-installed-checkpoint",message:"chore: checkpoint accepted work"};
+      const gitReview=await sdk.winddown.commitPreview(gitInput);void gitReview.preview.document.files[0]?.mode;
+      await sdk.winddown.commit(gitInput,gitReview.preview.revision,gitReview.preview.digest,true);
+      const gitResult=await sdk.winddown.waitCommit("generated-finishing");void gitResult.winddown.commit?.publishedCommit;
+      await sdk.winddown.decline("generated-finishing",0,true);await sdk.winddown.stop("generated-finishing");void sdk.winddown.list("generated-source");
+      ` : ""}
+      ${installedProtocol >= 40 ? `
+      const decisions=await sdk.decisions.status("generated-source");void decisions.provider;void decisions.outputBound;
+      const decision=await sdk.decisions.read("generated-decision");void decision.decision.source;void decision.input.questions;void decision.advice?.answers;
+      await sdk.decisions.stop("generated-decision");void sdk.decisions.list("generated-source");void sdk.settings.get()?.values.decisions.technicalQuestions;
+      ` : ""}
       ${installedProtocol >= 33 ? `
       const roleProposal=await sdk.candidates.roleProposal("generated-sequence");void roleProposal.document.roleOrigin.roleInputDigest;
       const roleReference={roleSequenceId:"generated-sequence"};
@@ -102,6 +130,7 @@ try {
       await sdk.sessions.mode("generated-id","read-only");
       await sdk.sessions.modelOptions("generated-id",{contextWindow:16384,thinkingEffort:"low"});
       const context=await sdk.sessions.context("generated-id"); void context.context.estimatedTokens;
+      ${installedProtocol >= 36 ? 'void context.context.windows?.values;void modelContextWindows({contextWindow:32769});await sdk.attachments.paste("generated-id","Generated typed paste",{start:0,end:0});' : ""}
       ${installedProtocol >= 23 ? `
       const terminal=await sdk.terminal.open("generated-id");
       const consolePage=await sdk.terminal.read(terminal.id!);void consolePage.terminal.binding?.inode;void consolePage.terminal.attachmentId;
@@ -219,7 +248,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
@@ -239,6 +268,27 @@ try {
       platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
     }});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
+    ${installedProtocol >= 38 ? `
+    assert.deepEqual(sdk.compound.list(),[]);
+    await assert.rejects(()=>sdk.compound.read("generated-missing-public-workflow"),error=>error.code==="compound_missing");
+    await assert.rejects(()=>sdk.compound.preview({sessionId:"generated-missing-source",draftWorkspaceId:"generated-draft",alternateWorkspaceId:"generated-alternate",
+      input:{task:"Generated installed fail-closed public scope.",files:[{path:"generated.ts",baseDigest:"absent"}]},requestPlan:null,requestArchitecture:null,validationScriptId:"generated-script",validationTimeoutMs:1000}),
+      error=>error.code==="compound_scope");
+    console.log("Installed protocol-38 public workflow SDK/runtime is present and rejects missing source/report scope without inference or a Local fallback.");
+    ` : ""}
+    ${installedProtocol >= 39 ? `
+    assert.equal(sdk.settings.get().values.winddown.enabled,false);assert.equal(sdk.settings.get().values.winddown.modelId,null);
+    assert.deepEqual(sdk.winddown.list(),[]);
+    await assert.rejects(()=>sdk.winddown.read("generated-missing-budget-checkpoint"),error=>error.code==="winddown_missing");
+    console.log("Installed protocol-39 reserved-checkpoint SDK/runtime preserves disabled/no-model defaults and rejects missing independent scope without a model/Git effect.");
+    ` : ""}
+    ${installedProtocol >= 40 ? `
+    assert.equal(sdk.settings.get().values.decisions.enabled,false);assert.equal(sdk.settings.get().values.decisions.modelId,null);
+    assert.deepEqual(sdk.decisions.list(),[]);
+    await assert.rejects(()=>sdk.decisions.read("generated-missing-owned-decision"),error=>error.code==="decision_missing");
+    await assert.rejects(()=>sdk.decisions.status("generated-missing-decision-source"),error=>error.code==="decision_scope");
+    console.log("Installed protocol-40 decisions preserve disabled/no-model defaults and refuse missing immutable source/report scope without paid inference or approval.");
+    ` : ""}
     let budgetServer=null,beta=null;
     try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
@@ -249,6 +299,26 @@ try {
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);
+      ${installedProtocol >= 36 ? `
+      assert.deepEqual(modelContextWindows({contextWindow:32769}),{source:"maximum-and-half",values:[32769,16384]});
+      const pasteSession=await sdk.sessions.create(null,"Generated installed exact paste");
+      const pasteDraft=sdk.getState().snapshot.sessions.find(session=>session.id===pasteSession.id).draft;
+      const pasteEditor=new DraftEditor(sdk,pasteSession.id,pasteDraft);
+      const exactPaste=Array.from({length:51},(_,index)=>"Generated installed paste "+index+" 🍊").join("\\r\\n");
+      try{
+        await pasteEditor.paste(exactPaste);
+        const captured=sdk.getState().snapshot.sessions.find(session=>session.id===pasteSession.id).draft;
+        assert.equal(captured.text,"");assert.equal(captured.attachments[0].kind,"paste_file");
+        const file=captured.attachments[0];
+        assert.deepEqual((await sdk.attachments.read(pasteSession.id,file.id)).content,{kind:"text",text:exactPaste});
+        await assert.rejects(()=>beta.attachments.read(pasteSession.id,file.id),{code:"attachment_session"});
+        await pasteEditor.send("queue",true);
+        const held=sdk.getState().snapshot.sessions.find(session=>session.id===pasteSession.id).queue[0];
+        assert.equal(held.held,true);assert.equal(held.text,"");assert.equal(held.attachments[0].digest,file.digest);
+        await sdk.sessions.delete(pasteSession.id,true);
+        await assert.rejects(()=>sdk.attachments.read(pasteSession.id,file.id),{code:"attachment_session"});
+      }finally{pasteEditor.dispose();}
+      ` : ""}
       assert.equal(Reflect.set(sdk,"profileId",profile.id),false);
       assert.equal(sdk.profileId,"default");assert.equal(beta.profileId,profile.id);
       assert.equal(beta.getState().snapshot.projects.length,0);assert.equal(beta.getState().snapshot.sessions.length,0);
@@ -861,6 +931,10 @@ try {
     console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/CLI/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
+  if (installedProtocol >= 40 && process.platform === "darwin") {
+    const { qualifyDecisions } = await import("./qualify-decisions.mjs");
+    console.log(await qualifyDecisions({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-decisions") }));
+  }
   if (installedProtocol >= 34) {
     const { qualifyModelEvidence } = await import("./qualify-model-evidence.mjs");
     console.log(await qualifyModelEvidence({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-explicit-model-evidence") }));

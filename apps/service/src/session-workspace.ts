@@ -36,6 +36,7 @@ export interface SessionWorkspaceHost {
   project(session: Pick<Session, "projectId" | "workspaceId">): Project;
   rootBusy(projectId: string, workspaceId: string | null): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
+  nativeRead?(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   remotePlanBinding(session: Session): PlanBinding;
   remoteConsoles?: RemoteConsoles;
 }
@@ -149,6 +150,12 @@ export class SessionWorkspace {
       case "project.porto": return { type: query.type, output: await this.projects.porto(this.project(query.projectId), AbortSignal.timeout(15_000)) };
       case "plan.read": {
         const session = this.session(query.sessionId);
+        if (session.controls.env === "Sandbox") {
+          if (!this.host.nativeRead) throw new MoguriError("sandbox_workspace", "This service has no qualified native plan reader. No Local source root was read.", 409);
+          const result = await this.host.nativeRead(session, { type: "plan.read" });
+          if (result.type !== "plan.read") throw new MoguriError("sandbox_workspace", "Native plan response changed its requested type.", 409);
+          return result;
+        }
         if (session.controls.env === "Remote") {
           const result = await this.host.remoteRead(session, { type: "plan.read" });
           if (result.type !== "plan.read") throw new MoguriError("remote_workspace_type", "Remote plan response did not match its request.", 409);
@@ -292,8 +299,9 @@ export class SessionWorkspace {
       }
       case "plan.save":
       case "artifact.capture": {
-        const session = this.session(command.sessionId); const project = this.host.project(session);
+        const session = this.session(command.sessionId);
         if (session.controls.env !== "Local") throw new MoguriError("plan_env", "Plan/artifact workspace transport is not qualified for this environment. No local project was read or written as a fallback.", 409);
+        const project = this.host.project(session);
         const settings = this.projects.configuration(project.id).values;
         const path = command.type === "artifact.capture" ? command.path ?? settings.planPath : settings.planPath;
         if (command.type === "plan.save") {

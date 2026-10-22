@@ -34,7 +34,7 @@ test("exact token/USD reservations share one owner across internal roles and can
 });
 
 test("a finite estimate policy forwards the reduced output bound and preserves cumulative reported usage across turns", { skip: process.platform !== "darwin" }, async () => {
-  const fixture = await setupFixture({ maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ maxOutputTokens: 128, contextWindow: 16384 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await fixture.configure();
     await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "Generated finite metering.", attachments: [] });

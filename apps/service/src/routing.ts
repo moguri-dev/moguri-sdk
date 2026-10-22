@@ -1,31 +1,48 @@
 import { Value } from "typebox/value";
 import {
-  DEFAULT_ROUTER_PROMPT, KUPO_MODEL_ID, MoguriError, SingleRoutingPlanSchema, type Controls, type KupoSettings, type ModelInfo, type SingleRoutingPlan,
+  DEFAULT_ROUTER_PROMPT, KUPO_MODEL_ID, modelContextWindows, MoguriError, SingleRoutingPlanSchema, type Controls, type KupoSettings, type ModelInfo, type SingleRoutingPlan,
 } from "../../../packages/protocol/src/index.ts";
+import type { RoutingPool } from "../../../packages/protocol/src/compound.ts";
+import { compoundPool } from "./compound-policy.ts";
 
-interface BoundedModel extends ModelInfo { maxTokens: number }
-const ready = (model: ModelInfo, settings: KupoSettings, env: Controls["env"]): model is BoundedModel => model.id !== KUPO_MODEL_ID && !model.synthetic &&
+export interface BoundedRoutingModel extends ModelInfo { maxTokens: number }
+export const routingWorkingWindow = (model: ModelInfo): number => {
+  try { return modelContextWindows(model).values[0] ?? 0; }
+  catch (error) {
+    if (!(error instanceof MoguriError && error.code === "model_context")) throw error;
+    throw new MoguriError("routing_context", "A configured model has invalid working-window declarations. Refresh its capabilities; no window or model was substituted.", 409);
+  }
+};
+export const routingModelReady = (model: ModelInfo, settings: RoutingPool, env: Controls["env"]): model is BoundedRoutingModel => model.id !== KUPO_MODEL_ID && !model.synthetic &&
   (model.environments?.includes(env) ?? env === "Local") && (model.source === "local" && model.endpointBoundary === "loopback" || settings.allowHosted) &&
-  typeof model.maxTokens === "number" && Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 && Number.isSafeInteger(model.contextWindow) && model.contextWindow >= 8192;
+  typeof model.maxTokens === "number" && Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 && Number.isSafeInteger(model.contextWindow) && model.contextWindow >= 8192 && routingWorkingWindow(model) >= 8192;
 
-export function kupoPool(settings: KupoSettings, models: ModelInfo[], env: Controls["env"], estimatedTokens = 0) {
-  if (!settings.enabled || settings.workflow !== "single") throw new MoguriError("routing_disabled", "Explicitly configure the experimental kupo Single policy first. Fixed models remain available.", 409);
+export function kupoPool(settings: RoutingPool, models: ModelInfo[], env: Controls["env"], estimatedTokens = 0) {
+  if (!settings.enabled) throw new MoguriError("routing_disabled", "Explicitly configure the experimental kupo policy and eligible pool first. Fixed models remain available.", 409);
   const classifier = models.find((model) => model.id === settings.classifierModelId);
-  if (!classifier || !ready(classifier, settings, env)) throw new MoguriError("routing_classifier", "The explicitly configured classifier is unavailable, incompatible with this env, or lacks hosted-data permission for a network/unknown endpoint or known output bounds. No fallback.", 409);
-  const candidates = models.filter((model): model is BoundedModel => settings.approvedModelIds.includes(model.id) && ready(model, settings, env) && model.contextWindow > estimatedTokens + model.maxTokens);
+  if (!classifier || !routingModelReady(classifier, settings, env)) throw new MoguriError("routing_classifier", "The explicitly configured classifier is unavailable, incompatible with this env, or lacks hosted-data permission for a network/unknown endpoint or known output bounds. No fallback.", 409);
+  const candidates = models.filter((model): model is BoundedRoutingModel => settings.approvedModelIds.includes(model.id) && routingModelReady(model, settings, env) && routingWorkingWindow(model) >= estimatedTokens + model.maxTokens + 4096);
   if (!candidates.length) throw new MoguriError("routing_pool", "No explicitly approved solver fits this env/context/privacy/output contract. No classifier request was sent.", 409);
   return { classifier: structuredClone(classifier), candidates: structuredClone(candidates) };
 }
 export function kupoAvailability(settings: KupoSettings, models: ModelInfo[], hardBudget: boolean): { model: ModelInfo | null; diagnostics: string[] } {
   if (!settings.enabled) return { model: null, diagnostics: ["kupo is disabled until you explicitly approve its Single policy and model pool."] };
   if (hardBudget) return { model: null, diagnostics: ["Finite kupo budgets remain unavailable until reserved wind-down and accepted-work checkpoint paths are qualified. Hard policy was not lifted."] };
-  const environments: Controls["env"][] = [], candidates: BoundedModel[] = [], diagnostics: string[] = [];
+  if (settings.workflow === "compound") {
+    try {
+      const pool = compoundPool(settings, models, "Local"), candidates = pool.candidates;
+      return { model: { id: KUPO_MODEL_ID, name: "kupo Compound (reviewed alpha)", contextWindow: Math.min(...candidates.map(routingWorkingWindow)),
+        maxTokens: settings.limits.proposalTokens, imageInput: false, providerId: "moguri-kupo", synthetic: true, environments: ["Local"] },
+        diagnostics: [...pool.diagnostics.map((entry) => entry.message), "Compound sends require an explicit source/worktree/test review through the shared compound API. No ordinary Single fallback."] };
+    } catch (error) { if (!(error instanceof MoguriError)) throw error; return { model: null, diagnostics: [error.message] }; }
+  }
+  const environments: Controls["env"][] = [], candidates: BoundedRoutingModel[] = [], diagnostics: string[] = [];
   for (const env of ["Local", "Remote"] as const) {
     try { const pool = kupoPool(settings, models, env); environments.push(env); candidates.push(...pool.candidates); }
     catch (error) { if (!(error instanceof MoguriError && error.code.startsWith("routing_"))) throw error; diagnostics.push(`${env}: ${error.message}`); }
   }
   if (!candidates.length) return { model: null, diagnostics };
-  return { model: { id: KUPO_MODEL_ID, name: "kupo Single (alpha)", contextWindow: Math.min(...candidates.map((model) => model.contextWindow)),
+  return { model: { id: KUPO_MODEL_ID, name: "kupo Single (alpha)", contextWindow: Math.min(...candidates.map(routingWorkingWindow)),
     maxTokens: Math.min(...candidates.map((model) => model.maxTokens)), imageInput: false, providerId: "moguri-kupo", synthetic: true, environments }, diagnostics };
 }
 export function routingPlan(value: unknown, candidateIds: string[], minimumConfidence: number): SingleRoutingPlan {

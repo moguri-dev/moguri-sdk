@@ -173,6 +173,9 @@ export interface NativeRollbackInput extends NativeBoundaryInput {
   exitCode: number; file: string; maxBytes?: number;
   baseline?: Record<string, string>;
 }
+export interface NativeCompletionInput extends NativeBoundaryInput {
+  exitCode?: number; planDigest?: string; signerFingerprint?: string; baseline?: Record<string, string>;
+}
 async function boundary(input: NativeBoundaryInput) {
   const sid = sessionHex(input.sessionId), root = join(await privateDirectory(input.stateRoot), "sessions", sid);
   await privateDirectory(root);
@@ -191,10 +194,9 @@ export async function readNativeBoundary(input: NativeBoundaryInput) {
   return { sessionId: value.sid, planDigest: value.planDigest, signerFingerprint: value.signerFingerprint,
     workspace: input.workspace, image: input.image };
 }
-export async function readNativeRollback(input: NativeRollbackInput) {
-  const fileName = pathName(input.file);
-  if (!uint(input.exitCode) || input.exitCode === 0) fail("Native rollback needs an actual unsuccessful run.");
+export async function readNativeCompletion(input: NativeCompletionInput) {
   const { sid, root, identity, planDigest, signerFingerprint } = await boundary(input);
+  if (input.planDigest !== undefined && input.planDigest !== planDigest || input.signerFingerprint !== undefined && input.signerFingerprint !== signerFingerprint) fail("Native completion changed its originally bound plan or signer.");
   const auditRaw = await bytes(join(root, "audit-log.json"), 16 * 1024 * 1024), audit = record(json(auditRaw));
   signature(json(await bytes(join(root, "audit-log.signature.json"), 64 * 1024)), identity, auditRaw, "artifact", "audit-log.json", { session_id: sid, boundary_plan_digest: planDigest });
   if (audit.format !== "sendbox-host-audit-publication" || audit.version !== 1 || audit.session_id !== sid || audit.boundary_plan_digest !== planDigest || !Array.isArray(audit.records) || audit.event_count !== audit.records.length) fail("Native signed audit does not match the captured boundary.");
@@ -203,9 +205,17 @@ export async function readNativeRollback(input: NativeRollbackInput) {
   const before = events.filter((event) => event.action === "before_snapshot_captured" && event.result === "success");
   if (before.length !== 1 || !hex(before[0]!.subject)) fail("Native audit has no unique captured baseline.");
   const beforeId = before[0]!.subject;
-  if (!events.some((event) => event.action === "runtime_execution_finished" && record(event.metadata).exit_code === String(input.exitCode)) ||
-    !events.some((event) => event.action === "session_finalized" && event.subject === "failed") ||
-    !events.some((event) => event.action === "snapshot_rollback" && event.subject === beforeId && event.result === "success")) fail("Native failure or successful rollback is not in its signed audit.");
+  const runtime = events.filter((event) => event.action === "runtime_execution_finished"), lost = events.filter((event) => event.action === "runtime_execution_failed"),
+    terminal = events.filter((event) => event.action === "session_finalized");
+  const exit = runtime.length === 1 ? record(runtime[0]!.metadata).exit_code : null;
+  const unreportedFailure = runtime.length === 0 && lost.length === 1 && lost[0]!.result === "error" && terminal[0]?.subject === "failed";
+  if (!unreportedFailure && (typeof exit !== "string" || !/^(0|[1-9]\d{0,2})$/.test(exit) || Number(exit) > 255 || lost.length !== 0) ||
+    input.exitCode !== undefined && String(input.exitCode) !== exit ||
+    terminal.length !== 1 || !["completed", "failed"].includes(String(terminal[0]!.subject))) fail("Native signed audit has no unique matching execution exit and finalization.");
+  const exitCode = unreportedFailure ? null : Number(exit), failed = exitCode !== 0 || terminal[0]!.subject !== "completed";
+  const rolledBack = events.some((event) => event.action === "snapshot_rollback" && event.subject === beforeId && event.result === "success");
+  if (failed && !rolledBack) fail("Native failure or successful rollback is not in its signed audit.");
+  if (!failed && rolledBack || terminal[0]!.subject === "completed" && exitCode !== 0) fail("Native finalization contradicts its actual exit or rollback.");
   const snapshots = join(root, "snapshots"), names = await readdir(join(snapshots, "manifests"));
   if (names.length > 128 || names.some((name) => !/^[a-f0-9]{64}\.json$/.test(name))) fail("Native retained snapshot set is unbounded or unsupported.");
   const manifests = await Promise.all(names.map(async (name) => {
@@ -219,18 +229,33 @@ export async function readNativeRollback(input: NativeRollbackInput) {
     pathName(path);
     if (!hex(digest) || baseline.entries.find((entry) => entry.path === path)?.kind.content_hash !== digest) fail("Native retained baseline differs from the captured source.");
   }
-  const beforeEntry = baseline.entries.find((entry) => entry.path === fileName);
-  let entry = after[0]!.entries.find((entry) => entry.path === fileName);
-  const visited = new Set<string>();
-  while (entry?.kind.type === "hardlink") {
-    if (visited.has(entry.path)) fail("Native snapshot hardlink cycle was rejected.");
-    visited.add(entry.path); entry = after[0]!.entries.find((candidate) => candidate.path === entry!.kind.source);
-  }
-  if (entry?.kind.type !== "regular" || !hex(entry.kind.content_hash) || !uint(entry.kind.size)) return fail("Native after-state has no regular retained proof.");
-  const maximum = input.maxBytes ?? 128 * 1024;
-  if (!uint(maximum) || maximum < 1 || maximum > 16 * 1024 * 1024 || entry.kind.size > maximum) fail("Native retained file exceeds the requested bound.");
-  const digest = entry.kind.content_hash, content = await bytes(join(snapshots, "objects", digest.slice(0, 2), digest.slice(2)), maximum);
-  if (content.length !== entry.kind.size || hash(content) !== digest) fail("Native retained object length/digest changed.");
-  return { sessionId: sid, signerFingerprint, planDigest, auditDigest: hash(auditRaw), beforeId, afterId: after[0]!.id, added: !beforeEntry,
-    afterBinding: "unique-private-store" as const, rollback: "confirmed" as const, digest, content };
+  const saved = after[0]!;
+  return { sessionId: sid, signerFingerprint, planDigest, auditDigest: hash(auditRaw), beforeId, afterId: saved.id,
+    afterBinding: "unique-private-store" as const, rollback: rolledBack ? "confirmed" as const : "not-requested" as const, exitCode,
+    entries: saved.entries.map((entry) => ({ ...entry, kind: { ...entry.kind } })),
+    async read(requested: string, maximum = 128 * 1024) {
+      const name = pathName(requested), beforeEntry = baseline.entries.find((entry) => entry.path === name);
+      let entry = saved.entries.find((entry) => entry.path === name);
+      const visited = new Set<string>();
+      while (entry?.kind.type === "hardlink") {
+        if (visited.has(entry.path)) fail("Native snapshot hardlink cycle was rejected.");
+        visited.add(entry.path); entry = saved.entries.find((candidate) => candidate.path === entry!.kind.source);
+      }
+      if (entry?.kind.type !== "regular" || !hex(entry.kind.content_hash) || !uint(entry.kind.size)) return fail("Native after-state has no regular retained proof.");
+      if (!uint(maximum) || maximum < 1 || maximum > 32 * 1024 * 1024 || entry.kind.size > maximum) fail("Native retained file exceeds the requested bound.");
+      const digest = entry.kind.content_hash, content = await bytes(join(snapshots, "objects", digest.slice(0, 2), digest.slice(2)), maximum);
+      if (content.length !== entry.kind.size || hash(content) !== digest) fail("Native retained object length/digest changed.");
+      return { digest, content, added: !beforeEntry, mode: entry.mode };
+    },
+  };
+}
+export async function readNativeRollback(input: NativeRollbackInput) {
+  const file = pathName(input.file);
+  if (!uint(input.exitCode) || input.exitCode === 0) fail("Native rollback needs an actual unsuccessful run.");
+  const evidence = await readNativeCompletion(input), maximum = input.maxBytes ?? 128 * 1024;
+  if (!uint(maximum) || maximum < 1 || maximum > 16 * 1024 * 1024) fail("Native retained file exceeds the requested bound.");
+  if (evidence.rollback !== "confirmed") fail("Native failure or successful rollback is not in its signed audit.");
+  const content = await evidence.read(file, maximum);
+  const { entries: _entries, read: _read, ...proof } = evidence;
+  return { ...proof, rollback: "confirmed" as const, ...content };
 }
