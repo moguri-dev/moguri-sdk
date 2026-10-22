@@ -28,6 +28,12 @@ failure; an in-flight save continues to block navigation/submission as appropria
 The settings-focused conversation is presented as **ask Moguri**, without
 changing its reviewed proposal or scope boundaries.
 
+Compact layouts keep offered answers and composer actions visible together
+with a held queue down to 840 x 620. Long question/advice content scrolls with
+keyboard access instead of pushing Send below the window. Speech stop/discard
+and capability-job cancellation remain available during a held preference save;
+new recordings are blocked until the configuration settles.
+
 Ctrl+Space must reach the focused chat surface without auto-repeating start/stop.
 Native stop requests are idempotent and finalization has its own bounded deadline,
 separate from cancellation escalation. Cancellation discards output; nonzero and
