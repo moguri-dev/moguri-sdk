@@ -58,7 +58,7 @@ test("schema-24 marker failure preserves exact schema-23 ciphertext and recovers
   try {
     store.commit([{ event_type: "job.progress", profile_id: "default", payload: { jobId: "generated-older-source", progress: "Generated encrypted schema-23 source." } }]);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
-    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema'); PRAGMA user_version=23;
+    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema','paste_file_schema'); PRAGMA user_version=23;
       CREATE TRIGGER generated_remote_mcp_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='remote_mcp_schema'
       BEGIN SELECT RAISE(ABORT,'Generated Remote MCP marker failure'); END; COMMIT;`);
     store.close(); store = undefined;

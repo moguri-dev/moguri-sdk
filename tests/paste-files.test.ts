@@ -216,3 +216,18 @@ test("explicit child context copies retain their own scoped file grant after sou
     assert.equal(fixture.requests.length, 1);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
+
+test("a settings-only chat preserves a pasted file and blocks before inference when no file tool is exposed", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const created = await sdk.metachat.create(null);
+    const session = () => fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)!;
+    await sdk.sessions.configure(created.id!, { ...session().controls, modelId: fixture.modelId });
+    await sdk.attachments.paste(created.id!, Array.from({ length: 51 }, (_, index) => `Generated settings paste ${index}`).join("\n"));
+    const before = session().draft;
+    await assert.rejects(() => sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: before.revision, delivery: "queue" }), /file tool|tool-less|settings-only/i);
+    assert.deepEqual(session().draft, before);
+    assert.deepEqual(session().queue, []);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});

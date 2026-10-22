@@ -7,7 +7,7 @@ import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, MoguriError, parse, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
+  CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
@@ -1277,6 +1277,11 @@ export class ControlPlane extends EventEmitter {
     const model = this.snapshot().provider.models.find((model) => model.id === session.controls.modelId);
     if (!model?.imageInput && (attachments.some((attachment) => attachment.kind === "image") || contextHasImages(this.context(session.id)))) throw new MoguriError("model_images", "Select an image-capable model before admitting this complete context. The draft/queue was preserved; no image was dropped.", 409);
   }
+  private fileModel(session: Session, attachments: Session["draft"]["attachments"], text: string): void {
+    if (session.kind !== "metachat" && session.kind !== "subagent") return;
+    if (pasteLineCount(text) <= 50 && !attachments.some((attachment) => attachment.kind === "paste_file") && !this.hasPasteFiles(session)) return;
+    throw new MoguriError("context_tools", "This settings-only or tool-less chat cannot inspect scoped pasted files. The complete draft/queue is preserved. Use a normal chat or an explicitly created read-only side session with approved file tools; no body was dropped or sent.", 409);
+  }
   /** @internal Privileged Node executor, not a public compound workflow or transport command. */
   executeOwnedRoles(value: OwnedRoleInput, approval: OwnedRoleReview, commandId: string = randomUUID()): Promise<CommandResult> {
     const input = structuredClone(parse(OwnedRoleInputSchema, value)), review = structuredClone(parse(OwnedRoleReviewSchema, approval));
@@ -1423,6 +1428,7 @@ export class ControlPlane extends EventEmitter {
         if (command.held && command.delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
         if (!command.held) {
           this.available(session.controls, true, session);
+          this.fileModel(session, session.draft.attachments, session.draft.text);
           this.imageModel(session, session.draft.attachments);
           if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "A prior turn failed or has unconfirmed effects. Inspect the workspace, then explicitly Resume after inspection before starting new work.", 409);
         }
@@ -1548,6 +1554,7 @@ export class ControlPlane extends EventEmitter {
       let item = session.queue.find((item) => item.delivery !== "steer" && !item.held)!;
       try {
         this.available(session.controls, true, session); this.imageModel(session, item.attachments);
+        this.fileModel(session, item.attachments, item.text);
         this.attachments(session, item.attachments);
         if (session.kind === "agent" && (session.pendingMode ?? session.mode) === "agent" && this.otherWriter(session)) continue;
         item = { ...item, ...this.platform.inputs.normalizePaste(item.text, item.attachments) };

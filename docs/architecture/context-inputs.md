@@ -70,6 +70,9 @@ grants in `session.created.pasteFiles`; deleting its source cannot erase those
 copies. It still needs separate file-tool approval. Tool-less model-created
 subagents fail explicitly when scoped files would be inaccessible, rather than
 receiving unreadable filenames or an automatic whole-file prompt expansion.
+Settings-only metachat likewise blocks scoped-file turn admission with an
+actionable diagnostic and preserves the draft/held queue. It never widens its
+tool set or silently supplies the whole file as a workaround.
 
 Unsupported image models block admission and preserve the complete draft/queue;
 images are never silently dropped, captioned remotely or sent to another model.

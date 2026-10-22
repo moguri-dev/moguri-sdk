@@ -263,12 +263,12 @@ try {
         assert.equal(captured.text,"");assert.equal(captured.attachments[0].kind,"paste_file");
         const file=captured.attachments[0];
         assert.deepEqual((await sdk.attachments.read(pasteSession.id,file.id)).content,{kind:"text",text:exactPaste});
-        await assert.rejects(()=>beta.attachments.read(pasteSession.id,file.id),/session|profile/);
+        await assert.rejects(()=>beta.attachments.read(pasteSession.id,file.id),{code:"attachment_session"});
         await pasteEditor.send("queue",true);
         const held=sdk.getState().snapshot.sessions.find(session=>session.id===pasteSession.id).queue[0];
         assert.equal(held.held,true);assert.equal(held.text,"");assert.equal(held.attachments[0].digest,file.digest);
         await sdk.sessions.delete(pasteSession.id,true);
-        await assert.rejects(()=>sdk.attachments.read(pasteSession.id,file.id),/session|profile/);
+        await assert.rejects(()=>sdk.attachments.read(pasteSession.id,file.id),{code:"attachment_session"});
       }finally{pasteEditor.dispose();}
       ` : ""}
       assert.equal(Reflect.set(sdk,"profileId",profile.id),false);
