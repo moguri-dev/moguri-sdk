@@ -299,8 +299,9 @@ export class SessionWorkspace {
       }
       case "plan.save":
       case "artifact.capture": {
-        const session = this.session(command.sessionId); const project = this.host.project(session);
+        const session = this.session(command.sessionId);
         if (session.controls.env !== "Local") throw new MoguriError("plan_env", "Plan/artifact workspace transport is not qualified for this environment. No local project was read or written as a fallback.", 409);
+        const project = this.host.project(session);
         const settings = this.projects.configuration(project.id).values;
         const path = command.type === "artifact.capture" ? command.path ?? settings.planPath : settings.planPath;
         if (command.type === "plan.save") {

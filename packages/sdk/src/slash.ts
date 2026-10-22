@@ -1,8 +1,8 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
 
-export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention";
+export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
 export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
 export type SlashResult =
@@ -61,6 +61,7 @@ export const slashCommands = [
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
+  { name: "sandbox", description: "Review native source staging, exact owned runs and separate user publication", argument: "[status|probe confirm-native|preview PATHS_JSON|prepare REVIEW_JSON confirm-stage|execution ID|result ID|stop ID confirm-stop|reconcile ID confirm-inspect|publish-preview ID PATHS_JSON|publish REVIEW_JSON confirm-publish|publication ID|stop-publication ID confirm-stop]" },
   { name: "mcp-remote", description: "Review exact Remote MCP grants and retained calls; never authenticate or approve a tool", argument: "[servers|preview SERVER|grant SERVER SHA256 REV confirm-reviewed [forward-access]|revoke SERVER REV confirm-revoke|calls|inspect OPERATION_ID]" },
   { name: "workspace", description: "Manage an explicit isolated Local checkout", argument: "[list|discover|create BRANCH [BASE]|new ID|bind ID|inspect ID|remove ID|reconcile ID]" },
   { name: "files", description: "Read the session's actual bound directory", argument: "[PATH]" },
@@ -417,6 +418,59 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "file": {
       if (!command.argument) throw new ClientError("file_path", "Use /file PROJECT_RELATIVE_PATH.");
       return { kind: "text", text: (await sdk.workspaces.file(session.id, command.argument)).text };
+    }
+    case "sandbox": {
+      const [action = "", ...parts] = command.argument.split(/\s+/).filter(Boolean), [id, confirmation, extra] = parts;
+      const text = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+      if (!action && client === "desktop") return { kind: "panel", panel: "Sandbox" };
+      if (!action || action === "status" && !id) {
+        const snapshot = sdk.getState().snapshot!;
+        return text({ ...(await sdk.sandbox.status()), workspace: (snapshot.sandboxWorkspaces ?? []).find((value) => value.id === session.sandboxWorkspaceId) ?? null,
+          executions: (snapshot.sandboxExecutions ?? []).filter((value) => value.sessionId === session.id).map(({ id, status, cleanup, cancellation, revision, resultDigest }) => ({ id, status, cleanup, cancellation, revision, resultDigest })),
+          publications: (snapshot.sandboxPublications ?? []).map(({ id, executionId, status, revision, publishedPaths, diagnostic }) => ({ id, executionId, status, revision, publishedPaths, diagnostic })) });
+      }
+      if (action === "probe" && id === "confirm-native" && !confirmation) { await sdk.sandbox.probe(); return text(await sdk.sandbox.status()); }
+      if (action === "preview") {
+        const input = parse(SandboxQuerySchema, { type: "sandbox.preview", sessionId: session.id, paths: JSON.parse(command.argument.slice(action.length).trim()) });
+        const result = await sdk.query(input);
+        if (result.type !== "sandbox.preview") throw new ClientError("sandbox_command", "Native preview changed its exact response type.");
+        return text({ ...result, confirmCommand: `/sandbox prepare ${JSON.stringify({ paths: result.preview.paths, expectedDigest: result.preview.digest,
+          expectedRevision: sdk.getState().snapshot!.sessions.find((value) => value.id === session.id)!.revision })} confirm-stage` });
+      }
+      if (action === "prepare" || action === "publish") {
+        const suffix = action === "prepare" ? " confirm-stage" : " confirm-publish";
+        let input = command.argument.slice(action.length).trim();
+        if (!input.endsWith(suffix)) throw new ClientError("sandbox_review", `Review the exact native bytes/root/policy and append ${suffix.trim()}. No native stage or source effect was started.`);
+        input = input.slice(0, -suffix.length);
+        const value: unknown = JSON.parse(input), allowed = action === "prepare" ? ["paths", "expectedDigest", "expectedRevision"] : ["executionId", "paths", "expectedDigest", "expectedRevision"];
+        if (!isRecord(value) || Object.keys(value).some((key) => !allowed.includes(key))) throw new ClientError("sandbox_review", "Use only exact paths, review digest/revision and the publication's original execution ID; root, profile and actual actor are not client input.");
+        const request = parse(SandboxCommandSchema, { ...value, type: action === "prepare" ? "sandbox.prepare" : "sandbox.publish",
+          ...(action === "prepare" ? { sessionId: session.id } : {}), confirm: true });
+        const created = await sdk.command(request);
+        if (action !== "publish") return text({ ...created, notice: "Exact reviewed private native stage prepared. Source unchanged; no model turn was started." });
+        const published = await sdk.sandbox.waitPublication(created.id!);
+        if (published.publication.status !== "completed") throw new ClientError("sandbox_publication_partial", `Native source publication ${published.publication.status}: ${published.publication.diagnostic ?? "Inspect its original attempts."} Use /sandbox publication ${created.id}. No successful copy or retry was inferred.`);
+        return text(published);
+      }
+      if (action === "execution" && id && !confirmation) return text(await sdk.sandbox.execution(id));
+      if (action === "result" && id && !confirmation) return text(await sdk.sandbox.result(id));
+      if (action === "publication" && id && !confirmation) return text(await sdk.sandbox.publication(id));
+      if (action === "stop" && id && confirmation === "confirm-stop" && !extra) { await sdk.sandbox.stop(id); return text(await sdk.sandbox.execution(id)); }
+      if (action === "reconcile" && id && confirmation === "confirm-inspect" && !extra) { await sdk.sandbox.reconcile(id); return text(await sdk.sandbox.execution(id)); }
+      if (action === "stop-publication" && id && confirmation === "confirm-stop" && !extra) {
+        const record = (await sdk.sandbox.publication(id)).publication;
+        await sdk.jobs.cancel(record.jobId); return text(await sdk.sandbox.publication(id));
+      }
+      if (action === "publish-preview" && id) {
+        const requested = command.argument.slice(action.length).trim().slice(id.length).trim();
+        const input = parse(SandboxQuerySchema, { type: "sandbox.publication.preview", executionId: id, paths: JSON.parse(requested) });
+        const result = await sdk.query(input);
+        if (result.type !== "sandbox.publication.preview") throw new ClientError("sandbox_command", "Native publication preview changed its requested response type.");
+        const execution = (await sdk.sandbox.execution(id)).execution;
+        return text({ ...result, confirmCommand: `/sandbox publish ${JSON.stringify({ executionId: id, paths: result.preview.document.patch.edits.map((edit) => edit.path),
+          expectedDigest: result.preview.digest, expectedRevision: execution.revision })} confirm-publish` });
+      }
+      throw new ClientError("sandbox_command", "Use /sandbox status; probe confirm-native; preview PATHS_JSON; prepare REVIEW_JSON confirm-stage; execution/result/publication ID; stop/reconcile ID confirm-stop|confirm-inspect; or publish-preview ID PATHS_JSON and publish REVIEW_JSON confirm-publish. No Local fallback or automatic acceptance.");
     }
     case "remote": {
       const [action, id, extra] = command.argument.split(/\s+/);

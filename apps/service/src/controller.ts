@@ -578,6 +578,11 @@ export class ControlPlane extends EventEmitter {
     }
     if (command.type === "sandbox.prepare") return this.sandboxWorkspaces.prepare(command, finish);
     const execution = this.sandboxExecution(command.executionId);
+    if (command.type === "sandbox.stop") {
+      const run = this.runs.get(execution.sessionId);
+      if (!run || run.sandboxExecutionId !== execution.id || run.turnId !== execution.turnId) throw new MoguriError("sandbox_owner_changed", "This exact native turn is no longer the active owner. No later turn was stopped.", 409);
+      this.stop(execution.sessionId); return finish([], { id: execution.id });
+    }
     if (this.sandbox.owns(execution.id)) throw new MoguriError("sandbox_active", "Stop/wait for this exact live native owner before offline reconciliation.", 409);
     if (!finish.intent) throw new MoguriError("sandbox_intent", "Native inspection needs its original user command identity before resource effects.", 409);
     const prior = execution.inspectionIntent;
@@ -630,7 +635,9 @@ export class ControlPlane extends EventEmitter {
     const captured = await captureSandboxResult(execution, await this.sandbox.key(execution.id), source?.files.map((file) => file.path) ?? []);
     const current = this.sandboxExecution(execution.id);
     if (current.lastSequence !== execution.lastSequence) throw new MoguriError("sandbox_cursor", "The native durable cursor changed during retained snapshot inspection. No frame or effect was replayed.", 409);
-    return { events: this.nativeReceiptEvents(current, captured.frames), execution: { ...current, resultDigest: this.store.putBlob(JSON.stringify(captured.result)),
+    return { events: [...this.nativeReceiptEvents(current, captured.frames), ...(captured.result.rollback === "confirmed" ? this.sandboxWorkspaces.invalidate(current.workspaceId,
+      "SendBox restored this private workspace by replacement. Actual after-state remains independently retained; explicitly review/prepare a new stage before another turn.") : [])],
+      execution: { ...current, resultDigest: this.store.putBlob(JSON.stringify(captured.result)),
       lastSequence: captured.cursor, ...(captured.result.journal.status === "unconfirmed" ? { status: "partial" as const, diagnostic: captured.result.journal.diagnostic } :
         captured.more ? { status: "partial" as const, diagnostic: "A bounded native journal page was retained. Inspect again for remaining receipts; no work is resumed." } : {}) } };
   }
@@ -1596,9 +1603,14 @@ export class ControlPlane extends EventEmitter {
       }
       case "attachment.add": {
         this.revision(session.draft.revision, command.expectedRevision);
-        const project = this.platform.managed.project(session);
-        const snapshot = await readProjectFile(project.path, command.path);
+        let snapshot: Awaited<ReturnType<typeof readProjectFile>>;
+        if (session.controls.env === "Sandbox") {
+          const native = await this.nativeRead(session, { type: "session.file", path: command.path });
+          if (native.type !== "session.file") throw new MoguriError("sandbox_attachment", "Native file capture changed its exact requested type. No source checkout was read.", 409);
+          snapshot = native;
+        } else snapshot = await readProjectFile(this.platform.managed.project(session).path, command.path);
         const current = this.session(session.id);
+        if (current.controls.env !== session.controls.env || current.workspaceId !== session.workspaceId || current.sandboxWorkspaceId !== session.sandboxWorkspaceId) throw new MoguriError("attachment_scope", "Attachment source binding changed. No snapshot or draft was replaced.", 409);
         this.revision(current.draft.revision, command.expectedRevision);
         const attachments = current.draft.attachments.filter((attachment) => attachment.path !== snapshot.path);
         if (attachments.length >= 16 || attachments.reduce((sum, item) => sum + item.bytes, snapshot.bytes) > 512 * 1024) throw new MoguriError("attachment_limit", "Use at most 16 project text files and 512 KiB of attached text.");

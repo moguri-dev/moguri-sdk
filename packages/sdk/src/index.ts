@@ -401,6 +401,7 @@ export class MoguriSdk extends TransportClient {
     execution: (executionId: string) => this.query({ type: "sandbox.execution", executionId }),
     result: (executionId: string) => this.query({ type: "sandbox.result", executionId }),
     reconcile: (executionId: string) => this.command({ type: "sandbox.reconcile", executionId, confirm: true }),
+    stop: (executionId: string) => this.command({ type: "sandbox.stop", executionId }),
     publicationPreview: (executionId: string, paths: string[]) => this.query({ type: "sandbox.publication.preview", executionId, paths }),
     publish: (executionId: string, paths: string[], expectedDigest: string, expectedRevision: number) =>
       this.command({ type: "sandbox.publish", executionId, paths, expectedDigest, expectedRevision, confirm: true }),

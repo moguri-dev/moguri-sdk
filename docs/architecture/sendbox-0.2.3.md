@@ -125,3 +125,13 @@ provider completion, public compound/Max/wind-down or full client qualification.
 Production readiness still requires the explicit pinned configuration and a
 passing fresh provider-network scope. No user settings, alias grants, ordinary
 0.2.1 installation or previous archive was replaced.
+
+The subsequent client checkpoint qualifies actual TUI keys (**3.97 s**) and
+hidden desktop setup/source review/guest tools/separate publication (**6.5 s**).
+The desktop's default retained-data case cannot enable Sandbox; explicit saved
+artifact/network review and actual verification still gate Env selection.
+Actual guest termination during a model request (**3.42 s**) verifies native
+absence and retains a partial outcome plus unknown paid capacity. Signed
+runtime exit and CLI exit remain distinct, including an unreported runtime
+failure. Source publication also survives actual controller SIGKILL before
+copying or after one file, without replay when its original receipt is lost.

@@ -60,6 +60,7 @@ export interface SandboxExecution {
 }
 export interface SandboxWorkspacePreview {
   digest: string; sessionId: string; sourceRoot: string | null; paths: string[]; bytes: number;
+  files: Array<{ path: string; text: string; digest: string; bytes: number }>;
   sourceHead: string | null; configDigest: string; diagnostic: string;
 }
 export const SandboxResultSchema = object({
@@ -143,6 +144,7 @@ export const SandboxCommandSchema = Type.Union([
   object({ type: Type.Literal("sandbox.probe"), confirm: Type.Literal(true) }),
   object({ type: Type.Literal("sandbox.prepare"), sessionId: id, paths: Type.Array(path, { maxItems: 200, uniqueItems: true }), expectedDigest: hash, expectedRevision: revision, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("sandbox.reconcile"), executionId: id, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("sandbox.stop"), executionId: id }),
   object({ type: Type.Literal("sandbox.publish"), executionId: id, paths: Type.Array(path, { minItems: 1, maxItems: 20, uniqueItems: true }),
     expectedDigest: hash, expectedRevision: revision, confirm: Type.Literal(true) }),
 ]);

@@ -37,6 +37,9 @@ authenticated late receipts; it never launches a VM, repeats a model/tool call,
 adds completed solver context or upgrades a partial turn. Unknown telemetry
 continues holding capacity. Private output files are capped at 200/2 MiB;
 excluded, protected, binary and oversized paths remain disclosed, not truncated.
+`sandbox.stop(executionId)` stops only that exact currently owned native turn;
+it cannot cancel a later turn merely sharing a session. Native project-file
+capture reads the actual private stage, never the Local source checkout.
 
 `sandbox.publicationPreview(executionId, paths)` reviews up to 20 selected
 text outputs/64 KiB against original Local source bases. Separately confirmed
@@ -51,6 +54,16 @@ replayed. Publication snapshots survive original session/report deletion.
 There is no implicit commit, branch, source deletion or binary/deleted-file
 publication. Native console/MCP/memory/subagent/evolution and plan-write
 transports remain unqualified rather than falling back to Local.
+
+CLI `sandbox preview/prepare PATHS.json --session ID` reads an explicit bounded
+JSON path array. Preparation needs its exact `--digest`, session `--revision`
+and `--confirm-review`. Publication uses `sandbox publish-preview RUN_ID
+PATHS.json`, followed separately by `sandbox publish RUN_ID PATHS.json
+--digest SHA --revision EXECUTION_REV --confirm-write`; Ctrl+C requests the
+original copy job's stop. `publication`, `publication-stop` and
+`publication-wait` inspect/cancel that retained owner. Shared CLI/TUI/desktop
+`/sandbox` commands print exact `confirm-stage`/`confirm-publish` commands after
+preview. No text prefix or model answer is treated as confirmation.
 
 This is an alpha API. Qualified **0.29.0-alpha.1 uses protocol 35**. Qualified
 **0.28.0-alpha.1 uses protocol 34**; the frozen qualified

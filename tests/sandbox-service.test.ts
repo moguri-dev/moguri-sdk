@@ -1,39 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { startService } from "../apps/service/src/server.ts";
-import { MoguriSdk } from "../packages/sdk/src/index.ts";
-import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts";
-import { nativeConfiguration, nativeFixtureCommand } from "./fixtures/native-target.ts";
-import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { waitFor } from "./fixture.ts";
+import { nativeConfiguration } from "./fixtures/native-target.ts";
+import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+import { runProgram } from "../apps/service/src/program.ts";
 
 const configuration = await nativeConfiguration();
-async function nativeSdkFixture() {
-  assert.ok(configuration);
-  await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
-  const root = await realpath(await mkdtemp(".native/qualification/native-service-")), state = join(root, "state"), project = join(root, "project");
-  for (const path of [state, project]) await mkdir(path, { mode: 0o700 });
-  await writeFile(join(project, "fixture.txt"), "generated source original\n");
-  const provider = await fixtureProvider({ exposeModels: true }), vault = new GeneratedFileVault(join(root, "generated-vault.json"));
-  const prepare = provider.provider.prepare.bind(provider.provider);
-  provider.provider.prepare = async (id, signal) => {
-    const value = await prepare(id, signal);
-    return { ...value, model: { ...value.model, baseUrl: "https://api.githubcopilot.com" }, auth: { ...value.auth, baseUrl: "https://api.githubcopilot.com" } };
-  };
-  const service = await startService({ stateDir: state, provider: provider.provider, retentionKey: GENERATED_RETENTION_KEY,
-    platform: { vault, sandbox: { vault, command: await nativeFixtureCommand(provider.modelId) } } });
-  const sdk = await new MoguriSdk(service.connection).ready();
-  return { root, project, provider, service, sdk, close: async (passed: boolean) => {
-    sdk.disconnect(); await service.close(); await provider.close();
-    if (passed) await rm(root, { recursive: true, force: true });
-    else console.error("Generated native service diagnostics retained:", root);
-  } };
-}
 test("SDK native source review, real guest model/tools, Manual approvals and solver accounting never write the source checkout", { skip: !configuration, timeout: 90_000 }, async () => {
   assert.ok(configuration);
-  const fixture = await nativeSdkFixture(), { sdk, provider, project } = fixture;
+  const fixture = await nativeApiFixture(configuration), { sdk, provider, project } = fixture;
   const git = initializeGeneratedRepository(project);
   await writeFile(join(project, "staged-user.txt"), "Generated existing staged intent.\n"); git(["add", "staged-user.txt"]);
   await writeFile(join(project, "unrelated-user.txt"), "Generated unrelated untracked edit.\n");
@@ -52,6 +30,10 @@ test("SDK native source review, real guest model/tools, Manual approvals and sol
     assert.equal(session().sandboxWorkspaceId, prepared.id);
     const original = await sdk.query({ type: "session.file", sessionId: created.id!, path: "fixture.txt" });
     assert.equal(original.text, "generated source original\n");
+    await assert.rejects(() => sdk.query({ type: "mcp.tools", sessionId: created.id!, serverId: "builtin", query: "", offset: 0 }), /no Local fallback|qualified transport/i);
+    await assert.rejects(() => sdk.command({ type: "mcp.call", sessionId: created.id!, serverId: "builtin", tool: "fetch_page",
+      arguments: { url: "https://generated.invalid" }, schemaDigest: "0".repeat(64) }), /No qualified native MCP/);
+    await assert.rejects(() => sdk.command({ type: "subagent.run", sessionId: created.id!, prompt: "Generated unqualified native child." }), /not qualified/);
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text: "generated native write", attachments: [] });
     await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
     const approved: string[] = [];
@@ -80,6 +62,10 @@ test("SDK native source review, real guest model/tools, Manual approvals and sol
     assert.equal(proof.calls.length, 3);
     assert.ok(proof.calls.every((call: { tools: string[] }) => call.tools.every((name) => ["ask_user", "list_files", "read_file", "write_file", "run_command"].includes(name))));
     assert.equal(await readFile(join(project, "fixture.txt"), "utf8"), "generated source original\n");
+    assert.equal((await sdk.workspaces.file(created.id!, "fixture.txt")).text, "generated native replacement\n");
+    await sdk.command({ type: "attachment.add", sessionId: created.id!, expectedRevision: session().draft.revision, path: "fixture.txt" });
+    const capturedNative = session().draft.attachments[0]!;
+    assert.deepEqual((await sdk.attachments.read(created.id!, capturedNative.id)).content, { kind: "text", text: "generated native replacement\n" });
     const totals = (await sdk.budgets.status(created.id!)).status.totals;
     assert.equal(totals.calls, 3); assert.equal(totals.reportedTokens, 126);
     await assert.rejects(() => sdk.artifacts.update(execution.id, { text: "Generated forged native provenance." }, 0), /immutable/i);
@@ -116,7 +102,7 @@ test("SDK native source review, real guest model/tools, Manual approvals and sol
 
 test("project-free native SDK turns read scoped long-paste pages through the authenticated broker without mounting or uploading the full file", { skip: !configuration, timeout: 90_000 }, async () => {
   assert.ok(configuration);
-  const fixture = await nativeSdkFixture(), { sdk, provider } = fixture;
+  const fixture = await nativeApiFixture(configuration), { sdk, provider } = fixture;
   let passed = false;
   try {
     const settings = structuredClone(sdk.settings.get()!);
@@ -155,7 +141,7 @@ test("project-free native SDK turns read scoped long-paste pages through the aut
 
 test("actual native model cancellation holds unknown metering, verifies guest absence and refuses a rolled-back stage before draft consumption", { skip: !configuration, timeout: 90_000 }, async () => {
   assert.ok(configuration);
-  const fixture = await nativeSdkFixture(), { sdk, provider } = fixture;
+  const fixture = await nativeApiFixture(configuration), { sdk, provider } = fixture;
   let passed = false;
   try {
     const settings = structuredClone(sdk.settings.get()!);
@@ -181,6 +167,40 @@ test("actual native model cancellation holds unknown metering, verifies guest ab
     assert.equal(session().draft.text, "Generated retained next prompt.");
     assert.equal(sdk.getState().snapshot!.sandboxExecutions!.length, 1);
     assert.equal((await sdk.budgets.calls({ sessionId: created.id! })).calls.length, 1);
+    assert.equal(provider.requests.length, 0);
+    passed = true;
+  } finally { await fixture.close(passed); }
+});
+
+test("actual native guest loss preserves partial outcome and unknown capacity without replay or conflating CLI/runtime exits", { skip: !configuration, timeout: 90_000 }, async () => {
+  assert.ok(configuration);
+  const fixture = await nativeApiFixture(configuration), { sdk, provider } = fixture;
+  let passed = false;
+  try {
+    const settings = structuredClone(sdk.settings.get()!);
+    await sdk.settings.update({ ...settings.values, sandbox: fixture.reviewedConfiguration }, settings.revision); await sdk.sandbox.probe();
+    const created = await sdk.sessions.create(null), session = () => sdk.getState().snapshot!.sessions.find((value) => value.id === created.id)!;
+    await sdk.sessions.configure(created.id!, { ...session().controls, env: "Sandbox", modelId: provider.modelId });
+    const preview = (await sdk.sandbox.preview(created.id!, [])).preview;
+    await sdk.sandbox.prepare(created.id!, [], preview.digest, session().revision);
+    await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text: "generated native slow", attachments: [] });
+    await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
+    await waitFor(() => session().messages.some((message) => message.text.includes("GENERATED_NATIVE_PENDING")), 20_000);
+    const original = sdk.getState().snapshot!.sandboxExecutions![0]!;
+    assert.ok(original.nativeSessionId && original.planDigest && original.signerFingerprint);
+    await runProgram("container", ["stop", "--time", "1", `${original.launchName}-${original.nativeSessionId}`], {
+      cwd: fixture.root, signal: AbortSignal.timeout(15_000), timeoutMs: 15_000, label: "Generated exact native guest-loss injection",
+    });
+    await waitFor(() => !session().turnId && ["failed", "partial"].includes(session().status), 20_000);
+    assert.equal(session().status, "partial");
+    const retained = (await sdk.sandbox.execution(original.id)).execution;
+    assert.equal(retained.cleanup, "owned-guest-stopped");
+    const result = (await sdk.sandbox.result(original.id)).result;
+    assert.ok(result, retained.diagnostic ?? "Original failed native after-state was not retained.");
+    assert.equal(result.rollback, "confirmed");
+    const call = (await sdk.budgets.calls({ sessionId: created.id! })).calls[0]!;
+    assert.equal(call.status, "unknown"); assert.equal(call.reportedTokens, null); assert.ok(call.reservedTokens! > 0);
+    assert.equal(sdk.getState().snapshot!.sandboxExecutions!.length, 1);
     assert.equal(provider.requests.length, 0);
     passed = true;
   } finally { await fixture.close(passed); }

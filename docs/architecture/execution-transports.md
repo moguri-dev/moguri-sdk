@@ -81,6 +81,16 @@ does not yet qualify every client or the remaining compound/Max/wind-down
 milestone gates. Private native directories and SendBox's separate snapshot
 store are not encrypted-retention deletion or reclaimed-space claims.
 
+The subsequent shared CLI/TUI/desktop checkpoint exposes explicit qualification,
+exact source previews, stage preparation, original-run stop/reconciliation and
+separate publication review. A native stop binds execution and turn ownership,
+not only a session ID. File views and legacy project-file capture use the
+private stage; unsupported delegate/plan writes are rejected before resolving
+the Local source. Retained report editors expose metadata only. A confirmed
+rollback invalidates its stage record, rather than leaving a reusable ready
+badge after the root inode changes. Client qualification does not enable
+unproven compound, Max, live-provider or side-capability combinations.
+
 An owned rootless loopback OpenSSH server passed strict generated host-key
 verification and a real worker-originated HTTP request in 175.94 ms. A changed
 host key prevented execution before another request. The server used generated

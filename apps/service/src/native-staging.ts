@@ -19,7 +19,7 @@ export interface NativeStage extends NativeStageOwner {
 }
 function invalid(message: string): never { throw new MoguriError("native_stage", `${message} No user checkout was replaced or published.`, 409); }
 const fileName = (path: string): string => {
-  if (!path || path.length > 4096 || isAbsolute(path) || /[\\\u0000]/.test(path) || path.split("/").some((part) => !part || part === "." || part === "..") || isProtectedProjectPath(path)) invalid("Choose an explicit unprotected relative text file.");
+  if (!path || path.length > 4096 || isAbsolute(path) || /[\\\u0000-\u001f\u007f]/.test(path) || path.split("/").some((part) => !part || part === "." || part === "..") || isProtectedProjectPath(path)) invalid("Choose an explicit unprotected relative text file.");
   return path;
 };
 const identity = (value: { dev: bigint; ino: bigint }): DirectoryIdentity => ({ device: String(value.dev), inode: String(value.ino) });

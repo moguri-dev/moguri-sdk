@@ -792,11 +792,13 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         }
       case "mcp.call": {
         const session = this.session(command.sessionId);
+        if (session.controls.env === "Sandbox") throw new MoguriError("mcp_env", "No qualified native MCP execution transport exists. No Local gateway worker, credential or source-root fallback was used.", 409);
         const call: ToolCall = { id: randomUUID(), name: "mcp_gateway", arguments: { action: "call", serverId: command.serverId, tool: command.tool, arguments: command.arguments, schemaDigest: command.schemaDigest } };
         const id = await this.host.externalCall(session, call, (signal) => this.callMcp(this.session(session.id), call.arguments, signal), finish.intent);
         return finish([], { id });
       }
       case "subagent.run":
+        if (this.session(command.sessionId).controls.env === "Sandbox") throw new MoguriError("subagent_env", "Native subagent execution is not qualified. No Local/SSH worker or source-root fallback was used.", 409);
         if (!snapshot.settings.values.subagents.enabled) throw new MoguriError("subagents_disabled", "Subagents are off by default. Explicitly enable the bounded read-only mode first.", 409);
         return finish([], { id: this.host.subagent(this.session(command.sessionId), command.prompt) });
       case "voice.download": {

@@ -63,6 +63,7 @@ export class SandboxWorkspaces {
     const text = JSON.stringify(input), before = (this.host.snapshot().sandboxWorkspaces ?? []).filter((value) => value.sessionId === sessionId).map(({ id, revision, status }) => ({ id, revision, status }));
     const preview: SandboxWorkspacePreview = { digest: digest(`moguri-native-workspace-v1\0${text}\0${JSON.stringify(before)}`), sessionId, sourceRoot: project?.path ?? null,
       paths: selected, bytes: source?.files.reduce((total, file) => total + file.bytes, 0) ?? 0, sourceHead, configDigest: frameDigest(config),
+      files: source?.files.map(({ path, text, digest, bytes }) => ({ path, text, digest, bytes })) ?? [],
       diagnostic: "Only these exact text snapshots enter a private native staging root. Agent writes never modify the source checkout; later publication needs separate byte/base/policy review." };
     return { preview, input, text, session };
   }
@@ -128,6 +129,10 @@ export class SandboxWorkspaces {
   }
   document(workspace: Pick<SandboxWorkspace, "inputDigest">) {
     return nativeWorkspaceDocument(this.store.blob(workspace.inputDigest));
+  }
+  invalidate(id: string, diagnostic: string): EventInput[] {
+    const workspace = (this.host.snapshot().sandboxWorkspaces ?? []).find((value) => value.id === id);
+    return workspace?.status === "ready" ? [this.event({ ...workspace, status: "partial", revision: workspace.revision + 1, diagnostic })] : [];
   }
   recover(): EventInput[] {
     return (this.host.snapshot().sandboxWorkspaces ?? []).filter((value) => value.status === "preparing").map((value) =>

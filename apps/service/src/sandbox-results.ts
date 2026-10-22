@@ -29,8 +29,7 @@ export async function captureSandboxResult(execution: SandboxExecution, key: Buf
   if (!execution.nativeSessionId || !execution.planDigest || !execution.signerFingerprint) throw new MoguriError("sandbox_result", "The original native session/plan/signer was never durably bound. No after-state or replacement was inferred.", 409);
   const evidence = await readNativeCompletion({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: execution.nativeSessionId,
     workspace: execution.stage.workspace, image: execution.image, command: { program: execution.command[0]!, arguments: execution.command.slice(1) },
-    createdAfter: execution.createdAfter, createdBefore: execution.createdBefore, planDigest: execution.planDigest, signerFingerprint: execution.signerFingerprint,
-    ...(execution.cliExitCode === null ? {} : { exitCode: execution.cliExitCode }) });
+    createdAfter: execution.createdAfter, createdBefore: execution.createdBefore, planDigest: execution.planDigest, signerFingerprint: execution.signerFingerprint });
   const files: SandboxResult["files"] = [], excluded: SandboxResult["excluded"] = [];
   let total = 0, excludedCount = 0;
   const exclude = (path: string, reason: string) => { excludedCount++; if (excluded.length < 200) excluded.push({ path, reason }); };

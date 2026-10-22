@@ -35,6 +35,15 @@ process.once("message", (raw: unknown) => {
           query: connection.query.bind(connection) };
       };
     }
+    if (raw.holdNativePublication === "before" || raw.holdNativePublication === "after-first") {
+      const assert = service.controller.platform.managed.assert.bind(service.controller.platform.managed); let held = false;
+      service.controller.platform.managed.assert = async (...args) => {
+        const publication = service.controller.snapshot().sandboxPublications?.find((value) => value.status === "publishing" &&
+          value.publishedPaths.length === (raw.holdNativePublication === "after-first" ? 1 : 0));
+        if (publication && !held) { held = true; process.send?.({ kind: "held-native-publication", publicationId: publication.id }); await new Promise<void>(() => {}); }
+        return assert(...args);
+      };
+    }
     if (raw.holdUserPlan === "approval" || raw.holdUserPlan === "result") {
       const gate = createRemoteFrameGate(raw.holdUserPlan === "approval" ? "approval" : "user-plan.complete",
         (frame) => process.send?.({ kind: "held-user-plan", executionId: frame?.executionId }));
