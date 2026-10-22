@@ -1,8 +1,8 @@
 # Reviewed compound workflows
 
-Status: shared service/SDK implementation in progress. The public path now
+Status: shared service/SDK/client implementation in progress. The public path now
 owns real bounded calls, conditional Cascade/Critique and separately approved
-project tests. CLI/TUI/desktop review, failure/recovery hardening and finite
+project tests through CLI, actual TUI and desktop. Failure/recovery hardening and finite
 wind-down remain qualification gates. Private prototypes and native execution
 checks do not establish this public workflow's acceptance.
 
@@ -167,3 +167,42 @@ plan/architecture critique, conditional escalation/revision, unknown lineage,
 unreported/late usage, hard denials, concurrent clients, stale reviews,
 source/index/HEAD preservation, lost receipts, real controller loss and
 recovery without another model, test command or filesystem publication.
+
+## Current source/client checkpoint
+
+The focused service/worker/candidate/migration sweep passes 95 cases in
+40.82 s, not a full milestone acceptance sweep. Actual generated loopback
+model calls choose the second declared route, run passing/failing host tests,
+escalate once or use a three-area critic plus one same-solver revision.
+A passing critic cannot override failed tests. Ordinary follow-up context
+excludes every retained auxiliary role. Manual denial preserves untouched
+source and held queues.
+
+The actual TUI keyboard flow passes in 4.95 s. Five focused hidden Electron
+cases pass in 15.1 s, including actual source/test/application separation and
+browser-prepared exact-model lineage claims, plus existing Single/candidate
+behavior. These are generated-provider and generated-source observations,
+not live-provider inference, independent training or calibrated quality.
+
+Actual controller SIGKILL during inference, waiting human review and an
+admitted project test passes in 9.86 s: no model/test replay, original
+unknown capacity stays held, stale reviews are rejected and actual candidate
+test uncertainty is quarantined. The original owned worker stops its known
+test process group on control disconnect. Detached/reparented containment
+remains unproven; no complete host-process boundary is claimed.
+
+The expanded public-only sweep passes 27 cases in 24.55 s. The actual packed
+external SDK consumer passes browser/React/Node/MCP types/imports, its approved
+install and zero-vulnerability audit; protocol-38 public scope rejection and
+all pre-existing installed runtime paths also pass. This is separate from a
+full source/native acceptance sweep.
+
+Implementation critique exposed and corrected three concrete authority
+mistakes: public critic/escalation results entering later ordinary solver
+context, active report deletion orphaning a pending owner, and a failed stop
+journal preventing actual cancellation. Exact public control turns are now
+excluded, live report deletion is blocked, and actual cancellation runs even
+when its stop append fails. Known command results settle only their exact
+recorded process observations, so completed tests do not strand source
+conversation deletion. Partial tests remain unconfirmed and require explicit
+inspection; cleanup is never invented.

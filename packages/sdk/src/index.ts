@@ -1,6 +1,7 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type PackageManager, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
-import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput } from "../../protocol/src/index.ts";
+import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput } from "../../protocol/src/index.ts";
+import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -153,9 +154,19 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly compound = {
+    lineageDraft: (input: CompoundLineageInput) => lineageDraft(() => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("disconnected", "Connect to the actual profile before preparing an unpersisted source-backed lineage review.");
+      return snapshot.provider.models;
+    }, input),
     preview: (input: CompoundInput) => this.query({ type: "compound.preview", input }),
     start: (input: CompoundInput, expectedDigest: string, confirmCost: true) => this.command({ type: "compound.start", input, expectedDigest, confirmCost }),
     read: (workflowId: string) => this.query({ type: "compound.read", workflowId }),
+    validationPreview: async (workflowId: string) => {
+      const value = await this.compound.read(workflowId);
+      if (!value.pendingValidation) throw new ClientError("compound_validation_missing", "This exact workflow has no current undecided validation review. Read its retained status; no review or command was replayed.");
+      return { workflowId: value.workflow.id, sessionId: value.workflow.sessionId, revision: value.workflow.revision, review: value.pendingValidation };
+    },
     review: (workflowId: string, validationId: string, expectedRevision: number, expectedDigest: string, allow: boolean) =>
       this.command({ type: "compound.review", workflowId, validationId, expectedRevision, expectedDigest, allow }),
     stop: (workflowId: string) => this.command({ type: "compound.stop", workflowId }),

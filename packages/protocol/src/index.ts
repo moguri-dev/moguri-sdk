@@ -517,6 +517,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         !previous && (artifact.originSessionId !== value.sessionId || artifact.projectId !== value.projectId || artifact.workspaceId !== value.workspaceId) ||
         candidates.has(value.id) || roleSequences.has(value.id) || candidateGenerations.has(value.id)) throw new MoguriError("compound_corrupt", "Public workflow lost its independently retained exact profile, report, source or input grant.", 409);
       compoundWorkflows.set(value.id, projectCompoundWorkflow(previous, value));
+      const owner = sessions.get(value.sessionId);
+      if (owner) for (const validation of value.validations) if (validation.dispatched && validation.resultDigest && validation.decision &&
+        (validation.status === "passed" || validation.status === "failed")) {
+        for (const process of owner.processes) if (process.turnId === value.id && process.callId === validation.id && ["running", "unconfirmed"].includes(process.outcome)) {
+          process.outcome = validation.status === "passed" ? "completed" : "failed";
+        }
+      }
     }
     if (event.event_type === "role.sequence_recorded") {
       const value = event.payload.sequence;
@@ -699,7 +706,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
-      if (job && ["cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
+      if (job && ["cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply", "compound.validate"].includes(job.kind) && event.payload.status === "partial" && job.projectId) {
         if (job.workspaceId) blockedWorkspaces.add(job.workspaceId); else blockedProjects.add(job.projectId);
       }
     }

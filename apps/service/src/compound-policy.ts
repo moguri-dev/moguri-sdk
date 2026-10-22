@@ -1,13 +1,11 @@
 import { MoguriError, parse, type Controls, type ModelInfo } from "../../../packages/protocol/src/index.ts";
 import { Value } from "typebox/value";
-import { COMPOUND_EVIDENCE_WARNING, CompoundRouterPlanSchema, CompoundSettingsSchema, type CompoundLineageReview, type CompoundRoute } from "../../../packages/protocol/src/compound.ts";
+import { COMPOUND_EVIDENCE_WARNING, compoundModelBindingText, CompoundRouterPlanSchema, CompoundSettingsSchema, type CompoundLineageReview, type CompoundRoute } from "../../../packages/protocol/src/compound.ts";
 import { digest } from "./store.ts";
 import { routingModelReady, routingWorkingWindow, type BoundedRoutingModel } from "./routing.ts";
 
 export function compoundModelBinding(model: ModelInfo): string {
-  return digest(JSON.stringify({ id: model.id, providerId: model.providerId ?? null, apiModelId: model.apiModelId ?? null,
-    source: model.source ?? null, endpointBoundary: model.endpointBoundary ?? null, environments: model.environments ?? [],
-    contextWindow: model.contextWindow, supportedContextWindows: model.supportedContextWindows ?? null, maxTokens: model.maxTokens ?? null }));
+  return digest(compoundModelBindingText(model));
 }
 function currentLineageSource(review: CompoundLineageReview): boolean {
   const reviewed = Date.parse(review.reviewedAt), until = Date.parse(review.validUntil), now = Date.now();

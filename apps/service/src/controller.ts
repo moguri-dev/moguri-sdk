@@ -311,7 +311,12 @@ export class ControlPlane extends EventEmitter {
       globalLimit: () => this.profileHooks?.globalBudget().limit ?? null, idle: (session) => this.generationIdle(session),
       artifact: (session, text, task) => this.platform.artifacts.generation(session, text, task, "compound"),
       launch: (session, id, timeoutMs) => this.launchRun(session, id, { compound: { id, timeoutMs } }),
-      stop: (sessionId, id) => { if (this.session(sessionId).turnId === id && this.runs.get(sessionId)?.compound?.id === id) this.stop(sessionId); },
+      stop: (sessionId, id) => {
+        const run = this.runs.get(sessionId);
+        if (this.session(sessionId).turnId !== id || run?.compound?.id !== id) return;
+        try { this.platform.stopSession(sessionId); }
+        finally { this.compound.cancel(id); this.requestWorkerStop(run); }
+      },
       changed: (listener) => { this.on("change", listener); return () => this.off("change", listener); },
     });
     this.provider.onChange = () => {
@@ -2600,10 +2605,6 @@ export class ControlPlane extends EventEmitter {
     this.platform.stopSession(sessionId);
     const current = this.session(sessionId);
     const compound = this.projection.compoundWorkflows.find((record) => record.sessionId === sessionId && record.id === current.turnId && ["running", "waiting_validation", "validating"].includes(record.status));
-    if (compound) {
-      if (!compound.stopRequested) this.commit([this.compound.event({ ...compound, revision: compound.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true })]);
-      this.compound.cancel(compound.id);
-    }
     if (current.parentSessionId && !current.turnId && current.queue.length) {
       this.commit(current.kind === "subagent" ? [...current.queue.map((item) => this.event(current, "queue.removed", { messageId: item.id })), this.event(current, "turn.finished", { outcome: "stopped", diagnostic: "Owned subagent cancelled before admission. No model request was started." })] :
         [this.event(current, "queue.held", { messageIds: current.queue.map((item) => item.id) })]);
@@ -2642,12 +2643,13 @@ export class ControlPlane extends EventEmitter {
     try {
       const sequence = run.roleSequence ? this.ownedRoles.record(run.roleSequence.id) : null;
       this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}),
+        ...(compound && !compound.stopRequested ? [this.compound.event({ ...compound, revision: compound.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true })] : []),
         ...(sequence && !sequence.stopRequested ? [this.platform.roles.event(projectRoleSequence(sequence, {
           ...sequence, revision: sequence.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true,
         }))] : []),
         ...this.cancelledQuestions(this.session(sessionId), "Owning turn was stopped. No answer was supplied.")]);
     }
-    finally { this.releaseQuestionWaits(sessionId); this.requestWorkerStop(run); }
+    finally { if (compound) this.compound.cancel(compound.id); this.releaseQuestionWaits(sessionId); this.requestWorkerStop(run); }
   }
   private requestWorkerStop(run: Run): void {
     if (run.abort.signal.aborted || run.done) return;

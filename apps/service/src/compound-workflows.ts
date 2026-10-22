@@ -179,8 +179,10 @@ export class CompoundWorkflows {
     if (command.type === "compound.stop") {
       const record = this.record(command.workflowId);
       if (!activeCompound(record)) return finish([], { id: record.id, revision: record.revision });
-      const result = finish(record.stopRequested ? [] : [this.event({ ...record, revision: record.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true })], { id: record.id });
-      this.cancel(record.id); this.host.stop(record.sessionId, record.id); return result;
+      try {
+        return finish(record.stopRequested ? [] : [this.event({ ...record, revision: record.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true }),
+          { event_type: "turn.stop_requested", profile_id: record.profileId, project_id: record.projectId, session_id: record.sessionId, turn_id: record.id, payload: {} }], { id: record.id });
+      } finally { this.cancel(record.id); this.host.stop(record.sessionId, record.id); }
     }
     if (command.type === "compound.review") return this.review(command, finish);
     const intent = finish.intent;

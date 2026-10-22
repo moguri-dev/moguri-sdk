@@ -6,6 +6,7 @@ import { MoguriError } from "./core.ts";
 import { RoleSequenceStepSchema, validateRoleLedger } from "./role-sequences.ts";
 import type { BudgetPlan } from "./budget-plans.ts";
 import type { BudgetEntry } from "./budgets.ts";
+import type { ModelInfo } from "./index.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 256 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -35,6 +36,18 @@ export const CompoundLineageReviewSchema = object({
   limitations: Type.String({ minLength: 1, maxLength: 1200 }),
 });
 export type CompoundLineageReview = Static<typeof CompoundLineageReviewSchema>;
+export const CompoundLineageInputSchema = object({
+  draftModelId: id, criticModelId: id, draftLineage: id, criticLineage: id,
+  sourceKind: CompoundLineageReviewSchema.properties.sourceKind, sourceUrl: CompoundLineageReviewSchema.properties.sourceUrl,
+  sourceText: CompoundLineageReviewSchema.properties.sourceText, validUntil: CompoundLineageReviewSchema.properties.validUntil,
+  limitations: CompoundLineageReviewSchema.properties.limitations,
+});
+export type CompoundLineageInput = Static<typeof CompoundLineageInputSchema>;
+export function compoundModelBindingText(model: ModelInfo): string {
+  return JSON.stringify({ id: model.id, providerId: model.providerId ?? null, apiModelId: model.apiModelId ?? null,
+    source: model.source ?? null, endpointBoundary: model.endpointBoundary ?? null, environments: model.environments ?? [],
+    contextWindow: model.contextWindow, supportedContextWindows: model.supportedContextWindows ?? null, maxTokens: model.maxTokens ?? null });
+}
 export const CompoundLimitsSchema = object({
   routerTokens: Type.Integer({ minimum: 1, maximum: 2048 }), proposalTokens: Type.Integer({ minimum: 1, maximum: 8192 }),
   criticTokens: Type.Integer({ minimum: 1, maximum: 4096 }), timeoutMs: Type.Integer({ minimum: 1000, maximum: 300_000 }),

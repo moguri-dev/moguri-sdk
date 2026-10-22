@@ -79,6 +79,19 @@ try {
       const roleGate=await sdk.roleSequences.contract("generated-sequence",1);
       void roleGate.contract;void roleGate.contextRoleIndices;void roleGate.result.status;
       ` : ""}
+      ${installedProtocol >= 38 ? `
+      const compoundInput:Parameters<typeof sdk.compound.preview>[0]={sessionId:"generated-source",draftWorkspaceId:"generated-draft",alternateWorkspaceId:"generated-alternate",
+        input:{task:"Generated typed public workflow.",files:[{path:"generated.ts",baseDigest:"absent"}]},requestPlan:null,requestArchitecture:null,validationScriptId:"generated-script",validationTimeoutMs:1000};
+      const compoundPreview=await sdk.compound.preview(compoundInput);void compoundPreview.preview.document.roles[0]?.inputBound;
+      const compoundStart=await sdk.compound.start(compoundInput,compoundPreview.preview.digest,true);
+      const compoundRead=await sdk.compound.read(compoundStart.id!);void compoundRead.roles[0]?.result;void compoundRead.workflow.validations[0]?.dispatched;
+      const compoundValidation=await sdk.compound.validationPreview(compoundStart.id!);
+      await sdk.compound.review(compoundStart.id!,compoundValidation.review.validationId,compoundValidation.revision,compoundValidation.review.digest,false);
+      await sdk.compound.stop(compoundStart.id!);void sdk.compound.list("generated-source");
+      const lineage=await sdk.compound.lineageDraft({draftModelId:"generated-draft-model",criticModelId:"generated-critic-model",draftLineage:"generated-alpha",criticLineage:"generated-beta",
+        sourceKind:"reviewed-training-report",sourceUrl:"https://generated.example.invalid/source",sourceText:"Generated synthetic policy evidence.",validUntil:new Date(Date.now()+3600000).toISOString(),limitations:"Generated claim, not quality or training proof."});
+      void lineage.review.draftBindingDigest;void lineage.warning;
+      ` : ""}
       ${installedProtocol >= 33 ? `
       const roleProposal=await sdk.candidates.roleProposal("generated-sequence");void roleProposal.document.roleOrigin.roleInputDigest;
       const roleReference={roleSequenceId:"generated-sequence"};
@@ -241,6 +254,14 @@ try {
       platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
     }});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
+    ${installedProtocol >= 38 ? `
+    assert.deepEqual(sdk.compound.list(),[]);
+    await assert.rejects(()=>sdk.compound.read("generated-missing-public-workflow"),error=>error.code==="compound_missing");
+    await assert.rejects(()=>sdk.compound.preview({sessionId:"generated-missing-source",draftWorkspaceId:"generated-draft",alternateWorkspaceId:"generated-alternate",
+      input:{task:"Generated installed fail-closed public scope.",files:[{path:"generated.ts",baseDigest:"absent"}]},requestPlan:null,requestArchitecture:null,validationScriptId:"generated-script",validationTimeoutMs:1000}),
+      error=>error.code==="compound_scope");
+    console.log("Installed protocol-38 public workflow SDK/runtime is present and rejects missing source/report scope without inference or a Local fallback.");
+    ` : ""}
     let budgetServer=null,beta=null;
     try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
