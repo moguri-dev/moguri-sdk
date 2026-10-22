@@ -87,14 +87,32 @@ test("reattached output keeps an explicit bounded UTF-8-safe gap rather than a d
   const fixture = await terminalPrototype(), client = await connectTerminalPrototype(fixture.connection);
   try {
     await client.input("GENERATED_BIG\n");
-    const snapshot = async () => { const page = await client.read(), tail = await client.read(page.nextOffset); return { ...page, data: page.data + tail.data, nextOffset: tail.nextOffset }; };
+    const snapshot = async () => {
+      const page = await client.read(), tail = await client.read(page.nextOffset);
+      if (tail.baseOffset !== page.baseOffset) return null;
+      return { ...page, data: page.data + tail.data, nextOffset: tail.nextOffset };
+    };
     let output = await snapshot();
-    for (let index = 0; index < 100 && (!output.baseOffset || !output.data.includes("GENERATED_BIG_END")); index++) {
+    for (let index = 0; index < 100 && (!output?.baseOffset || !output.data.includes("GENERATED_BIG_END")); index++) {
       await new Promise((resolve) => setTimeout(resolve, 10)); output = await snapshot();
     }
+    assert.ok(output, "The retained window must stabilize within the bounded observation.");
     assert.ok(output.baseOffset > 0); assert.ok(Buffer.byteLength(output.data) <= 128 * 1024);
+    assert.ok(Buffer.byteLength(output.data) >= 128 * 1024 - 3, "Read the complete UTF-8-safe window, not merely its last page.");
     assert.equal(output.data.includes("\ufffd"), false); assert.ok(output.data.includes("GENERATED_BIG_END"), "The complete retained window must include the observed end marker.");
     assert.ok(output.nextOffset > output.baseOffset);
+
+    const previous = await client.read();
+    await client.input("GENERATED_BIG\n");
+    let following = await client.read(previous.nextOffset);
+    for (let index = 0; index < 100 && following.baseOffset <= previous.nextOffset; index++) {
+      await new Promise((resolve) => setTimeout(resolve, 10)); following = await client.read(previous.nextOffset);
+    }
+    assert.ok(following.baseOffset > previous.nextOffset, "New output must expose the gap behind the previous page's cursor.");
+    assert.ok(Buffer.byteLength(previous.data) <= 128 * 1024);
+    assert.ok(Buffer.byteLength(following.data) <= 128 * 1024);
+    assert.ok(Buffer.byteLength(previous.data + following.data) > 128 * 1024, "Pages from different live windows are not one bounded retained snapshot.");
+    assert.equal(following.data.includes("\ufffd"), false);
     assert.deepEqual(await readdir(fixture.runtime), ["control.sock"]);
   } finally { client.disconnect(); await fixture.close(); }
 });
