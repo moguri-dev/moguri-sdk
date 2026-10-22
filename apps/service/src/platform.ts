@@ -921,7 +921,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         if ([...this.active.values()].some((job) => job.kind === "voice.record" || job.kind === "voice.transcribe")) throw new MoguriError("speech_busy", "Finish or cancel the current local dictation first.", 409);
         const ready = await this.voice.status();
         if (!ready.modelReady || !ready.runtimeReady) throw new MoguriError("speech_not_ready", ready.diagnostic!, 409);
-        return finish([], { id: this.job(command.type, session.projectId, session.id, (signal, _, id) => this.voice.transcribe(id, command.type === "voice.record" ? "microphone" : resolve(command.path), snapshot.settings.values.voice, signal)) });
+        return finish([], { id: this.job(command.type, session.projectId, session.id, (signal, progress, id) => this.voice.transcribe(id, command.type === "voice.record" ? "microphone" : resolve(command.path), snapshot.settings.values.voice, signal, progress)) });
       }
       case "voice.stop": {
         const job = snapshot.jobs.find((job) => job.id === command.jobId);

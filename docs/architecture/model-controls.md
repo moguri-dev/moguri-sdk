@@ -104,6 +104,8 @@ Model-setting mutation ownership is request-scoped, not tied to a popover's
 mount lifetime. Closing/reopening the menu cannot release an in-flight gate or
 run a preserved command under stale settings. The composer tracks actual
 pending requests and retains refusal diagnostics outside the closed menu.
+Working-window and thinking-effort dropdowns save on selection through those
+same revision-bound requests, without a second Save step or a model call.
 Controlled hidden workflows hold the real service mutation, dismiss the menu,
 verify disabled submission/preserved drafts, then exercise both successful
 settlement and explicit refusal. Keyboard tests wait for actual enabled
