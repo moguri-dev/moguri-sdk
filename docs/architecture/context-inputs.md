@@ -5,6 +5,16 @@ content grants. They do not grant a model arbitrary host filesystem access or
 create client-owned provider payloads. Explicit user selection is required;
 bare `^`, `:`, `#`, `!` and `@` text remains literal.
 
+Protocol 43 adds [first-class PDF/DOCX/XLSX documents](document-attachments.md)
+through this same pipeline. It retains both original and extracted snapshots
+under the existing encrypted session/profile grants. Source/text files and
+images keep their existing shapes and behavior. Models receive descriptors and
+approved bounded list/read/search tools, never whole-document prompt expansion.
+Extraction runs locally in restricted resource-bounded processes. PDF page,
+DOCX paragraph/heading/table and XLSX sheet/cell/cache/inert-formula provenance,
+explicit OCR/format limitations and exact failure/cancellation behavior are
+defined in the linked contract.
+
 ## Reuse and qualification
 
 Reuse the existing scoped file reader, TypeBox, ignore (MIT), digest-addressed

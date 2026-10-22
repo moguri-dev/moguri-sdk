@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import * as vec from "sqlite-vec";
-import { eventTypes, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { attachmentDigests, eventTypes, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
@@ -57,17 +57,17 @@ function references(input: EventInput): string[] {
     case "sandbox.execution_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((hash): hash is string => hash !== null);
     case "sandbox.publication_recorded": return [input.payload.publication.inputDigest, input.payload.publication.resultDigest,
       input.payload.publication.documentDigest, input.payload.publication.operationDigest].filter((hash): hash is string => hash !== null);
-    case "queue.enqueued": return input.payload.item.attachments.map((entry) => entry.digest);
-    case "queue.edited": return input.payload.attachments?.map((entry) => entry.digest) ?? [];
-    case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.pasteFiles ?? []).map((entry) => entry.digest)];
-    case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.map((entry) => entry.digest)];
+    case "queue.enqueued": return input.payload.item.attachments.flatMap(attachmentDigests);
+    case "queue.edited": return input.payload.attachments?.flatMap(attachmentDigests) ?? [];
+    case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.pasteFiles ?? []).flatMap(attachmentDigests), ...(input.payload.documents ?? []).flatMap(attachmentDigests)];
+    case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.flatMap(attachmentDigests)];
     case "turn.prompt_bound": return [input.payload.promptDigest];
     case "turn.control_started": return [input.payload.purpose === "plan.save" ? input.payload.intentDigest : input.payload.promptDigest];
     case "plan.save_recorded": return [input.payload.save.inputDigest, input.payload.save.resultDigest].filter((hash): hash is string => hash !== null);
     case "mcp.remote_recorded": return [input.payload.call.intentDigest, input.payload.call.resultDigest].filter((hash): hash is string => hash !== null);
     case "compaction.saved": return [input.payload.compaction.inputDigest, input.payload.compaction.resultDigest, input.payload.compaction.replacementDigest].filter((hash): hash is string => hash !== null);
-    case "draft.saved": return input.payload.attachments.map((entry) => entry.digest);
-    case "steer.applied": return input.payload.item.attachments.map((entry) => entry.digest);
+    case "draft.saved": return input.payload.attachments.flatMap(attachmentDigests);
+    case "steer.applied": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "model.completed": return [input.payload.contextDigest];
     case "capability.saved": return [input.payload.entry.contentDigest];
     case "capability.proposed": return [input.payload.proposal.contentDigest];
@@ -249,6 +249,12 @@ export class EventStore {
         INSERT INTO retention_metadata(id,value) VALUES ('owned_decision_schema','1');
         PRAGMA user_version=40; COMMIT;`);
       if (version < 41) this.db.exec("BEGIN IMMEDIATE; PRAGMA user_version=41; COMMIT;");
+      if (version < 42) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('task_progress_schema','1');
+        PRAGMA user_version=42; COMMIT;`);
+      if (version < 43) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('document_attachment_schema','1');
+        PRAGMA user_version=43; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

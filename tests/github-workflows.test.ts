@@ -614,13 +614,13 @@ test("restart terminalizes dispatched and undispatched original jobs without rep
   } finally { await f.close(); }
 });
 
-test("schema40 upgrades to schema41 without deleting existing generated project state", async () => {
+test("schema40 upgrades to the current schema without deleting existing generated project state", async () => {
   const f = await generated({ persistent: true });
   try {
-    f.store.db.exec("PRAGMA user_version=40");
+    f.store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('task_progress_schema','document_attachment_schema'); PRAGMA user_version=40; COMMIT;");
     const reopened = new EventStore(f.storePath, f.key);
     try {
-      assert.equal(Number(reopened.db.prepare("PRAGMA user_version").get()?.user_version), 41);
+      assert.equal(Number(reopened.db.prepare("PRAGMA user_version").get()?.user_version), PROTOCOL_VERSION);
       assert.equal(projectEvents(reopened.events()).projects[0]?.id, f.scope.projectId);
     } finally { reopened.close(); }
   } finally { await f.close(); }
@@ -642,7 +642,7 @@ test("schema41 retention/projection survives source deletion, immutable ownershi
     assert.equal(JSON.parse(f.store.blob(result.operation.reviewDigest)).action.body, "Generated independently retained comment");
     const reopened = new EventStore(f.storePath, f.key);
     try {
-      assert.equal(Number(reopened.db.prepare("PRAGMA user_version").get()?.user_version), 41);
+      assert.equal(Number(reopened.db.prepare("PRAGMA user_version").get()?.user_version), PROTOCOL_VERSION);
       assert.equal(projectEvents(reopened.events()).githubOperations[0]?.id, id);
       assert.match(reopened.blob(result.operation.resultDigest!), /Generated independently retained comment/);
     } finally { reopened.close(); }

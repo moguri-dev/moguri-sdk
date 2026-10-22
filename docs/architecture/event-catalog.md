@@ -15,7 +15,7 @@ Unused scope fields are null in checkpoint 1.
 | `session.created`, `session.configured` | Title/controls, optional resolved startup values/source revisions and explicit configuration changes. Running turns cannot be rewritten. |
 | `session.archived`, `session.restored` | Non-destructive lifecycle changes after settling owned work and holding prompts. PR merge does not prevent restoration. |
 | `session.blocked`, `session.resumed` | Admission diagnostic or explicit user resumption. Resumption does not prove prior cleanup. |
-| `draft.saved` | Text and authorized snapshots; increments the draft revision. |
+| `draft.saved` | Text and authorized snapshots; increments the draft revision. Protocol 43 atomically grants both original and extracted document digests, without persisting plaintext document bodies in events. |
 | `queue.enqueued`, `queue.edited`, `queue.removed`, `queue.reordered` | Exact unclaimed message mutation, each with a queue revision. |
 | `queue.delivery_changed` | Explicit conversion of an unclaimed steer into a new queued turn. |
 | `turn.started` | Admitted item, controls, allowed-env revision and optional committed prompt digest; claims the item once. |
@@ -33,6 +33,7 @@ Unused scope fields are null in checkpoint 1.
 | `tool.requested` | Exact declared tool, approval UUID and policy revision. Optional Guided text binds the actual solver model/step/call; it never authorizes execution. |
 | `tool.decided` | Allow/deny, exact request UUID and real `user`/`policy`/`delegation` actor, with rule ID for explicit grants. Model advice never becomes a human answer. |
 | `tool.started`, `tool.output`, `tool.completed` | Approved execution, bounded output, explicit actual/denied/stopped/failed/partial/unconfirmed result. |
+| `task.progress_reported` | Protocol-42 bounded owning-solver estimate, actual model/step/call and exact checked-plan digest. Encrypted session advice, never lifecycle completion, answer, acceptance or permission. |
 | `process.started` | Owned tool-call ID, PID and process group. |
 | `turn.stop_requested`, `turn.stop_acknowledged` | Distinct cancellation transitions. Acknowledgement alone is not successful cleanup. |
 | `turn.finished` | Completed/stopped/failed/partial, with actionable diagnostics. Unsettled model usage/process cleanup remain unknown. A known user-plan no-effect failure with confirmed worker exit or a tool-less/root-less generation can explicitly record no workspace effects without claiming general process containment. |

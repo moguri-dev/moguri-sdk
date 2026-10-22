@@ -91,7 +91,7 @@ export class ModelRegistry implements ProviderAdapter {
     if (!isRecord(catalog) || !Array.isArray(catalog.data) || catalog.data.length > 512 || !catalog.data.every((entry) => isRecord(entry) && typeof entry.id === "string")) throw new MoguriError("local_model_catalog", "Expect a bounded OpenAI-compatible data array with model IDs.");
     const ids = new Set(catalog.data.filter(isRecord).map((entry) => entry.id));
     const models = endpoint.models.filter((model) => ids.has(model.id)).map((model) => ({
-      id: this.modelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput,
+      id: this.modelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput, ...(model.toolInput !== undefined ? { toolInput: model.toolInput } : {}),
       providerId: `${this.prefix}.${endpoint.id}`, source: "local" as const, apiModelId: model.id, endpointBoundary: modelEndpointBoundary(endpoint.baseUrl), thinkingLevels: [], environments: this.options.environments ?? ["Local"],
     }));
     if (!models.length) throw new MoguriError("local_model_catalog", "None of this endpoint's explicitly configured models is advertised. Check IDs and limits; no model was guessed.");

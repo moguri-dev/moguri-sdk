@@ -8,6 +8,8 @@ import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse
 import { ControlDefaultsSchema } from "./controls.ts";
 import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
+import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
+export * from "./progress.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
 import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
 import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type ArtifactMaterializationPreview } from "./artifacts.ts";
@@ -196,6 +198,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  ProgressQuerySchema,
   GithubQuerySchema,
   LinearQuerySchema,
   ExtensionQuerySchema,
@@ -307,7 +310,7 @@ export interface VoiceStatus {
   bytes: number; license: string; languageLocales: { code: string; tier: "ready" | "broad" | "adaptation" }[];
 }
 export type SandboxStatus = SandboxReadiness;
-export type PlatformResponse =
+export type PlatformResponse = ProgressResponse
   | GithubResponse
   | LinearResponse
   | ExtensionResponse

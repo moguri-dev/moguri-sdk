@@ -12,6 +12,7 @@ export const LocalEndpointSchema = Type.Object({
     contextWindow: Type.Integer({ minimum: 8192, maximum: 10_000_000 }),
     maxTokens: Type.Integer({ minimum: 64, maximum: 262144 }),
     imageInput: Type.Boolean(),
+    toolInput: Type.Optional(Type.Boolean()),
   }, { additionalProperties: false }), { minItems: 1, maxItems: 32 }),
 }, { additionalProperties: false });
 export type LocalEndpoint = Static<typeof LocalEndpointSchema>;

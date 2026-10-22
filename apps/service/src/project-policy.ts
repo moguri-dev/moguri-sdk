@@ -25,7 +25,7 @@ export async function assertFolderAccess(root: string, input: string, write: boo
   const name = relative(root, path) || ".";
   assertFolderName(name, write, policy);
 }
-export const readTools = new Set(["list_files", "read_file", "memory_search", "ask_user"]);
+export const readTools = new Set(["list_files", "read_file", "list_documents", "read_document", "search_document", "memory_search", "ask_user", "task_progress"]);
 export async function assertSessionTool(session: Session, root: string | null, settings: ProjectSettings, call: ToolCall, inspectFilesystem = true): Promise<void> {
   if ((session.mode === "read-only" || session.pendingMode === "read-only" || session.kind === "side") && !readTools.has(call.name)) throw new MoguriError("read_only", "This session is question/read-only. Edit, shell, MCP execution, Git and evolution tools are disabled.", 403);
   if (typeof call.arguments.path === "string" && isPasteFilePath(call.arguments.path)) {
