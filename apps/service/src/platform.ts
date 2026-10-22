@@ -59,6 +59,16 @@ import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { SandboxPublications } from "./sandbox-publications.ts";
 import type { WinddownCommitHost } from "./winddown-commits.ts";
+import { TieredKnowledge } from "./knowledge.ts";
+import { isKnowledgeCommand, isKnowledgeQuery } from "../../../packages/protocol/src/knowledge.ts";
+import { Extensions } from "./extensions.ts";
+import { HookDefinitionSchema, isExtensionCommand, isExtensionQuery } from "../../../packages/protocol/src/extensions.ts";
+import { parse } from "../../../packages/protocol/src/core.ts";
+import { GitHubWorkflows, type GitHubWorkflowOptions } from "./github-workflows.ts";
+import { LinearWorkflows, type LinearWorkflowOptions } from "./linear-workflows.ts";
+import { isGithubCommand, isGithubQuery } from "../../../packages/protocol/src/github-workflows.ts";
+import { isLinearCommand, isLinearQuery } from "../../../packages/protocol/src/linear-workflows.ts";
+import type { WorkflowHost } from "./workflow-host.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -129,11 +139,15 @@ export interface PlatformHost {
   remoteMcpTools(session: Session, server: McpServerConfig | null): Promise<McpToolInfo[]>;
   globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
   foreignRootBusy(root: string): boolean;
-  localRootBusy(root: string, exceptJobId?: string): boolean;
+  localRootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions }
 export class PlatformRuntime {
+  readonly knowledge: TieredKnowledge;
+  readonly extensions: Extensions;
+  readonly github: GitHubWorkflows;
+  readonly linear: LinearWorkflows;
   readonly engagement: Engagement;
   readonly inputs: ContextInputs;
   readonly memory: RepositoryMemory;
@@ -152,6 +166,11 @@ export class PlatformRuntime {
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   private readonly memoryIndexes = new Map<string, string>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
+    this.knowledge = new TieredKnowledge(store, { snapshot: () => this.snapshot(), events: host.events, sandbox: host.sandboxStatus });
+    this.extensions = new Extensions(store, { snapshot: () => this.snapshot(), events: host.events,
+      project: (id) => this.project(id), projects: () => this.sessions.projects,
+      skill: (content) => this.skill(content),
+      entry: (...args) => this.entry(...args) });
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
     this.roles = new RoleSequences(store, () => this.snapshot(), () => host.events());
     this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
@@ -171,7 +190,11 @@ export class PlatformRuntime {
     });
     this.managed = new ManagedWorkspaces(stateDir, {
       snapshot: () => this.snapshot(), project: (id) => this.project(id), commit: (events) => this.host.commit(events), wake: host.wake,
-      writeBusy: (projectId, workspaceId) => this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.snapshot().managedWorkspaces.find((workspace) => workspace.id === workspaceId)?.path ?? ""),
+      writeBusy: (projectId, workspaceId) => {
+        const workspace = this.snapshot().managedWorkspaces.find((workspace) => workspace.id === workspaceId);
+        return this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) ||
+          Boolean(workspace && (this.engagement.writeRoots().includes(workspace.path) || host.localRootBusy(workspace.path)));
+      },
       remoteRead: host.remoteRead,
       nativeRead: host.nativeRead,
       job: (kind, projectId, execute, start, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, start, workspaceId),
@@ -180,7 +203,12 @@ export class PlatformRuntime {
       snapshot: () => this.snapshot(), project: (id, workspaceId) => this.managed.project({ projectId: id, workspaceId: workspaceId ?? null }), commit: (events) => this.host.commit(events),
       job: (kind, projectId, execute, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, undefined, workspaceId), wake: () => this.host.wake(),
       closing: host.closingProject,
-      publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId ?? null) || this.nativePublications.isBusy(projectId, workspaceId ?? null) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path),
+      assertRoot: async (projectId, workspaceId, signal) => {
+        signal.throwIfAborted(); await this.managed.assert({ projectId, workspaceId: workspaceId ?? null }); signal.throwIfAborted();
+      },
+      onLinearCredentialsChanged: () => { for (const project of this.snapshot().projects) this.linear?.invalidateProject(project.id); },
+      onLinearBoardChanged: (projectId) => this.linear?.invalidateProject(projectId),
+      publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId ?? null) || this.nativePublications.isBusy(projectId, workspaceId ?? null) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path) || host.localRootBusy(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path),
     }, store, stateDir, options);
     this.sessions = new SessionWorkspace({
       snapshot: () => this.snapshot(), commit: (events, forget) => this.host.commit(events, forget),
@@ -217,6 +245,21 @@ export class PlatformRuntime {
       job: (projectId, workspaceId, execute, start, settled, lifecycle) => this.job("sandbox.publish", projectId, null, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
     this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);
+    const workflowHost: WorkflowHost = {
+      snapshot: () => this.snapshot(), events: host.events,
+      project: (projectId, workspaceId) => this.managed.project({ projectId, workspaceId: workspaceId ?? null }),
+      configuration: (projectId) => this.sessions.projects.configuration(projectId),
+      assertRoot: async (projectId, workspaceId, signal) => {
+        signal.throwIfAborted(); await this.managed.assert({ projectId, workspaceId: workspaceId ?? null }); signal.throwIfAborted();
+      },
+      rootBusy: (root, exceptJobId, permitRebaseRecovery) => host.localRootBusy(root, exceptJobId, permitRebaseRecovery) || this.snapshot().terminals.some((terminal) =>
+        terminal.env === "Local" && terminal.binding?.root === root && !["closed", "failed", "acknowledged"].includes(terminal.status)),
+      closing: host.closingProject, commit: host.commit,
+      job: (kind, projectId, workspaceId, execute, start, settled, lifecycle, sessionId) =>
+        this.job(kind, projectId, sessionId ?? null, execute, settled, start, workspaceId, lifecycle),
+    };
+    this.github = new GitHubWorkflows(store, workflowHost, options.github);
+    this.linear = new LinearWorkflows(store, workflowHost, this.workspace.integrations, options.linear);
     this.repositories = new RepositoryTelemetry({
       snapshot: () => this.snapshot(), scope: host.repositoryScope, git: host.repositoryGit,
       remoteRead: host.remoteRepository,
@@ -403,6 +446,9 @@ export class PlatformRuntime {
   }
   async recover(): Promise<void> {
     this.managed.recover();
+    this.github.recover();
+    const linear = this.linear.recover();
+    if (linear.length) this.host.commit(linear);
     const oauth = this.snapshot().oauthAuthorizations.filter((value) => ["waiting", "exchanging"].includes(value.state));
     if (oauth.length) this.host.commit(oauth.map((authorization) => ({ event_type: "mcp.oauth_changed", profile_id: this.snapshot().profileId, project_id: authorization.projectId, payload: { authorization: { ...authorization, state: "failed", authorizationUrlReady: false, diagnostic: "Service restarted. OAuth callbacks/verifiers were not replayed; reconnect explicitly." } } })));
     const interrupted = this.snapshot().jobs.filter((job) => job.status === "running" || job.status === "waiting_input");
@@ -412,11 +458,15 @@ export class PlatformRuntime {
         diagnostic: "Service restarted during candidate work. Original intent/effects remain unconfirmed; inspect the retained source and owned staging root. Nothing was replayed." } },
     }));
     const native = this.nativePublications.recover();
-    if (interrupted.length || candidates.length || native.length) this.host.commit([...candidates, ...native, ...interrupted.map((job): EventInput => ({
-      event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
-      payload: { jobId: job.id, status: "partial", resultDigest: null, error: "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed.",
-        ...(job.candidate ? { candidateId: job.candidate.candidateId } : {}), ...(job.sandboxPublicationId ? { sandboxPublicationId: job.sandboxPublicationId } : {}) },
-    }))]);
+    if (interrupted.length || candidates.length || native.length) this.host.commit([...candidates, ...native, ...interrupted.map((job): EventInput => {
+      const operation = job.operationId ? this.snapshot().linearOperations.find((operation) => operation.id === job.operationId) ??
+        this.snapshot().githubOperations.find((operation) => operation.id === job.operationId) : undefined;
+      return { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
+        payload: { jobId: job.id, status: operation && operation.status !== "running" ? operation.status : "partial", resultDigest: null,
+          error: operation?.diagnostic ?? "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed.",
+          ...(job.operationId ? { operationId: job.operationId } : {}), ...(job.candidate ? { candidateId: job.candidate.candidateId } : {}),
+          ...(job.sandboxPublicationId ? { sandboxPublicationId: job.sandboxPublicationId } : {}) } };
+    })]);
     this.workspace.start();
     await this.sessions.recover();
   }
@@ -424,6 +474,7 @@ export class PlatformRuntime {
     const snapshot = this.snapshot();
     const project = session?.projectId ? session.controls.env === "Local" ? this.managed.project(session) : this.project(session.projectId) : undefined;
     const entries = snapshot.registry.filter((entry) => entry.enabled && (!entry.ownerPluginId || snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled)) && (entry.projectId === null || entry.projectId === project?.id) && (entry.kind === "skill" || entry.kind === "memory"));
+    for (const entry of entries) this.extensions.assertCompatible(entry);
     const knowledge = entries.map((entry) => `[${entry.kind}: ${entry.name}; source=${entry.source}; sha256=${entry.contentDigest}]\n${this.store.blob(entry.contentDigest)}`).join("\n\n").slice(0, 16_384);
     return `${snapshot.settings.values.systemPrompt}
 ${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}
@@ -483,6 +534,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const snapshot = this.snapshot();
     const entries = snapshot.registry.filter((entry) => entry.kind === "script" && entry.enabled && (!entry.ownerPluginId || snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled)) && entry.projectId === projectId);
+    for (const entry of entries) this.extensions.assertCompatible(entry);
     return Promise.all(entries.map(async (entry) => {
       const path = join(directory, `${entry.contentDigest}.mjs`);
       const content = this.store.blob(entry.contentDigest);
@@ -491,6 +543,10 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isGithubQuery(query)) return this.github.query(query);
+    if (isLinearQuery(query)) return this.linear.query(query);
+    if (isExtensionQuery(query)) return this.extensions.query(query);
+    if (isKnowledgeQuery(query)) return this.knowledge.query(query);
     if (isDecisionQuery(query)) return this.host.decisionQuery(query);
     if (isWinddownQuery(query)) return this.host.winddownQuery(query);
     if (isCompoundQuery(query)) return this.host.compoundQuery(query);
@@ -610,7 +666,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     let text = memory ? JSON.stringify({ binding: memory.binding, items, omittedHits: 0 }) : "";
     while (text.length > 8000 && items.length) { items.pop(); text = JSON.stringify({ binding: memory?.binding, items, omittedHits: total - items.length }); }
     return `${base}\n<session-mode>${session.mode}. ${session.mode === "read-only" ? "Answer questions using only permitted read operations. Never edit files, execute commands, publish, commit, push or create a PR." : "Use only the currently declared and authorized tools."}</session-mode>${instructions}` +
-      (memory && total > 0 ? `\n<untrusted-repository-memory>\n${text}\n</untrusted-repository-memory>` : "");
+      (memory && total > 0 ? `\n<untrusted-repository-memory>\n${text}\n</untrusted-repository-memory>` : "") + this.knowledge.context(session.id);
   }
   private async content(path: string, limit = 64 * 1024): Promise<string> {
     const file = await stat(path);
@@ -655,7 +711,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job } }]);
     const owner = this.snapshot().jobs.find((job) => job.id === id), candidateId = owner?.candidate?.candidateId;
     const retention = { ...(candidateId ? { candidateId } : {}), ...(owner?.sandboxPublicationId ? { sandboxPublicationId: owner.sandboxPublicationId } : {}),
-      ...(owner?.winddownId ? { winddownId: owner.winddownId } : {}) };
+      ...(owner?.winddownId ? { winddownId: owner.winddownId } : {}), ...(owner?.operationId ? { operationId: owner.operationId } : {}) };
     const abort = new AbortController();
     const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
@@ -663,7 +719,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       const resultDigest = this.store.putBlob(JSON.stringify(result)), events = lifecycle?.completed(result, resultDigest) ?? [];
       this.host.commit([...events, { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest, error: null, ...retention } }]);
     }).catch((error: unknown) => {
-      const partial = error instanceof MoguriError && ["install_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
+      const partial = error instanceof MoguriError && ["install_partial", "cache_partial", "cache_cleanup_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
         kind === "repository.refresh" && this.snapshot().repositoryObservations.some((observation) => observation.jobId === id) ||
         kind === "memory.index" && this.memory.published(id);
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
@@ -679,6 +735,10 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isGithubCommand(command)) return this.github.execute(command, finish);
+    if (isLinearCommand(command)) return this.linear.execute(command, finish);
+    if (isExtensionCommand(command)) return this.extensions.execute(command, finish);
+    if (isKnowledgeCommand(command)) return this.knowledge.execute(command, finish);
     if (isDecisionCommand(command)) return this.host.decisionCommand(command, finish);
     if (isWinddownCommand(command)) return this.host.winddownCommand(command, finish);
     if (isCompoundCommand(command)) return this.host.compoundCommand(command, finish);
@@ -759,6 +819,9 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "capability.toggle": {
         const entry = snapshot.registry.find((entry) => entry.id === command.capabilityId);
         if (!entry || entry.revision !== command.expectedRevision) throw new MoguriError("capability_conflict", "Capability is missing or changed. Reload before enabling it.", 409);
+        if (entry.retired && command.enabled) throw new MoguriError("capability_retired", "This capability was removed from its current bundle. Review and install or roll back the whole exact bundle instead.", 409);
+        if (command.enabled) this.extensions.assertCompatible(entry);
+        if (entry.kind === "hook" || entry.kind === "plugin" && snapshot.registry.some((child) => child.ownerPluginId === entry.id && child.kind === "hook")) this.extensions.assertIdle(entry.projectId);
         if (command.enabled && entry.ownerPluginId && !snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled)) throw new MoguriError("plugin_disabled", "Enable the owning plugin before activating its capability.", 409);
         return finish([{ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry: { ...entry, enabled: command.enabled, revision: entry.revision + 1 } } }]);
       }
@@ -776,7 +839,10 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
           const content = this.store.blob(proposal.contentDigest);
           const existing = snapshot.registry.find((entry) => entry.projectId === proposal.projectId && entry.kind === proposal.kind && entry.name === proposal.name);
           if (existing?.contentDigest !== proposal.baseDigest) throw new MoguriError("proposal_stale", "The approved base changed. Generate and review a new proposal.", 409);
-          const metadata = proposal.kind === "skill" ? this.skill(content) : { name: proposal.name, description: "Human-approved evolution proposal; execution remains separately permissioned." };
+          if (existing?.ownerPluginId) throw new MoguriError("proposal_plugin_owned", "A proposal cannot detach a capability from its owning plugin. Review a complete bundle update instead.", 409);
+          if (proposal.kind === "hook" && existing) this.extensions.assertIdle(proposal.projectId);
+          const metadata = proposal.kind === "skill" ? this.skill(content) : proposal.kind === "hook" ? parse(HookDefinitionSchema, JSON.parse(content)) : { name: proposal.name, description: "Human-approved evolution proposal; execution remains separately permissioned." };
+          if (proposal.kind === "hook" && metadata.name !== proposal.name) throw new MoguriError("hook_name", "The proposed hook name must match its exact definition. Nothing was installed.", 409);
           const entry = this.entry(proposal.projectId, proposal.kind, metadata.name, metadata.description, content, "approved-proposal");
           events.push({ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry: existing ? { ...entry, id: existing.id, revision: existing.revision + 1 } : entry } });
         }
@@ -860,7 +926,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         const job = snapshot.jobs.find((job) => job.id === command.jobId);
         if (!job) throw new MoguriError("job_not_found", "This job is outside the current profile.", 404);
         try { return finish(job.candidate && ["running", "waiting_input"].includes(job.status) ? this.candidates.stopEvents(job.candidate.candidateId, job.id) :
-          job.sandboxPublicationId && ["running", "waiting_input"].includes(job.status) ? this.nativePublications.stopEvents(job.sandboxPublicationId, job.id) : []); }
+          job.sandboxPublicationId && ["running", "waiting_input"].includes(job.status) ? this.nativePublications.stopEvents(job.sandboxPublicationId, job.id) : this.operationStopEvents(job.id)); }
         finally { this.active.get(command.jobId)?.abort.abort(); }
       }
     }
@@ -904,10 +970,10 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (call.name === "memory_search") {
       return { text: JSON.stringify(await this.memorySearch(session.id, String(call.arguments.query), 6, signal)), isError: false, outcome: "completed" };
     }
-    if (call.name === "propose_skill" || call.name === "propose_script" || call.name === "propose_memory") {
+    if (call.name === "propose_skill" || call.name === "propose_script" || call.name === "propose_memory" || call.name === "propose_hook") {
       const project = this.project(session.projectId);
       if (!this.snapshot().settings.values.evolution.enabled) throw new MoguriError("evolution_disabled", "Model proposals require explicit opt-in. They never apply themselves.");
-      const kind = call.name === "propose_skill" ? "skill" : call.name === "propose_script" ? "script" : "memory";
+      const kind = call.name === "propose_skill" ? "skill" : call.name === "propose_script" ? "script" : call.name === "propose_hook" ? "hook" : "memory";
       const name = String(call.arguments.name);
       const content = String(call.arguments.content);
       const existing = this.snapshot().registry.find((entry) => entry.projectId === session.projectId && entry.kind === kind && entry.name === name);
@@ -940,21 +1006,24 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     const jobs = [...this.active.entries()].filter(([, job]) => job.sessionId === id);
     const events = jobs.flatMap(([id]) => {
       const candidateId = this.snapshot().jobs.find((job) => job.id === id)?.candidate?.candidateId;
-      return candidateId ? this.candidates.stopEvents(candidateId, id) : [];
+      return candidateId ? this.candidates.stopEvents(candidateId, id) : this.operationStopEvents(id);
     });
     try { if (events.length) this.host.commit(events); }
     finally { for (const [, job] of jobs) job.abort.abort(); }
   }
   async settleSession(id: string): Promise<void> { this.stopSession(id); await Promise.all([...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
   async cancelProject(id: string): Promise<void> {
-    const jobs = [...this.active.values()].filter((job) => job.projectId === id);
-    for (const job of jobs) job.abort.abort();
-    await Promise.all(jobs.map((job) => job.done));
+    const jobs = [...this.active.entries()].filter(([, job]) => job.projectId === id);
+    try { const events = jobs.flatMap(([id]) => this.operationStopEvents(id)); if (events.length) this.host.commit(events); }
+    finally { for (const [, job] of jobs) job.abort.abort(); }
+    await Promise.all(jobs.map(([, job]) => job.done));
     await this.gateway.cancelRoot(this.project(id).path);
     for (const workspace of this.snapshot().managedWorkspaces.filter((workspace) => workspace.projectId === id && workspace.status !== "removed")) await this.gateway.cancelRoot(workspace.path);
     await this.gateway.oauth.cancelScope(id);
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
+    this.github.close();
+    this.linear.close();
     this.workspace.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
@@ -962,5 +1031,16 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Platform cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "platform_cleanup");
     if (failed?.status === "rejected") throw failed.reason;
+  }
+  private operationStopEvents(jobId: string): EventInput[] {
+    const job = this.snapshot().jobs.find((job) => job.id === jobId);
+    if (!job?.operationId || !["running", "waiting_input"].includes(job.status)) return [];
+    const github = this.snapshot().githubOperations.find((operation) => operation.id === job.operationId);
+    if (github?.status === "running" && !github.cancelRequested) return [{ event_type: "github.operation_recorded", profile_id: github.profileId,
+      project_id: github.projectId, session_id: github.originSessionId, payload: { operation: { ...github, cancelRequested: true, revision: github.revision + 1, updatedAt: new Date().toISOString() } } }];
+    const linear = this.snapshot().linearOperations.find((operation) => operation.id === job.operationId);
+    if (linear?.status === "running" && !linear.stopRequested) return [{ event_type: "linear.operation_recorded", profile_id: linear.profileId,
+      project_id: linear.projectId, session_id: linear.sessionId, payload: { operation: { ...linear, stopRequested: true, revision: linear.revision + 1, updatedAt: new Date().toISOString() } } }];
+    return [];
   }
 }

@@ -48,6 +48,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D24 | Artifact repository copies bind exact source/root/policy and optional new local commit intent; deleting stored grants requires real copy/commit verification. | Copy persistence, no-overwrite/index isolation, cancellation/recovery or deletion proof fails. |
 | D25 | Every owned model dispatch has an atomic profile-owned reservation. Finite limits require explicit estimates; unknown completion holds capacity and settings resets cannot lift policy. | Concurrent/late/restart accounting, actual output forwarding, unknown-price handling or role/source retention fails. |
 | D26 | Immutable profile views share one root event authority. Credentials/data stay scoped; global environment policy, startup values and budgets remain root-owned across client switching. | Default migration, cross-client isolation, atomic policy/cap races, resource ownership or external SDK/native preview qualification fails. |
+| D27 | Reviewed platform workflows add independent tiered knowledge, bounded lifecycle hooks, repository-backed catalogs, explicit Git/GitHub/Linear writes and scoped ecosystem caches; whole-descendant guarantees require qualified SendBox. | Exact review, privacy, compatibility, root leases, command/no-replay, migration/recovery, native VM teardown or packed-client qualification fails. |
 
 ## D01. Build from zero with borrowed libraries
 
@@ -454,13 +455,18 @@ Advisory checks happen before artifact download/reuse; unknown is not clean.
 Project scripts/hooks/configuration are not evaluated during managed installs.
 No package gets a malware-free guarantee and no lifecycle code runs on the host
 as a fake SendBox substitute. Only qualified adapters are offered; workspace,
-private-registry and further ecosystem support remain explicit limitations.
+private-registry and further ecosystem support were initial explicit limits.
+The separately owner-requested protocol-41
+[scoped adapters](dependency-cache-scopes.md) extend those formats without
+removing integrity, fresh-advisory, credential/resource or lifecycle gates.
 
 Tickets are local and independent of sessions, with revisioned configurable
 phases and no assignee. A verified merged PR can advance phase under the
 board's read-only observation policy. Linear starts off and imports only
 explicit pages using a scoped user key; local issues are never auto-exported.
-Neither integration starts CI, merges, pushes or grants permissions.
+Those original observation/import paths do not start CI, merge, push or grant
+permissions. D27 adds separately reviewed user workflows, not automatic export
+or a mutation hidden inside an observation.
 
 CI is restricted to pushes to `main`. Feature/PR checks are performed locally.
 
@@ -759,6 +765,47 @@ canonical root, not a profile's Local mapping or target alias. Existing
 execution/quarantine events enforce that identity across restart without
 rewriting durable payloads. Effective mode/acquisition, not a requested
 read-only label, determines when the common writer lease is released.
+
+## D27. Reviewed platform workflows and whole-session boundary
+
+**Decision, 2026-10-22.** The owner requested the
+[platform workflow extension](platform-workflows.md) through the same
+control plane, SDK, CLI/TUI and desktop. It is a source extension, not a
+declaration that the first milestone or unrelated deferred work is complete.
+
+Sky has an exact turn/session lifetime; Terra is project/work-item scoped;
+Glacier is independently retained and explicitly promoted profile-wide
+compressed knowledge. Tiered model-context injection is separately off by
+default. Per-note compartment expiry does not erase independently promoted
+copies, retain source text in tombstones, or replay original creation commands.
+
+Lifecycle hooks use the existing worker/tool path with exact user-authored
+commands, bounded start/end triggers and actual approvals. They cannot create
+model reservations before permission, run in tool-less/read-only roles, become
+model context, or grant permissions. Reviewed installation, enabling and
+execution remain distinct. Versions and complete bundle rollback are retained.
+
+The selected marketplace is **repository-backed**, with reviewed exact Git
+objects and inline compatible manifests. No hosted account, package installer,
+mutable checkout, credential discovery or arbitrary plugin entrypoint is added.
+Git/GitHub and Linear writes retain independent original user intent/results;
+remote version checks and explicit protected-action confirmations do not claim
+stronger external atomicity than the API actually supplies. Interrupted writes
+are partial and never replayed.
+
+Cache scope is npm/pnpm private registries/workspaces plus Python, Rust/Cargo
+and Go. C# stays deferred. Native managers do not authorize host build scripts,
+source distributions, toolchain downloads, ambient credentials or cross-profile
+private-byte reuse.
+
+The owner explicitly chose **qualified SendBox for guaranteed descendant
+containment**. Native Local/SSH process groups remain limited for arbitrary
+setsid/double-fork/reparenting. Global Sandbox-only policy blocks new native
+turns without switching their Env or relabeling grandfathered Local work.
+Only verification of the exact owned VM's absence establishes the complete
+process boundary; it does not establish successful filesystem rollback,
+permission or prompt-injection resistance. No unsupported macOS fork tracker,
+privileged helper, PID inference or unrelated workload is substituted.
 
 ## Still open
 

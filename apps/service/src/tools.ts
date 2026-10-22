@@ -30,7 +30,7 @@ export const tools: Tool[] = [
     offset: Type.Optional(Type.Integer({ minimum: 0 })),
   }, { additionalProperties: false }) },
   { name: "run_subagent", description: "Request one explicitly enabled, depth-one, read-only/tool-less subagent using this session's fixed model and approved context. The returned model output is advice, not user authority. It shares cancellation and records its own usage.", parameters: Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 32768 }) }, { additionalProperties: false }) },
-  ...(["skill", "script", "memory"] as const).map((kind) => ({
+  ...(["skill", "script", "memory", "hook"] as const).map((kind) => ({
     name: `propose_${kind}`, description: `Propose a ${kind} improvement for human review. This does not install, enable, execute or promote it; it requires explicit evolution opt-in.`,
     parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }, { additionalProperties: false }),
   })),
@@ -39,7 +39,7 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
   if (readOnly) return [];
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
-    .filter((tool) => scope.project || scope.pasteFiles && tool.name === "read_file" || !["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(tool.name))
+    .filter((tool) => scope.project || scope.pasteFiles && tool.name === "read_file" || !["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory", "propose_hook"].includes(tool.name))
     .filter((tool) => !scope.metachat || tool.name === "moguri_config" || tool.name === "ask_user")
     .filter((tool) => scope.env !== "Sandbox" || ["ask_user", "list_files", "read_file", "write_file", "run_command"].includes(tool.name))
     .filter((tool) => mode !== "read-only" || readTools.has(tool.name))

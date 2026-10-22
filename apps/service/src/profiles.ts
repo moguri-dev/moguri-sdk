@@ -11,6 +11,7 @@ import { budgetCharges } from "./budgets.ts";
 import { digest, EventStore } from "./store.ts";
 import { writeArtifactExport } from "./artifact-export.ts";
 import { remoteRootQuarantined } from "./remote.ts";
+import { githubRootQuarantined } from "../../../packages/protocol/src/github-workflows.ts";
 
 interface Options {
   controller(store: EventStore, stateDir: string, hooks: ProfileHooks): ControlPlane;
@@ -180,7 +181,7 @@ export class ProfileRuntime {
       const control = this.controllers.get(profile.id);
       if (control?.ownedWriteRoots().includes(root)) return true;
       const state = control?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
-      if (remoteRootQuarantined(state, root) || state.projects.some((project) => project.path === root && state.blockedProjects.includes(project.id)) ||
+      if (remoteRootQuarantined(state, root) || githubRootQuarantined(state, root) || state.projects.some((project) => project.path === root && state.blockedProjects.includes(project.id)) ||
         state.managedWorkspaces.some((workspace) => workspace.path === root && state.blockedWorkspaces.includes(workspace.id))) return true;
     }
     return false;

@@ -39,6 +39,7 @@ try {
   }
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
+  if (installedProtocol >= 41 && (!help.includes("moguri github") || !help.includes("moguri marketplace") || !help.includes("moguri containment"))) throw new Error("The installed CLI is missing the protocol-41 platform workflow surface.");
   await writeFile(join(consumer, "consumer.ts"), `
     import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}${installedProtocol >= 34 ? ", type ModelEvidenceReport" : ""}} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
@@ -106,6 +107,26 @@ try {
       const decision=await sdk.decisions.read("generated-decision");void decision.decision.source;void decision.input.questions;void decision.advice?.answers;
       await sdk.decisions.stop("generated-decision");void sdk.decisions.list("generated-source");void sdk.settings.get()?.values.decisions.technicalQuestions;
       ` : ""}
+      ${installedProtocol >= 41 ? `{
+      const note=await sdk.knowledge.save({tier:"Terra",projectId:"generated-project",title:"Generated typed knowledge",text:"Generated reviewed source."});
+      const knowledge=await sdk.knowledge.read(note.id!);void knowledge.record.intent.id;
+      const promoted=await sdk.knowledge.promote(note.id!,knowledge.record.revision,knowledge.record.contentDigest,{tier:"Glacier",title:"Generated summary",text:"Generated summary."},true);
+      const promotedRead=await sdk.knowledge.read(promoted.id!);await sdk.knowledge.version(promoted.id!,promotedRead.record.contentDigest);await sdk.knowledge.history(note.id!);
+      await sdk.hooks.import("generated-project",{schemaVersion:1,name:"generated-typed-hook",description:"Generated typed hook",trigger:"turn.start",command:"printf generated",timeoutMs:1000});
+      await sdk.capabilities.history("generated-capability");await sdk.capabilities.version("generated-capability","a".repeat(64));
+      const catalogSource={projectId:"generated-project",sourceProjectId:"generated-source",commit:"a".repeat(40),path:"moguri-marketplace.json"};
+      const catalog=await sdk.marketplace.catalog(catalogSource);void catalog.catalog.packages[0]?.license;
+      const marketInput={...catalogSource,packageName:"generated-bundle",version:"1.0.0"};
+      const market=await sdk.marketplace.preview(marketInput);await sdk.marketplace.install(marketInput,market.preview.digest,true);
+      const gitScope={env:"Local" as const,projectId:"generated-project"};
+      const gitReview=await sdk.github.preview(gitScope,{kind:"git.tag.create",tag:"generated-typed",target:"a".repeat(40),annotated:false,message:""});
+      const gitOperation=await sdk.github.execute(gitReview.preview,gitReview.preview.document.confirmations,true);void (await sdk.github.read(gitOperation.id!)).operation.dispatched;
+      const linearReview=await sdk.linear.preview({projectId:"generated-project"},{action:"issue.create",fields:{title:"Generated typed Linear issue"}});
+      const linearOperation=await sdk.linear.accept(linearReview.preview,true);void (await sdk.linear.read(linearOperation.id!)).operation.remoteWorkspaceId;
+      const registries=await sdk.cache.registries.list();void registries.registries[0]?.credentialRevision;
+      await sdk.cache.inspect("generated-project","python");await sdk.cache.inspect("generated-project","cargo");await sdk.cache.inspect("generated-project","go");
+      const containment=await sdk.containment.status();void containment.containment.qualifiedSandboxReady;
+      }` : ""}
       ${installedProtocol >= 33 ? `
       const roleProposal=await sdk.candidates.roleProposal("generated-sequence");void roleProposal.document.roleOrigin.roleInputDigest;
       const roleReference={roleSequenceId:"generated-sequence"};
@@ -294,6 +315,41 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
+      ${installedProtocol >= 41 ? `{
+      assert.equal(sdk.settings.get().values.memory.useTieredContext,false);
+      const temporarySession=await sdk.sessions.create(p.id,"Generated installed knowledge source");
+      const sky=await sdk.knowledge.save({tier:"Sky",sessionId:temporarySession.id,lifetime:"session",title:"Generated installed Sky",text:"Generated reviewed installed knowledge with temporary detail."});
+      const skyRead=await sdk.knowledge.read(sky.id);
+      const terra=await sdk.knowledge.promote(sky.id,0,skyRead.record.contentDigest,{tier:"Terra",title:"Generated installed Terra",text:"Generated reviewed installed knowledge."},true);
+      const terraRead=await sdk.knowledge.read(terra.id);
+      const glacier=await sdk.knowledge.promote(terra.id,0,terraRead.record.contentDigest,{tier:"Glacier",title:"Generated installed Glacier",text:"Generated installed knowledge."},true);
+      await sdk.sessions.delete(temporarySession.id,true);
+      await assert.rejects(()=>sdk.knowledge.read(sky.id),{code:"knowledge_missing"});
+      assert.equal((await sdk.knowledge.read(glacier.id)).text,"Generated installed knowledge.");
+      await sdk.knowledge.forget(terra.id,0,true);
+      const hook=await sdk.hooks.import(p.id,{schemaVersion:1,name:"generated-installed-hook",description:"Generated installed hook",trigger:"turn.start",command:"printf generated-installed",timeoutMs:1000});
+      assert.equal(sdk.getState().snapshot.registry.find(entry=>entry.id===hook.id).enabled,false);
+      assert.equal((await sdk.capabilities.history(hook.id)).entries.length,1);
+      const catalog={schemaVersion:1,packages:[{schemaVersion:1,name:"generated-installed-bundle",version:"1.0.0",description:"Generated installed bundle",license:"MIT",
+        minimumProtocol:41,maximumProtocol:41,skills:["---\\nname: generated-installed-style\\ndescription: Generated installed style\\n---\\nUse generated fixture types."],scripts:[],hooks:[]}]};
+      await writeFile(join(project,"moguri-marketplace.json"),JSON.stringify(catalog));
+      git(["add","--","moguri-marketplace.json"]);git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated installed catalog"]);
+      const marketInput={projectId:p.id,sourceProjectId:p.id,commit:git(["rev-parse","HEAD"]).trim(),path:"moguri-marketplace.json",packageName:"generated-installed-bundle",version:"1.0.0"};
+      assert.equal((await sdk.marketplace.catalog({projectId:p.id,sourceProjectId:p.id,commit:marketInput.commit,path:marketInput.path})).catalog.packages.length,1);
+      const marketReview=(await sdk.marketplace.preview(marketInput)).preview;
+      const bundle=await sdk.marketplace.install(marketInput,marketReview.digest,true);
+      assert.equal(sdk.getState().snapshot.registry.filter(entry=>entry.id===bundle.id||entry.ownerPluginId===bundle.id).every(entry=>!entry.enabled),true);
+      git(["config","core.hooksPath","/dev/null"]);git(["config","tag.gpgSign","false"]);git(["config","commit.gpgSign","false"]);
+      const gitSession=await sdk.sessions.create(p.id,"Generated installed Git source"),gitHead=git(["rev-parse","HEAD"]).trim(),gitIndex=await readFile(join(project,".git/index"));
+      const gitReview=(await sdk.github.preview({env:"Local",projectId:p.id,sessionId:gitSession.id},{kind:"git.tag.create",tag:"generated-installed-reviewed-tag",target:gitHead,annotated:false,message:""})).preview;
+      const gitStarted=await sdk.github.execute(gitReview,gitReview.document.confirmations,true);
+      const gitFinished=await sdk.github.wait(gitStarted.id,{timeoutMs:10000});
+      assert.equal(gitFinished.operation.status,"completed");assert.equal(git(["rev-parse","refs/tags/generated-installed-reviewed-tag"]).trim(),gitHead);
+      assert.equal(git(["rev-parse","HEAD"]).trim(),gitHead);assert.deepEqual(await readFile(join(project,".git/index")),gitIndex);
+      await sdk.sessions.delete(gitSession.id,true);assert.equal((await sdk.github.read(gitStarted.id)).operation.originSessionId,gitSession.id);
+      assert.deepEqual((await sdk.cache.registries.list()).registries,[]);assert.equal((await sdk.containment.status()).containment.required,false);
+      console.log("Installed protocol-41 SDK/CLI/runtime preserves tier lifetimes and independent promotion, disabled catalog/hooks, exact real Git publication and source-independent results without inference.");
+      }` : ""}
       let operationSessionId;
       assert.equal(sdk.getState().snapshot.protocolVersion,PROTOCOL_VERSION);
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
