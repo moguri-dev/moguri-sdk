@@ -33,6 +33,9 @@ unknown unless supplied. Fresh user-approved rates are required under USD
 limits. Consuming a plan rechecks all current held/actual capacity before
 transfer; a newly stricter cap below it cannot be bypassed by shrinking an
 input estimate. An undispatched plan is not a call or a provider report.
+An already-too-small actual/held cap returns `budget_exhausted` before any
+transfer/start, preserving the complete original hold rather than admitting
+an affordable output prefix or refunding unknown work.
 
 ## One bounded finishing role
 
