@@ -337,3 +337,12 @@ DOM before its asynchronous update. Locators now name the exact current
 resource/member consent, and the model assertion waits for the same required
 maximum/half values rather than accepting a proxy. All six affected desktop
 cases pass; no production code or model/permission threshold was relaxed.
+
+Final committed-source acceptance passes **1,045/1,045 native-enabled
+unit/integration/TUI cases in 935.17 s, zero skips**, then **67/67 hidden
+Electron workflows in 2.6 min**. The actual packed external SDK installation,
+root/React/Node/MCP imports/types/runtime/worker/CLI probes and source/consumer
+audits pass after the no-probe correction. The current VM payload hashes remain
+identical to the immutable qualified image above. These measurements qualify
+only their stated generated source/VM boundary and do not replace earlier
+archives or establish live hosted-service entitlement or milestone completion.
