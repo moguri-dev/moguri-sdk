@@ -7,6 +7,7 @@ import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import type { Message } from "@earendil-works/pi-ai";
 import {
+  TaskProgressToolSchema,
   CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
@@ -2562,7 +2563,7 @@ export class ControlPlane extends EventEmitter {
         const started = this.history.find((event) => event.event_type === "turn.started" && event.turn_id === run.turnId);
         const prompt = started?.event_type === "turn.started" && started.payload.promptDigest ? this.store.blob(started.payload.promptDigest) : this.platform.prompt(current);
         run.repositoryContext ??= await this.repositoryContext(current);
-        const solverPrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext, run.abort.signal);
+        const solverPrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext, run.abort.signal) + this.platform.progress.reminder(current.id);
         const effectivePrompt = phase === "router" ? ROUTER_PROMPT : solverPrompt;
         if (run.done || run.abort.signal.aborted) return;
         if (synthetic && (policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || permissionRevision !== this.projection.settings.permissionRevision ||
@@ -2806,6 +2807,19 @@ export class ControlPlane extends EventEmitter {
         catch (error) { this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Question relay failed; no user answer was recorded.", isError: true, outcome: "failed" } }); }
         return;
       }
+      if (request.call.name === "task_progress") {
+        try {
+          await this.assertCurrentTool(session, request.call);
+          const authorization = authorizeTool(this.projection.settings.values, request.call, null);
+          if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
+          const result = await this.platform.progress.tool(session.id, run.turnId, this.modelAdviceSource(session, request),
+            parse(TaskProgressToolSchema, request.call.arguments), run.abort.signal);
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: JSON.stringify(result), isError: false, outcome: "completed" } });
+        } catch (error) {
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof Error ? error.message : "Progress check failed. No completion was inferred.", isError: true, outcome: run.abort.signal.aborted ? "stopped" : "failed" } });
+        }
+        return;
+      }
       if (session.controls.env === "Remote" && request.call.name === "mcp_gateway" && request.call.arguments.action === "call") {
         try {
           const authorization = await this.authorizeRemoteMcp(run, request);
@@ -2851,9 +2865,9 @@ export class ControlPlane extends EventEmitter {
           });
           return;
         }
-        if (authorization.decision === "allow" && !hookRequiresHuman || request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config") {
+        if (authorization.decision === "allow" && !hookRequiresHuman || request.call.name === "ask_user" || request.call.name === "task_progress" || session.kind === "metachat" && request.call.name === "moguri_config") {
           this.grantTool(run, request.call.id);
-          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: request.call.name === "ask_user" || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
+          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: request.call.name === "ask_user" || request.call.name === "task_progress" || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(this.platform.sessions.projects.values(session.projectId)) } });
           return;
         }

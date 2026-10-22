@@ -249,6 +249,9 @@ export class EventStore {
         INSERT INTO retention_metadata(id,value) VALUES ('owned_decision_schema','1');
         PRAGMA user_version=40; COMMIT;`);
       if (version < 41) this.db.exec("BEGIN IMMEDIATE; PRAGMA user_version=41; COMMIT;");
+      if (version < 42) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('task_progress_schema','1');
+        PRAGMA user_version=42; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

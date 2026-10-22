@@ -1,12 +1,13 @@
 import { Type, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
-import { MAX_TEXT, MoguriError, isPasteFilePath, ConfigurationSpecSchema, UserQuestionSchema, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, MoguriError, isPasteFilePath, ConfigurationSpecSchema, UserQuestionSchema, TaskProgressToolSchema, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
 import { listProjectFiles, readProjectFile, writeProjectFile, textFilePage } from "./files.ts";
 import { runCommand } from "./supervisor.ts";
 import { assertFolderAccess, matchesFolder, readTools, type FolderPolicy } from "./project-policy.ts";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 export const tools: Tool[] = [
+  { name: "task_progress", description: "For a task running at least one minute, read the current bound plan checklist, then report a grounded completion estimate and short explanation with its exact planDigest. Recheck at meaningful milestones or about once a minute at safe model/tool boundaries, never by launching another model. This is untrusted advice, not completion, permission or acceptance. Never check plan items merely to improve the percentage. Missing checklist is unknown; use null planDigest only when no plan exists. Ordinary model calls remain metered.", parameters: TaskProgressToolSchema },
   { name: "ask_user", description: "Ask one genuine clarification with optional choices. In Guided autonomy, you may include recommendation with one offered zero-based choiceIndex and a concise reason; omit it when missing user-only facts prevent a justified recommendation. The actual user must still answer. Never invent an answer, request secrets, or treat advice as tool/Git permission. Question, model advice and actual answer retain their separate provenance.", parameters: UserQuestionSchema },
   { name: "moguri_config", description: "Settings-chat capability: read non-secret global/project configuration or propose an exact change for human review. Never applies/enables a change, stores credentials, authenticates, executes commands or grants permissions. A proposal is untrusted advice, not a user answer.", parameters: Type.Object({
     action: Type.Union([Type.Literal("read"), Type.Literal("propose")]),
@@ -41,7 +42,7 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
     .filter((tool) => scope.project || scope.pasteFiles && tool.name === "read_file" || !["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory", "propose_hook"].includes(tool.name))
     .filter((tool) => !scope.metachat || tool.name === "moguri_config" || tool.name === "ask_user")
-    .filter((tool) => scope.env !== "Sandbox" || ["ask_user", "list_files", "read_file", "write_file", "run_command"].includes(tool.name))
+    .filter((tool) => scope.env !== "Sandbox" || ["ask_user", "task_progress", "list_files", "read_file", "write_file", "run_command"].includes(tool.name))
     .filter((tool) => mode !== "read-only" || readTools.has(tool.name))
     .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)

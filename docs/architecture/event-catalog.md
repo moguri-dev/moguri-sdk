@@ -33,6 +33,7 @@ Unused scope fields are null in checkpoint 1.
 | `tool.requested` | Exact declared tool, approval UUID and policy revision. Optional Guided text binds the actual solver model/step/call; it never authorizes execution. |
 | `tool.decided` | Allow/deny, exact request UUID and real `user`/`policy`/`delegation` actor, with rule ID for explicit grants. Model advice never becomes a human answer. |
 | `tool.started`, `tool.output`, `tool.completed` | Approved execution, bounded output, explicit actual/denied/stopped/failed/partial/unconfirmed result. |
+| `task.progress_reported` | Protocol-42 bounded owning-solver estimate, actual model/step/call and exact checked-plan digest. Encrypted session advice, never lifecycle completion, answer, acceptance or permission. |
 | `process.started` | Owned tool-call ID, PID and process group. |
 | `turn.stop_requested`, `turn.stop_acknowledged` | Distinct cancellation transitions. Acknowledgement alone is not successful cleanup. |
 | `turn.finished` | Completed/stopped/failed/partial, with actionable diagnostics. Unsettled model usage/process cleanup remain unknown. A known user-plan no-effect failure with confirmed worker exit or a tool-less/root-less generation can explicitly record no workspace effects without claiming general process containment. |

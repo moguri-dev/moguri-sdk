@@ -69,6 +69,7 @@ import { LinearWorkflows, type LinearWorkflowOptions } from "./linear-workflows.
 import { isGithubCommand, isGithubQuery } from "../../../packages/protocol/src/github-workflows.ts";
 import { isLinearCommand, isLinearQuery } from "../../../packages/protocol/src/linear-workflows.ts";
 import type { WorkflowHost } from "./workflow-host.ts";
+import { TaskProgressRuntime } from "./task-progress.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -150,6 +151,7 @@ export class PlatformRuntime {
   readonly linear: LinearWorkflows;
   readonly engagement: Engagement;
   readonly inputs: ContextInputs;
+  readonly progress: TaskProgressRuntime;
   readonly memory: RepositoryMemory;
   readonly gateway: McpGateway;
   readonly voice: LocalDictation;
@@ -245,6 +247,18 @@ export class PlatformRuntime {
       job: (projectId, workspaceId, execute, start, settled, lifecycle) => this.job("sandbox.publish", projectId, null, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
     this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir);
+    this.progress = new TaskProgressRuntime({
+      profileId: store.profileId, session: (id) => this.session(id), events: host.events, commit: host.commit,
+      binding: (session) => JSON.stringify([session.id, session.turnId, session.controls.env, session.workspaceId, session.sandboxWorkspaceId,
+        this.snapshot().settings.values.remote, this.snapshot().projects.find((project) => project.id === session.projectId),
+        this.snapshot().managedWorkspaces.find((workspace) => workspace.id === session.workspaceId),
+        session.projectId ? this.sessions.projects.configuration(session.projectId) : null]),
+      plan: async (sessionId) => {
+        const plan = await this.sessions.query({ type: "plan.read", sessionId });
+        if (plan.type !== "plan.read") throw new MoguriError("progress_plan", "The plan reader returned another response. No progress was inferred.", 409);
+        return plan;
+      },
+    });
     const workflowHost: WorkflowHost = {
       snapshot: () => this.snapshot(), events: host.events,
       project: (projectId, workspaceId) => this.managed.project({ projectId, workspaceId: workspaceId ?? null }),
@@ -567,6 +581,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (isManagedWorkspaceQuery(query)) return this.managed.query(query);
     if (isExecutionQuery(query)) return { type: query.type, remote: this.host.remoteStatus() };
     if (isInputQuery(query)) return this.inputs.query(query);
+    if (query.type === "session.progress") return { type: query.type, progress: await this.progress.read(query.sessionId) };
     if (isEngagementQuery(query)) return this.engagement.query(query);
     if (isSessionWorkspaceQuery(query)) return this.sessions.query(query);
     if (isWorkspaceQuery(query)) return this.workspace.query(query);

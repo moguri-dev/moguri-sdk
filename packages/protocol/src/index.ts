@@ -40,10 +40,11 @@ import { projectKnowledge, type KnowledgeEventPayloads, type KnowledgeRecord } f
 import { projectGithubOperation, type GithubEventPayloads, type GithubOperation } from "./github-workflows.ts";
 import { projectLinearOperation, type LinearEventPayloads, type LinearOperation } from "./linear-workflows.ts";
 import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts";
+import type { TaskProgressReport } from "./progress.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 41;
+export const PROTOCOL_VERSION = 42;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -271,6 +272,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
   "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string };
+  "task.progress_reported": { report: TaskProgressReport };
   "turn.stop_requested": Record<string, never>;
   "turn.stop_acknowledged": Record<string, never>;
   "turn.finished": { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null; workspaceEffects?: "none" | "possible" };
@@ -353,7 +355,7 @@ export const eventTypes: readonly EventType[] = [
   "draft.saved", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
-  "turn.finished", "policy.updated", "provider.changed", "mcp.oauth_changed",
+  "turn.finished", "task.progress_reported", "policy.updated", "provider.changed", "mcp.oauth_changed",
   "settings.updated", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "cache.prepared",
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",

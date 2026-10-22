@@ -18,6 +18,7 @@ export type SlashResult =
   | { kind: "profile"; profileId: string }
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
+  { name: "progress", description: "Compare the bound plan checklist with optional long-task model estimates" },
   { name: "attach-file", description: "Capture an explicitly selected local UTF-8 file", argument: "ABSOLUTE_PATH" },
   { name: "attach-image", description: "Capture a local PNG/JPEG/WebP; terminal clipboard images need this fallback", argument: "ABSOLUTE_PATH" },
   { name: "attach-folder", description: "Preview an exact folder snapshot, then confirm its digest", argument: "[SHA256] ABSOLUTE_PATH" },
@@ -102,6 +103,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "progress": return { kind: "text", text: JSON.stringify(await sdk.sessions.progress(session.id), null, 2) };
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument);
     case "knowledge":

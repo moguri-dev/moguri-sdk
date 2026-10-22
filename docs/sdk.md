@@ -5,13 +5,21 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **41** for the owner-requested
+Current source uses protocol **42** for
+[task completion estimates](architecture/task-progress.md), extending the
+protocol-41 owner-requested
 [platform workflow extension](architecture/platform-workflows.md).
 The prior issue-17 source used protocol **40** for shared model windows/scoped
 paste, native execution, reviewed Local compound workflows, finite Local
 wind-down and owned bounded decisions. It does not replace the immutable qualified archives listed below.
 See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
 for the actual generated VM evidence and remaining client/environment gates.
+
+`sessions.progress(sessionId)` reads the bound plan checklist and compares it
+with optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
+every 15 seconds without overlapping polls or model calls. CLI
+`moguri progress --session ID` and `/progress` expose the same typed observation.
+Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
 
 ## Reviewed platform workflow surface
 
