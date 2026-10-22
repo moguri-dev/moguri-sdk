@@ -102,6 +102,7 @@ test("signatures, encrypted formats, malformed XML/ZIP, CRC, active content and 
     ["pdf", generatedPdf({ encrypted: true })], ["docx", Buffer.from("d0cf11e0a1b11ae100", "hex")],
     ["docx", generatedZip([{ name: "word/document.xml", flags: 1, text: "Generated encrypted header" }])],
     ["docx", generatedZip(malformed)], ["xlsx", generatedDocx()],
+    ["docx", generatedZip(generatedOfficeEntries("docx").map((entry) => entry.name === "word/document.xml" ? { ...entry, text: `<w:document xmlns:w="${wordNamespace}"><w:body><w:p><w:r><w:t>&nbsp;</w:t></w:r></w:p></w:body></w:document>` } : entry))],
     ["docx", generatedZip(generatedOfficeEntries("docx").map((entry) => entry.name === "word/document.xml" ? { ...entry, crc: 0 } : entry))],
     ["xlsx", generatedZip([...generatedOfficeEntries("xlsx"), { name: "xl/vbaProject.bin", text: "Generated inert macro" }])],
     ["docx", generatedZip([...generatedOfficeEntries("docx"), { name: "../generated.xml", text: "Generated traversal" }])],

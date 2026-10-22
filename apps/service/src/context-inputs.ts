@@ -30,6 +30,9 @@ export class ContextInputs {
   private captures = new Map<string, { sessionId: string; abort: AbortController; done: Promise<CommandResult> }>();
   private closing = false;
   constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly integrations: ProjectIntegrations, private readonly host: Host, private readonly stateDir: string, documentOptions: DocumentParserOptions = {}) { this.parsers = new DocumentParsers(documentOptions); }
+  assertDraftReady(sessionId: string): void {
+    if ([...this.captures.values()].some((capture) => capture.sessionId === sessionId)) throw new MoguriError("document_pending", "Document extraction is still active for this draft. Wait for completion or cancel that capture before sending/holding the complete prompt. The draft and queue were preserved.", 409);
+  }
   normalizePaste(text: string, attachments: Attachment[], retain = true): { text: string; attachments: Attachment[] } {
     const lines = pasteLineCount(text);
     if (lines <= 50) return { text, attachments };

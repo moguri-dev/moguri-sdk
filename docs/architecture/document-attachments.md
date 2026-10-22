@@ -41,6 +41,9 @@ draft, or fails explicitly without replacing it. Concurrent revisions, stop,
 timeout, deletion and shutdown cannot publish a late result. Interrupted capture
 is never replayed on restart; retained completed snapshots need no reparsing.
 Workers receive bytes, not source paths, credentials or a service token.
+Send and hold admission are blocked while that draft has an active document
+capture, including through another SDK client. Pending context is never
+silently left out of an admitted prompt.
 
 ## Resource and execution limits
 
@@ -169,3 +172,14 @@ its 4,311-token fresh input plus the unchanged 4,096-token headroom did not fit.
 The repetitive compaction fixture now uses 64 rather than 80 repetitions and
 asserts that exact input/headroom bound before each dispatch. No production
 budget/context limit or no-truncation check was relaxed.
+
+The full sweep exposed a TUI viewport regression from the added progress rows.
+The checklist now uses the footer's existing reserved row, remaining visible
+without hiding raw compaction results; the original unchanged native UI
+assertion passes again (1.30 s). Strict XML-only entities reject HTML-only named
+entities such as `&nbsp;`, and cancellation before source loading uses the same
+typed `document_cancelled` result as an active parser. Pending-capture send/hold
+rejection is exercised without consuming the draft or queue. The corrected
+document-focused sweep passes 27/27 cases in 19.40 s and all six parser spike
+groups pass again (PDF 238.38 ms / 131.89 MiB, DOCX 166.40 ms / 104.03 MiB,
+XLSX 171.67 ms / 103.75 MiB).

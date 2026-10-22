@@ -115,6 +115,8 @@ test("cancel and shutdown stop the exact parser, release capacity and never publ
     const pending = sdk.attachments.document(fixture.sessionId, path, { captureId: "generated-capture" });
     const rejected = assert.rejects(() => pending, /cancelled/i);
     await waitFor(() => started === 1);
+    await assert.rejects(() => sdk.command({ type: "message.send", sessionId: fixture.sessionId, expectedRevision: fixture.session().draft.revision, delivery: "queue", held: true }), { code: "document_pending" });
+    assert.deepEqual(fixture.session().queue, []); assert.equal(fixture.session().draft.text, "Generated cancellable draft.");
     const other = await sdk.sessions.create(null);
     await assert.rejects(() => sdk.attachments.cancelDocument(other.id!, "generated-capture"), /not active/i);
     await sdk.attachments.cancelDocument(fixture.sessionId, "generated-capture"); await rejected;

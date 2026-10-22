@@ -54,6 +54,9 @@ estimates stale after two minutes or a plan change and exposes disagreement of
 20 percentage points or more. A model's 100% does not finish the task. Terminal
 outcomes remain authoritative; later tasks cannot inherit an earlier estimate.
 CLI and `/progress` expose the same observation and provenance.
+The TUI checklist occupies its existing reserved footer row rather than
+shrinking raw-result views. A reported long-task estimate gets one additional
+compact row; `/progress` exposes the complete explanation and provenance.
 
 ## Source qualification
 

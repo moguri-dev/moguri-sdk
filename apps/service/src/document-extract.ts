@@ -4,7 +4,7 @@ import { posix, dirname, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { fromBufferPromise } from "yauzl";
-import sax from "sax";
+import sax, { type SAXOptions } from "sax";
 import { DOCUMENT_LIMITS as L, cellCoordinates, type DocumentData, type DocumentFormat, type DocumentLocation, type DocumentSummary, type DocumentUnit } from "../../../packages/protocol/src/documents.ts";
 
 export class DocumentExtractionError extends Error {
@@ -14,7 +14,8 @@ function fail(code: string, message: string): never { throw new DocumentExtracti
 interface XmlNode { name: string; uri: string; attributes: Record<string, string>; text: string; children: XmlNode[] }
 function xml(bytes: Buffer): XmlNode {
   if (!isUtf8(bytes) || bytes.includes(0)) fail("document_xml", "OOXML parts must contain valid UTF-8 XML without NUL.");
-  const parser = sax.parser(true, { xmlns: true, position: false }), stack: XmlNode[] = [];
+  const options: SAXOptions & { strictEntities: boolean } = { xmlns: true, position: false, strictEntities: true };
+  const parser = sax.parser(true, options), stack: XmlNode[] = [];
   let root: XmlNode | undefined, nodes = 0;
   parser.ondoctype = () => fail("document_xml", "DTD/custom entities are unsupported. No external resource was read.");
   parser.onerror = () => fail("document_xml", "The document contains malformed XML. Nothing was attached.");

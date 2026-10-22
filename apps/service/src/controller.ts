@@ -1732,6 +1732,7 @@ export class ControlPlane extends EventEmitter {
       }
       case "message.send": {
         this.revision(session.draft.revision, command.expectedRevision);
+        this.platform.inputs.assertDraftReady(session.id);
         if (command.held && command.delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
         if (!command.held) {
           this.assertOrdinaryTurn(session);

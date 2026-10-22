@@ -6,6 +6,7 @@ import { DOCUMENT_LIMITS as L, DocumentDataSchema, type DocumentData, type Docum
 import { MoguriError, isRecord } from "../../../packages/protocol/src/core.ts";
 
 let activeWorkers = 0;
+const cancelledCapture = () => new MoguriError("document_cancelled", "Document capture was cancelled. The complete draft was preserved.", 409);
 export interface DocumentParserOptions { workerPath?: string; timeoutMs?: number; rssMiB?: number }
 export class DocumentParsers {
   private readonly active = new Map<string, { abort: AbortController; done: Promise<unknown> }>();
@@ -16,7 +17,7 @@ export class DocumentParsers {
     return this.capture(key, async () => bytes, format, signal);
   }
   capture(key: string, read: () => Promise<Buffer>, format: DocumentFormat, signal?: AbortSignal): Promise<{ document: DocumentData; maxRssKiB: number }> {
-    if (this.closed || signal?.aborted) return Promise.reject(new MoguriError("document_cancelled", "Document capture was cancelled. The draft was preserved.", 409));
+    if (this.closed || signal?.aborted) return Promise.reject(cancelledCapture());
     if (activeWorkers >= L.concurrency || this.active.has(key)) return Promise.reject(new MoguriError("document_busy", "Two document parsers are already active, or this capture ID is in use. Retry explicitly; your draft was preserved.", 409));
     const abort = new AbortController();
     const cancel = () => abort.abort();
@@ -28,6 +29,9 @@ export class DocumentParsers {
       abort.signal.throwIfAborted();
       if (!bytes.length || bytes.length > L.originalBytes) throw new MoguriError("document_limit", "Documents must be nonempty and at most 8 MiB.");
       return this.run(bytes, format, abort.signal);
+    }).catch((error: unknown) => {
+      if (abort.signal.aborted) throw cancelledCapture();
+      throw error;
     }).finally(() => {
       signal?.removeEventListener("abort", cancel); this.active.delete(key); activeWorkers--;
     });
@@ -53,7 +57,7 @@ export class DocumentParsers {
       });
       const chunks: Buffer[] = []; let outputBytes = 0, stderr = "", failure: MoguriError | undefined, sampling = false;
       const stop = (error: MoguriError) => { failure ??= error; child.kill("SIGKILL"); };
-      const cancelled = () => stop(new MoguriError("document_cancelled", "Document capture was cancelled. The complete draft was preserved.", 409));
+      const cancelled = () => stop(cancelledCapture());
       signal.addEventListener("abort", cancelled, { once: true });
       if (signal.aborted) cancelled();
       const timeout = setTimeout(() => stop(new MoguriError("document_timeout", "Local document extraction exceeded 10 seconds (or the stricter configured test deadline). The draft was preserved.", 409)), timeoutMs);
