@@ -87,6 +87,11 @@ architecture are checked. Staged bytes are quarantined, not executed.
 AppleDouble `__MACOSX` metadata is size/path bounded but never extracted or used
 as application permissions; actual `ditto` metadata directories may be 0775.
 Application entries retain their strict mode/type checks and full tree digest.
+The drag-to-install DMG separately includes an `/Applications` shortcut beside
+the actual app bundle. That external link is never inside the application tree
+or updater ZIP. Packaging verification mounts only its own read-only image,
+checks both top-level entries, then detaches it without launching the app.
+No dependency, durable schema, runtime API or installation permission changes.
 
 Installation is separately reviewed against fresh old/staged tree digests, the
 actual owned packaged app, same-filesystem candidate and retained backup.
