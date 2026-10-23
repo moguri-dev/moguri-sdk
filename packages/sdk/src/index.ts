@@ -1,5 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
+import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
 import type { Attachment, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
@@ -414,6 +415,12 @@ export class MoguriSdk extends TransportClient {
     status: () => this.query({ type: "runtime.status" }),
     retryPower: () => this.command({ type: "runtime.power.retry" }),
   };
+  readonly notifications = {
+    list: () => structuredClone(this.getState().snapshot?.notificationSounds ?? []),
+    importSound: (name: string, bytes: Uint8Array, commandId?: string) => this.command({ type: "notification.sound.import", name, audio: audioBase64(bytes) }, commandId),
+    sound: (id: string) => this.query({ type: "notification.sound.read", id }),
+    removeSound: (id: string, expectedDigest: string, confirm: true) => this.command({ type: "notification.sound.remove", id, expectedDigest, confirm }),
+  };
   readonly integrations = {
     githubConnection: () => this.query({ type: "github.connection" }),
     sqlStatus: () => this.query({ type: "integrations.sql.status" }),
@@ -499,6 +506,25 @@ export class MoguriSdk extends TransportClient {
     readResult: (resultId: string, offset = 0, limit = 12000) => this.query({ type: "result.read", resultId, offset, limit }),
   };
   readonly voice = {
+    startCapture: async (sessionId: string, id: string = crypto.randomUUID()): Promise<{ id: string; token: string }> => {
+      if (this.getState().status !== "connected") throw new ClientError("disconnected", "Reconnect the original profile before capturing audio.");
+      const request = parse(SpeechCaptureRequestSchema, { action: "start", sessionId, id });
+      const result = await this.request("/v1/voice", request);
+      if (!isRecord(result) || result.id !== id || typeof result.token !== "string" || !/^[a-f0-9-]{36}$/.test(result.token)) throw new ClientError("speech_capture_response", "The service did not acknowledge the exact original capture. No microphone was started.");
+      await this.refresh(); return { id, token: result.token };
+    },
+    uploadCapture: async (sessionId: string, id: string, token: string, bytes: Uint8Array): Promise<void> => {
+      validateSpeechWav(bytes);
+      const request = parse(SpeechCaptureRequestSchema, { action: "upload", sessionId, id, token, audio: audioBase64(bytes) });
+      const result = await this.request("/v1/voice", request);
+      if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "The original audio intake was not acknowledged. It was not retried or sent to another recognizer.");
+      await this.refresh();
+    },
+    cancelCapture: async (sessionId: string, id: string, token: string): Promise<void> => {
+      const request = parse(SpeechCaptureRequestSchema, { action: "cancel", sessionId, id, token });
+      const result = await this.request("/v1/voice", request);
+      if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "Cancellation was not accepted by the original capture. No different profile or microphone was contacted.");
+    },
     status: () => this.query({ type: "voice.status" }),
     download: (acceptLicense: true) => this.command({ type: "voice.download", acceptLicense }),
     record: (sessionId: string) => this.command({ type: "voice.record", sessionId }),

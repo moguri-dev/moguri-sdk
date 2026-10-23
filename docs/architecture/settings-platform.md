@@ -156,6 +156,33 @@ original/generated. Explicitly selected custom sounds are bounded and retained
 independently of source session deletion; new blob references need transactional
 retention grants.
 
+Protocol/database 46 adds the browser-capture marker and transient typed voice
+route. Admission binds original client job ID/profile/session, requires installed
+model/runtime, and excludes concurrent speech. Private 0700/0600 WAV staging is
+canonical-root checked and removed on settlement/restart; unknown entries block
+new capture, never get adopted. Device capture uses an AudioWorklet emitted as
+an actual same-origin asset (`?no-inline`), without weakening CSP. Physical
+press/release, delayed media admission and one final upload remain controller
+owned. Tests use Chromium's actual generated device and a generated recognizer,
+not a real microphone or downloaded model.
+Unconfirmed client cancellation retains its original lease and a visible discard
+retry; another microphone cannot start while that cleanup is unresolved.
+
+Protocol/database 47 adds notification settings and `notification.sound_saved`
+and `notification.sound_removed`. Every immutable sound is a separate encrypted
+retention compartment (`notification-sound/<id>`); its digest enters the existing
+transactional blob-reference mechanism. Removal retains only original command
+identity, preventing import replay after receipt loss without keeping deleted
+audio/name in that tombstone. Per-profile choices require an existing resource.
+File import accepts regular, no-follow, bounded canonical PCM16 WAV, at most ten
+seconds and 32 retained resources per profile. No compressed-media decoder or
+sound fallback is added. Native preview/import validate the trusted main frame
+and exact active profile before/after asynchronous delivery. Profile/suspend
+signals close pending playback; a late audio-context resume cannot start it.
+Failed audio cleanup retains its exact context for explicit retry. OS banners
+are silent; separate application audio follows its own saved enable/focus flags.
+Migration preserves prior ciphertext, exact defaults and explicit device choices.
+
 ## Reused components and persistence
 
 Reuse React and Electron (MIT), Ghostty Web (MIT), Node builtins/SQLite, the

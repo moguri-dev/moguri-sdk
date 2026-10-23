@@ -2,11 +2,13 @@ import { fileURLToPath } from "node:url";
 import { ensureConnection as ensureTransportConnection, readConnection, stateDirectory } from "../../client/src/node.ts";
 import type { ServiceOptions } from "../../../apps/service/src/server.ts";
 import { MoguriSdk } from "./index.ts";
-import { dirname, join } from "node:path";
-import { lstat, readFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import { lstat, open, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
 import { isRecord, PROTOCOL_VERSION, type ArtifactExport, type Connection, type RuntimeCloseOptions } from "../../protocol/src/index.ts";
 import { writeArtifactExport } from "../../../apps/service/src/artifact-export.ts";
 import type { PlatformOptions } from "../../../apps/service/src/platform.ts";
+import { MAX_NOTIFICATION_AUDIO_BYTES, validateNotificationWav } from "../../protocol/src/notification-sounds.ts";
 
 export { readConnection, stateDirectory };
 const source = import.meta.url.endsWith(".ts");
@@ -76,5 +78,23 @@ export function sdkServicePath(): string { return source ? worker("main") : join
 export const protocolVersion = PROTOCOL_VERSION;
 export async function saveArtifactExport(path: string, document: ArtifactExport): Promise<{ path: string; digest: string }> {
   return writeArtifactExport(path, document);
+}
+export async function loadNotificationSoundFile(path: string): Promise<{ name: string; audio: string }> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await file.stat();
+    if (!metadata.isFile() || metadata.size > MAX_NOTIFICATION_AUDIO_BYTES) throw new Error("Select a regular mono 16-kHz PCM16 WAV up to ten seconds. No compressed or oversized audio was decoded.");
+    const bytes = Buffer.alloc(MAX_NOTIFICATION_AUDIO_BYTES + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const value = await file.read(bytes, offset, bytes.length - offset, offset);
+      if (!value.bytesRead) break; offset += value.bytesRead;
+    }
+    const audio = bytes.subarray(0, offset);
+    validateNotificationWav(audio);
+    const name = basename(path).replace(/\.wav$/i, "");
+    if (!name.trim() || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error("Use a sound filename up to 80 characters without control characters.");
+    return { name, audio: audio.toString("base64") };
+  } finally { await file.close(); }
 }
 export type { Connection };

@@ -1,6 +1,6 @@
 import { relative, isAbsolute, normalize } from "node:path";
 import type { ToolCall, UserSettings } from "../../../packages/protocol/src/index.ts";
-import { appearanceErrors, sqlEndpoint, isPasteFilePath, MoguriError } from "../../../packages/protocol/src/index.ts";
+import { appearanceErrors, sqlEndpoint, validateShortcutSet, isPasteFilePath, MoguriError } from "../../../packages/protocol/src/index.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { validateRemoteTarget } from "./remote.ts";
 
@@ -8,6 +8,9 @@ export interface Authorization { decision: "ask" | "allow" | "deny"; ruleId?: st
 export function validateSettings(settings: UserSettings): void {
   validateLocalEndpoints(settings.localModels);
   validateRemoteTarget(settings.remote);
+  const shortcuts = validateShortcutSet({ voice: settings.voice.shortcut ?? "Control+Space",
+    commands: settings.shortcuts?.commands ?? "Primary+KeyK", terminalCopy: settings.shortcuts?.terminalCopy ?? "Primary+Shift+KeyC" });
+  if (shortcuts.length) throw new MoguriError("shortcut_conflict", shortcuts.join(" "));
   const contrast = appearanceErrors(settings.appearance);
   if (contrast.length) throw new MoguriError("theme_contrast", `Theme contrast needs correction: ${contrast.slice(0, 6).join(" ")}`);
   if (Buffer.byteLength(JSON.stringify(settings.guidance ?? {})) > 64 * 1024) throw new MoguriError("guidance_limit", "Combined guidance templates must fit within 64 KiB. Nothing was truncated.");

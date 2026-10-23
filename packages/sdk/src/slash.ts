@@ -78,6 +78,7 @@ export const slashCommands = [
   { name: "run", description: "Release a held prompt", argument: "ID" },
   { name: "settings", description: "Open shared settings" },
   { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry]" },
+  { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
   { name: "models", description: "Choose an available model" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
@@ -321,6 +322,16 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         return { kind: "ok", message: "Explicit scoped routing policy saved. No model or inference was selected/started. Hosted data and concrete compound routes need their explicit review; policy cannot lift hard budgets." };
       }
       throw new ClientError("routing_command", "Use /kupo status, history or set POLICY_JSON. Configure the actual scoped pool before explicitly selecting /model kupo.");
+    }
+    case "notification-sounds": {
+      const [action = "list", id, digest, confirmation, ...extra] = command.argument.split(/\s+/).filter(Boolean);
+      if (action === "list" && !id) return { kind: "text", text: JSON.stringify(sdk.notifications.list(), null, 2) };
+      if (action === "read" && id && !digest) return { kind: "text", text: JSON.stringify((await sdk.notifications.sound(id)).sound, null, 2) };
+      if (action === "remove" && id && digest && confirmation === "confirm-remove" && !extra.length) {
+        await sdk.notifications.removeSound(id, digest, true);
+        return { kind: "ok", message: "The unused sound's independent encrypted retention was removed. No alternative sound was selected." };
+      }
+      throw new ClientError("notification_sounds_command", "Use /notification-sounds list, read ID or remove ID SHA confirm-remove. Explicit file imports use CLI notification-sounds import FILE.wav --confirm-write or desktop Settings. No terminal audio playback.");
     }
     case "runtime":
       if (command.argument && command.argument !== "power-retry") throw new ClientError("runtime_command", "Use /runtime or /runtime power-retry. This never resumes a model or changes an execution environment.");

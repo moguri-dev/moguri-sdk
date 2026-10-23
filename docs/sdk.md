@@ -753,6 +753,31 @@ Preferences are `settings.values.notifications`: `inApp: true`, `os: false`,
 `previewContent: false` by default. Native OS delivery/navigation is an Electron
 binding of service events, not a second notification state store.
 
+`needsInputSound` and `completedSound` each default to
+`{enabled: true, id: "default"}`; `soundWhileFocused` defaults false. Sounds do
+not depend on the banner flag. `notifications.importSound(name, pcmWav,
+optionalCommandId)`, `notifications.list()`, `notifications.sound(id)` and
+`notifications.removeSound(id, observedContentDigest, true)` use immutable,
+profile-owned encrypted snapshots. Imports require canonical mono 16-kHz PCM16
+WAV up to ten seconds and at most 32 retained sounds. Removal rejects currently
+selected resources, even when the corresponding alert is disabled. An original
+import command cannot recreate removed audio after receipt loss. File loading
+is explicit Node client delivery through `loadNotificationSoundFile(path)`;
+the browser-safe SDK never gains arbitrary filesystem authority. No TUI/CLI
+operation automatically plays audio.
+
+Desktop dictation uses `voice.startCapture(sessionId, optionalOriginalId)`,
+`voice.uploadCapture(sessionId, id, token, wavBytes)` and
+`voice.cancelCapture(sessionId, id, token)`. These use transient authenticated
+`/v1/voice` requests, not durable commands. The original profile/session/job and
+one-use nonce stay bound through cancellation and disconnect. The maximum
+normalized clip is 120 seconds / 3,840,044 bytes; malformed rates/channels,
+noncanonical base64, duplicate upload and reused job identity are rejected.
+Audio and upload nonces are never retained in events/receipts. Actual ASR jobs
+and explicit transcript insertion still use existing shared APIs. Root exports
+`encodeSpeechWav`, `validateSpeechWav`, shortcut parsing/matching helpers and
+typed preferences without importing native/provider runtime.
+
 ### Held prompts, modes and retained plans
 
 ```ts

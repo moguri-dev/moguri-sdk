@@ -2,7 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MAX_TEXT, MoguriError } from "./core.ts";
 export { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
-import { PlatformCommandSchema, defaultSettings, normalizeSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
+import { PlatformCommandSchema, defaultSettings, normalizeSettings, type NotificationSound, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
 export * from "./platform.ts";
 export * from "./model.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
@@ -43,8 +43,10 @@ import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts"
 import type { TaskProgressReport } from "./progress.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
+export * from "./audio.ts";
+export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 45;
+export const PROTOCOL_VERSION = 47;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -287,6 +289,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "attention.acknowledged": { attentionIds: string[] };
   "attention.cleared": { attentionIds: string[] };
   "settings.updated": { settings: UserSettings; revision: number; permissionRevision: number };
+  "notification.sound_saved": { sound: NotificationSound };
+  "notification.sound_removed": { id: string; commandId: string };
   "capability.saved": { entry: CapabilityEntry };
   "capability.proposed": { proposal: Proposal };
   "proposal.decided": { proposalId: string; approve: boolean; actor: "user" };
@@ -358,7 +362,7 @@ export const eventTypes: readonly EventType[] = [
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "policy.updated", "provider.changed", "mcp.oauth_changed",
-  "settings.updated", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
+  "settings.updated", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "cache.prepared",
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
@@ -393,6 +397,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const oauthAuthorizations = new Map<string, McpAuthorization>();
   const configurationProposals = new Map<string, ConfigurationProposal>();
   const attention = new Map<string, Attention>();
+  const notificationSounds = new Map<string, NotificationSound>();
   const boards = new Map<string, IssueBoard>();
   const issues = new Map<string, LocalIssue>();
   const dependencyCaches = new Map<string, CacheReceipt>();
@@ -726,6 +731,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "issue.saved") issues.set(event.payload.issue.id, structuredClone(event.payload.issue));
     if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.workspaceId ?? "base"}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
     if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: normalizeSettings(event.payload.settings) };
+    if (event.event_type === "notification.sound_saved") notificationSounds.set(event.payload.sound.id, structuredClone(event.payload.sound));
+    if (event.event_type === "notification.sound_removed") notificationSounds.delete(event.payload.id);
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "proposal.decided") {
@@ -1078,7 +1085,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       control.payload.promptDigest !== sequence.inputDigest || control.payload.controls.env !== sequence.env) throw new MoguriError("role_sequence_corrupt", "Role metadata lost its exact original owning control turn. No model or root authority was adopted.", 409);
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
-    settings, registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
+    settings, notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],

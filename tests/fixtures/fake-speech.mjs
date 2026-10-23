@@ -25,6 +25,7 @@ if (process.argv.includes("--exit-signal")) {
       process.argv.includes("--finalize-delay") ? Number(argument("--finalize-delay")) : 0);
   });
 } else {
-  console.log("Generated local dictation.");
+  if (process.argv.includes("--transcribe-delay")) setTimeout(() => console.log("Generated local dictation."), Number(argument("--transcribe-delay")));
+  else console.log("Generated local dictation.");
 }
 if (marker >= 0) writeFileSync(process.argv[marker + 1], String(process.pid));

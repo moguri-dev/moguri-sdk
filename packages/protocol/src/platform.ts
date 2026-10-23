@@ -12,6 +12,8 @@ import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 export * from "./progress.ts";
 import { AppearanceSchema, GuidanceSchema, type PowerStatus, type SqlConnection } from "./preferences.ts";
 export * from "./preferences.ts";
+import { NotificationSoundCommandSchema, NotificationSoundQuerySchema, type NotificationSound, type NotificationSoundResponse } from "./notification-sounds.ts";
+export * from "./notification-sounds.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
 import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
 import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type ArtifactMaterializationPreview } from "./artifacts.ts";
@@ -77,6 +79,7 @@ const id = Type.String({ minLength: 1, maxLength: 128 });
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 const revision = Type.Integer({ minimum: 0 });
 const decision = Type.Union([Type.Literal("ask"), Type.Literal("allow"), Type.Literal("deny")]);
+const notificationSound = object({ enabled: Type.Boolean(), id: Type.String({ minLength: 1, maxLength: 128 }) });
 
 export const DEFAULT_SYSTEM_PROMPT = `You are Moguri, a practical software engineering agent.
 
@@ -127,7 +130,10 @@ export const SettingsSchema = object({
   kupo: KupoSettingsSchema,
   winddown: WinddownSettingsSchema,
   decisions: DecisionSettingsSchema,
-  notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
+  notifications: object({
+    inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean(),
+    needsInputSound: Type.Optional(notificationSound), completedSound: Type.Optional(notificationSound), soundWhileFocused: Type.Optional(Type.Boolean()),
+  }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
@@ -149,7 +155,8 @@ export const defaultSettings = (): UserSettings => ({
   kupo: defaultKupoSettings(),
   winddown: defaultWinddownSettings(),
   decisions: defaultDecisionSettings(),
-  notifications: { inApp: true, os: false, previewContent: false },
+  notifications: { inApp: true, os: false, previewContent: false,
+    needsInputSound: { enabled: true, id: "default" }, completedSound: { enabled: true, id: "default" }, soundWhileFocused: false },
   localModels: [], startup: { global: {}, profile: {} },
   remote: null,
 });
@@ -160,6 +167,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
     permissions: { ...defaults.permissions, ...settings.permissions },
     voice: { ...defaults.voice, ...settings.voice },
     retention: { ...defaults.retention, ...settings.retention },
+    notifications: { ...defaults.notifications, ...settings.notifications },
   };
 }
 export type SettingsSection = keyof UserSettings;
@@ -176,6 +184,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  NotificationSoundCommandSchema,
   object({ type: Type.Literal("runtime.power.retry") }),
   object({ type: Type.Literal("project.clone"), repository: Type.String({ minLength: 1, maxLength: 2048 }), path, confirm: Type.Literal(true) }),
   GithubCommandSchema,
@@ -229,6 +238,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  NotificationSoundQuerySchema,
   object({ type: Type.Literal("runtime.status") }),
   object({ type: Type.Literal("integrations.sql.status") }),
   ProgressQuerySchema,
@@ -332,6 +342,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   oauthAuthorizations: McpAuthorization[];
   configurationProposals: ConfigurationProposal[];
   attention: Attention[];
+  notificationSounds: NotificationSound[];
   executions: RemoteExecution[];
   sandboxWorkspaces?: SandboxWorkspace[];
   sandboxExecutions?: SandboxExecution[];
@@ -345,6 +356,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse
+  | NotificationSoundResponse
   | { type: "runtime.status"; runtime: { directory: string; power: PowerStatus } }
   | { type: "integrations.sql.status"; connection: SqlConnection }
   | GithubResponse

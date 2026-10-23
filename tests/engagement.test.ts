@@ -127,7 +127,8 @@ test("schema-5 encrypted history migrates without changing identities, receipts 
     assert.deepEqual(restarted.controller.events(0).slice(0, history.length).map((event) => [event.seq, event.id]), history);
     assert.equal(restarted.controller.snapshot().sessions[0]?.draft.text, "Generated retained schema-five draft.");
     assert.equal(restarted.controller.snapshot().sessions[0]?.controls.modelId, fixture.modelId);
-    assert.deepEqual(restarted.controller.snapshot().settings.values.notifications, { inApp: true, os: false, previewContent: false });
+    assert.deepEqual(restarted.controller.snapshot().settings.values.notifications, { inApp: true, os: false, previewContent: false,
+      needsInputSound: { enabled: true, id: "default" }, completedSound: { enabled: true, id: "default" }, soundWhileFocused: false });
     assert.ok(restarted.store.db.prepare("SELECT id FROM receipts WHERE id='generated-engagement-upgrade'").get());
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }

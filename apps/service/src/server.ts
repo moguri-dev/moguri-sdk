@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { ControlPlane } from "./controller.ts";
 import { EventStore } from "./store.ts";
 import type { ProviderAdapter } from "./provider.ts";
-import { CommandSchema, GLOBAL_PROFILE_ID, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
+import { CommandSchema, GLOBAL_PROFILE_ID, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, SpeechCaptureRequestSchema, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
 import type { PlatformOptions } from "./platform.ts";
 import { retentionKey } from "./retention-key.ts";
 import { ProfileRuntime } from "./profiles.ts";
@@ -120,7 +120,7 @@ export async function startService(options: ServiceOptions) {
         const profileId = suppliedProfile === undefined ? PROFILE_ID : typeof suppliedProfile === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(suppliedProfile) ? suppliedProfile : null;
         if (!profileId || profileId === GLOBAL_PROFILE_ID) throw new MoguriError("profile_scope", "Choose one explicit user profile. No Default fallback was used.", 403);
         if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(await rootProfiles.snapshot(profileId))); return; }
-        if (!["/v1/commands", "/v1/query", "/v1/terminal", "/v1/lifecycle"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
+        if (!["/v1/commands", "/v1/query", "/v1/terminal", "/v1/voice", "/v1/lifecycle"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
         let bytes = 0;
@@ -132,6 +132,9 @@ export async function startService(options: ServiceOptions) {
         }
         let body: unknown;
         try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new MoguriError("invalid_json", "Command body is not valid JSON."); }
+        if (request.url === "/v1/voice") {
+          response.end(JSON.stringify(await (await rootProfiles.control(profileId)).platform.captureVoice(parse(SpeechCaptureRequestSchema, body)))); return;
+        }
         if (request.url === "/v1/lifecycle") {
           const requested = parse(Type.Object({ action: Type.Union([Type.Literal("stop"), Type.Literal("restart")]) }, { additionalProperties: false }), body);
           if (lifecycle?.status === "stopping" && lifecycle.action !== requested.action) throw new MoguriError("lifecycle_conflict", "A different explicit lifecycle operation is already stopping this controller. No opposite terminal action was accepted.", 409);
