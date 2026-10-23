@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
+import { localRootsOverlap } from "./project-clone.ts";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema,
@@ -108,7 +109,7 @@ export interface ProfileHooks {
   extendCommit(profileId: string, events: EventInput[]): EventInput[];
   committed(profileId: string, events: StoredEvent[]): void;
   globalBudget(): GlobalBudgetCapacity;
-  foreignRootBusy(profileId: string, root: string): boolean;
+  foreignRootBusy(profileId: string, root: string, includeNested?: boolean): boolean;
 }
 interface ExternalRun {
   sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
@@ -288,6 +289,7 @@ export class ControlPlane extends EventEmitter {
       globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
       foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
       localRootBusy: (root, exceptJobId, permitRebaseRecovery) => this.ownedWriteRoots(undefined, exceptJobId, permitRebaseRecovery).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
+      cloneRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).some((owned) => localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
       sharedGlobals: Boolean(this.profileHooks),
     }, platformOptions);
     this.sandboxWorkspaces = new SandboxWorkspaces(store, platformOptions.stateDir ?? dirname(store.path), this.sandbox, {
@@ -556,6 +558,11 @@ export class ControlPlane extends EventEmitter {
       if (session?.id !== exceptSessionId && run.remoteRoot) roots.push(run.remoteRoot);
     }
     roots.push(...this.platform.engagement.writeRoots());
+    for (const job of this.projection.jobs) if (job.id !== exceptJobId && job.projectClone && ["running", "waiting_input"].includes(job.status)) {
+      const path = job.projectClone.path;
+      roots.push(...job.projectClone.leaseRoots, ...this.projection.projects.map((project) => project.path).filter((root) => localRootsOverlap(root, path)),
+        ...this.projection.managedWorkspaces.filter((workspace) => workspace.status !== "removed" && localRootsOverlap(workspace.path, path)).map((workspace) => workspace.path));
+    }
     roots.push(...this.compound?.writeRoots(exceptJobId) ?? []);
     if (!permitRebaseRecovery) for (const root of new Set(this.projection.githubOperations.map((operation) => operation.root.root))) {
       if (githubRootQuarantined(this.projection, root)) roots.push(root);
@@ -1538,7 +1545,6 @@ export class ControlPlane extends EventEmitter {
     const capability = this.snapshot().capabilities.find((capability) => capability.env === controls.env);
     if (!capability?.ready) throw new MoguriError("env_unavailable", capability?.reason ?? "Execution environment unavailable.", 409);
     if (controls.autonomy === "Autopilot Max") this.decisions.capability(controls.env);
-    if (controls.autonomy === "Autopilot" && !this.projection.settings.values.permissions.tools.some((rule) => rule.decision === "allow") && !this.projection.settings.values.permissions.commands.some((rule) => rule.decision === "allow")) throw new MoguriError("delegation_required", "Configure explicit bounded tool or exact-command delegations before selecting Autopilot.", 409);
     this.platform.budgets.validateControls(controls);
     if (requireModel && session && session.kind === "agent" && session.mode === "agent" && this.projection.executions.some((execution) => (session.projectId ? execution.projectId === session.projectId : execution.sessionId === session.id) && this.runs.get(execution.sessionId)?.executionId !== execution.id && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("remote_cleanup", "Owned remote cleanup is still pending/unconfirmed. Wait for its terminal status, reconcile it, or explicitly acknowledge actual process inspection before new work.", 409);
     if (controls.env === "Remote") {
@@ -1635,6 +1641,7 @@ export class ControlPlane extends EventEmitter {
         if (!isAbsolute(command.path)) throw new MoguriError("invalid_project", "Use an absolute project directory. Relative paths depend on the client, not the service.");
         const path = await realpath(command.path);
         if (!(await stat(path)).isDirectory()) throw new MoguriError("invalid_project", "A project must be an existing local directory.");
+        if (this.projection.jobs.some((job) => job.projectClone?.path === path && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("clone_pending", "This destination still belongs to its original clone job. Finish or cancel it before explicitly importing its files.", 409);
         const existing = this.projection.projects.find((project) => project.path === path);
         if (existing) return finish([], { id: existing.id });
         const project = { id: randomUUID(), name: basename(path), path };

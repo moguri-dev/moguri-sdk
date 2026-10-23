@@ -48,6 +48,13 @@ export const defaultProjectConfiguration = (projectId: string): ProjectConfigura
 });
 export interface NavigationFolder { id: string; name: string; order: number; revision: number }
 export interface SessionGroup extends NavigationFolder { projectId: string }
+export const ProjectCloneIntentSchema = object({
+  version: Type.Literal(1), projectId: id, repository: Type.String({ minLength: 1, maxLength: 2048 }), path, parent: path,
+  device: Type.String({ minLength: 1, maxLength: 40 }), inode: Type.String({ minLength: 1, maxLength: 40 }),
+  leaseRoots: Type.Array(path, { minItems: 1, maxItems: 1000 }),
+  policyRevision: revision, commandId: id, commandDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+});
+export type ProjectCloneIntent = Static<typeof ProjectCloneIntentSchema>;
 export interface SessionWorkspaceSnapshot {
   projectConfigurations: ProjectConfiguration[]; projectFolders: NavigationFolder[]; sessionGroups: SessionGroup[];
   artifacts: RetainedArtifact[]; terminals: TerminalState[];
@@ -76,7 +83,8 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.browser"), sessionId: id, url: Type.String({ minLength: 1, maxLength: 2048 }) }),
   object({ type: Type.Literal("artifact.capture"), sessionId: id, path: Type.Optional(path) }),
   object({ type: Type.Literal("plan.save"), sessionId: id, text: Type.String({ maxLength: 128 * 1024 }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }), expectedBinding: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })) }),
-  object({ type: Type.Literal("terminal.open"), sessionId: id, scriptId: Type.Optional(id), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
+  object({ type: Type.Literal("terminal.open"), sessionId: id, root: Type.Optional(path), scriptId: Type.Optional(id), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
+  object({ type: Type.Literal("terminal.open-global"), root: path, cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
   object({ type: Type.Literal("terminal.close"), terminalId: id }),
   object({ type: Type.Literal("terminal.reconcile"), terminalId: id }),
   object({ type: Type.Literal("terminal.acknowledge"), terminalId: id, confirmInspection: Type.Literal(true) }),
@@ -99,6 +107,7 @@ export const SessionWorkspaceQuerySchema = Type.Union([
   object({ type: Type.Literal("project.porto"), projectId: id }),
   object({ type: Type.Literal("plan.read"), sessionId: id }),
   object({ type: Type.Literal("terminal.read"), terminalId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 65536 }) }),
+  object({ type: Type.Literal("terminal.default-root") }),
 ]);
 export type SessionWorkspaceQuery = Static<typeof SessionWorkspaceQuerySchema>;
 export const isSessionWorkspaceQuery = (value: unknown): value is SessionWorkspaceQuery => Value.Check(SessionWorkspaceQuerySchema, value);
@@ -108,5 +117,6 @@ export type SessionWorkspaceResponse =
   | { type: "project.git"; branch: string; repository: string | null; status: string; diff: string }
   | { type: "project.sources"; instructions: string | null; mcp: string | null; instructionsPath: string; mcpPath: string; mcpDigest: string | null }
   | { type: "project.porto"; output: string }
+  | { type: "terminal.default-root"; root: string }
   | ({ type: "plan.read"; path: string; text: string; digest: string; exists: boolean } & Partial<PlanBinding>)
   | { type: "terminal.read"; terminal: TerminalState; data: string; baseOffset: number; nextOffset: number };

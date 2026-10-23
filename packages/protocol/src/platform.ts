@@ -2,7 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
 import { McpServerSchema, SandboxSchema } from "./config.ts";
-import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot } from "./sessions.ts";
+import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot, type ProjectCloneIntent } from "./sessions.ts";
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
@@ -147,6 +147,7 @@ const section = Type.Union([
   Type.Literal("decisions"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  object({ type: Type.Literal("project.clone"), repository: Type.String({ minLength: 1, maxLength: 2048 }), path, confirm: Type.Literal(true) }),
   GithubCommandSchema,
   LinearCommandSchema,
   ExtensionCommandSchema,
@@ -260,6 +261,7 @@ export interface Proposal {
   baseDigest?: string;
 }
 export interface CapabilityJob {
+  projectClone?: ProjectCloneIntent;
   operationId?: string;
   workspaceId?: string | null;
   materialization?: ArtifactMaterializationPreview;

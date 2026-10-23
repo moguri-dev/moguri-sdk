@@ -71,6 +71,7 @@ import { isLinearCommand, isLinearQuery } from "../../../packages/protocol/src/l
 import type { WorkflowHost } from "./workflow-host.ts";
 import { TaskProgressRuntime } from "./task-progress.ts";
 import type { DocumentParserOptions } from "./documents.ts";
+import { cloneProject, prepareProjectClone } from "./project-clone.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -142,6 +143,7 @@ export interface PlatformHost {
   globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
   foreignRootBusy(root: string): boolean;
   localRootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean): boolean;
+  cloneRootBusy(root: string, exceptJobId?: string): boolean;
   sharedGlobals: boolean;
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions }
@@ -226,6 +228,7 @@ export class PlatformRuntime {
       retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session) => this.managed.project(session),
       rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
+      localRootBusy: host.localRootBusy,
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
@@ -751,6 +754,40 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return id;
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (command.type === "project.clone") {
+      if (!finish.intent) throw new MoguriError("clone_intent", "Repository cloning requires its original user command identity. No process was started.", 409);
+      const previous = this.snapshot().jobs.find((job) => job.projectClone?.commandId === finish.intent!.id);
+      if (previous) {
+        if (previous.projectClone?.commandDigest !== finish.intent.digest) throw new MoguriError("idempotency_conflict", "This clone command ID belongs to different original input. No process was replayed.", 409);
+        return finish([], { id: previous.id });
+      }
+      const originalPolicy = this.snapshot().policy;
+      if (!originalPolicy.allowedEnvs.includes("Local")) throw new MoguriError("clone_policy", "Cloning a Local project is blocked by the current Local execution policy. No other host was selected.", 403);
+      const prepared = await prepareProjectClone(command.repository, command.path, originalPolicy.revision, finish.intent);
+      const intent = { ...prepared, leaseRoots: [...new Set([prepared.path, ...this.snapshot().projects.map((project) => project.path),
+        ...this.snapshot().managedWorkspaces.filter((workspace) => workspace.status !== "removed").map((workspace) => workspace.path)]
+        .filter((root) => root === prepared.path || prepared.path.startsWith(`${root}/`)))] };
+      let jobId: string | undefined;
+      const current = () => {
+        if (this.snapshot().policy.revision !== intent.policyRevision || !this.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("clone_policy_changed", "Local clone policy changed. Original effects must be inspected; nothing was replayed.", 409);
+        if (this.host.cloneRootBusy(intent.path, jobId)) throw new MoguriError("clone_root_busy", "An owned writer holds this clone destination or its containing project/worktree. Wait for the original owner; no effects were replayed.", 409);
+      };
+      current();
+      if (this.snapshot().jobs.some((job) => job.projectClone?.path === intent.path && ["running", "waiting_input", "partial"].includes(job.status))) throw new MoguriError("clone_pending", "This destination already has retained clone intent. Inspect its original job and files; no clone was replayed.", 409);
+      let created = false;
+      const id = this.job("project.clone", null, null, (signal, progress) => cloneProject(intent, signal, progress, current, () => { created = true; }), undefined,
+        (job) => this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, payload: { job: { ...job, projectClone: intent } } }]), undefined, {
+          completed: (value) => {
+            current();
+            if (!isRecord(value) || value.id !== intent.projectId || value.path !== intent.path || typeof value.name !== "string") throw new MoguriError("clone_result", "Clone result lost its original project/root binding. Inspect retained files; no complete success was recorded.", 409);
+            return [{ event_type: "project.added", profile_id: this.snapshot().profileId, project_id: intent.projectId, payload: { project: { id: intent.projectId, name: value.name, path: intent.path } } }];
+          },
+          failed: (error, cancelled) => ({ events: [], status: created ? "partial" : cancelled ? "cancelled" : "failed",
+            error: `${created ? `Clone may be partial at ${intent.path}. Files were preserved; inspect before any explicit retry.` : "Clone did not create a project."} ${error instanceof Error ? error.message : "Inspect the original clone job."}` }),
+        });
+      jobId = id;
+      return finish([], { id });
+    }
     if (isGithubCommand(command)) return this.github.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
     if (isExtensionCommand(command)) return this.extensions.execute(command, finish);

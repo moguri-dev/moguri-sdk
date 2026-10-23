@@ -7,7 +7,7 @@ export * from "./platform.ts";
 export * from "./model.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
-import { defaultProjectSettings } from "./sessions.ts";
+import { defaultProjectSettings, ProjectCloneIntentSchema } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
 import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
@@ -44,7 +44,7 @@ import type { TaskProgressReport } from "./progress.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 43;
+export const PROTOCOL_VERSION = 44;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -669,6 +669,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const terminal = event.payload.terminal, previous = terminals.get(terminal.id);
       if (!Value.Check(TerminalStateSchema, terminal)) throw new MoguriError("terminal_corrupt", "Terminal state is invalid. Retained history was preserved.", 409);
       if (terminal.binding && terminal.env !== terminal.binding.env) throw new MoguriError("terminal_corrupt", "Terminal execution env differs from its captured binding. No boundary was relabeled.", 409);
+      if (terminal.sessionId === null || terminal.projectId === null) {
+        if (terminal.env !== "Local" || terminal.binding?.env !== "Local" || terminal.binding.profileId !== profileId ||
+          terminal.binding.sessionId !== terminal.sessionId || terminal.binding.projectId !== terminal.projectId ||
+          terminal.sessionId === null && terminal.projectId !== null || terminal.workspaceId != null || terminal.binding.workspaceId !== null ||
+          terminal.sessionId !== event.session_id || terminal.projectId !== event.project_id) throw new MoguriError("terminal_corrupt", "Independent Local console lost its exact null scope, profile or captured root. No session/project was inferred.", 409);
+      }
       if (terminal.env === "Remote") {
         const owner = terminal.ownerId ? terminalOwners.get(terminal.ownerId) : undefined;
         if (!owner?.remote || terminal.binding?.env !== "Remote" || terminal.binding.peerDigest !== owner.remote.peerDigest ||
@@ -685,7 +691,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       terminals.set(terminal.id, { ...terminal });
       if (event.payload.terminal.status === "unconfirmed") {
         if (event.payload.terminal.workspaceId) blockedWorkspaces.add(event.payload.terminal.workspaceId);
-        else blockedProjects.add(event.payload.terminal.projectId);
+        else if (event.payload.terminal.projectId) blockedProjects.add(event.payload.terminal.projectId);
       }
     }
     if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
@@ -726,6 +732,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "job.started") {
       const job = event.payload.job;
+      if (job.projectClone || job.kind === "project.clone") {
+        if (!Value.Check(ProjectCloneIntentSchema, job.projectClone) || job.kind !== "project.clone" || job.projectId !== null || job.sessionId !== null ||
+          job.parentTurnId !== null || job.workspaceId != null || job.operationId || job.candidate || job.memory ||
+          event.session_id != null || event.project_id != null || event.artifact_id != null || jobs.has(job.id) ||
+          [...jobs.values()].some((other) => other.projectClone?.commandId === job.projectClone?.commandId)) throw new MoguriError("clone_corrupt", "Clone job lost its independent original command and exact Local destination. No effects were replayed.", 409);
+        const intent = job.projectClone!;
+        if (!intent.leaseRoots.includes(intent.path) || intent.leaseRoots.some((root) => root !== intent.path && !intent.path.startsWith(`${root}/`)) ||
+          !intent.path.startsWith(intent.parent === "/" ? "/" : `${intent.parent}/`)) throw new MoguriError("clone_corrupt", "Clone leases no longer belong to the exact destination and its containing roots. No alternate authority was inferred.", 409);
+      }
       if (job.operationId) {
         const operation = githubOperations.get(job.operationId) ?? linearOperations.get(job.operationId);
         const sessionId = operation && ("originSessionId" in operation ? operation.originSessionId : operation.sessionId);

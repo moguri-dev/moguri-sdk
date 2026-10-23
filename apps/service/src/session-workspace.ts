@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
+import { homedir } from "node:os";
 import {
   MoguriError, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
@@ -35,6 +36,7 @@ export interface SessionWorkspaceHost {
   startup(projectId: string | null): ResolvedControls;
   project(session: Pick<Session, "projectId" | "workspaceId">): Project;
   rootBusy(projectId: string, workspaceId: string | null): boolean;
+  localRootBusy(root: string): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   nativeRead?(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   remotePlanBinding(session: Session): PlanBinding;
@@ -45,12 +47,13 @@ export class SessionWorkspace {
   readonly terminals: TerminalManager;
   private timer?: ReturnType<typeof setInterval>;
   private cleaning = false;
+  private globalOpening?: Promise<TerminalState>;
   constructor(private readonly host: SessionWorkspaceHost, stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
     this.projects = new ProjectService(() => host.snapshot(), stateDir);
     this.terminals = new TerminalManager({
       snapshot: () => this.snapshot(),
       changed: (terminal) => {
-        if (!this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) throw new MoguriError("terminal_session_removed", "Terminal state cannot resurrect a removed session.", 409);
+        if (terminal.sessionId !== null && !this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) throw new MoguriError("terminal_session_removed", "Terminal state cannot resurrect a removed session.", 409);
         this.host.commit([{ event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId, payload: { terminal } }]);
       },
       ownerChanged: (owner) => this.host.commit([{ event_type: "terminal.owner_changed", profile_id: this.snapshot().profileId, payload: { owner } }]),
@@ -98,39 +101,82 @@ export class SessionWorkspace {
   async input(request: TerminalInput): Promise<void> {
     const terminal = this.snapshot().terminals.find((terminal) => terminal.id === request.terminalId);
     if (!terminal) throw new MoguriError("terminal_missing", "Terminal is outside this profile.", 404);
-    this.session(terminal.sessionId); await this.terminals.input(request);
+    if (terminal.sessionId !== null) this.session(terminal.sessionId);
+    await this.terminals.input(request);
   }
-  private terminalContext(sessionId: string, scriptId?: string) {
+  private localTerminalPolicy(): void {
+    if (!this.snapshot().policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.some((value) => value.env === "Local" && value.ready)) {
+      throw new MoguriError("terminal_env", "Local user consoles are blocked by the current execution policy. No Remote or Sandbox fallback was used.", 409);
+    }
+  }
+  private async globalTerminal(root: string, cols: number, rows: number, intent: NonNullable<WorkspaceFinish["intent"]>): Promise<TerminalState> {
+    if (!isAbsolute(root)) throw new MoguriError("terminal_root", "Choose an explicit absolute directory for the global Local console.");
+    const canonical = await realpath(root);
+    const binding = terminalBinding({ profileId: this.snapshot().profileId, sessionId: null, projectId: null, workspaceId: null, root: canonical });
+    const recheck = () => {
+      this.localTerminalPolicy();
+      if (this.host.localRootBusy(canonical)) throw new MoguriError("workspace_busy", "An owned writer holds this exact Local root. No independent terminal was started.", 409);
+      if (terminalBinding(binding).digest !== binding.digest) throw new MoguriError("terminal_root_changed", "The chosen global terminal root changed. No replacement or input was replayed.", 409);
+    };
+    recheck();
+    if (this.globalOpening) {
+      const existing = await this.globalOpening; recheck();
+      if (existing.binding?.digest !== binding.digest) throw new MoguriError("terminal_global_exists", "The global terminal is already starting in another exact root. Inspect it instead of replacing it.", 409);
+      return existing;
+    }
+    const existing = this.snapshot().terminals.find((terminal) => terminal.sessionId === null && !["closed", "failed", "acknowledged"].includes(terminal.status));
+    if (existing) {
+      if (existing.status !== "running" || existing.binding?.digest !== binding.digest) throw new MoguriError("terminal_global_exists", "Inspect or close the original global terminal before opening another root. No shell was replaced.", 409);
+      return existing;
+    }
+    const work = this.terminals.open(binding, cols, rows, intent, recheck);
+    this.globalOpening = work;
+    try { return await work; } finally { if (this.globalOpening === work) this.globalOpening = undefined; }
+  }
+  private terminalContext(sessionId: string, scriptId?: string, explicitRoot?: string) {
     const session = this.session(sessionId), env = session.controls.env;
     if (session.status === "archived") throw new MoguriError("archived", "Restore this session before opening or typing into its terminal.", 409);
     if (!["Local", "Remote"].includes(env) || !this.snapshot().policy.allowedEnvs.includes(env) || !this.snapshot().capabilities.find((capability) => capability.env === env)?.ready) throw new MoguriError("terminal_env", "No qualified terminal transport exists for this environment/policy; no Local fallback.", 409);
     if (env === "Remote" && session.workspaceId !== null) throw new MoguriError("terminal_remote_workspace", "Remote consoles require an explicitly mapped project, not an implicit Local worktree.", 409);
-    const project = env === "Remote" ? this.project(session.projectId) : this.host.project(session);
-    if (env === "Local" && this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
-    const configuration = this.projects.configuration(project.id), script = scriptId ? configuration.values.scripts.find((script) => script.id === scriptId) : undefined;
+    const project = session.projectId === null ? null : env === "Remote" ? this.project(session.projectId) : this.host.project(session);
+    if (!project && (env !== "Local" || !explicitRoot)) throw new MoguriError("project_required", "Select a project, or explicitly choose a Local root for this project-free user console. No previous root was reused.", 409);
+    if (!project && explicitRoot && this.host.localRootBusy(explicitRoot)) throw new MoguriError("workspace_busy", "An owned writer holds this exact Local root. No project-free terminal was started.", 409);
+    if (project && explicitRoot !== undefined) throw new MoguriError("terminal_root", "Project consoles use their bound workspace. An explicit alternate root requires a separate global console.", 409);
+    if (project && env === "Local" && this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
+    const configuration = project ? this.projects.configuration(project.id) : null, script = scriptId ? configuration?.values.scripts.find((script) => script.id === scriptId) : undefined;
     if (scriptId && !script) throw new MoguriError("project_script", "Choose an existing explicitly configured project script.", 404);
-    const remote = env === "Remote" ? this.host.remoteConsoles?.admission() : undefined, root = env === "Remote" ? configuration.values.remotePath : project.path;
+    const remote = env === "Remote" ? this.host.remoteConsoles?.admission() : undefined, root = env === "Remote" ? configuration?.values.remotePath : project?.path ?? explicitRoot;
     if (env === "Remote" && !remote) throw new MoguriError("terminal_remote_unqualified", "Remote console admission is not wired on this service. No Local broker was selected.", 409);
     if (!root || !root.startsWith("/") || /[\0\r\n]/.test(root)) throw new MoguriError("terminal_root", "Configure this exact execution environment's absolute project root. No previous or Local root was substituted.", 409);
-    const scope = { profileId: this.snapshot().profileId, sessionId: session.id, projectId: project.id, workspaceId: session.workspaceId, root };
-    return { session, project, script, scope, remote, signature: frameDigest([scope, env, configuration.revision, this.snapshot().policy.revision, script ?? null, remote ?? null]) };
+    const scope = { profileId: this.snapshot().profileId, sessionId: session.id, projectId: project?.id ?? null, workspaceId: session.workspaceId, root };
+    return { session, project, script, scope, remote, signature: frameDigest([scope, env, configuration?.revision ?? null, this.snapshot().policy.revision, script ?? null, remote ?? null]) };
   }
-  private async terminalAdmission(sessionId: string, scriptId?: string) {
-    const captured = this.terminalContext(sessionId, scriptId);
-    const binding = captured.remote ? await this.host.remoteConsoles!.binding({ ...captured.scope, workspaceId: null }, captured.remote.boundary, AbortSignal.timeout(10_000)) :
-      terminalBinding(captured.scope);
-    this.terminalRecheck(sessionId, scriptId, captured.signature, binding);
-    return { ...captured, binding };
+  private async terminalAdmission(sessionId: string, scriptId?: string, explicitRoot?: string) {
+    if (explicitRoot !== undefined) {
+      if (!isAbsolute(explicitRoot)) throw new MoguriError("terminal_root", "Choose an explicit absolute Local console root.");
+      explicitRoot = await realpath(explicitRoot);
+    }
+    const captured = this.terminalContext(sessionId, scriptId, explicitRoot);
+    const binding = captured.remote && captured.project ? await this.host.remoteConsoles!.binding({ ...captured.scope, projectId: captured.project.id, workspaceId: null }, captured.remote.boundary, AbortSignal.timeout(10_000)) : terminalBinding(captured.scope);
+    this.terminalRecheck(sessionId, scriptId, captured.signature, binding, explicitRoot);
+    return { ...captured, binding, explicitRoot };
   }
-  private terminalRecheck(sessionId: string, scriptId: string | undefined, signature: string, binding: import("../../../packages/protocol/src/index.ts").TerminalBinding): void {
-    const current = this.terminalContext(sessionId, scriptId);
+  private terminalRecheck(sessionId: string, scriptId: string | undefined, signature: string, binding: import("../../../packages/protocol/src/index.ts").TerminalBinding, explicitRoot?: string): void {
+    const current = this.terminalContext(sessionId, scriptId, explicitRoot);
     if (current.signature !== signature || binding.env === "Local" && terminalBinding(current.scope).digest !== binding.digest) throw new MoguriError("terminal_scope_changed", "Terminal root/script/authority changed during admission. Original effects remain inspectable; no launch was replayed.", 409);
   }
   private terminalInputAllowed(terminal: TerminalState): void {
+    if (terminal.sessionId === null) {
+      this.localTerminalPolicy();
+      const binding = terminal.binding;
+      if (terminal.env !== "Local" || binding?.env !== "Local" || binding.profileId !== this.snapshot().profileId ||
+        binding.sessionId !== null || binding.projectId !== null || binding.workspaceId !== null || terminalBinding(binding).digest !== binding.digest) throw new MoguriError("terminal_root_changed", "The global console no longer owns its exact Local null scope and root. No input or replacement was sent.", 409);
+      return;
+    }
     const session = this.session(terminal.sessionId), binding = terminal.binding;
     if (!binding || terminal.env !== session.controls.env || session.status === "archived" || !this.snapshot().policy.allowedEnvs.includes(binding.env)) throw new MoguriError("terminal_root_changed", "This retained terminal no longer has its original allowed execution environment/policy. No input/resize was sent.", 409);
     if (binding.env === "Local") {
-      const current = this.terminalContext(terminal.sessionId);
+      const current = this.terminalContext(terminal.sessionId, undefined, session.projectId === null ? binding.root : undefined);
       if (current.remote || binding.digest !== terminalBinding(current.scope).digest) throw new MoguriError("terminal_root_changed", "The retained Local root changed. No input/resize or replacement was sent.", 409);
     } else {
       const owner = this.snapshot().terminalOwners.find((owner) => owner.id === terminal.ownerId), target = this.snapshot().settings.values.remote;
@@ -143,6 +189,7 @@ export class SessionWorkspace {
   }
   async query(query: SessionWorkspaceQuery): Promise<SessionWorkspaceResponse> {
     switch (query.type) {
+      case "terminal.default-root": return { type: query.type, root: await realpath(this.options.terminal?.defaultRoot ?? homedir()) };
       case "session.context": return { type: query.type, context: await this.host.contextPreview(this.session(query.sessionId)) };
       case "project.configuration": return { type: query.type, configuration: this.projects.configuration(query.projectId) };
       case "project.sources": return this.projects.sources(this.project(query.projectId));
@@ -324,11 +371,16 @@ export class SessionWorkspace {
         }
       }
       case "terminal.open": {
-        const captured = await this.terminalAdmission(command.sessionId, command.scriptId);
+        const captured = await this.terminalAdmission(command.sessionId, command.scriptId, command.root);
         if (!finish.intent) throw new MoguriError("terminal_intent", "Terminal launch needs its canonical user command identity. No shell was started.", 409);
         const terminal = await this.terminals.open(captured.binding, command.cols, command.rows, finish.intent, () => {
-          this.terminalRecheck(command.sessionId, command.scriptId, captured.signature, captured.binding);
+          this.terminalRecheck(command.sessionId, command.scriptId, captured.signature, captured.binding, captured.explicitRoot);
         }, captured.script, captured.remote);
+        return finish([], { id: terminal.id });
+      }
+      case "terminal.open-global": {
+        if (!finish.intent) throw new MoguriError("terminal_intent", "A global launch requires its actual user command identity. No console was started.", 409);
+        const terminal = await this.globalTerminal(command.root, command.cols, command.rows, finish.intent);
         return finish([], { id: terminal.id });
       }
       case "terminal.reconcile": {

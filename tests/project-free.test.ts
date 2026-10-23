@@ -68,3 +68,17 @@ test("project-free sessions run independently and a failed one quarantines neith
     assert.deepEqual(fixture.service.controller.snapshot().blockedSessions, []);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
+
+test("project-free Autopilot is selectable without tool grants and still cannot acquire workspace authority", mac, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const created = await sdk.sessions.create(null), current = () => sdk.getState().snapshot!.sessions.find((session) => session.id === created.id)!;
+    await sdk.sessions.configure(created.id!, { ...current().controls, modelId: fixture.modelId, autonomy: "Autopilot" });
+    assert.equal(current().controls.autonomy, "Autopilot");
+    assert.deepEqual(sdk.settings.get()!.values.permissions, { tools: [], commands: [] });
+    await send(sdk, current(), "Generated project-free Autopilot question.");
+    await waitFor(() => fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)?.status === "completed");
+    assert.equal(/read_file|write_file|run_command/.test(JSON.stringify(fixture.requests[0]?.tools)), false);
+    assert.equal(current().projectId, null);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});

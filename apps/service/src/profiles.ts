@@ -7,6 +7,7 @@ import {
   type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
 import { ControlPlane, type ProfileHooks } from "./controller.ts";
+import { localRootsOverlap } from "./project-clone.ts";
 import { budgetCharges } from "./budgets.ts";
 import { digest, EventStore } from "./store.ts";
 import { writeArtifactExport } from "./artifact-export.ts";
@@ -33,7 +34,7 @@ export class ProfileRuntime {
       extendCommit: (id, events) => this.extend(id, events),
       committed: (id, events) => this.committed(id, events),
       globalBudget: () => this.globalBudget(),
-      foreignRootBusy: (id, root) => this.foreignRootBusy(id, root),
+      foreignRootBusy: (id, root, includeNested) => this.foreignRootBusy(id, root, includeNested),
     };
   }
   catalog(): ProfileCatalog {
@@ -175,12 +176,13 @@ export class ProfileRuntime {
     const charges = budgetCharges(entries, plans);
     return { limit, chargedTokens: charges.tokens, chargedUsdMicros: charges.usdMicros };
   }
-  private foreignRootBusy(id: string, root: string): boolean {
+  private foreignRootBusy(id: string, root: string, includeNested = false): boolean {
     for (const profile of this.catalog().profiles) {
       if (profile.id === id) continue;
       const control = this.controllers.get(profile.id);
-      if (control?.ownedWriteRoots().includes(root)) return true;
+      if (control?.ownedWriteRoots().some((owned) => includeNested ? localRootsOverlap(root, owned) : owned === root)) return true;
       const state = control?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      if (state.jobs.some((job) => job.projectClone && ["running", "waiting_input"].includes(job.status) && localRootsOverlap(root, job.projectClone.path))) return true;
       if (remoteRootQuarantined(state, root) || githubRootQuarantined(state, root) || state.projects.some((project) => project.path === root && state.blockedProjects.includes(project.id)) ||
         state.managedWorkspaces.some((workspace) => workspace.path === root && state.blockedWorkspaces.includes(workspace.id))) return true;
     }

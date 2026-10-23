@@ -328,6 +328,8 @@ export class MoguriSdk extends TransportClient {
     acknowledge: (attentionIds: string[]) => this.command({ type: "attention.acknowledge", attentionIds }),
   };
   readonly projects = {
+    add: (path: string) => this.command({ type: "project.add", path }),
+    clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),
     configuration: (projectId: string) => this.query({ type: "project.configuration", projectId }),
     configure: (projectId: string, settings: ProjectSettings, expectedRevision: number) => this.command({ type: "project.settings", projectId, settings, expectedRevision }),
     organize: (projectId: string, presentation: { folderId: string | null; color: string; order: number }, expectedRevision: number) => this.command({ type: "project.organize", projectId, ...presentation, expectedRevision }),
@@ -367,7 +369,9 @@ export class MoguriSdk extends TransportClient {
     if (!isRecord(result) || result.accepted !== true) throw new ClientError("terminal_input", "Terminal input acknowledgement was not confirmed. It was not automatically replayed.");
   }
   readonly terminal = {
-    open: (sessionId: string, cols = 80, rows = 24, scriptId?: string) => this.command({ type: "terminal.open", sessionId, cols, rows, ...(scriptId ? { scriptId } : {}) }),
+    open: (sessionId: string, cols = 80, rows = 24, scriptId?: string, root?: string) => this.command({ type: "terminal.open", sessionId, cols, rows, ...(scriptId ? { scriptId } : {}), ...(root ? { root } : {}) }),
+    openGlobal: (root: string, cols = 80, rows = 24) => this.command({ type: "terminal.open-global", root, cols, rows }),
+    defaultRoot: () => this.query({ type: "terminal.default-root" }),
     input: async (terminalId: string, data: string, signal?: AbortSignal) => {
       if (!data.length) throw new ClientError("terminal_input", "Terminal input must contain at least one character.");
       const original = this.getState().snapshot?.terminals.find((terminal) => terminal.id === terminalId);

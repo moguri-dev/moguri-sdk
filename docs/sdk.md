@@ -410,7 +410,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single or declared Compound policy/configure with an observed settings revision. Ordinary Single history remains separate from retained public compound reports. Finite Local turns need explicit qualified reserved wind-down; images and synthetic-model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
-| `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, terminal/owner reconciliation and explicit process-inspection acknowledgements. Immutable env/peer/root and authenticated per-profile ownership survive explicit restart. Input/resize bypass durable receipts. |
+| `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
@@ -422,6 +422,15 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 ### Owned Local and Remote user consoles
 
 `terminal.open(sessionId)` is an explicit user action, not an agent tool.
+`terminal.defaultRoot()` discloses the canonical home directory without starting
+a process. `terminal.openGlobal(root)` explicitly opens one profile-owned Local
+console with actual null session/project fields. It does not create a fake chat,
+inherit a repository or grant workspace access to a model. Concurrent opens
+reuse the same exact live root/intent rather than creating another global PTY.
+`terminal.open(sessionId, cols, rows, undefined, root)` supports a project-free
+Local user console only when that root is explicitly supplied. A project-bound
+console still uses the exact selected project/worktree, never an alternate root.
+
 `terminal.read(id, offset, limit)` returns the exact Local or Remote binding, actual
 attachment generation, bounded volatile data and base/next offsets. A missing
 prefix or expired buffer is not reconstructed as a transcript.
@@ -683,10 +692,13 @@ validated commands used by both clients.
 ### Project-free chats and reviewed configuration
 
 `sessions.create()` or `sessions.create(null)` creates a real project-free chat.
-Raw `session.create` also permits an omitted/null `projectId`. No workspace root,
-attachments, commands, terminal or repository memory is available, and failure
+Raw `session.create` also permits an omitted/null `projectId`. No model workspace
+root, project-file attachments, agent commands or repository memory is available, and failure
 quarantines only the affected general chat. Scope cannot be reassigned by a
 navigation selection. Explicit global MCPs remain subject to normal approvals.
+Separate explicit user consoles do not change that model boundary. Autopilot may
+be selected without a project or preexisting allow rule; this adds no tool
+permissions, and undelegated operations still require human review.
 
 ```ts
 const general = await sdk.sessions.create(null);
@@ -749,6 +761,18 @@ request; immediate restriction and model-declared tools are service-enforced.
 
 Project settings use `projects.configuration` and
 `projects.configure(projectId, settings, observedRevision)`.
+`projects.add(absolutePath)` registers an existing canonical directory.
+`projects.clone(repositoryUrl, newAbsolutePath, true)` returns an independently
+retained `project.clone` capability job, not a completed project. Wait with
+`jobs.wait(id)` and inspect its actual status before using
+`job.projectClone.projectId`. Successful project registration and `job.finished`
+commit atomically. The intent retains canonical destination/parent identity,
+containing-root leases and original command ID/digest. Cancel, restart or a lost
+receipt never repeats the original Git operation or deletes partial files.
+Cloning does not run hooks/checkout filters/submodules, initiate personal login
+or start inference. Existing destinations and embedded URL credentials fail
+before effects.
+
 `projects.sources` returns the actual instruction/MCP source and `mcpDigest`;
 `projects.importMcp(projectId, observedRevision, true, reviewedDigest)` rejects
 file changes after review and installs supported entries disabled.

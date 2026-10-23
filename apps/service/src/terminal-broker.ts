@@ -77,6 +77,9 @@ export async function runTerminalOwner(boot: TerminalBootstrap): Promise<void> {
             binding.sessionId !== intent.sessionId || binding.projectId !== intent.projectId || binding.workspaceId !== (intent.workspaceId ?? null)) {
             throw new MoguriError("terminal_intent", "The user terminal launch has no exact admitted owner/root/command binding. Nothing was started.", 409);
           }
+          if ((intent.sessionId === null || intent.projectId === null) && (env !== "Local" || intent.sessionId === null && intent.projectId !== null || intent.workspaceId != null)) {
+            throw new MoguriError("terminal_intent", "An independent console requires an exact Local null scope, never a borrowed project or remote peer.", 409);
+          }
           const launchDigest = frameDigest([intent.id, binding, request.launch, intent.cols, intent.rows, intent.title]);
           if (launchDigest !== intent.launchDigest) throw new MoguriError("terminal_intent", "The launch arguments do not match their admitted digest.", 409);
           const previous = seen.get(intent.id);
