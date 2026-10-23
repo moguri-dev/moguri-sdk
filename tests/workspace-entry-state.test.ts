@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -11,6 +11,20 @@ import { startService } from "../apps/service/src/server.ts";
 import { writeLegacyState } from "./fixtures/legacy-state.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { setupFixture } from "./fixture.ts";
+import { terminalBinding } from "../apps/service/src/terminal-identity.ts";
+import { frameDigest } from "../apps/service/src/worker-wire.ts";
+
+test("Local and Remote version-1 root bindings retain their exact pre-upgrade digest encoding", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-binding-v1-"));
+  try {
+    const root = await realpath(directory), metadata = await lstat(root, { bigint: true });
+    const scope = { profileId: "generated-profile", sessionId: "generated-session", projectId: "generated-project", workspaceId: null, root };
+    const local = { ...scope, env: "Local" as const, device: String(metadata.dev), inode: String(metadata.ino) };
+    const remote = { ...scope, env: "Remote" as const, peerDigest: "7".repeat(64), device: String(metadata.dev), inode: String(metadata.ino) };
+    assert.equal(terminalBinding(scope).digest, frameDigest(local));
+    assert.equal(terminalBinding({ ...scope, env: "Remote", peerDigest: remote.peerDigest }).digest, frameDigest(remote));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 test("migration 44 rolls back its marker atomically and preserves exact encrypted history and receipts", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-entry-migration-")), path = join(directory, "state.sqlite"), key = randomBytes(32);

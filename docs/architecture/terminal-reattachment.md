@@ -19,6 +19,11 @@ Remote still requires non-null session/project/peer ownership. Global intent
 survives unrelated session/project deletion; concurrent opens cannot start a
 second global PTY, and missing receipts cannot resurrect closed original work.
 Existing owner metadata/builds are retained, not silently upgraded or replaced.
+Version-1 binding digests also retain their original serialized field order;
+the independent-scope extension must not invalidate an existing Local or SSH
+root merely by reordering equivalent metadata. Null project/session IDs do not
+remove the captured root's protection against worktree removal or artifact
+publication while that console is still live.
 
 The [prerequisite spike](terminal-reattachment-primitives.md) qualified the real
 PTY, process-loss, framing and authentication primitives before integration.

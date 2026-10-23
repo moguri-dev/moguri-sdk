@@ -198,7 +198,9 @@ export class PlatformRuntime {
       writeBusy: (projectId, workspaceId) => {
         const workspace = this.snapshot().managedWorkspaces.find((workspace) => workspace.id === workspaceId);
         return this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) ||
-          Boolean(workspace && (this.engagement.writeRoots().includes(workspace.path) || host.localRootBusy(workspace.path)));
+          Boolean(workspace && (this.engagement.writeRoots().includes(workspace.path) || host.localRootBusy(workspace.path) ||
+            this.snapshot().terminals.some((terminal) => terminal.binding?.env === "Local" && terminal.binding.root === workspace.path &&
+              !["closed", "failed", "acknowledged"].includes(terminal.status))));
       },
       remoteRead: host.remoteRead,
       nativeRead: host.nativeRead,

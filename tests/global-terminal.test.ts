@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
+import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 
 const native = { skip: process.platform !== "darwin" };
 const program = { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_GLOBAL_READY\\n'; exec cat"] };
@@ -90,5 +91,24 @@ test("a missing global launch receipt cannot replace a closed original console",
     await assert.rejects(() => sdk.command(command, id), /original command already owns a terminal intent/);
     assert.equal(fixture.service.controller.snapshot().terminals.length, 1);
     assert.equal((await sdk.terminal.read(opened.id!)).terminal.pid, before.terminal.pid);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("an independent global console protects its exact managed root from removal and artifact publication without borrowing project identity", native, async () => {
+  const fixture = await setupFixture({ platform: { terminal: program } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    initializeGeneratedRepository(fixture.project);
+    const created = await sdk.workspaces.create(fixture.session().projectId, "moguri/generated-global-root");
+    const workspace = await sdk.workspaces.wait(created.id!);
+    await sdk.artifacts.create(fixture.sessionId, { kind: "report", name: "Generated root-bound report", text: "Generated independent console publication guard." });
+    const opened = await sdk.terminal.openGlobal(workspace.path);
+    const options = { workspaceId: workspace.id }, preview = (await sdk.artifacts.materializePreview(fixture.session().projectId, options)).preview;
+    await assert.rejects(() => sdk.artifacts.materialize(fixture.session().projectId, preview.digest, options), /Finish owned work/);
+    await assert.rejects(() => sdk.workspaces.remove(workspace.id, workspace.revision, true), /owned writer|holds.*worktree/i);
+    assert.equal((await sdk.terminal.read(opened.id!)).terminal.status, "running");
+    assert.equal((await sdk.terminal.read(opened.id!)).terminal.projectId, null);
+    await sdk.terminal.close(opened.id!);
+    await sdk.workspaces.remove(workspace.id, workspace.revision, true);
+    assert.equal((await sdk.workspaces.wait(workspace.id)).status, "removed");
   } finally { sdk.disconnect(); await fixture.close(); }
 });
