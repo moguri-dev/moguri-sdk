@@ -8,6 +8,29 @@ The [protocol-40 source requalification](#protocol-40-source-requalification)
 below adds the actual shared SDK/client lifecycle. Historical protocol-36/37
 receipts remain scoped to their original payloads and are not relabeled.
 
+## Desktop launch environment
+
+Finder-launched apps may omit `/usr/local/bin` and `/opt/homebrew/bin` from
+`PATH`, even when Apple's `container` CLI is installed. The macOS adapter
+appends these standard installation directories for its host-side release,
+image, policy, guest inventory, launch and cleanup processes. Existing explicit
+`PATH` order is preserved; only `PATH` and `HOME` are inherited by these native
+host operations, not other host credentials.
+
+The same environment reaches SendBox's own subprocesses. This does not change
+the guest environment, grant network access, relax exact release/image pins,
+source a shell startup file or select a different provider. Missing binaries
+and unsuccessful cleanup remain errors. The actual adapter regression runs
+qualification and verified guest teardown with Finder's minimal system `PATH`;
+without explicit current native receipts it remains skipped, not a native pass.
+
+The isolated protocol-50 compatibility build passes that actual Finder-PATH
+guest/cleanup case in **1,465.76 ms**, and encrypted IPC with denied model access
+and retained rollback in **2,968.82 ms**, using existing image
+`sha256:517fba3d59a3be64c04166dff9de038168580ce67315c4de538503636e3680b0`.
+Its worker/bridge pins are unchanged. This is model-free host-launch evidence,
+not fresh provider-network qualification or qualification of a later protocol.
+
 ## Protocol-41 detached-descendant source qualification
 
 The owner explicitly selected qualified SendBox for sessions requiring a

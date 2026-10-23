@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { SandboxRuntime } from "../apps/service/src/sandbox-runtime.ts";
+import { SandboxRuntime, sandboxHostEnvironment } from "../apps/service/src/sandbox-runtime.ts";
 import { captureNativeSource, materializeNativeStage, inspectNativeStage } from "../apps/service/src/native-staging.ts";
 import { captureSandboxResult } from "../apps/service/src/sandbox-results.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
@@ -13,12 +13,25 @@ import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 
 const configuration = await nativeConfiguration();
-test("actual SendBox 0.2.3 adapter verifies pinned artifacts, real guest process controls and exact owned VM absence without a model call", { skip: !configuration, timeout: 90_000 }, async () => {
+test("native host tools include macOS installation paths without replacing explicit PATH order or forwarding secrets", () => {
+  const environment = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: "/generated/home", GENERATED_SECRET: "generated-not-forwarded" };
+  assert.deepEqual(sandboxHostEnvironment(environment), {
+    PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin", HOME: "/generated/home",
+  });
+  assert.equal(environment.PATH, "/usr/bin:/bin:/usr/sbin:/sbin");
+  const configured = { PATH: "/generated/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin", HOME: "/generated/home" };
+  assert.deepEqual(sandboxHostEnvironment(configured), configured);
+  assert.equal(sandboxHostEnvironment({}).PATH, "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin");
+});
+
+test("actual SendBox 0.2.3 adapter verifies pinned artifacts, guest process controls and owned VM absence with Finder's minimal PATH and no model call", { skip: !configuration, timeout: 90_000 }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/native-sdk-")), state = join(root, "state");
   await mkdir(state, { mode: 0o700 });
   const runtime = new SandboxRuntime(state, () => configuration, { vault: new GeneratedFileVault(join(root, "generated-vault.json")) });
+  const originalPath = process.env.PATH;
+  process.env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
   let passed = false;
   try {
     assert.equal(runtime.readiness.ready, false);
@@ -32,7 +45,11 @@ test("actual SendBox 0.2.3 adapter verifies pinned artifacts, real guest process
     assert.equal(runtime.owns(probeId), false, "The create-only original qualification never launches another VM on replay.");
     passed = true;
   } finally {
-    await runtime.close();
+    try { await runtime.close(); }
+    finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+    }
     if (passed) await rm(root, { recursive: true, force: true });
     else console.error("Generated native adapter diagnostics retained:", root);
   }
