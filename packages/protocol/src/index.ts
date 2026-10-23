@@ -2,7 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MAX_TEXT, MoguriError } from "./core.ts";
 export { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
-import { PlatformCommandSchema, defaultSettings, normalizeSettings, type ApplicationConfiguration, type StorageMove, type NotificationSound, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
+import { PlatformCommandSchema, defaultSettings, normalizeSettings, type ApplicationConfiguration, type ApplicationUpdate, type StorageMove, type NotificationSound, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type RetainedArtifact, type TerminalState, type SessionGroup } from "./platform.ts";
 export * from "./platform.ts";
 export * from "./model.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
@@ -46,7 +46,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 49;
+export const PROTOCOL_VERSION = 50;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -291,6 +291,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "settings.updated": { settings: UserSettings; revision: number; permissionRevision: number };
   "application.configured": ApplicationConfiguration;
   "application.storage_recorded": { operation: StorageMove };
+  "application.update_recorded": { update: ApplicationUpdate };
   "notification.sound_saved": { sound: NotificationSound };
   "notification.sound_removed": { id: string; commandId: string };
   "capability.saved": { entry: CapabilityEntry };
@@ -364,7 +365,7 @@ export const eventTypes: readonly EventType[] = [
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "policy.updated", "provider.changed", "mcp.oauth_changed",
-  "settings.updated", "application.configured", "application.storage_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
+  "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "cache.prepared",
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",

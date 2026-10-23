@@ -1,11 +1,15 @@
 import { stateDirectory } from "../../../packages/client/src/node.ts";
 import { startService } from "./server.ts";
 import { stateLocationDirectory } from "../../../packages/client/src/state-location.ts";
+import { runtimeBuildVersion } from "./updates.ts";
+import { pinnedInstalledApplication } from "./bundle-tree.ts";
 
 export { startService };
 if (import.meta.main) {
   try {
-    const service = await startService({ stateDir: stateDirectory(), storage: { locatorDirectory: stateLocationDirectory(), explicitOverride: Boolean(process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0") } });
+    const version = runtimeBuildVersion();
+    const service = await startService({ stateDir: stateDirectory(), storage: { locatorDirectory: stateLocationDirectory(), explicitOverride: Boolean(process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0") },
+      updates: { version, installationRoot: await pinnedInstalledApplication(version) } });
     console.error(`Moguri service ready on loopback (protocol ${service.connection.protocolVersion}).`);
     let closing = false;
     const close = () => {

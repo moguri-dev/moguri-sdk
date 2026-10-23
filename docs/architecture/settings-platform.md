@@ -67,6 +67,47 @@ Gatekeeper, evade an OS warning or call an incomplete replacement successful.
 Interrupted application replacement retains recoverable old/staged bytes and
 does not automatically repeat an uncertain install.
 
+Protocol/database 50 adds root-owned `application.update_recorded`. A separate
+`dev.moguri.application.updates.<whole-store-key-id>` secret namespace holds only
+the private-release PAT; token intake is transient, never a durable command,
+receipt argument, model input or shell argument. Native desktop admits an
+automatic check on startup and every four hours while it runs; hidden fixtures
+admit none. Current root preferences are rechecked. An existing ready/partial
+update needs review, not an automatic paid/network retry. Manual checks and
+cancellation retain original command identity and actual outcomes.
+
+The fixed HTTPS GitHub repository, release and asset IDs must agree with one
+bounded architecture-specific manifest. API redirects never forward the PAT to
+asset/CDN hosts. Archives require exact size/SHA-512, bounded expansion, unique
+normalized/case-folded paths, CRCs and ordinary files/directories. Only safe
+internal relative framework links are created, after files; symlink parents,
+escapes, cycles, devices and unexpected application roots are rejected. Actual
+bundle inventory SHA-512, identifier, package version/entrypoint and Mach-O
+architecture are checked. Staged bytes are quarantined, not executed.
+AppleDouble `__MACOSX` metadata is size/path bounded but never extracted or used
+as application permissions; actual `ditto` metadata directories may be 0775.
+Application entries retain their strict mode/type checks and full tree digest.
+
+Installation is separately reviewed against fresh old/staged tree digests, the
+actual owned packaged app, same-filesystem candidate and retained backup.
+Unpackaged runtimes cannot replace a checkout. Durable installing intent precedes
+filesystem preparation. The current pinned standalone Node and a builtin-only
+bundled installer are copied/hashed into a private original helper compartment;
+non-system-dylib runtimes are refused instead of lazily borrowing libraries from
+renamed/new code. Helper environment excludes Node/DYLD injection. The exact
+service/desktop owners must end before replacement; no guessed PID is signalled.
+The service arms that one helper only after actual all-profile/SQLite shutdown.
+Unknown/missing receipts or failed cleanup never authorize another installer.
+
+The helper preserves the previous app, re-verifies actual copied/renamed bytes
+and requests normal OS launch without removing quarantine or bypassing warnings.
+`installed` is not `completed`: the new running bundle/version must match the
+retained journal/digest at next startup. A failed launch still retains known
+installed bytes and explicit launch failure. Original partial stages, siblings
+and backups are not implicitly deleted. Tests exercise a real copied helper and
+standalone Node with generated bundles/PIDs, while suppressing OS application
+launch and all personal credentials.
+
 Menu-bar visibility is a real native preference, not a renderer-only checkbox.
 Native capabilities accept only the trusted main renderer and actual user
 actions. Embedded browser content never gains native configuration authority.
@@ -216,8 +257,8 @@ Migration preserves prior ciphertext, exact defaults and explicit device choices
 
 Reuse React and Electron (MIT), Ghostty Web (MIT), Node builtins/SQLite, the
 existing SDK/event store/keychain and native SendBox supervision. Existing
-`semver` (ISC) and `yauzl` (MIT) provide version and bounded ZIP primitives if
-needed by release staging. Do not add a parallel provider loop, terminal parser,
+`semver` (ISC) and `yauzl` (MIT) provide version ordering and bounded ZIP
+primitives for release staging. Do not add a parallel provider loop, terminal parser,
 configuration database or unsigned automatic script executor.
 
 NeMo-Speech.cpp 0.2.0 remains Apache-2.0. The optional pinned Nemotron model is
@@ -255,6 +296,29 @@ generated results do not qualify real account entitlement, live model quality,
 Apple signing/notarization, Linux release execution, a new native guest or a
 personal SSH machine. Original spike unavailable/FAIL labels remain historical
 gates, not proof of current runtime discovery.
+
+Additional generated/native qualification for the implemented settings:
+
+| Exact probe | Result |
+| --- | --- |
+| PCM/device/PTT, cancellation and retained sound checkpoint | 30 focused checks and nine hidden UI checks passed |
+| Full-store move with independent sounds, two profiles and unchanged project roots | Passed, 322.75 ms |
+| Changed target / partial-copy restart / no-replay | Passed; source and exact competing bytes retained |
+| Root preference and native relocation UI | Passed in a hidden window; no real tray/picker/relaunch |
+| Private GitHub feed/PAT/CDN and original-command checks | Passed with generated credentials and intercepted HTTPS requests |
+| Actual copied standalone helper, shutdown arm, old/new bundle and startup receipt | Passed, 2,318.36 ms; generated owner PIDs and suppressed OS launch |
+| Interrupt after preserving old bundle | Passed, 46.59 ms; exact backup and candidate retained, zero launches |
+| Actual freshly packaged macOS ZIP/manifest through production consumer | Passed, 306,986,780 archive bytes / 96,895.78 ms |
+| Packed external SDK, CLI and shared terminal updater/store paths | Passed; no personal credential, inference or app launch |
+
+The actual shell-installed Node depended on non-system Homebrew dylibs and was
+not a standalone installer runtime. That failed probe was not worked around by
+borrowing libraries; the real helper qualification uses the project's pinned
+standalone Node, and production rejects non-system dependencies before effects.
+The package's ad-hoc signing and optional `.icon`-format warning do not claim
+Apple developer signing, notarization, live private-token entitlement or Linux
+release readiness. The existing lazy Ghostty chunk-size warning remains separate
+from correctness of these native primitives.
 
 ## Required evidence
 

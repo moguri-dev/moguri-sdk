@@ -418,6 +418,24 @@ export class MoguriSdk extends TransportClient {
   readonly application = {
     status: () => this.query({ type: "application.status" }),
     configure: (changes: Partial<import("../../protocol/src/application.ts").ApplicationPreferences>, expectedRevision: number) => this.command({ type: "application.configure", changes, expectedRevision }),
+    updates: {
+      status: () => this.query({ type: "application.update.status" }),
+      credential: () => this.query({ type: "application.update.credential" }),
+      read: (id: string) => this.query({ type: "application.update.read", id }),
+      history: () => this.query({ type: "application.update.history" }),
+      check: (automatic = false, commandId?: string) => this.command({ type: "application.update.check", automatic }, commandId),
+      cancel: (id: string) => this.command({ type: "application.update.cancel", id }),
+      setToken: async (token: string | null): Promise<void> => {
+        const value = await this.request("/v1/application", { action: "update-token", token });
+        if (!isRecord(value) || value.configured !== (token !== null)) throw new ClientError("update_credential_ack", "The updater's exact separate secret change was not acknowledged.");
+      },
+      installPreview: (id: string) => this.query({ type: "application.update.install_preview", id }),
+      install: async (id: string, expectedDigest: string, desktopPid: number, confirm: true): Promise<{ id: string; journal: string; intentDigest: string }> => {
+        const value = await this.request("/v1/application", { action: "update-install", id, expectedDigest, desktopPid, confirm });
+        if (!isRecord(value) || value.id !== id || value.accepted !== true || typeof value.journal !== "string" || typeof value.intentDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.intentDigest)) throw new ClientError("update_install_ack", "The exact original installation was not acknowledged. Inspect retained intent; no install or restart was replayed.");
+        return { id, journal: value.journal, intentDigest: value.intentDigest };
+      },
+    },
     storage: {
       status: () => this.query({ type: "application.storage.status" }),
       preview: (path: string) => this.query({ type: "application.storage.preview", path }),

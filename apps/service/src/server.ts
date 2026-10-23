@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { ControlPlane } from "./controller.ts";
 import { EventStore } from "./store.ts";
 import type { ProviderAdapter } from "./provider.ts";
-import { CommandSchema, GLOBAL_PROFILE_ID, isApplicationCommand, isApplicationQuery, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, SpeechCaptureRequestSchema, StorageMoveRequestSchema, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
+import { CommandSchema, GLOBAL_PROFILE_ID, isApplicationCommand, isApplicationQuery, isUpdateQuery, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, SpeechCaptureRequestSchema, StorageMoveRequestSchema, UpdateTokenRequestSchema, UpdateInstallRequestSchema, isRecord, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
 import type { PlatformOptions } from "./platform.ts";
 import { retentionKey } from "./retention-key.ts";
 import { ProfileRuntime } from "./profiles.ts";
@@ -15,6 +15,7 @@ import { NEMOTRON_MODEL } from "./voice.ts";
 import { ApplicationRuntime } from "./application.ts";
 import { acknowledgeMovedDatabase, storedStorageOptions, type StorageOptions } from "./storage-relocation.ts";
 import { claimStoreIdentity, readDefaultStateLocation, readStateLocation } from "../../../packages/client/src/state-location.ts";
+import type { UpdateOptions } from "./updates.ts";
 
 const authenticateSchema = Type.Object({
   type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -48,6 +49,7 @@ export interface ServiceOptions {
   stateDir: string; provider?: ProviderAdapter; workerPath?: string; platform?: PlatformOptions; retentionKey?: Buffer;
   profiles?: { provider?: (profileId: string) => ProviderAdapter | undefined; platform?: (profileId: string) => PlatformOptions };
   storage?: StorageOptions;
+  updates?: UpdateOptions;
 }
 export async function startService(options: ServiceOptions) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
@@ -128,12 +130,13 @@ export async function startService(options: ServiceOptions) {
     const rootProfiles = profiles;
     let quiescing: Promise<void> | undefined;
     application = new ApplicationRuntime(store, () => changed(GLOBAL_PROFILE_ID, []), {
-      resourceBase, storage, facts: () => rootProfiles.maintenanceFacts(),
+      resourceBase, storage, updates: options.updates, facts: () => rootProfiles.maintenanceFacts(),
       quiesce: () => { quiescing ??= rootProfiles.close({ preserveTerminals: true }); void quiescing.catch((error: unknown) => console.error("Relocation quiescence is unconfirmed:", error instanceof Error ? error.message : "owned profile cleanup failed")); },
     });
     const rootApplication = application;
+    await rootApplication.updates.initialize();
     const token = randomBytes(32).toString("hex");
-    let closeRuntime!: (options?: RuntimeCloseOptions) => Promise<void>;
+    let closeRuntime!: (options?: RuntimeCloseOptions, preserveInstaller?: boolean) => Promise<void>;
     let lifecycle: { action: "stop" | "restart"; status: "stopping" | "unconfirmed"; diagnostic: string | null } | null = null;
     let expectedHost = "";
     const acceptable = (request: IncomingMessage) => request.headers.host === expectedHost &&
@@ -167,6 +170,20 @@ export async function startService(options: ServiceOptions) {
         }
         if (request.url === "/v1/application") {
           if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before reviewing whole-store maintenance.", 404);
+          if (isRecord(body) && body.action === "update-token") {
+            const input = parse(UpdateTokenRequestSchema, body);
+            response.end(JSON.stringify(await rootApplication.updates.setToken(input.token))); return;
+          }
+          if (isRecord(body) && body.action === "update-install") {
+            const accepted = await rootApplication.updates.prepareInstallation(parse(UpdateInstallRequestSchema, body), profileId);
+            response.once("finish", () => {
+              void (async () => {
+                try { await closeRuntime({ preserveTerminals: true }, true); await rootApplication.updates.armInstallation(); }
+                catch (error) { console.error("The original update shutdown/installer arm is unconfirmed:", error instanceof Error ? error.message : "inspect retained journal and backup"); }
+              })();
+            });
+            response.end(JSON.stringify({ ...accepted, accepted: true })); return;
+          }
           const accepted = await rootApplication.storage.begin(parse(StorageMoveRequestSchema, body));
           response.once("finish", () => {
             void (async () => {
@@ -198,7 +215,7 @@ export async function startService(options: ServiceOptions) {
           const query = parse(QuerySchema, body);
           if (isApplicationQuery(query)) {
             if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before reading application configuration.", 404);
-            response.end(JSON.stringify(query.type === "application.storage.status" ? { type: query.type, storage: rootApplication.storage.status() } :
+            response.end(JSON.stringify(isUpdateQuery(query) ? await rootApplication.updateQuery(query) : query.type === "application.storage.status" ? { type: query.type, storage: rootApplication.storage.status() } :
               query.type === "application.storage.preview" ? { type: query.type, review: await rootApplication.storage.preview(query.path) } :
               { type: query.type, configuration: rootApplication.configuration() })); return;
           }
@@ -260,11 +277,11 @@ export async function startService(options: ServiceOptions) {
     await writePrivate(pendingConnection, JSON.stringify(connection));
     await rename(pendingConnection, connectionPath);
     let closeTask: Promise<void> | undefined;
-    closeRuntime = (options: RuntimeCloseOptions = {}) => {
+    closeRuntime = (options: RuntimeCloseOptions = {}, preserveInstaller = false) => {
       if (!closeTask) lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "stopping", diagnostic: null };
       closeTask ??= (async () => {
-        rootApplication.close();
-        await rootProfiles.close(options);
+        const nativeClosing = rootApplication.close(preserveInstaller), ownersClosing = rootProfiles.close(options);
+        await Promise.all([nativeClosing, ownersClosing]);
         for (const socket of websockets.clients) socket.terminate();
         await new Promise<void>((resolve) => websockets.close(() => resolve()));
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -286,8 +303,8 @@ export async function startService(options: ServiceOptions) {
       close: closeRuntime,
     };
   } catch (error) {
-    application?.close();
-    if (profiles) await profiles.close(); else await controller?.close();
+    const nativeClosing = application?.close(), ownersClosing = profiles ? profiles.close() : controller?.close();
+    await Promise.all([nativeClosing, ownersClosing]);
     store?.close();
     await lock.close();
     await unlink(lockPath);

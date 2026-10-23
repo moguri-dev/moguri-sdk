@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { GLOBAL_PROFILE_ID } from "../packages/sdk/src/index.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
+import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { startService } from "../apps/service/src/server.ts";
+import { MoguriSdk } from "../packages/sdk/src/index.ts";
 
 test("application preferences have one revision-bound root owner across isolated profiles", async () => {
   const fixture = await profileFixture();
@@ -23,4 +26,21 @@ test("application preferences have one revision-bound root owner across isolated
     assert.equal(Object.hasOwn(beta.settings.get()!.values, "application"), false);
     assert.ok(fixture.providers.every((provider) => provider.requests.length === 0));
   } finally { await fixture.close(); }
+});
+
+test("schema-49 root configuration and profile identities upgrade without adding an updater call or changing saved flags", async () => {
+  const fixture = await profileFixture();
+  let reopened: Awaited<ReturnType<typeof startService>> | undefined, sdk: MoguriSdk | undefined;
+  try {
+    const configuration = (await fixture.sdk.application.status()).configuration;
+    await fixture.sdk.application.configure({ menuBar: false, automaticUpdates: false }, configuration.revision);
+    const history = fixture.service.store.events().map((event) => [event.id, event.seq]);
+    fixture.sdk.disconnect(); await writeLegacyState(fixture.service, 49);
+    reopened = await startService(fixture.options); sdk = await new MoguriSdk(reopened.connection).ready();
+    assertCurrentSchema(reopened.store);
+    assert.deepEqual(reopened.store.events().slice(0, history.length).map((event) => [event.id, event.seq]), history);
+    assert.deepEqual((await sdk.application.status()).configuration.values, { menuBar: false, automaticUpdates: false });
+    assert.equal((await sdk.application.updates.history()).updates.length, 0);
+    assert.ok(fixture.providers.every((provider) => provider.requests.length === 0));
+  } finally { sdk?.disconnect(); await reopened?.close(); await fixture.close(); }
 });

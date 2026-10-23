@@ -774,6 +774,27 @@ Embedded `createRuntime` consumers must explicitly configure `storage` authority
 to enable a first move. Once a store records that authority, later views cannot
 discard it or substitute another locator to open a stale copy.
 
+`application.updates.status()`, `history()`, `read(id)`, `credential()`,
+`setToken(tokenOrNull)`, `check(automatic?, optionalOriginalCommandId)` and
+`cancel(id)` use root-owned update state and a purpose-specific secure PAT.
+Credential intake is transient; normal provider/CLI credentials are not read.
+No raw token enters durable commands, receipts, event diagnostics or model
+history. Inspection and staging do not execute downloaded code.
+
+After actual human review, `application.updates.installPreview(id)` binds fresh
+old/new tree digests and the canonical owned packaged destination/backup.
+`install(id, review.digest, actualDesktopPid, true)` is a transient shutdown
+request, not a normal command followed by automatic reconnect. Its acknowledgement
+identifies one private journal and immutable intent digest. Node
+`waitForUpdateInstallArm(journal, id, intentDigest)` waits for the original
+durable shutdown/arm acknowledgement before the native owner exits. It never
+replaces a missing helper or retries filesystem effects. Root configuration,
+update and store-relocation intents remain separate from per-profile settings
+and session retention; a pending installation blocks store relocation.
+Source/embedded runtimes need explicit `updates` authority to check releases;
+production derives the packaged installation root from the actual pinned Node
+runtime, never a user-selected arbitrary application path.
+
 `needsInputSound` and `completedSound` each default to
 `{enabled: true, id: "default"}`; `soundWhileFocused` defaults false. Sounds do
 not depend on the banner flag. `notifications.importSound(name, pcmWav,

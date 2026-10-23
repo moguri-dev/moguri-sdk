@@ -275,6 +275,9 @@ export class EventStore {
       if (version < 49) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('state_location_schema','1');
         PRAGMA user_version=49; COMMIT;`);
+      if (version < 50) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('private_update_schema','1');
+        PRAGMA user_version=50; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

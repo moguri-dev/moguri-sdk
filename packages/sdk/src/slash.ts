@@ -79,6 +79,7 @@ export const slashCommands = [
   { name: "settings", description: "Open shared settings" },
   { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
+  { name: "updates", description: "Inspect private-release updates or explicitly check/cancel; never authenticate or install", argument: "[status|history|read ID|check|cancel ID]" },
   { name: "models", description: "Choose an available model" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
@@ -332,6 +333,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         return { kind: "ok", message: "The unused sound's independent encrypted retention was removed. No alternative sound was selected." };
       }
       throw new ClientError("notification_sounds_command", "Use /notification-sounds list, read ID or remove ID SHA confirm-remove. Explicit file imports use CLI notification-sounds import FILE.wav --confirm-write or desktop Settings. No terminal audio playback.");
+    }
+    case "updates": {
+      const [action = "status", id, ...extra] = command.argument.split(/\s+/).filter(Boolean);
+      if (extra.length) throw new ClientError("update_command", "Use /updates status/history/read ID/check/cancel ID. Credentials and installation never enter chat.");
+      const result = !id && action === "status" ? await sdk.application.updates.status() : !id && action === "history" ? await sdk.application.updates.history() :
+        !id && action === "check" ? await sdk.application.updates.check() : id && action === "read" ? await sdk.application.updates.read(id) : id && action === "cancel" ? await sdk.application.updates.cancel(id) : null;
+      if (!result) throw new ClientError("update_command", "Use /updates status/history/read ID/check/cancel ID. This never grants an installer or provider permission.");
+      return { kind: "text", text: JSON.stringify(result, null, 2) };
     }
     case "runtime":
       if (command.argument === "storage") return { kind: "text", text: JSON.stringify(await sdk.application.storage.status(), null, 2) };

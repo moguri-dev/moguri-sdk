@@ -16,6 +16,7 @@ import { NotificationSoundCommandSchema, NotificationSoundQuerySchema, type Noti
 export * from "./notification-sounds.ts";
 import { ApplicationCommandSchema, ApplicationQuerySchema, type ApplicationResponse } from "./application.ts";
 import { StorageQuerySchema, type StorageResponse } from "./storage-location.ts";
+import { UpdateQuerySchema, type UpdateResponse } from "./application-updates.ts";
 export * from "./application.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
 import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
@@ -242,6 +243,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  UpdateQuerySchema,
   StorageQuerySchema,
   ApplicationQuerySchema,
   NotificationSoundQuerySchema,
@@ -362,6 +364,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse
+  | UpdateResponse
   | StorageResponse
   | ApplicationResponse
   | NotificationSoundResponse
