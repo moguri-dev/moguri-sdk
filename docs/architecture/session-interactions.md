@@ -53,6 +53,9 @@ Legacy stop events retain their old interpretation. Explicit Interrupt keeps its
 separate next-turn behavior; stopping or restarting never resumes held work.
 While a turn runs, a nonempty draft plus Cmd/Ctrl exposes Hold in the primary
 button; a successful queue submission restores Stop without cancelling the turn.
+Releasing the modifier while that request is pending keeps the disabled clock
+visible until acknowledgement or failure. Compact control rows wrap without
+overlap; popovers stay above the complete toolbar, not a newly wrapped row.
 
 Closed terminals disappear from the visible selector, not from retained ownership
 or cleanup evidence. The embedded renderer remains Ghostty. Default shells resolve
