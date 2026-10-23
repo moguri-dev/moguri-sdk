@@ -310,6 +310,9 @@ Additional generated/native qualification for the implemented settings:
 | Interrupt after preserving old bundle | Passed, 46.59 ms; exact backup and candidate retained, zero launches |
 | Actual freshly packaged macOS ZIP/manifest through production consumer | Passed, 306,986,780 archive bytes / 96,895.78 ms |
 | Packed external SDK, CLI and shared terminal updater/store paths | Passed; no personal credential, inference or app launch |
+| Final complete serialized unit/native suite | 1,149 passed, nine gated skips, zero failures; 1,158 total / 1,047,837.54 ms |
+| Final complete hidden Electron suite | 90 passed, one native-Sandbox gate; 91 total / about 3.5 minutes |
+| Final packed-consumer install, all SDK entrypoints and dependency audit | Passed; zero vulnerabilities |
 
 The actual shell-installed Node depended on non-system Homebrew dylibs and was
 not a standalone installer runtime. That failed probe was not worked around by
@@ -319,6 +322,15 @@ The package's ad-hoc signing and optional `.icon`-format warning do not claim
 Apple developer signing, notarization, live private-token entitlement or Linux
 release readiness. The existing lazy Ghostty chunk-size warning remains separate
 from correctness of these native primitives.
+
+Raw pre-settings migration probes now remove only the six additive 45-50
+markers through a shared guarded fixture helper before testing their original
+transactional failure/rollback. Their ciphertext, key, receipt and original
+schema assertions are unchanged. A genuine new native intent/sound event cannot
+be relabeled as old fixture state. The project-free permission assertion includes
+the explicit default `ask`, and the no-repository MCP race mutates a valid folder
+policy revision rather than attempting an intentionally prohibited upstream
+configuration. Production migration/admission checks were not weakened.
 
 ## Required evidence
 
