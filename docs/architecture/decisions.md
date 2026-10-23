@@ -433,6 +433,9 @@ Both TUI and desktop import that SDK. SDK capabilities own API access and domain
 semantics; Electron adds only native affordances and presentation. Protocol 2
 and transactional database migration 2 extend existing state without reset.
 The [SDK platform contract](sdk-platform.md) records validation and gates.
+The [settings platform contract](settings-platform.md) extends this boundary
+with searchable grouped settings, profile-wide left navigation and reviewed
+native preferences. Desktop-only affordances do not become a second authority.
 
 User-viewable/editable system instructions have shared defaults and reset.
 Deterministic permissions cannot be weakened through prompt text. Repository
