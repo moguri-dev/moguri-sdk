@@ -759,6 +759,18 @@ Root application configuration is separate from profile settings:
 Competing profiles share one revision and do not copy native preferences into
 their own configuration.
 
+Node `ensureConnection` and `connectMoguri` accept an optional
+`confirmUpgrade(review)` callback. Discovery validates private loopback metadata
+and authenticated health before classifying a responsive older service as
+`ServiceProtocolMismatch`, rather than calling every version mismatch corrupt.
+The review exposes only root/PID/protocol/fingerprint facts, not its connection
+token. A true result allows one exact fingerprint-rechecked authenticated
+terminal-preserving restart; a false result raises `ServiceUpgradeCancelled`
+without stopping anything. Newer/unverified owners are never offered as an
+automatic downgrade/restart. Without a callback, callers receive the actionable
+mismatch and may choose an explicit lifecycle operation themselves.
+`autoStart: false` stays strict and never invokes upgrade/launch effects.
+
 `application.storage.status()` and `application.storage.preview(path)` expose the
 actual runtime authority and exact review. After actual all-profile review,
 `application.storage.relocate(path, review.digest, true, optionalOriginalId)`

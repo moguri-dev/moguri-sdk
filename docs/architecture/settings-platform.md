@@ -277,6 +277,19 @@ Root settings are replicated only through existing root authority, not a
 foreign-profile content broadcast. Native filesystem/update intents retain
 their own immutable owner and terminal/partial outcome.
 
+Startup connection compatibility is not a durable schema change. Node discovery
+separates structurally invalid metadata from a private older-protocol connection,
+checks authenticated PID/protocol health, and exposes a token-free exact-root
+upgrade review. Desktop requires actual human confirmation before the existing
+authenticated restart path, preserving terminals without input replay. A changed
+registry during confirmation is rejected before any stop; newer services are not
+downgraded. Dead/unreachable stale metadata uses ordinary lock/recovery startup,
+not a database reset. Timeout/unconfirmed health never authorizes PID-based
+force-stop. Discovery remains lazy and Node-only; browser/React entrypoints do
+not import provider, MCP or PTY runtime code. Tests use generated endpoints,
+original drafts/grants and a real generated replacement service, never personal
+credentials or model requests.
+
 ## Fresh prerequisite measurements
 
 Phase 0, session/Ghostty and model-control spikes were rerun before this change:
