@@ -73,6 +73,33 @@ The original script's live-provider, Rust/Linux, notarized release, qualified
 native guest, model-quality, live-decision and configured-SSH gates remain
 unavailable; these measurements do not enable those capabilities.
 
+### Protocol-44 source qualification
+
+The final production build and type checks pass. The complete generated
+unit/native suite passes **1,092 checks with 9 gated skips in 1,029.85 s**;
+the hidden desktop suite passes **81 workflows with 1 native-Sandbox skip in
+3.2 min**. All four packed external SDK entrypoints pass import/declaration
+checks. Actual installed SDK/CLI/shared-command qualification exercises real
+generated Git clones, project-free Autopilot and independent Local consoles
+with **zero model calls**. Workspace and packed-consumer audits report
+**zero vulnerabilities**.
+
+Coverage includes same/different-profile root leases, simultaneous global
+opens and clone destinations, delayed/cancelled clone work, failed final
+publication, service restart and missing original receipts without replay,
+schema-43 migration rollback/reopen, unchanged version-1 Local/SSH binding
+digests, and independent-console protection against worktree removal and
+artifact publication. Desktop checks preserve parent drafts/models/scopes,
+use Start for both project-free profile defaults and project overrides, and verify
+the red composer Stop in its original Send position.
+
+The expected upstream dependency deprecation notices, OpenTUI experimental FFI
+warning and lazy Ghostty bundle-size warning remain visible. All audio, Git
+repositories, SSH identities, recognizers and provider responses used here are
+generated fixtures. This is source qualification, not live microphone/ASR,
+personal provider entitlement, native Sandbox, notarized packaging or complete
+detached-process containment.
+
 ## Phase 0 and reused components
 
 Use maintained `ghostty-web` 0.4.0 (MIT), which embeds Ghostty's WASM VT parser
