@@ -341,9 +341,26 @@ Additional generated/native qualification for the implemented settings:
 | Interrupt after preserving old bundle | Passed, 46.59 ms; exact backup and candidate retained, zero launches |
 | Actual freshly packaged macOS ZIP/manifest through production consumer | Passed, 306,986,780 archive bytes / 96,895.78 ms |
 | Packed external SDK, CLI and shared terminal updater/store paths | Passed; no personal credential, inference or app launch |
-| Final complete serialized unit/native suite | 1,149 passed, nine gated skips, zero failures; 1,158 total / 1,047,837.54 ms |
-| Final complete hidden Electron suite | 90 passed, one native-Sandbox gate; 91 total / about 3.5 minutes |
-| Final packed-consumer install, all SDK entrypoints and dependency audit | Passed; zero vulnerabilities |
+| Initial settings checkpoint: complete serialized unit/native suite | 1,149 passed, nine gated skips, zero failures; 1,158 total / 1,047,837.54 ms |
+| Initial settings checkpoint: complete hidden Electron suite | 90 passed, one native-Sandbox gate; 91 total / about 3.5 minutes |
+| Initial settings checkpoint: packed-consumer install, all SDK entrypoints and dependency audit | Passed; zero vulnerabilities |
+
+The desktop-close follow-up additionally qualified the current exit behavior:
+
+| Exact follow-up probe | Result |
+| --- | --- |
+| Captured-owner stop, startup compatibility, reconnect and terminal recovery | 36 focused Node checks passed |
+| Related close, dictation, onboarding and explicit Remote restart UI | 15 hidden Electron checks passed |
+| Complete hidden Electron suite after the exit change | 95 passed, one native-Sandbox gate, zero failures; 96 total / 3.6 minutes |
+| The four close/cancel/cleanup-retry/pending-admission cases in the actual newly packaged executable | Passed; generated state and hidden windows only |
+| Fresh packed external SDK types/entrypoints, approved install, installed worker/CLI/TUI and audits | Passed; zero vulnerabilities |
+| Fresh actual macOS ZIP/manifest through the production consumer | Passed, 306,994,866 archive bytes / 96,299.39 ms; no application execution or quarantine bypass |
+| Fresh actual read-only mounted DMG | Passed; real app and Applications shortcut, no application execution |
+
+The package producer now keeps development bundles under
+`release/builds.noindex/`; distribution archives stay directly under `release/`.
+The older full-unit count above is a historical checkpoint, not a claim that the
+entire serialized unit suite was rerun for this exit-only follow-up.
 
 The actual shell-installed Node depended on non-system Homebrew dylibs and was
 not a standalone installer runtime. That failed probe was not worked around by
