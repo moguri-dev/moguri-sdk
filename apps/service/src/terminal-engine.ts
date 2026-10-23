@@ -3,6 +3,7 @@ import * as pty from "node-pty";
 import { MoguriError } from "../../../packages/protocol/src/core.ts";
 import type { TerminalInput, TerminalState } from "../../../packages/protocol/src/index.ts";
 import { stopGroup } from "./supervisor.ts";
+import { terminalEnvironment, terminalShell } from "./terminal-shell.ts";
 
 export interface TerminalLaunchOptions { executable?: string; args?: string[] }
 interface OwnedTerminal { state: TerminalState; pty: pty.IPty; output: string; baseOffset: number; stopping?: Promise<TerminalState>; done: Promise<void>; ended: () => void }
@@ -13,11 +14,11 @@ export class TerminalEngine {
     if (scope.id && this.owned.has(scope.id)) throw new MoguriError("terminal_duplicate", "This terminal identity already owns a process. No replacement shell was started.", 409);
     if ([...this.owned.values()].filter((entry) => entry.state.status === "running").length >= 16 ||
       [...this.owned.values()].filter((entry) => entry.state.sessionId === scope.sessionId && entry.state.status === "running").length >= (scope.sessionId === null ? 1 : 4)) throw new MoguriError("terminal_limit", "Close a running terminal first. One global, four per session and sixteen overall are supported.");
-    const shell = options.executable ?? process.env.SHELL ?? "/bin/sh";
+    const shell = options.executable ?? terminalShell();
     const args = script ? ["-lc", script.command] : options.args ?? ["-l"];
     const processPty = pty.spawn(shell, args, {
       cwd: scope.root, cols, rows, name: "xterm-256color",
-      env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? scope.root, TERM: "xterm-256color", LANG: "en_US.UTF-8" },
+      env: terminalEnvironment(scope.root, shell),
     });
     let ended!: () => void;
     const done = new Promise<void>((resolve) => { ended = resolve; });

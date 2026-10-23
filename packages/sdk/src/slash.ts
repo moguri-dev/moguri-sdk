@@ -53,7 +53,7 @@ export const slashCommands = [
   { name: "winddown", description: "Inspect reserved finishing models and separately review actual-user accepted-work Git checkpoints", argument: "[status|list|read ID|commit-preview JSON|commit REV SHA confirm-git JSON|decline ID REV confirm-decline|stop ID confirm-stop]" },
   { name: "decisions", description: "Configure bounded decision advice and inspect actual actor/charges; never answer or approve", argument: "[status|list|read ID|stop ID confirm-stop|set POLICY_JSON]" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
-  { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
+  { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer|other ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
   { name: "dashboard", description: "Inspect model accounting, planned holds, tool/MCP outcomes and retained storage", argument: "[FILTERS_JSON|calls FILTERS_JSON|plans FILTERS_JSON|operations FILTERS_JSON|storage]" },
   { name: "repository", description: "Review explicit root-bound metadata; no automatic GitHub or model request", argument: "[preview|state|refresh BINDING REV confirm-lookup|clear REV confirm-clear|stop JOB_ID]" },
@@ -491,9 +491,11 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const [action, id, revision, ...text] = command.argument.split(/\s+/);
       const question = sdk.getState().snapshot!.questions.find((question) => question.id === session.pendingQuestionId && question.status === "open");
       if (!action) return { kind: "text", text: JSON.stringify({ question: question ?? null, diagnostic: "Only an actual answer endpoint resolves this state; heuristic attention or a queued prompt does not answer." }, null, 2) };
-      if (action !== "answer" || !id || !revision || !/^\d+$/.test(revision) || !text.length) throw new ClientError("question_answer", "Use /question, or explicitly /question answer ID REV TEXT. No answer or permission is inferred.");
+      if (!["answer", "other"].includes(action) || !id || !revision || !/^\d+$/.test(revision) || !text.length) throw new ClientError("question_answer", "Use /question, /question answer ID REV TEXT, or /question other ID REV TEXT. No answer or permission is inferred.");
       if (!question || question.id !== id) throw new ClientError("question_scope", "This is not the current question for this conversation.");
-      await sdk.questions.answer(id, text.join(" "), Number(revision)); return { kind: "ok", message: "Actual user answer recorded. Tool/Git permissions and policy were not changed." };
+      if (action === "other") await sdk.questions.answerOther(id, text.join(" "), Number(revision));
+      else await sdk.questions.answer(id, text.join(" "), Number(revision));
+      return { kind: "ok", message: "Actual user answer recorded. Tool/Git permissions and policy were not changed." };
     }
     case "project-removal": {
       if (!session.projectId) throw new ClientError("project_required", "Select a project for its explicit removal workflow. No previous project was inferred.");

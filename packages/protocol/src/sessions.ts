@@ -63,11 +63,14 @@ export interface SessionWorkspaceSnapshot {
 }
 export const SessionChangesSchema = object({
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), pinned: Type.Optional(Type.Boolean()), unread: Type.Optional(Type.Boolean()),
+  order: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
   groupId: Type.Optional(nullableId), parentSessionId: Type.Optional(nullableId), prUrl: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()])),
 });
 export type SessionChanges = Static<typeof SessionChangesSchema>;
 export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema }),
+  object({ type: Type.Literal("session.reorder"), projectId: nullableId, parentSessionId: nullableId, groupId: nullableId, archived: Type.Boolean(),
+    sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.mode"), sessionId: id, expectedRevision: revision, mode: SessionModeSchema }),
   object({ type: Type.Literal("session.spawn"), sessionId: id, kind: Type.Union([Type.Literal("agent"), Type.Literal("side")]), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })) }),
   object({ type: Type.Literal("session.from-work"), projectId: id, workspaceId: Type.Optional(id), issueId: Type.Optional(id), prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })) }),
@@ -95,6 +98,9 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("retention.run") }),
 ]);
 export type SessionWorkspaceCommand = Static<typeof SessionWorkspaceCommandSchema>;
+export function compareSessions(a: { pinned: boolean; order?: number; createdAt: string; id: string }, b: { pinned: boolean; order?: number; createdAt: string; id: string }): number {
+  return Number(b.pinned) - Number(a.pinned) || (a.order ?? 0) - (b.order ?? 0) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
+}
 export const isSessionWorkspaceCommand = (value: unknown): value is SessionWorkspaceCommand => Value.Check(SessionWorkspaceCommandSchema, value);
 export const TerminalInputSchema = Type.Union([
   object({ action: Type.Literal("input"), terminalId: id, data: Type.String({ minLength: 1, maxLength: 16384 }) }),

@@ -5,7 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **43** for
+Current source uses protocol **51** for
+[session interactions](architecture/session-interactions.md), following the
+protocol-44 through 50 settings/native lifecycle slices and protocol-43
 [document attachments](architecture/document-attachments.md), including
 protocol-42 [task completion estimates](architecture/task-progress.md), extending the
 protocol-41 owner-requested
@@ -16,11 +18,52 @@ wind-down and owned bounded decisions. It does not replace the immutable qualifi
 See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
 for the actual generated VM evidence and remaining client/environment gates.
 
-`sessions.progress(sessionId)` reads the bound plan checklist and compares it
-with optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
+`sessions.progress(sessionId)` reads the explicit current model plan when present,
+otherwise the separately bound workspace-file checklist, and compares it with
+optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
 every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
+
+## Session interaction contract
+
+`sessions.reorder(projectId, parentSessionId, groupId, archived, sessions)`
+requires the complete sibling set as `{sessionId, revision}` entries. It checks
+all revisions before appending the existing `session.organized` events atomically.
+`Session.order` and the browser-safe `compareSessions` helper provide shared
+presentation order with pin priority; they do not change worker admission
+priority. Existing `sessions.organize(id, {parentSessionId}, revision)` keeps
+same-project, no-active-reparenting, model-subagent and cycle/depth boundaries.
+No move transfers model context, roots, Env or permissions.
+
+`settings.values.retention.confirmArchive` and `confirmDelete` default to true
+and scope to the current profile. They are routine client-confirmation
+preferences, not CP permission grants or automatic retention policy. Actual
+session deletion still requires its existing explicit confirmation/revision and
+successful owned cleanup.
+
+`questions.answerOther(questionId, text, revision)` explicitly records a real
+user's alternative, including for a strict-choice question. It does not add a
+model-offered choice, expand automatic technical-choice delegation or consume
+the chat draft. `questions.answerDraft(id, revision, true)` is the separate
+explicit Other path that atomically consumes only the exact saved text revision.
+Ordinary `answer`/`answerDraft` retain their original validation. CLI
+`moguri question answer-other ID ANSWER_FILE --revision N` and shared
+`/question other ID REV TEXT` use the same endpoint. Neither operation grants
+tool/Git permission.
+
+The owning worker's existing `task_progress` tool accepts `action: "plan"` with
+a title and two to fifty distinct `{text, status}` steps (`pending`,
+`in_progress`, `done`). `task.plan_updated` and `Session.taskPlan` retain its
+actual model/step/call, binding hash, revision and turn. `progress.plan` is null
+for another task/root; polling and ordinary messages cannot create a plan or
+start another inference. The desktop shows this checklist only in Plan.
+
+Resume admits one queued prompt per settled owned turn. New explicit stop intent
+uses `turn.stop_requested.payload.holdQueue` to retain undispatched prompts
+through restart without changing legacy event interpretation. Explicit Interrupt
+keeps its own next-turn semantics; cancellation and unknown accounting never
+become completed work or authorization for a replay.
 
 ## Document attachments
 

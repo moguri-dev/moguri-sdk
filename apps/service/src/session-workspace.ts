@@ -250,6 +250,22 @@ export class SessionWorkspace {
   }
   async execute(command: SessionWorkspaceCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     switch (command.type) {
+      case "session.reorder": {
+        const current = this.snapshot().sessions.filter((session) => session.projectId === command.projectId &&
+          (session.parentSessionId ?? null) === command.parentSessionId &&
+          (command.parentSessionId !== null || session.groupId === command.groupId) &&
+          (session.status === "archived") === command.archived);
+        const ids = new Set(command.sessions.map((session) => session.sessionId));
+        if (ids.size !== command.sessions.length || ids.size !== current.length || current.some((session) => !ids.has(session.id))) {
+          throw new MoguriError("session_order", "Reorder exactly the current sibling sessions. Reload after a session is added, moved, archived or removed.", 409);
+        }
+        const events = command.sessions.map((item, order) => {
+          const session = current.find((session) => session.id === item.sessionId)!;
+          this.revision(session.revision, item.revision);
+          return this.event(session, { event_type: "session.organized", profile_id: this.snapshot().profileId, payload: { changes: { order } } });
+        });
+        return finish(events);
+      }
       case "session.organize": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
         if (command.changes.title !== undefined && !command.changes.title.trim()) throw new MoguriError("session_title", "A session name cannot be empty.");
@@ -261,7 +277,15 @@ export class SessionWorkspace {
             if (visited.has(parent) || visited.size > 8) throw new MoguriError("session_cycle", "Session attachment must be acyclic and at most eight levels deep.");
             visited.add(parent); const ancestor = this.session(parent);
             if (ancestor.projectId !== session.projectId) throw new MoguriError("session_project", "Attach sessions only within the same project.");
+            if (ancestor.kind === "subagent") throw new MoguriError("session_parent", "Model-owned subagents cannot adopt user sessions or change their cancellation ownership.", 409);
             parent = ancestor.parentSessionId ?? null;
+          }
+          const pending = [{ id: session.id, depth: visited.size - 1 }], descendants = new Set<string>();
+          while (pending.length) {
+            const next = pending.pop()!;
+            if (descendants.has(next.id) || next.depth > 8) throw new MoguriError("session_cycle", "The complete attached subtree must remain acyclic and at most eight levels deep.");
+            descendants.add(next.id);
+            for (const child of this.snapshot().sessions.filter((child) => child.parentSessionId === next.id)) pending.push({ id: child.id, depth: next.depth + 1 });
           }
         }
         if (command.changes.groupId && !this.snapshot().sessionGroups.some((group) => group.id === command.changes.groupId && group.projectId === session.projectId)) throw new MoguriError("session_group", "Choose a group in this project.");

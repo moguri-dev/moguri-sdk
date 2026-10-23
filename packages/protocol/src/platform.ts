@@ -128,6 +128,7 @@ export const SettingsSchema = object({
   retention: object({
     deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }),
     archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
+    confirmArchive: Type.Optional(Type.Boolean()), confirmDelete: Type.Optional(Type.Boolean()),
   }),
   artifacts: object({ retainAnswers: Type.Boolean() }),
   budgets: BudgetSettingsSchema,
@@ -153,7 +154,7 @@ export const defaultSettings = (): UserSettings => ({
   lifecycle: { keepAwake: false, tailMinutes: 5 },
   integrations: { sql: { enabled: false, endpoint: "http://127.0.0.1:9147" } },
   sandbox: { executable: "sendbox", configPath: null, image: null, bundlePath: null, trustRootPath: null },
-  retention: { deleteArchived: false, afterDays: 7, archiveCompleted: false, archiveAfterDays: 7 },
+  retention: { deleteArchived: false, afterDays: 7, archiveCompleted: false, archiveAfterDays: 7, confirmArchive: true, confirmDelete: true },
   artifacts: { retainAnswers: true },
   budgets: { rates: [], maxPriceAgeDays: 30 },
   kupo: defaultKupoSettings(),

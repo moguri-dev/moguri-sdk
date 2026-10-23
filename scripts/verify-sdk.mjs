@@ -89,6 +89,14 @@ try {
       ${installedProtocol >= 34 ? 'const evidence:ModelEvidenceReport=(await sdk.models.evidence("generated-model")).evidence;void evidence.claimed.family;void evidence.source.familyField;' : ""}
       const snapshot = sdk.settings.get();
       if (!snapshot) throw new Error("Not connected");
+      ${installedProtocol >= 51 ? `
+      await sdk.sessions.reorder(null,null,null,false,[{sessionId:"generated-id",revision:0}]);
+      await sdk.questions.answerOther("generated-question","Generated explicit other answer",0);
+      await sdk.questions.answerDraft("generated-question",0,true);
+      const currentPlan=(await sdk.sessions.progress("generated-id")).progress.plan;
+      void currentPlan?.source.callId;void currentPlan?.steps[0]?.status;void currentPlan?.binding;
+      void snapshot.values.retention.confirmArchive;void snapshot.values.retention.confirmDelete;
+      ` : ""}
       ${installedProtocol >= 28 ? "const candidate:CandidateRecord|undefined=sdk.getState().snapshot?.candidates[0];void candidate?.stageIntent.commandId;" : ""}
       ${installedProtocol >= 29 ? `
       const patch:CandidatePatch={kind:"patch",summary:"Generated typed candidate.",edits:[{path:"generated.ts",baseDigest:"absent",text:"Generated typed bytes."}]};

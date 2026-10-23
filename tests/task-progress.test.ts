@@ -8,6 +8,33 @@ import { MoguriSdk, planChecklist, progressBar, type ModelAdviceSource } from ".
 import { setupFixture } from "./fixture.ts";
 import { waitFor } from "./fixture.ts";
 
+test("only an explicit multi-step model plan creates task metadata, with no minute-long wait or workspace write", async () => {
+  const fixture = await setupFixture(), store = new EventStore(":memory:");
+  let session = { ...fixture.session(), turnId: "generated-plan-turn", status: "running" as const };
+  const source: ModelAdviceSource = { actor: "model", modelId: "generated-model", providerId: "generated-provider", stepId: "generated-step", callId: "generated-plan-call" };
+  const runtime = new TaskProgressRuntime({
+    profileId: "default", session: () => session, events: () => store.events(), binding: (value) => `${value.id}:${value.turnId}:${value.controls.env}`,
+    plan: async () => ({ path: "docs/plan.md", text: "- [x] Existing repository example\n- [ ] Not a model task plan\n", digest: "a".repeat(64), exists: true }),
+    commit: (events) => { store.commit(events); for (const event of events) if (event.event_type === "task.plan_updated") session = { ...session, taskPlan: structuredClone(event.payload.plan) }; },
+  });
+  try {
+    store.commit([{ event_type: "turn.started", profile_id: "default", session_id: session.id, project_id: session.projectId, turn_id: session.turnId,
+      payload: { item: { id: "generated-plan-item", text: "Generated multi-step change", attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: 0 } }]);
+    assert.equal((await runtime.read(session.id)).plan, null);
+    const result = await runtime.tool(session.id, session.turnId, source, { action: "plan", title: "Generated change",
+      steps: [{ text: "Inspect generated inputs", status: "done" }, { text: "Implement generated change", status: "pending" }] }, new AbortController().signal);
+    assert.equal(result.plan?.steps.length, 2); assert.equal(result.checklist.percent, 50);
+    assert.equal(result.plan?.source.callId, source.callId);
+    const abort = new AbortController(); abort.abort();
+    await assert.rejects(() => runtime.tool(session.id, session.turnId, source, { action: "plan", title: "Generated cancelled plan",
+      steps: [{ text: "Generated first", status: "pending" }, { text: "Generated second", status: "pending" }] }, abort.signal), /abort/i);
+    assert.equal(store.events().filter((event) => event.event_type === "task.plan_updated").length, 1);
+    session = { ...session, turnId: "generated-other-turn" };
+    assert.equal((await runtime.read(session.id)).plan, null);
+    assert.equal(fixture.requests.length, 0);
+  } finally { store.close(); await fixture.close(); }
+});
+
 test("plan progress counts generated nested Markdown checkboxes, not code or ordinary prose", () => {
   assert.deepEqual(planChecklist("- [x] Generated first\n  - [ ] Generated second\n1. [X] Third\r\n````md\n- [x] Not work\n```\n- [x] Still code\n````\n~~~\n- [ ] Also code\n~~~\n[x] Prose\n"), { completed: 2, total: 3, percent: 67 });
   assert.deepEqual(planChecklist("Generated plan without a checklist."), { completed: 0, total: 0, percent: null });

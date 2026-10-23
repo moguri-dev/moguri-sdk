@@ -1762,7 +1762,7 @@ export class ControlPlane extends EventEmitter {
           this.event(session, "draft.saved", { text: "", attachments: [] }),
         ], { id: item.id });
         if (!command.held) this.paused.delete(session.id);
-        if (command.delivery === "interrupt" && session.turnId) this.stop(session.id);
+        if (command.delivery === "interrupt" && session.turnId) this.stop(session.id, false);
         if (!command.held) this.pumpAll();
         return { id: item.id };
       }
@@ -1870,7 +1870,7 @@ export class ControlPlane extends EventEmitter {
   private pumpAll(): void {
     if (this.shuttingDown) return;
     for (const session of this.projection.sessions) {
-      if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.deletingSessions.has(session.id) || session.turnId || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
+      if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.deletingSessions.has(session.id) || session.turnId || this.runs.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
       if (session.kind === "subagent" && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
@@ -2224,8 +2224,8 @@ export class ControlPlane extends EventEmitter {
     this.revision(question.revision, command.expectedRevision);
     const session = this.session(question.sessionId), waiting = this.questionWaits.get(question.id);
     if (question.status !== "open" || session.turnId !== question.turnId || !waiting || waiting.run.done || waiting.run.abort.signal.aborted || this.runs.get(session.id) !== waiting.run || this.deletingProjects.has(session.projectId ?? "") || this.deletingSessions.has(session.id)) throw new MoguriError("question_closed", "This question was answered, cancelled or interrupted. No answer was applied to another turn.", 409);
-    if (!command.text.trim() || Buffer.byteLength(command.text) > 32 * 1024 || !question.allowFreeform && !question.choices.includes(command.text)) throw new MoguriError("question_answer", "Choose one exact offered answer, or use non-empty freeform text only when this question permits it.");
-    const events: EventInput[] = [this.event(session, "question.answered", { questionId: question.id, answer: { text: command.text, actor: "user", modelId: null, sourceCallId: null, answeredAt: new Date().toISOString() } }, question.stepId)];
+    if (!command.text.trim() || Buffer.byteLength(command.text) > 32 * 1024 || !command.other && !question.allowFreeform && !question.choices.includes(command.text)) throw new MoguriError("question_answer", "Choose one exact offered answer, or explicitly submit Other for a different non-empty answer.");
+    const events: EventInput[] = [this.event(session, "question.answered", { questionId: question.id, answer: { text: command.text, actor: "user", modelId: null, sourceCallId: null, answeredAt: new Date().toISOString(), ...(command.other ? { other: true as const } : {}) } }, question.stepId)];
     if (command.consumeDraft) {
       if (command.consumeDraft.sessionId !== session.id || session.draft.revision !== command.consumeDraft.expectedRevision || session.draft.text !== command.text) throw new MoguriError("revision_conflict", "The saved draft changed. Your answer/draft was preserved; review the current text before answering.", 409);
       events.push(this.event(session, "draft.saved", { text: "", attachments: session.draft.attachments }));
@@ -2916,14 +2916,16 @@ export class ControlPlane extends EventEmitter {
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
     }
   }
-  private stop(sessionId: string): void {
+  private stop(sessionId: string, holdQueue = true): void {
     try { this.decisions.cancelSession(sessionId); } catch (error) { console.error("Decision cancellation persistence failed; actual owned abort was still requested:", error instanceof MoguriError ? error.code : "decision_stop"); }
     for (const session of this.projection.sessions) if (session.parentSessionId === sessionId) this.stop(session.id);
     this.sandboxWorkspaces.cancel(sessionId);
     this.platform.stopSession(sessionId);
     const current = this.session(sessionId);
+    if (holdQueue) this.paused.add(sessionId);
+    const queueHold = holdQueue && current.queue.length ? { holdQueue: true as const } : {};
     const compound = this.projection.compoundWorkflows.find((record) => record.sessionId === sessionId && record.id === current.turnId && ["running", "waiting_validation", "validating"].includes(record.status));
-    if (current.parentSessionId && !current.turnId && current.queue.length) {
+    if ((current.parentSessionId || holdQueue) && !current.turnId && current.queue.length) {
       this.commit(current.kind === "subagent" ? [...current.queue.map((item) => this.event(current, "queue.removed", { messageId: item.id })), this.event(current, "turn.finished", { outcome: "stopped", diagnostic: "Owned subagent cancelled before admission. No model request was started." })] :
         [this.event(current, "queue.held", { messageIds: current.queue.map((item) => item.id) })]);
     }
@@ -2933,11 +2935,11 @@ export class ControlPlane extends EventEmitter {
       external.abort.abort();
       const run = this.runs.get(sessionId);
       if (external.started && run?.mcpControl) {
-        try { this.commit([this.event(this.session(sessionId), "turn.stop_requested", {})]); }
+        try { this.commit([this.event(this.session(sessionId), "turn.stop_requested", queueHold)]); }
         finally { this.requestWorkerStop(run); }
         return;
       }
-      this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}), this.event(this.session(sessionId), "turn.stop_acknowledged", {})]);
+      this.commit([this.event(this.session(sessionId), "turn.stop_requested", queueHold), this.event(this.session(sessionId), "turn.stop_acknowledged", {})]);
       if (external.remoteMcpId) {
         const call = this.mcpCall(external.remoteMcpId, external.sessionId);
         if (call.phase !== "settled") this.updateMcp(call, { phase: "settled", status: external.started ? "partial" : "stopped",
@@ -2950,17 +2952,20 @@ export class ControlPlane extends EventEmitter {
     if (!run) {
       const sequence = this.projection.roleSequences.find((sequence) => sequence.sessionId === sessionId && sequence.id === current.turnId && sequence.status === "running");
       if (sequence) this.commit([
-        this.event(current, "turn.stop_requested", {}),
+        this.event(current, "turn.stop_requested", queueHold),
         this.platform.roles.event({ ...sequence, revision: sequence.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true }),
         this.event(current, "turn.finished", { outcome: "partial", diagnostic: "No active owned worker could acknowledge this retained role intent. Its stop is partial; no inference, cleanup or continuation was fabricated.",
           ...(!this.history.some((event) => event.turn_id === sequence.id && (event.event_type === "tool.started" || event.event_type === "process.started")) ? { workspaceEffects: "none" as const } : {}) }),
       ]);
       return;
     }
-    if (run.abort.signal.aborted) return;
+    if (run.abort.signal.aborted || run.done) {
+      if (holdQueue && current.queue.some((item) => !item.held)) this.commit([this.event(current, "queue.held", { messageIds: current.queue.map((item) => item.id) })]);
+      return;
+    }
     try {
       const sequence = run.roleSequence ? this.ownedRoles.record(run.roleSequence.id) : null;
-      this.commit([this.event(this.session(sessionId), "turn.stop_requested", {}),
+      this.commit([this.event(this.session(sessionId), "turn.stop_requested", queueHold),
         ...(compound && !compound.stopRequested ? [this.compound.event({ ...compound, revision: compound.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true })] : []),
         ...(sequence && !sequence.stopRequested ? [this.platform.roles.event(projectRoleSequence(sequence, {
           ...sequence, revision: sequence.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true,

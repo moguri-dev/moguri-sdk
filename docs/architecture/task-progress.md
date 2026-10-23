@@ -1,7 +1,8 @@
 # Task completion estimates
 
-The completion bar compares the session's actual bound plan checklist with
-optional advice from its owning solver. Neither number proves code quality,
+The progress API compares the session's explicit model plan, or its separately
+bound workspace file for existing SDK/CLI clients, with optional advice from its
+owning solver. Neither number proves code quality,
 acceptance, permission, successful cancellation or overall task completion.
 Checked items have equal weight; unchecked work can be much larger.
 
@@ -19,6 +20,15 @@ Protocol/schema 42 adds `session.progress` and `task.progress_reported`. The
 additive migration records the new contract without rewriting history,
 ciphertext, receipts or existing plans. Reports use the session's existing
 encrypted retention compartment and disappear with its deletion.
+
+Protocol/schema 51 adds the explicit owning-model `task_progress` plan action
+and `task.plan_updated`. A plan has two to fifty distinct bounded steps and
+retains the actual model/step/call, turn, binding hash and revision. It can be
+created before a minute has elapsed; percentage reports keep their original
+long-task gate. Simple messages, an existing repository file and UI polling
+cannot synthesize a task plan. A new task/root cannot inherit an earlier plan.
+The [interaction contract](session-interactions.md) covers migration, client
+placement, cancellation and exact actual-user answers.
 
 ## Checklist and periodic comparison
 
@@ -57,9 +67,11 @@ CLI and `/progress` expose the same observation and provenance.
 The TUI checklist occupies its existing reserved footer row rather than
 shrinking raw-result views. A reported long-task estimate gets one additional
 compact row; `/progress` exposes the complete explanation and provenance.
-Desktop keeps the bar in a compact single row, with a keyboard-accessible
-native details dialog for explanations, errors and provenance. That dialog
-participates in the composer's existing native-preview visibility gate. The
+Desktop shows the checklist and estimates only in the Plan sidebar, with a
+keyboard-accessible native details dialog for explanations, errors and
+provenance. Without an explicit current model plan, it shows no progress bar.
+The separately opened workspace-plan-file editor remains available in that tab.
+The details dialog participates in the existing native-preview visibility gate. The
 original compact-window question/answer and tool-decision assertions remain
 unchanged and pass with the answer controls fully visible.
 

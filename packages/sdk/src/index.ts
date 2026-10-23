@@ -76,6 +76,8 @@ export class MoguriSdk extends TransportClient {
     },
     context: (sessionId: string) => this.query({ type: "session.context", sessionId }),
     organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes, expectedRevision }),
+    reorder: (projectId: string | null, parentSessionId: string | null, groupId: string | null, archived: boolean, sessions: { sessionId: string; revision: number }[]) =>
+      this.command({ type: "session.reorder", projectId, parentSessionId, groupId, archived, sessions }),
     rename: (sessionId: string, title: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes: { title }, expectedRevision }),
     mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
     spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
@@ -279,12 +281,13 @@ export class MoguriSdk extends TransportClient {
     materialization: (jobId: string) => this.query({ type: "artifact.materialization", jobId }),
   };
   readonly questions = {
+    answerOther: (questionId: string, text: string, expectedRevision: number) => this.command({ type: "question.answer", questionId, text, expectedRevision, other: true }),
     answer: (questionId: string, text: string, expectedRevision: number, consumeDraft?: { sessionId: string; expectedRevision: number }) => this.command({ type: "question.answer", questionId, text, expectedRevision, ...(consumeDraft ? { consumeDraft } : {}) }),
-    answerDraft: (questionId: string, expectedRevision: number) => {
+    answerDraft: (questionId: string, expectedRevision: number, other = false) => {
       const question = this.getState().snapshot?.questions.find((question) => question.id === questionId);
       const session = this.getState().snapshot?.sessions.find((session) => session.id === question?.sessionId);
       if (!question || !session) throw new ClientError("question_missing", "Connect and review the actual pending question.");
-      return this.command({ type: "question.answer", questionId, text: session.draft.text, expectedRevision, consumeDraft: { sessionId: session.id, expectedRevision: session.draft.revision } });
+      return this.command({ type: "question.answer", questionId, text: session.draft.text, expectedRevision, ...(other ? { other: true as const } : {}), consumeDraft: { sessionId: session.id, expectedRevision: session.draft.revision } });
     },
   };
   readonly workspaces = {

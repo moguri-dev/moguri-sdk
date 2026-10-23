@@ -16,6 +16,7 @@ export interface ModelAdviceSource {
 export interface QuestionRecommendation extends ModelAdviceSource { choice: string; reason: string }
 export interface QuestionAnswer {
   text: string; actor: "user" | "model" | "decision-provider"; modelId: string | null; sourceCallId: string | null; answeredAt: string;
+  other?: true;
   decisionId?: string; providerId?: string;
   decisionOrigin?: DecisionEvidence;
 }
@@ -27,6 +28,7 @@ export interface UserQuestion extends Omit<UserQuestionInput, "recommendation"> 
 export const QuestionCommandSchema = object({
   type: Type.Literal("question.answer"), questionId: Type.String({ minLength: 1, maxLength: 128 }),
   expectedRevision: Type.Integer({ minimum: 0 }), text: Type.String({ minLength: 1, maxLength: 32 * 1024 }),
+  other: Type.Optional(Type.Literal(true)),
   consumeDraft: Type.Optional(object({ sessionId: Type.String({ minLength: 1, maxLength: 128 }), expectedRevision: Type.Integer({ minimum: 0 }) })),
 });
 export type QuestionCommand = Static<typeof QuestionCommandSchema>;

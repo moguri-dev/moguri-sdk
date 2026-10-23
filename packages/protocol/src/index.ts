@@ -40,13 +40,13 @@ import { projectKnowledge, type KnowledgeEventPayloads, type KnowledgeRecord } f
 import { projectGithubOperation, type GithubEventPayloads, type GithubOperation } from "./github-workflows.ts";
 import { projectLinearOperation, type LinearEventPayloads, type LinearOperation } from "./linear-workflows.ts";
 import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts";
-import type { TaskProgressReport } from "./progress.ts";
+import type { TaskPlan, TaskProgressReport } from "./progress.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 50;
+export const PROTOCOL_VERSION = 51;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -176,6 +176,8 @@ export interface Session {
   pendingMode: SessionMode | null;
   kind: SessionKind;
   pinned: boolean;
+  order?: number;
+  taskPlan?: TaskPlan;
   unread: boolean;
   groupId: string | null;
   archivedAt: string | null;
@@ -277,7 +279,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
   "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string };
   "task.progress_reported": { report: TaskProgressReport };
-  "turn.stop_requested": Record<string, never>;
+  "task.plan_updated": { plan: TaskPlan };
+  "turn.stop_requested": { holdQueue?: true };
   "turn.stop_acknowledged": Record<string, never>;
   "turn.finished": { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null; workspaceEffects?: "none" | "possible" };
   "policy.updated": { policy: Policy; finishingTurnIds: string[] };
@@ -364,7 +367,7 @@ export const eventTypes: readonly EventType[] = [
   "draft.saved", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
-  "turn.finished", "task.progress_reported", "policy.updated", "provider.changed", "mcp.oauth_changed",
+  "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
   "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "cache.prepared",
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
@@ -385,6 +388,7 @@ export const eventTypes: readonly EventType[] = [
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
   const projects = new Map<string, Project>();
   const sessions = new Map<string, Session>();
+  let nextSessionOrder = 0;
   let policy: Policy = { revision: 0, allowedEnvs: ["Local", "Sandbox", "Remote"] };
   const blockedProjects = new Set<string>();
   const blockedSessions = new Set<string>();
@@ -651,6 +655,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "question.asked") questions.set(event.payload.question.id, { ...structuredClone(event.payload.question), recommendation: structuredClone(event.payload.question.recommendation ?? null), sourceEventId: event.id });
     if (event.event_type === "question.answered") {
       const question = questions.get(event.payload.questionId);
+      if (event.payload.answer.other && event.payload.answer.actor !== "user") throw new MoguriError("question_corrupt", "Only an actual user can submit an explicit Other answer. State was preserved.", 409);
       if (event.payload.answer.actor === "decision-provider") {
         const answer = event.payload.answer, record = decisions.get(answer.decisionId ?? ""), origin = answer.decisionOrigin, entry = budgetEntries.get(answer.sourceCallId ?? "");
         if (!question || question.allowFreeform || question.status !== "open" || !question.choices.includes(answer.text) ||
@@ -885,7 +890,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         lastError: null, localFinishing: false, createdAt: event.timestamp, updatedAt: event.timestamp,
         parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
-        kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, unread: false, groupId: null, archivedAt: null,
+        kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, order: nextSessionOrder++, unread: false, groupId: null, archivedAt: null,
         prUrl: event.payload.prUrl ?? null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
         suggestionSources: event.payload.suggestionSources,
         inheritedImages: event.payload.inheritedImages,
@@ -916,11 +921,20 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const changes = event.payload.changes;
         if (changes.title !== undefined) session.title = changes.title;
         if (changes.pinned !== undefined) session.pinned = changes.pinned;
+        if (changes.order !== undefined) { session.order = changes.order; nextSessionOrder = Math.max(nextSessionOrder, changes.order + 1); }
         if (changes.unread !== undefined) session.unread = changes.unread;
         if (changes.groupId !== undefined) session.groupId = changes.groupId;
         if (changes.parentSessionId !== undefined) session.parentSessionId = changes.parentSessionId ?? undefined;
         if (changes.prUrl !== undefined) session.prUrl = changes.prUrl;
         session.revision++; break;
+      }
+      case "task.plan_updated": {
+        const plan = event.payload.plan;
+        if (plan.turnId !== event.turn_id || plan.source.actor !== "model" || plan.source.stepId !== event.step_id ||
+          plan.revision !== (session.taskPlan?.revision ?? -1) + 1 || plan.steps.length < 2 || plan.steps.length > 50) {
+          throw new MoguriError("plan_corrupt", "The task plan lost its actual model, turn or revision. State was preserved.", 409);
+        }
+        session.taskPlan = structuredClone(plan); break;
       }
       case "session.mode_requested": session.pendingMode = event.payload.mode; session.revision++; break;
       case "session.mode_changed": session.mode = event.payload.mode; session.pendingMode = null; session.revision++; break;
@@ -1054,7 +1068,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         for (const process of session.processes) if (process.callId === event.payload.call.id) process.outcome = event.payload.outcome;
         break;
       }
-      case "turn.stop_requested": session.status = "stopping"; break;
+      case "turn.stop_requested":
+        session.status = "stopping";
+        if (event.payload.holdQueue && session.queue.some((item) => !item.held)) {
+          for (const item of session.queue) item.held = true;
+          session.queueRevision++;
+        }
+        break;
       case "turn.stop_acknowledged": break;
       case "turn.finished":
         session.status = event.payload.outcome; session.turnId = null; session.pendingApproval = null; session.pendingQuestionId = null;

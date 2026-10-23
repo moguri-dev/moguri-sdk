@@ -1,5 +1,10 @@
 # Session workspace and Ghostty contract
 
+The [protocol-51 interaction follow-up](session-interactions.md) adds atomic
+sibling ordering, existing guarded drag attachment, shared confirmation
+preferences, explicit model-only task checklists and real-user Other answers.
+It does not change actual session roots or grant model authority. and Ghostty contract
+
 This user-requested slice keeps capability semantics in the SDK/service and
 extends the existing dark client world. It is not a new terminal implementation
 or a reason to enable deferred autonomous features. CI remains main-push-only.
