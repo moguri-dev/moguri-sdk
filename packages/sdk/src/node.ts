@@ -54,9 +54,24 @@ export async function connectMoguri(options: { stateDir?: string; runtime?: stri
   });
   return new MoguriSdk(connection, () => readConnection(stateDir), options.profileId).ready();
 }
-export async function stopMoguriService(stateDir = stateDirectory(), options: RuntimeCloseOptions = {}, expected?: ServiceUpgradeReview): Promise<void> {
+export async function stopMoguriService(stateDir = stateDirectory(), options: RuntimeCloseOptions & { expectedConnection?: Connection } = {}, expected?: ServiceUpgradeReview): Promise<void> {
   const path = join(stateDir, "connection.json");
-  const value = await readPrivateConnection(stateDir);
+  let value: Connection;
+  try { value = await readPrivateConnection(stateDir); }
+  catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT") || !options.expectedConnection) throw error;
+    try { await lstat(join(stateDir, "service.lock")); throw new Error("The original service registry is missing but its writer lock remains. Shutdown is unconfirmed; no other owner was stopped."); }
+    catch (lockError) { if (!(lockError instanceof Error && "code" in lockError && lockError.code === "ENOENT")) throw lockError; }
+    try {
+      const response = await fetch(`${options.expectedConnection.baseUrl}/v1/health`, { headers: { Authorization: `Bearer ${options.expectedConnection.token}` }, redirect: "error", signal: AbortSignal.timeout(2000) });
+      await response.body?.cancel();
+      throw new Error("The captured service still responds without its original registry. Shutdown is unconfirmed; no different owner was adopted.");
+    } catch (healthError) {
+      if (healthError instanceof TypeError && healthError.cause instanceof Error && "code" in healthError.cause && healthError.cause.code === "ECONNREFUSED") return;
+      throw healthError;
+    }
+  }
+  if (options.expectedConnection && (await serviceUpgradeReview(value, stateDir)).fingerprint !== (await serviceUpgradeReview(options.expectedConnection, stateDir)).fingerprint) throw new Error("The app's captured service connection changed. No replacement or different owner was stopped.");
   if (expected && (!expected.canRestart || !options.preserveTerminals || (await serviceUpgradeReview(value, stateDir)).fingerprint !== expected.fingerprint)) throw new Error("The exact service/root reviewed for upgrade changed. No different owner was stopped; review the current service again.");
   const url = new URL(value.baseUrl);
   if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.username || url.password) throw new Error("Refusing to signal an unverified service.");

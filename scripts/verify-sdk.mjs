@@ -25,6 +25,7 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
   const documentInputs = generatedDocuments ? [
@@ -60,6 +61,10 @@ try {
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
       const upgradeReview = async (review:ServiceUpgradeReview):Promise<boolean> => {void review.fingerprint;void review.observedProtocol;return false;};
       const reviewedConnection = (stateDir:string) => ensureConnection({stateDir,confirmUpgrade:upgradeReview});void reviewedConnection;
+      ` : ""}
+      ${capturedServiceStop ? `
+      const stopCaptured = (stateDir:string, captured:Awaited<ReturnType<typeof createRuntime>>["connection"]) => stopMoguriService(stateDir,{expectedConnection:captured});
+      void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
       ${installedProtocol >= 44 ? `
@@ -1033,7 +1038,7 @@ try {
         assert.equal(after.data.split("GENERATED_INSTALLED_CONSOLE_READY").length-1,1);
         const read=JSON.parse((await invoke(["terminal","read",opened.id])).stdout);assert.equal(read.terminal.pid,before.terminal.pid);
         const tui=await consoleSdk.slash(session.id,"/terminals read "+opened.id,"tui");assert.equal(tui.kind,"text");assert.equal(JSON.parse(tui.text).terminal.pid,before.terminal.pid);
-        await consoleSdk.terminal.close(opened.id);consoleSdk.disconnect();await stopMoguriService(consoleState);
+        await consoleSdk.terminal.close(opened.id);consoleSdk.disconnect();await stopMoguriService(consoleState,{expectedConnection:consoleRuntime.connection});
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }

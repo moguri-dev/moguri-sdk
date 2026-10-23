@@ -79,6 +79,16 @@ inspection. Ordinary service stop, default embedded disposal and an explicit
 terminal close retain owned-group stop semantics. Closing or hiding the
 desktop panel detaches its view, not the shell.
 
+Closing the desktop app itself is different from hiding its terminal panel.
+After unsaved-window close is actually accepted, the app fences reconnects,
+awaits any in-flight connection admission, and sends ordinary stop only to its
+captured private root/connection fingerprint. It waits for service shutdown
+before Electron exit. This stops all profile-owned workers and known terminal
+groups, not arbitrary named/PID-discovered processes. Cancelled unsaved close
+does not stop the service. Rotated ownership or failed cleanup blocks successful
+exit and remains retryable. Verified update/storage restart completion retains
+its separate preserve-terminal handoff instead of issuing a later ordinary stop.
+
 The authenticated lifecycle endpoint acknowledges **acceptance**, not completed
 shutdown. Opposite in-flight stop/restart actions conflict. Clients wait for
 the private registry to disappear and detect explicit unconfirmed shutdown.

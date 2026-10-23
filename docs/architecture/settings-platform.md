@@ -290,6 +290,19 @@ not import provider, MCP or PTY runtime code. Tests use generated endpoints,
 original drafts/grants and a real generated replacement service, never personal
 credentials or model requests.
 
+Ordinary desktop close is not a terminal-preserving restart. Accepted last-window
+close, Cmd+Q and Quit fence new connection/profile admission, await an in-flight
+connection, and stop the exact captured private-root/service fingerprint through
+the existing authenticated lifecycle. Electron exits only after real all-profile
+cleanup, including owned user consoles and stopped/partial worker outcomes.
+Unsaved-edit cancellation leaves the service running; changed ownership or failed
+cleanup retains the original state and an explicit retry. Reviewed update/storage
+restart handoffs remain separate. This follow-up reuses Electron (MIT), Node
+builtins and the existing Node SDK lifecycle; it adds no dependency, durable
+event, schema migration, provider permission or client-only domain state.
+Generated native coverage exercises accepted close during actual work, cancelled
+close, failed private cleanup/retry and a delayed connection admission.
+
 ## Fresh prerequisite measurements
 
 Phase 0, session/Ghostty and model-control spikes were rerun before this change:

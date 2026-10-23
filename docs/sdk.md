@@ -771,6 +771,15 @@ automatic downgrade/restart. Without a callback, callers receive the actionable
 mismatch and may choose an explicit lifecycle operation themselves.
 `autoStart: false` stays strict and never invokes upgrade/launch effects.
 
+Native desktop exit calls `stopMoguriService(capturedStateDir,
+{expectedConnection: capturedConnection})`, not a freshly inferred default root.
+The private registry fingerprint and authenticated PID/protocol must still match
+that captured owner before sending the existing ordinary-stop lifecycle request.
+A missing registry is considered already stopped only with no writer lock and a
+refused captured endpoint. A rotated/new owner is never stopped implicitly.
+Window close waits for this acknowledgement, while unsaved-edit cancellation
+does not begin shutdown. Explicit terminal-preserving restart remains separate.
+
 `application.storage.status()` and `application.storage.preview(path)` expose the
 actual runtime authority and exact review. After actual all-profile review,
 `application.storage.relocate(path, review.digest, true, optionalOriginalId)`
