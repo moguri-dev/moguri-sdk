@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { writeLegacyState, removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { setupFixture } from "./fixture.ts";
 import { terminalBinding } from "../apps/service/src/terminal-identity.ts";
@@ -32,6 +32,7 @@ test("migration 44 rolls back its marker atomically and preserves exact encrypte
   try {
     store.commit([{ event_type: "job.progress", profile_id: "default", payload: { jobId: "generated-old-job", progress: "Generated encrypted pre-entry state." } }]);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
+    removePost44FixtureMarkers(store.db);
     store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id='workspace_entry_schema'; PRAGMA user_version=43;
       CREATE TRIGGER generated_entry_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='workspace_entry_schema'
       BEGIN SELECT RAISE(ABORT,'Generated entry migration failure'); END; COMMIT;`);

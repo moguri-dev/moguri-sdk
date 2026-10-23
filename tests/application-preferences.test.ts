@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { GLOBAL_PROFILE_ID } from "../packages/sdk/src/index.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
-import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { assertCurrentSchema, removePost44FixtureMarkers, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 
@@ -34,6 +34,7 @@ test("schema-49 root configuration and profile identities upgrade without adding
   try {
     const configuration = (await fixture.sdk.application.status()).configuration;
     await fixture.sdk.application.configure({ menuBar: false, automaticUpdates: false }, configuration.revision);
+    assert.throws(() => removePost44FixtureMarkers(fixture.service.store.db), /genuine pre-settings/);
     const history = fixture.service.store.events().map((event) => [event.id, event.seq]);
     fixture.sdk.disconnect(); await writeLegacyState(fixture.service, 49);
     reopened = await startService(fixture.options); sdk = await new MoguriSdk(reopened.connection).ready();

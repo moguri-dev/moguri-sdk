@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
@@ -18,6 +19,7 @@ test("schema-22 marker failure leaves exact schema-21 ciphertext and recovers wi
   try {
     store.commit([{ event_type: "job.progress", profile_id: "default", payload: { jobId: "generated-source", progress: "Generated encrypted source." } }]);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
+    removePost44FixtureMarkers(store.db);
     store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','repository_attribution_schema','terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema','paste_file_schema','native_execution_schema','compound_workflow_schema','budget_winddown_schema','owned_decision_schema','task_progress_schema','document_attachment_schema'); PRAGMA user_version=21;
       CREATE TRIGGER generated_repository_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='repository_attribution_schema'
       BEGIN SELECT RAISE(ABORT,'Generated repository marker failure'); END; COMMIT;`);
@@ -94,7 +96,7 @@ test("an unconfigured external MCP admission cannot move to a different binding 
     const pending = sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "generated" }, tool.digest);
     await waitFor(() => held);
     const configuration = (await sdk.projects.configuration(fixture.session().projectId)).configuration;
-    await sdk.projects.configure(configuration.projectId, { ...configuration.values, repo: { ...configuration.values.repo, upstream: "generated-new-upstream" } }, configuration.revision);
+    await sdk.projects.configure(configuration.projectId, { ...configuration.values, deniedFolders: ["generated-new-denied-folder"] }, configuration.revision);
     release();
     await assert.rejects(() => pending, { code: "mcp_scope_changed" });
     assert.equal((await sdk.telemetry.operations()).totals.attempts, 0);
