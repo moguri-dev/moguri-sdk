@@ -97,6 +97,28 @@ all call these APIs. Examples and exact errors/lifecycle limits are in
 [Linear](architecture/linear-workflows.md) and
 [dependency cache scopes](architecture/dependency-cache-scopes.md).
 
+### Shared preference maintenance
+
+Protocol 45 preserves old event/control bytes and explicitly saved retention
+values while filling new nested defaults. `settings.update/reset` includes
+typed `guidance`, named/custom `appearance`, default `permissions.defaultDecision`,
+optional session `verbosity`, `lifecycle` and existing-daemon integration settings.
+Global/project guidance is recorded in actual future prompt snapshots.
+`runtime.status()` reports the encrypted directory and real owned idle-sleep
+state; `runtime.retryPower()` retries only that original helper, never a model.
+
+`projects.repositories(id)` is a bounded, explicitly Local, non-link-following
+inspection. Upstream configuration requires one completely verified repository,
+including a nested root. Incomplete/denied/multi-repository layouts do not
+guess or rebind the session's workspace.
+
+`integrations.githubConnection()` explicitly verifies the controller GitHub CLI
+account without Copilot/update credentials. `linear.connection(false)` reads only
+credential presence; `linear.connection(true)` verifies the actual account and
+workspace without inventing a project/team. `integrations.sqlStatus()` makes
+only the enabled, explicitly configured existing daemon's bounded health read.
+These observations do not grant files, tools, repository writes or model access.
+
 ## Decision-provider development surface
 
 `decisions.status(sessionId)` reports actual compatible provider readiness,

@@ -331,6 +331,7 @@ export class MoguriSdk extends TransportClient {
     add: (path: string) => this.command({ type: "project.add", path }),
     clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),
     configuration: (projectId: string) => this.query({ type: "project.configuration", projectId }),
+    repositories: (projectId: string) => this.query({ type: "project.repositories", projectId }),
     configure: (projectId: string, settings: ProjectSettings, expectedRevision: number) => this.command({ type: "project.settings", projectId, settings, expectedRevision }),
     organize: (projectId: string, presentation: { folderId: string | null; color: string; order: number }, expectedRevision: number) => this.command({ type: "project.organize", projectId, ...presentation, expectedRevision }),
     reorder: (folderId: string | null, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.reorder", folderId, projects }),
@@ -408,6 +409,14 @@ export class MoguriSdk extends TransportClient {
       this.command({ type: "settings.update", settings, expectedRevision, acknowledgePromptRisk }),
     reset: (section: SettingsSection | "all", expectedRevision: number) =>
       this.command({ type: "settings.reset", section, expectedRevision }),
+  };
+  readonly runtime = {
+    status: () => this.query({ type: "runtime.status" }),
+    retryPower: () => this.command({ type: "runtime.power.retry" }),
+  };
+  readonly integrations = {
+    githubConnection: () => this.query({ type: "github.connection" }),
+    sqlStatus: () => this.query({ type: "integrations.sql.status" }),
   };
   readonly prompt = {
     preview: (sessionId?: string) => this.query({ type: "prompt.preview", ...(sessionId ? { sessionId } : {}) }),
@@ -531,6 +540,7 @@ export class MoguriSdk extends TransportClient {
   readonly cache = createCacheApi(this);
   readonly linear = {
     ...createLinearWorkflowApi(this),
+    connection: (verify = false) => this.query({ type: "linear.connection", verify }),
     status: (projectId: string) => this.query({ type: "linear.status", projectId }),
     setToken: (token: string) => this.command({ type: "linear.token.set", token }),
     clearToken: () => this.command({ type: "linear.token.clear" }),

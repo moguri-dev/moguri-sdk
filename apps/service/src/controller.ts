@@ -520,6 +520,7 @@ export class ControlPlane extends EventEmitter {
     if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
     this.projection = projectEvents(this.history, this.profileId);
+    this.platform?.sessions.power.update();
     this.profileHooks?.committed(this.profileId, appended);
     this.emit("change", appended);
     this.remote.synchronize();

@@ -6,6 +6,7 @@ import { ControlDefaultsSchema } from "./controls.ts";
 import { ProjectArtifactChoiceSchema, type RetainedArtifact } from "./artifacts.ts";
 import type { PlanBinding } from "./plan-saves.ts";
 import type { TerminalState } from "./terminals.ts";
+import { WorkflowGuidanceSchema } from "./preferences.ts";
 export * from "./terminals.ts";
 export type { RetainedArtifact } from "./artifacts.ts";
 
@@ -33,6 +34,7 @@ export const ProjectSettingsSchema = object({
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }), planPath: path,
   defaults: ControlDefaultsSchema,
   remotePath: Type.Union([path, Type.Null()]),
+  guidance: Type.Optional(WorkflowGuidanceSchema),
 });
 export type ProjectSettings = Static<typeof ProjectSettingsSchema>;
 export const defaultProjectSettings = (): ProjectSettings => ({
@@ -100,6 +102,7 @@ export const TerminalInputSchema = Type.Union([
 ]);
 export type TerminalInput = Static<typeof TerminalInputSchema>;
 export const SessionWorkspaceQuerySchema = Type.Union([
+  object({ type: Type.Literal("project.repositories"), projectId: id }),
   object({ type: Type.Literal("session.context"), sessionId: id }),
   object({ type: Type.Literal("project.configuration"), projectId: id }),
   object({ type: Type.Literal("project.git"), projectId: id, diff: Type.Boolean() }),
@@ -112,6 +115,7 @@ export const SessionWorkspaceQuerySchema = Type.Union([
 export type SessionWorkspaceQuery = Static<typeof SessionWorkspaceQuerySchema>;
 export const isSessionWorkspaceQuery = (value: unknown): value is SessionWorkspaceQuery => Value.Check(SessionWorkspaceQuerySchema, value);
 export type SessionWorkspaceResponse =
+  | ({ type: "project.repositories" } & ProjectRepositoryLayout)
   | { type: "session.context"; context: ModelContextPreview }
   | { type: "project.configuration"; configuration: ProjectConfiguration }
   | { type: "project.git"; branch: string; repository: string | null; status: string; diff: string }
@@ -120,3 +124,4 @@ export type SessionWorkspaceResponse =
   | { type: "terminal.default-root"; root: string }
   | ({ type: "plan.read"; path: string; text: string; digest: string; exists: boolean } & Partial<PlanBinding>)
   | { type: "terminal.read"; terminal: TerminalState; data: string; baseOffset: number; nextOffset: number };
+export interface ProjectRepositoryLayout { roots: string[]; complete: boolean; diagnostic: string }

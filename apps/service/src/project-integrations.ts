@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { isRecord, MoguriError, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, type GitHubConnection, type LinearConnection, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
 import { boundedBody, fetchJson } from "./network.ts";
 import { runProgram } from "./program.ts";
 import type { SecretVault } from "./gateway.ts";
 import { loadRepository, lookupRepository, type RepositoryReadBinding } from "./repository-metadata.ts";
 import { redactSecrets } from "./secret-redactor.ts";
 
-export interface IntegrationOptions { fetch?: typeof fetch; vault?: SecretVault; prRefreshMs?: number }
+export interface IntegrationOptions { fetch?: typeof fetch; vault?: SecretVault; prRefreshMs?: number; program?: typeof runProgram }
 export interface LinearAccess {
   readonly generation: string;
   readonly signal: AbortSignal;
@@ -40,6 +40,27 @@ export class ProjectIntegrations {
   private linearChanging = false;
   private readonly linearProjects = new Map<string, AbortController>();
   constructor(readonly vault: SecretVault, private readonly options: IntegrationOptions = {}) {}
+  async githubConnection(root: string, signal: AbortSignal): Promise<GitHubConnection> {
+    const result = await this.githubRequest("user", "gh-cli", root, signal);
+    if (!isRecord(result) || typeof result.login !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(result.login) ||
+      typeof result.id !== "number" || !Number.isSafeInteger(result.id) || result.id < 1) throw new MoguriError("github_account", "The existing GitHub CLI account was not verified. Sign in with gh explicitly; Copilot and update credentials were not used.", 401);
+    return { login: result.login, id: result.id, boundary: "control-plane-gh-cli" };
+  }
+  async linearConnection(verify: boolean, signal: AbortSignal): Promise<LinearConnection> {
+    const generation = this.linearGeneration, source = this.linearAbort;
+    if (this.linearChanging) throw new MoguriError("linear_auth_changing", "Wait for the profile credential change before inspecting it.", 409);
+    const credential = await this.vault.read("linear", AbortSignal.any([signal, source.signal]));
+    signal.throwIfAborted();
+    if (source.signal.aborted || generation !== this.linearGeneration || this.linearChanging) throw new MoguriError("linear_auth_changed", "The profile credential changed during inspection. No old account was adopted.", 409);
+    if (!credential) return { credential: "required", account: null };
+    if (!verify) return { credential: "configured", account: null };
+    const access = await this.linearAccess(signal);
+    const result = await access.request("query MoguriConnection { viewer { id name } organization { id name } }", {}, signal);
+    const valid = (value: unknown): value is { id: string; name: string } => isRecord(value) && typeof value.id === "string" && value.id.length > 0 && value.id.length <= 128 &&
+      typeof value.name === "string" && value.name.length > 0 && value.name.length <= 200 && !/[\u0000-\u001f\u007f]/.test(value.name);
+    if (!access.current() || !valid(result.viewer) || !valid(result.organization)) throw new MoguriError("linear_identity", "Linear did not verify the exact account/workspace. No team or credential was substituted.", 409);
+    return { credential: "configured", account: { id: result.viewer.id, name: result.viewer.name, workspaceId: result.organization.id, workspaceName: result.organization.name } };
+  }
   invalidateLinearCredentials(): void {
     this.linearAbort.abort();
     this.linearAbort = new AbortController();
@@ -147,7 +168,7 @@ export class ProjectIntegrations {
   }
   private async githubRequest(endpoint: string, access: "public" | "gh-cli", root: string, signal: AbortSignal): Promise<unknown> {
     if (access === "gh-cli") {
-      const text = await runProgram("gh", ["api", "--hostname", "github.com", "--method", "GET", endpoint], {
+      const text = await (this.options.program ?? runProgram)("gh", ["api", "--hostname", "github.com", "--method", "GET", endpoint], {
         cwd: root, signal, timeoutMs: 15_000, maxBytes: 2 * 1024 * 1024, label: "Read selected GitHub metadata",
         env: { GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" },
       });

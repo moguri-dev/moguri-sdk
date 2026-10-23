@@ -108,6 +108,7 @@ export class LocalDictation {
     this.verified = fingerprint;
   }
   async transcribe(jobId: string, source: string | "microphone", settings: UserSettings["voice"], signal: AbortSignal, progress: (message: string) => void = () => {}): Promise<{ text: string; modelId: string; language: string; source: "local" }> {
+    if (source === "microphone" && settings.inputDeviceId && settings.inputDeviceId !== "default") throw new MoguriError("speech_input_device", "This native capture supports only the default microphone. Use the selected device through desktop capture, or explicitly choose Default in Voice settings. No device was substituted.", 409);
     const active: { child: ChildProcess | null; stopping: boolean; terminate?: (signal: NodeJS.Signals) => void } = { child: null, stopping: false };
     this.active.set(jobId, active);
     let timer: ReturnType<typeof setTimeout> | undefined;

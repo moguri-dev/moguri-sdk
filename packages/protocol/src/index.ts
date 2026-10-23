@@ -2,7 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MAX_TEXT, MoguriError } from "./core.ts";
 export { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
-import { PlatformCommandSchema, defaultSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
+import { PlatformCommandSchema, defaultSettings, normalizeSettings, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type SessionGroup, type RetainedArtifact, type TerminalState } from "./platform.ts";
 export * from "./platform.ts";
 export * from "./model.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
@@ -44,7 +44,7 @@ import type { TaskProgressReport } from "./progress.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 44;
+export const PROTOCOL_VERSION = 45;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -177,6 +177,8 @@ export interface Session {
   unread: boolean;
   groupId: string | null;
   archivedAt: string | null;
+  completedAt?: string;
+  finishedAt?: string;
   prUrl: string | null;
   workItemId: string | null;
   browserUrl: string | null;
@@ -723,7 +725,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "board.saved") boards.set(event.payload.board.projectId, structuredClone(event.payload.board));
     if (event.event_type === "issue.saved") issues.set(event.payload.issue.id, structuredClone(event.payload.issue));
     if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.workspaceId ?? "base"}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
-    if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: { ...defaultSettings(), ...event.payload.settings } };
+    if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: normalizeSettings(event.payload.settings) };
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "proposal.decided") {
@@ -1046,6 +1048,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "turn.stop_acknowledged": break;
       case "turn.finished":
         session.status = event.payload.outcome; session.turnId = null; session.pendingApproval = null; session.pendingQuestionId = null;
+        session.finishedAt = event.timestamp;
+        if (event.payload.outcome === "completed") session.completedAt = event.timestamp;
         session.lastError = event.payload.diagnostic; session.localFinishing = false;
         for (const usage of session.usage) if (usage.outcome === "running") usage.outcome = "unconfirmed";
         for (const process of session.processes) if (process.outcome === "running") process.outcome = "unconfirmed";

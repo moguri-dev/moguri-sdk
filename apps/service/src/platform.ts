@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import { Value } from "typebox/value";
 import {
-  defaultSettings, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
+  defaultSettings, guidanceText, verbosityGuidance, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
   defaultBoard,
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
@@ -30,6 +30,7 @@ import {
 import { RepositoryMemory, memoryIndexId, memoryLocator } from "./memory.ts";
 import { McpGateway, McpKeychain, type SecretVault } from "./gateway.ts";
 import { LocalDictation, type SpeechOptions } from "./voice.ts";
+import { sqlConnection } from "./sql-connection.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
 import { validateSettings } from "./permissions.ts";
 import { WorkspaceRuntime, type WorkspaceOptions } from "./workspace.ts";
@@ -170,7 +171,7 @@ export class PlatformRuntime {
   readonly repositories: RepositoryTelemetry;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   private readonly memoryIndexes = new Map<string, string>();
-  constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
+  constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, private readonly options: PlatformOptions = {}) {
     this.knowledge = new TieredKnowledge(store, { snapshot: () => this.snapshot(), events: host.events, sandbox: host.sandboxStatus });
     this.extensions = new Extensions(store, { snapshot: () => this.snapshot(), events: host.events,
       project: (id) => this.project(id), projects: () => this.sessions.projects,
@@ -497,7 +498,7 @@ export class PlatformRuntime {
     for (const entry of entries) this.extensions.assertCompatible(entry);
     const knowledge = entries.map((entry) => `[${entry.kind}: ${entry.name}; source=${entry.source}; sha256=${entry.contentDigest}]\n${this.store.blob(entry.contentDigest)}`).join("\n\n").slice(0, 16_384);
     return `${snapshot.settings.values.systemPrompt}
-${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}
+${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}${guidanceText(snapshot.settings.values.guidance, project ? this.sessions.projects.values(project.id).guidance : undefined)}${session?.controls.verbosity && verbosityGuidance[session.controls.verbosity] ? `\n<response-verbosity>${verbosityGuidance[session.controls.verbosity]}</response-verbosity>` : ""}
 
 <moguri-execution-contract>
 Project: ${project ? session?.controls.env === "Remote" ? this.sessions.projects.configuration(project.id).values.remotePath ?? "(remote workspace not configured)" : project.path : "(no active project)"}
@@ -592,6 +593,8 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (isSessionWorkspaceQuery(query)) return this.sessions.query(query);
     if (isWorkspaceQuery(query)) return this.workspace.query(query);
     switch (query.type) {
+      case "runtime.status": return { type: query.type, runtime: { directory: dirname(this.store.path), power: this.sessions.power.status() } };
+      case "integrations.sql.status": return { type: query.type, connection: await sqlConnection(this.snapshot().settings.values, this.options.integrations?.fetch) };
       case "prompt.preview": {
         const session = query.sessionId ? this.session(query.sessionId) : undefined;
         return { type: query.type, editable: this.snapshot().settings.values.systemPrompt, effective: session ? await this.effectivePrompt(session) : this.prompt(), warning: SYSTEM_PROMPT_WARNING };
@@ -822,6 +825,8 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (isWorkspaceCommand(command)) return this.workspace.execute(command, finish);
     const snapshot = this.snapshot();
     switch (command.type) {
+      case "runtime.power.retry":
+        await this.sessions.power.retry(); return finish([]);
       case "models.token.set":
       case "models.token.clear": return this.host.modelCredential(command.endpointId, command.type === "models.token.set" ? command.token : undefined, finish);
       case "settings.update":

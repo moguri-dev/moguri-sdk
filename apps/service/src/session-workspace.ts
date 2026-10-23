@@ -16,9 +16,11 @@ import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.
 import { remoteTerminalPeer, terminalBinding } from "./terminal-identity.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { RemoteConsoles } from "./remote-terminals.ts";
+import { canAutoArchive } from "./session-lifecycle.ts";
+import { KeepAwake, type PowerDriver } from "./keep-awake.ts";
 
 export type WorkspaceFinish = ((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => CommandResult) & { intent?: { id: string; digest: string } };
-export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number }
+export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number; power?: PowerDriver }
 export interface SessionWorkspaceHost {
   snapshot(): Snapshot;
   commit(events: EventInput[], forget?: ForgetRequest): void;
@@ -45,11 +47,14 @@ export interface SessionWorkspaceHost {
 export class SessionWorkspace {
   readonly projects: ProjectService;
   readonly terminals: TerminalManager;
+  readonly power: KeepAwake;
   private timer?: ReturnType<typeof setInterval>;
+  private powerTimer?: ReturnType<typeof setInterval>;
   private cleaning = false;
   private globalOpening?: Promise<TerminalState>;
   constructor(private readonly host: SessionWorkspaceHost, stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
     this.projects = new ProjectService(() => host.snapshot(), stateDir);
+    this.power = new KeepAwake(() => this.snapshot(), options.power, options.now);
     this.terminals = new TerminalManager({
       snapshot: () => this.snapshot(),
       changed: (terminal) => {
@@ -79,25 +84,42 @@ export class SessionWorkspace {
   private event(session: Session, event: EventInput): EventInput { return { ...event, profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id }; }
   async recover(): Promise<void> {
     await this.terminals.recover();
-    this.timer = setInterval(() => { void this.retention().catch((error: unknown) => console.error("Archived-session retention failed:", error instanceof Error ? error.message : "Unknown retention failure")); }, 60_000);
+    this.timer = setInterval(() => { void this.retention().catch((error: unknown) => console.error("Session retention failed:", error instanceof Error ? error.message : "Unknown retention failure")); }, 60_000);
     this.timer.unref();
+    this.power.update();
+    this.powerTimer = setInterval(() => this.power.update(), 1000);
+    this.powerTimer.unref();
   }
-  async retention(): Promise<{ deleted: number }> {
+  async retention(): Promise<{ deleted: number; archived: number }> {
     const policy = this.snapshot().settings.values.retention;
-    if (!policy.deleteArchived || this.cleaning) return { deleted: 0 };
+    if ((!policy.deleteArchived && !policy.archiveCompleted) || this.cleaning) return { deleted: 0, archived: 0 };
     this.cleaning = true;
-    let deleted = 0;
+    let deleted = 0, archived = 0;
     try {
-      const cutoff = (this.options.now?.() ?? Date.now()) - policy.afterDays * 86400_000;
-      for (const session of this.snapshot().sessions.filter((session) => session.status === "archived" && session.archivedAt && Date.parse(session.archivedAt) <= cutoff)) {
-        if (!this.snapshot().settings.values.retention.deleteArchived) break;
+      const now = this.options.now?.() ?? Date.now();
+      const newlyArchived = new Set<string>();
+      for (const session of this.snapshot().sessions) {
+        const snapshot = this.snapshot(), current = snapshot.sessions.find((value) => value.id === session.id);
+        if (current && canAutoArchive(snapshot, current, now)) {
+          this.host.commit([this.event(current, { profile_id: snapshot.profileId, event_type: "session.archived", payload: {} })]);
+          newlyArchived.add(current.id);
+          archived++;
+        }
+      }
+      for (const session of this.snapshot().sessions) {
+        const policy = this.snapshot().settings.values.retention;
+        if (!policy.deleteArchived) break;
+        if (newlyArchived.has(session.id) || session.status !== "archived" || !session.archivedAt || Date.parse(session.archivedAt) > now - policy.afterDays * 86400_000) continue;
         await this.host.deleteSession(session, (events, result = {}, forget) => { this.host.commit(events, forget); return result; });
         deleted++;
       }
-      return { deleted };
+      return { deleted, archived };
     } finally { this.cleaning = false; }
   }
-  async close(options: RuntimeCloseOptions = {}): Promise<void> { clearInterval(this.timer); await this.terminals.closeAll(options); }
+  async close(options: RuntimeCloseOptions = {}): Promise<void> {
+    clearInterval(this.timer); clearInterval(this.powerTimer);
+    await Promise.all([this.power.close(), this.terminals.closeAll(options)]);
+  }
   async input(request: TerminalInput): Promise<void> {
     const terminal = this.snapshot().terminals.find((terminal) => terminal.id === request.terminalId);
     if (!terminal) throw new MoguriError("terminal_missing", "Terminal is outside this profile.", 404);
@@ -189,6 +211,7 @@ export class SessionWorkspace {
   }
   async query(query: SessionWorkspaceQuery): Promise<SessionWorkspaceResponse> {
     switch (query.type) {
+      case "project.repositories": return this.projects.repositories(this.project(query.projectId), AbortSignal.timeout(5000));
       case "terminal.default-root": return { type: query.type, root: await realpath(this.options.terminal?.defaultRoot ?? homedir()) };
       case "session.context": return { type: query.type, context: await this.host.contextPreview(this.session(query.sessionId)) };
       case "project.configuration": return { type: query.type, configuration: this.projects.configuration(query.projectId) };
@@ -319,6 +342,10 @@ export class SessionWorkspace {
         } else {
           updated.values = command.type === "project.mcp.import" ? await this.projects.importMcp(project, command.expectedDigest) : command.settings;
           this.projects.validate(updated.values, project.id);
+          if (updated.values.repo.upstream !== current.values.repo.upstream) {
+            const layout = await this.projects.repositories(project, AbortSignal.timeout(5000));
+            if (!layout.complete || layout.roots.length !== 1) throw new MoguriError("project_upstream", "An upstream preference requires exactly one verified repository in the attached Local folder. No source root was inferred.", 409);
+          }
         }
         const latest = this.projects.configuration(project.id); this.revision(latest.revision, command.expectedRevision);
         const result = finish([{ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: project.id, payload: { configuration: updated } }], { revision: updated.revision });
@@ -408,8 +435,8 @@ export class SessionWorkspace {
           payload: { terminal: { ...terminal, status: "acknowledged", diagnostic: "The user acknowledged process inspection. This does not retrospectively prove cleanup." } } }]);
       }
       case "retention.run": {
-        if (!this.snapshot().settings.values.retention.deleteArchived) throw new MoguriError("retention_disabled", "Enable archived-session deletion explicitly first.");
-        const result = await this.retention(); return finish([], { revision: result.deleted });
+        if (!this.snapshot().settings.values.retention.deleteArchived && !this.snapshot().settings.values.retention.archiveCompleted) throw new MoguriError("retention_disabled", "Enable automatic completed-session archive or archived-session deletion explicitly first.");
+        const result = await this.retention(); return finish([], { revision: result.deleted + result.archived });
       }
     }
   }
