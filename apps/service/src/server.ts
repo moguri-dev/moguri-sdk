@@ -1,17 +1,20 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
-import { chmod, lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { Type } from "typebox";
 import { ControlPlane } from "./controller.ts";
 import { EventStore } from "./store.ts";
 import type { ProviderAdapter } from "./provider.ts";
-import { CommandSchema, GLOBAL_PROFILE_ID, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, SpeechCaptureRequestSchema, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
+import { CommandSchema, GLOBAL_PROFILE_ID, isApplicationCommand, isApplicationQuery, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, SpeechCaptureRequestSchema, StorageMoveRequestSchema, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
 import type { PlatformOptions } from "./platform.ts";
 import { retentionKey } from "./retention-key.ts";
 import { ProfileRuntime } from "./profiles.ts";
 import { NEMOTRON_MODEL } from "./voice.ts";
+import { ApplicationRuntime } from "./application.ts";
+import { acknowledgeMovedDatabase, storedStorageOptions, type StorageOptions } from "./storage-relocation.ts";
+import { claimStoreIdentity, readDefaultStateLocation, readStateLocation } from "../../../packages/client/src/state-location.ts";
 
 const authenticateSchema = Type.Object({
   type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -44,6 +47,7 @@ async function claimLock(path: string): Promise<Awaited<ReturnType<typeof open>>
 export interface ServiceOptions {
   stateDir: string; provider?: ProviderAdapter; workerPath?: string; platform?: PlatformOptions; retentionKey?: Buffer;
   profiles?: { provider?: (profileId: string) => ProviderAdapter | undefined; platform?: (profileId: string) => PlatformOptions };
+  storage?: StorageOptions;
 }
 export async function startService(options: ServiceOptions) {
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
@@ -51,20 +55,40 @@ export async function startService(options: ServiceOptions) {
   if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== process.getuid?.() || (directory.mode & 0o077) !== 0) {
     throw new Error("Moguri's state directory must be a user-owned, non-symlink directory with mode 0700.");
   }
+  if (options.storage) {
+    const location = readDefaultStateLocation(options.storage.locatorDirectory);
+    const canonical = await realpath(options.stateDir);
+    if (location && location.dataDir !== canonical && location.move.source === canonical) throw new Error("This original root is retired by the authoritative store locator. No old or empty fallback was opened.");
+  }
   const lockPath = join(options.stateDir, "service.lock");
   const lock = await claimLock(lockPath);
   await lock.writeFile(JSON.stringify({ pid: process.pid }));
   let store: EventStore | undefined;
   let controller: ControlPlane | undefined;
   let profiles: ProfileRuntime | undefined;
+  let application: ApplicationRuntime | undefined;
+  let releaseIdentity: (() => Promise<void>) | undefined;
   const connectionPath = join(options.stateDir, "connection.json");
   try {
     const dbPath = join(options.stateDir, "state.sqlite");
     const dbFile = await open(dbPath, "a", 0o600);
     await dbFile.close();
     await chmod(dbPath, 0o600);
+    const stored = storedStorageOptions(dbPath);
+    if (stored.locatorDirectory && options.storage && resolve(options.storage.locatorDirectory) !== stored.locatorDirectory) throw new Error("The whole store already binds a different locator authority. No new alias or writer was created.");
+    const storage = options.storage ?? (stored.locatorDirectory ? { locatorDirectory: stored.locatorDirectory, explicitOverride: true } : undefined);
     const retention = await retentionKey(dbPath, options.retentionKey);
+    if (stored.locatorDirectory && !readStateLocation(stored.locatorDirectory, retention.id)) throw new Error("The whole store's exact bound locator is missing. No retired, copied or empty fallback was opened.");
+    if (storage) {
+      releaseIdentity = await claimStoreIdentity(storage.locatorDirectory, retention.id, options.stateDir);
+      await acknowledgeMovedDatabase(dbPath, storage, retention.id);
+    }
     store = new EventStore(dbPath, retention.key, retention.id);
+    const resourceBase = stored.resourceBase ?? options.stateDir;
+    if (stored.resourceBase) {
+      const resources = await lstat(stored.resourceBase);
+      if (!resources.isDirectory() || resources.isSymbolicLink() || resources.uid !== process.getuid?.() || resources.mode & 0o077) throw new Error("The retained original resource root changed. No cache, worktree, profile or terminal directory was rebound.");
+    }
     const authenticated = new Map<WebSocket, string>();
     const authenticating = new Set<WebSocket>();
     const send = (socket: WebSocket, value: unknown) => {
@@ -80,7 +104,7 @@ export async function startService(options: ServiceOptions) {
         else send(socket, { type: "invalidate" });
       }
     };
-    profiles = new ProfileRuntime(store, options.stateDir, {
+    profiles = new ProfileRuntime(store, resourceBase, {
       controller: (view, stateDir, profileHooks) => {
         const scopedPlatform = options.profiles?.platform?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.platform : {
           mcpWorkerPath: options.platform?.mcpWorkerPath,
@@ -93,8 +117,8 @@ export async function startService(options: ServiceOptions) {
         const officialSpeech = !model || model.id === NEMOTRON_MODEL.id && model.revision === NEMOTRON_MODEL.revision && model.sha256 === NEMOTRON_MODEL.sha256;
         return new ControlPlane(view, provider, options.workerPath, {
           ...platform, stateDir, profileHooks,
-          cache: { ...platform?.cache, cacheDirectory: platform?.cache?.cacheDirectory ?? join(options.stateDir, "dependency-cache") },
-          speech: { ...platform?.speech, modelDirectory: platform?.speech?.modelDirectory ?? (officialSpeech ? join(options.stateDir, "speech-models") : undefined) },
+          cache: { ...platform?.cache, cacheDirectory: platform?.cache?.cacheDirectory ?? join(resourceBase, "dependency-cache") },
+          speech: { ...platform?.speech, modelDirectory: platform?.speech?.modelDirectory ?? (officialSpeech ? join(resourceBase, "speech-models") : undefined) },
         });
       },
       changed,
@@ -102,6 +126,12 @@ export async function startService(options: ServiceOptions) {
     controller = await profiles.initialize();
     const control = controller;
     const rootProfiles = profiles;
+    let quiescing: Promise<void> | undefined;
+    application = new ApplicationRuntime(store, () => changed(GLOBAL_PROFILE_ID, []), {
+      resourceBase, storage, facts: () => rootProfiles.maintenanceFacts(),
+      quiesce: () => { quiescing ??= rootProfiles.close({ preserveTerminals: true }); void quiescing.catch((error: unknown) => console.error("Relocation quiescence is unconfirmed:", error instanceof Error ? error.message : "owned profile cleanup failed")); },
+    });
+    const rootApplication = application;
     const token = randomBytes(32).toString("hex");
     let closeRuntime!: (options?: RuntimeCloseOptions) => Promise<void>;
     let lifecycle: { action: "stop" | "restart"; status: "stopping" | "unconfirmed"; diagnostic: string | null } | null = null;
@@ -120,7 +150,7 @@ export async function startService(options: ServiceOptions) {
         const profileId = suppliedProfile === undefined ? PROFILE_ID : typeof suppliedProfile === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(suppliedProfile) ? suppliedProfile : null;
         if (!profileId || profileId === GLOBAL_PROFILE_ID) throw new MoguriError("profile_scope", "Choose one explicit user profile. No Default fallback was used.", 403);
         if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(await rootProfiles.snapshot(profileId))); return; }
-        if (!["/v1/commands", "/v1/query", "/v1/terminal", "/v1/voice", "/v1/lifecycle"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
+        if (!["/v1/commands", "/v1/query", "/v1/terminal", "/v1/voice", "/v1/lifecycle", "/v1/application"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
         let bytes = 0;
@@ -134,6 +164,20 @@ export async function startService(options: ServiceOptions) {
         try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new MoguriError("invalid_json", "Command body is not valid JSON."); }
         if (request.url === "/v1/voice") {
           response.end(JSON.stringify(await (await rootProfiles.control(profileId)).platform.captureVoice(parse(SpeechCaptureRequestSchema, body)))); return;
+        }
+        if (request.url === "/v1/application") {
+          if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before reviewing whole-store maintenance.", 404);
+          const accepted = await rootApplication.storage.begin(parse(StorageMoveRequestSchema, body));
+          response.once("finish", () => {
+            void (async () => {
+              try { await closeRuntime({ preserveTerminals: true }); await rootApplication.storage.copyAfterClose(); }
+              catch (error) {
+                await rootApplication.storage.failed(error);
+                console.error("Moguri store relocation is partial:", error instanceof Error ? error.message : "the original encrypted source and destination were retained");
+              }
+            })().catch((error: unknown) => console.error("Relocation diagnostic persistence is unconfirmed:", error instanceof Error ? error.message : "inspect original locator and source"));
+          });
+          response.end(JSON.stringify({ ...accepted, accepted: true })); return;
         }
         if (request.url === "/v1/lifecycle") {
           const requested = parse(Type.Object({ action: Type.Union([Type.Literal("stop"), Type.Literal("restart")]) }, { additionalProperties: false }), body);
@@ -152,6 +196,12 @@ export async function startService(options: ServiceOptions) {
         }
         if (request.url === "/v1/query") {
           const query = parse(QuerySchema, body);
+          if (isApplicationQuery(query)) {
+            if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before reading application configuration.", 404);
+            response.end(JSON.stringify(query.type === "application.storage.status" ? { type: query.type, storage: rootApplication.storage.status() } :
+              query.type === "application.storage.preview" ? { type: query.type, review: await rootApplication.storage.preview(query.path) } :
+              { type: query.type, configuration: rootApplication.configuration() })); return;
+          }
           if (isProfileQuery(query)) {
             if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "This profile is missing/unready. No registry fallback was used.", 404);
             response.end(JSON.stringify({ type: query.type, catalog: rootProfiles.catalog() })); return;
@@ -160,6 +210,10 @@ export async function startService(options: ServiceOptions) {
         }
         const command = parse(CommandSchema, body);
         if (command.profileId !== profileId) throw new MoguriError("profile_scope", "Request scope and command profile differ. No foreign receipt or effect was used.", 403);
+        if (isApplicationCommand(command.command)) {
+          if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before changing application configuration.", 404);
+          response.end(JSON.stringify(rootApplication.dispatch(command, command.command))); return;
+        }
         response.end(JSON.stringify(isProfileCommand(command.command) ? await rootProfiles.dispatch(command, command.command) : await (await rootProfiles.control(profileId)).dispatch(command)));
       };
       void handle().catch((error: unknown) => {
@@ -209,6 +263,7 @@ export async function startService(options: ServiceOptions) {
     closeRuntime = (options: RuntimeCloseOptions = {}) => {
       if (!closeTask) lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "stopping", diagnostic: null };
       closeTask ??= (async () => {
+        rootApplication.close();
         await rootProfiles.close(options);
         for (const socket of websockets.clients) socket.terminate();
         await new Promise<void>((resolve) => websockets.close(() => resolve()));
@@ -217,6 +272,8 @@ export async function startService(options: ServiceOptions) {
         await unlink(connectionPath);
         await lock.close();
         await unlink(lockPath);
+        await releaseIdentity?.();
+        releaseIdentity = undefined;
       })().catch((error: unknown) => {
         lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "unconfirmed",
           diagnostic: "Shutdown did not complete. The registry and writer lock remain; restore the explicit terminal backend or inspect its processes, then retry lifecycle cleanup." };
@@ -225,14 +282,16 @@ export async function startService(options: ServiceOptions) {
       return closeTask;
     };
     return {
-      connection, controller: control, store, profiles: rootProfiles,
+      connection, controller: control, store, profiles: rootProfiles, application: rootApplication,
       close: closeRuntime,
     };
   } catch (error) {
+    application?.close();
     if (profiles) await profiles.close(); else await controller?.close();
     store?.close();
     await lock.close();
     await unlink(lockPath);
+    await releaseIdentity?.();
     throw error;
   }
 }

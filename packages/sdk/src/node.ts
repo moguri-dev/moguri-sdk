@@ -11,6 +11,7 @@ import type { PlatformOptions } from "../../../apps/service/src/platform.ts";
 import { MAX_NOTIFICATION_AUDIO_BYTES, validateNotificationWav } from "../../protocol/src/notification-sounds.ts";
 
 export { readConnection, stateDirectory };
+export { readDefaultStateLocation, readStateLocation, stateLocationDirectory, waitForStorageRelocation } from "../../client/src/state-location.ts";
 const source = import.meta.url.endsWith(".ts");
 const worker = (name: string) => fileURLToPath(new URL(source ? `../../../apps/service/src/${name}.ts` : `../${name}.mjs`, import.meta.url));
 export function ensureConnection(options: Parameters<typeof ensureTransportConnection>[0] = {}) {
@@ -33,7 +34,8 @@ export async function createRuntime(options: ServiceOptions) {
 export async function connectMoguri(options: { stateDir?: string; runtime?: string; autoStart?: boolean; profileId?: string } = {}): Promise<MoguriSdk> {
   const stateDir = options.stateDir ?? stateDirectory();
   const connection = options.autoStart === false ? await readConnection(stateDir) : await ensureConnection({
-    stateDir, runtime: options.runtime, servicePath: fileURLToPath(new URL(source ? "../../../apps/service/src/main.ts" : "../service.mjs", import.meta.url)),
+    stateDir, explicitStateDir: Boolean(options.stateDir || process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0"),
+    runtime: options.runtime, servicePath: fileURLToPath(new URL(source ? "../../../apps/service/src/main.ts" : "../service.mjs", import.meta.url)),
   });
   return new MoguriSdk(connection, () => readConnection(stateDir), options.profileId).ready();
 }

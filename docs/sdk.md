@@ -753,6 +753,27 @@ Preferences are `settings.values.notifications`: `inApp: true`, `os: false`,
 `previewContent: false` by default. Native OS delivery/navigation is an Electron
 binding of service events, not a second notification state store.
 
+Root application configuration is separate from profile settings:
+`application.status()` returns the current root `configuration`;
+`application.configure({menuBar: false}, observedRevision)` saves only that leaf.
+Competing profiles share one revision and do not copy native preferences into
+their own configuration.
+
+`application.storage.status()` and `application.storage.preview(path)` expose the
+actual runtime authority and exact review. After actual all-profile review,
+`application.storage.relocate(path, review.digest, true, optionalOriginalId)`
+uses transient authenticated intake, retains intent and closes every writer.
+It does not refresh/reconnect a profile after requesting that shutdown. Node
+consumers can use `waitForStorageRelocation(actualLocatorDirectory, id, keyId)`;
+the directory comes from actual storage status, not a guessed Home path.
+`readDefaultStateLocation`, `readStateLocation` and `stateLocationDirectory`
+are explicit Node exports. Source receipts, master-key identity, independent
+retention grants, unknown budgets and original resource roots remain intact.
+No original move ID can redispatch a copy, even after a missing receipt.
+Embedded `createRuntime` consumers must explicitly configure `storage` authority
+to enable a first move. Once a store records that authority, later views cannot
+discard it or substitute another locator to open a stale copy.
+
 `needsInputSound` and `completedSound` each default to
 `{enabled: true, id: "default"}`; `soundWhileFocused` defaults false. Sounds do
 not depend on the banner flag. `notifications.importSound(name, pcmWav,

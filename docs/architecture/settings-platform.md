@@ -112,6 +112,35 @@ retain old data and a reviewable outcome; cleanup and rollback are explicit,
 never recursive deletion of an entire user-selected root. Exact authenticated
 user PTYs can survive an explicit service restart, without input replay.
 
+Protocol/database 48 introduces root-owned `application.configured` and its
+single observed revision, independent of every profile's settings. The real
+Electron menu-bar icon follows that saved flag; hidden fixtures suppress native
+tray creation. Protocol/database 49 adds `application.storage_recorded`, a
+private external locator and a whole-store key-ID writer lease. An explicitly
+provided state root stays explicit, including through SDK auto-start. Default
+discovery and launcher-internal state-directory propagation are distinguished.
+
+Relocation review fixes the canonical source/destination, whole-store identity,
+all profile IDs, actual active owners, exact destination inode/emptiness and copy
+set (`state.sqlite`). Admission retains original intent before synchronously
+closing profile admission. Every known controller is signalled before setup or
+cleanup awaits. An authenticated transient intake acknowledges the original
+operation without requiring a snapshot after its service closes. All SQLite
+connections and WAL close before the bounded streaming copy. Actual source and
+destination SHA-512 plus the retained key ID are reverified before atomic locator
+publication. The first target boot verifies those exact copied bytes before its
+SQLite acknowledgement and ordinary profile/provider initialization.
+
+`storage_resource_base` retains the original private filesystem authority for
+profile resources, worktrees, models, caches and PTY brokers. Those paths and
+event bytes are not migrated to the data directory. Per-key external mapping
+rejects old/copy aliases, and a live or unconfirmed writer lease prevents a
+second service for the same key ID. Missing recorded locators and changed copied
+bytes block startup rather than selecting an empty or stale fallback. Source
+and partial target are retained. A restarted interrupted intent becomes partial,
+never an automatic copy/restart. Native maintenance suppresses automatic service
+reconnection until the explicitly requested app restart.
+
 ## Instructions and appearance
 
 Global guidance applies within the actual profile, with explicit project

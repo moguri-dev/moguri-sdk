@@ -19,6 +19,7 @@ import {
   isDecisionCommand, isDecisionQuery, type DecisionCommand, type DecisionQuery, type DecisionResponse,
   isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
+  isApplicationCommand, isApplicationQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   isPlanSaveCommand, isPlanSaveQuery, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse,
   isRemoteMcpCommand, isRemoteMcpQuery, type RemoteMcpCommand, type RemoteMcpQuery, type RemoteMcpResponse,
@@ -574,6 +575,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isApplicationQuery(query)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (isGithubQuery(query)) return this.github.query(query);
     if (isLinearQuery(query)) return this.linear.query(query);
     if (isExtensionQuery(query)) return this.extensions.query(query);
@@ -825,6 +827,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return { id: request.id, token: lease.token };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isApplicationCommand(command)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (command.type === "project.clone") {
       if (!finish.intent) throw new MoguriError("clone_intent", "Repository cloning requires its original user command identity. No process was started.", 409);
       const previous = this.snapshot().jobs.find((job) => job.projectClone?.commandId === finish.intent!.id);

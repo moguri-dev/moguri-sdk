@@ -48,6 +48,18 @@ export class ProfileRuntime {
     }
     return { ...catalog, profiles: [...profiles.values()] };
   }
+  maintenanceFacts() {
+    const catalog = this.catalog(), activeOwners: string[] = [], roots: string[] = [];
+    for (const profile of catalog.profiles) {
+      const state = this.controllers.get(profile.id)?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      for (const session of state.sessions) if (session.turnId) activeOwners.push(`turn/${profile.id}/${session.turnId}`);
+      for (const job of state.jobs) if (["running", "waiting_input"].includes(job.status)) activeOwners.push(`job/${profile.id}/${job.id}`);
+      for (const terminal of state.terminals) if (!["closed", "failed"].includes(terminal.status)) activeOwners.push(`terminal/${profile.id}/${terminal.id}`);
+      if (profile.status === "creating") activeOwners.push(`profile-setup/${profile.id}`);
+      roots.push(...state.projects.map((project) => project.path), ...state.managedWorkspaces.filter((workspace) => workspace.status !== "removed").map((workspace) => workspace.path));
+    }
+    return { profiles: catalog.profiles.map((profile) => profile.id), activeOwners, roots };
+  }
   async snapshot(id: string) {
     const control = await this.control(id);
     const sequence = this.initial.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE json_extract(data,'$.event_type') IN ('budget.recorded','budget.plan_recorded')").get();
@@ -274,10 +286,11 @@ export class ProfileRuntime {
   private async shutdown(options: RuntimeCloseOptions): Promise<void> {
     this.closed = true;
     for (const active of this.active.values()) active.abort.abort();
+    const closing = Promise.allSettled([...this.controllers.values()].map((controller) => controller.close(options)));
     await Promise.all([...this.active.values()].map((active) => active.done));
     const loaded = await Promise.allSettled([...this.loading.values()]);
     for (const result of loaded) if (result.status === "rejected") console.error("Profile initialization ended during shutdown:", result.reason instanceof MoguriError ? result.reason.code : "profile_initialization");
-    const settled = await Promise.allSettled([...this.controllers.values()].map((controller) => controller.close(options)));
+    const settled = await closing;
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Profile cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "profile_cleanup");
     if (failed?.status === "rejected") throw failed.reason;

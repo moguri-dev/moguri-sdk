@@ -14,6 +14,9 @@ import { AppearanceSchema, GuidanceSchema, type PowerStatus, type SqlConnection 
 export * from "./preferences.ts";
 import { NotificationSoundCommandSchema, NotificationSoundQuerySchema, type NotificationSound, type NotificationSoundResponse } from "./notification-sounds.ts";
 export * from "./notification-sounds.ts";
+import { ApplicationCommandSchema, ApplicationQuerySchema, type ApplicationResponse } from "./application.ts";
+import { StorageQuerySchema, type StorageResponse } from "./storage-location.ts";
+export * from "./application.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
 import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
 import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type ArtifactMaterializationPreview } from "./artifacts.ts";
@@ -184,6 +187,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  ApplicationCommandSchema,
   NotificationSoundCommandSchema,
   object({ type: Type.Literal("runtime.power.retry") }),
   object({ type: Type.Literal("project.clone"), repository: Type.String({ minLength: 1, maxLength: 2048 }), path, confirm: Type.Literal(true) }),
@@ -238,6 +242,8 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  StorageQuerySchema,
+  ApplicationQuerySchema,
   NotificationSoundQuerySchema,
   object({ type: Type.Literal("runtime.status") }),
   object({ type: Type.Literal("integrations.sql.status") }),
@@ -356,6 +362,8 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse
+  | StorageResponse
+  | ApplicationResponse
   | NotificationSoundResponse
   | { type: "runtime.status"; runtime: { directory: string; power: PowerStatus } }
   | { type: "integrations.sql.status"; connection: SqlConnection }

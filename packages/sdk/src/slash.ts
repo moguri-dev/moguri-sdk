@@ -77,7 +77,7 @@ export const slashCommands = [
   { name: "queue", description: "Show queued prompts" },
   { name: "run", description: "Release a held prompt", argument: "ID" },
   { name: "settings", description: "Open shared settings" },
-  { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry]" },
+  { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
   { name: "models", description: "Choose an available model" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
@@ -334,6 +334,8 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       throw new ClientError("notification_sounds_command", "Use /notification-sounds list, read ID or remove ID SHA confirm-remove. Explicit file imports use CLI notification-sounds import FILE.wav --confirm-write or desktop Settings. No terminal audio playback.");
     }
     case "runtime":
+      if (command.argument === "storage") return { kind: "text", text: JSON.stringify(await sdk.application.storage.status(), null, 2) };
+      if (command.argument.startsWith("storage-preview ")) return { kind: "text", text: JSON.stringify(await sdk.application.storage.preview(command.argument.slice("storage-preview ".length)), null, 2) };
       if (command.argument && command.argument !== "power-retry") throw new ClientError("runtime_command", "Use /runtime or /runtime power-retry. This never resumes a model or changes an execution environment.");
       if (command.argument === "power-retry") await sdk.runtime.retryPower();
       return { kind: "text", text: JSON.stringify(await sdk.runtime.status(), null, 2) };

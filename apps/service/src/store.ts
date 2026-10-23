@@ -269,6 +269,12 @@ export class EventStore {
       if (version < 47) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('notification_sound_schema','1');
         PRAGMA user_version=47; COMMIT;`);
+      if (version < 48) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('application_preferences_schema','1');
+        PRAGMA user_version=48; COMMIT;`);
+      if (version < 49) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('state_location_schema','1');
+        PRAGMA user_version=49; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

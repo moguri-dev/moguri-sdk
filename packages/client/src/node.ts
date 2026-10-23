@@ -4,10 +4,12 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lstat, mkdir, open, readFile } from "node:fs/promises";
 import { isRecord, PROTOCOL_VERSION, type Connection } from "../../protocol/src/index.ts";
+import { readDefaultStateLocation } from "./state-location.ts";
 
 export function stateDirectory(): string {
-  return process.env.MOGURI_STATE_DIR ? resolve(process.env.MOGURI_STATE_DIR) :
-    process.platform === "darwin" ? join(homedir(), "Library", "Application Support", "Moguri") : join(homedir(), ".local", "state", "moguri");
+  if (process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0") return resolve(process.env.MOGURI_STATE_DIR);
+  return readDefaultStateLocation()?.dataDir ?? (process.env.MOGURI_STATE_DIR ? resolve(process.env.MOGURI_STATE_DIR) :
+    process.platform === "darwin" ? join(homedir(), "Library", "Application Support", "Moguri") : join(homedir(), ".local", "state", "moguri"));
 }
 export async function readConnection(stateDir = stateDirectory()): Promise<Connection> {
   const path = join(stateDir, "connection.json");
@@ -23,7 +25,7 @@ export async function readConnection(stateDir = stateDirectory()): Promise<Conne
     value.wsUrl !== `ws://${url.host}/v1/events`) throw new Error("Moguri service must use an authenticated loopback endpoint.");
   return { protocolVersion: value.protocolVersion, baseUrl: value.baseUrl, wsUrl: value.wsUrl, token: value.token, pid: value.pid };
 }
-export async function ensureConnection(options: { stateDir?: string; runtime?: string; servicePath?: string } = {}): Promise<Connection> {
+export async function ensureConnection(options: { stateDir?: string; runtime?: string; servicePath?: string; explicitStateDir?: boolean } = {}): Promise<Connection> {
   const stateDir = options.stateDir ?? stateDirectory();
   const probe = async () => {
     const connection = await readConnection(stateDir);
@@ -45,7 +47,9 @@ export async function ensureConnection(options: { stateDir?: string; runtime?: s
   const servicePath = options.servicePath ?? fileURLToPath(new URL(source ? "../../../apps/service/src/main.ts" : "./service.mjs", import.meta.url));
   const child = spawn(options.runtime ?? process.execPath, [...(servicePath.endsWith(".ts") ? ["--import", "tsx"] : []), servicePath], {
     detached: true, stdio: ["ignore", log.fd, log.fd],
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, MOGURI_STATE_DIR: stateDir },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, MOGURI_STATE_DIR: stateDir,
+      MOGURI_STATE_DIR_EXPLICIT: (options.explicitStateDir ?? Boolean(options.stateDir || process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0")) ? "1" : "0",
+      ...(process.env.MOGURI_LOCATION_DIR ? { MOGURI_LOCATION_DIR: process.env.MOGURI_LOCATION_DIR } : {}) },
   });
   let launchError: Error | undefined;
   child.on("error", (error) => { launchError = error; });

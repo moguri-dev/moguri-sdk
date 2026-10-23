@@ -415,6 +415,19 @@ export class MoguriSdk extends TransportClient {
     status: () => this.query({ type: "runtime.status" }),
     retryPower: () => this.command({ type: "runtime.power.retry" }),
   };
+  readonly application = {
+    status: () => this.query({ type: "application.status" }),
+    configure: (changes: Partial<import("../../protocol/src/application.ts").ApplicationPreferences>, expectedRevision: number) => this.command({ type: "application.configure", changes, expectedRevision }),
+    storage: {
+      status: () => this.query({ type: "application.storage.status" }),
+      preview: (path: string) => this.query({ type: "application.storage.preview", path }),
+      relocate: async (path: string, expectedDigest: string, confirm: true, id: string = crypto.randomUUID()): Promise<{ id: string; keyId: string }> => {
+        const result = await this.request("/v1/application", { action: "storage-relocate", id, path, expectedDigest, confirm });
+        if (!isRecord(result) || result.id !== id || result.accepted !== true || typeof result.keyId !== "string") throw new ClientError("storage_acknowledgement", "The original relocation was not acknowledged. Inspect its retained intent; no copy was retried.");
+        return { id, keyId: result.keyId };
+      },
+    },
+  };
   readonly notifications = {
     list: () => structuredClone(this.getState().snapshot?.notificationSounds ?? []),
     importSound: (name: string, bytes: Uint8Array, commandId?: string) => this.command({ type: "notification.sound.import", name, audio: audioBase64(bytes) }, commandId),
