@@ -30,7 +30,7 @@ export class WorkspaceRuntime {
   private refreshing = new Map<string, string>();
   private prAborts = new Map<string, AbortController>();
   private linear = new Map<string, AbortController>();
-  constructor(private readonly host: WorkspaceHost, store: EventStore, stateDir: string, private readonly options: WorkspaceOptions = {}) {
+  constructor(private readonly host: WorkspaceHost, store: EventStore, private readonly stateDir: string, private readonly options: WorkspaceOptions = {}) {
     this.cache = new DependencyCache(store, stateDir, { ...options.cache, registries: () => this.host.snapshot().dependencyRegistries ?? [] });
     this.integrations = new ProjectIntegrations(options.integrations?.vault ?? new McpKeychain(`dev.moguri.profile.${this.host.snapshot().profileId}.integrations`), options.integrations);
   }
@@ -117,6 +117,8 @@ export class WorkspaceRuntime {
   }
   async query(query: WorkspaceQuery): Promise<WorkspaceResponse> {
     switch (query.type) {
+      case "github.connection": return { type: query.type, connection: await this.integrations.githubConnection(this.stateDir, AbortSignal.timeout(15_000)) };
+      case "linear.connection": return { type: query.type, connection: await this.integrations.linearConnection(query.verify, AbortSignal.timeout(15_000)) };
       case "board.get": return { type: query.type, board: this.board(query.projectId), issues: this.host.snapshot().issues.filter((issue) => issue.projectId === query.projectId) };
       case "cache.inspect": {
         const signal = AbortSignal.timeout(30_000);

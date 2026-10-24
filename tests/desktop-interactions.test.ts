@@ -42,8 +42,10 @@ test("session ordering is atomic, optimistic, sibling-scoped and shared with eve
     assert.deepEqual(sdk.getState().snapshot!.sessions.slice().sort(compareSessionOrder).map((session) => session.id), [third, fixture.sessionId, second]);
     await assert.rejects(() => sdk.command({ type: "session.reorder", sessions: stale }), /Another client/);
     await assert.rejects(async () => fixture.service.controller.dispatch({ id: randomUUID(), profileId: sdk.profileId, command: {
-      type: "session.organize", sessionId: second, expectedRevision: sdk.getState().snapshot!.sessions.find((session) => session.id === second)!.revision, changes: { order: 0 },
+      type: "session.organize", sessionId: second, expectedRevision: sdk.getState().snapshot!.sessions.find((session) => session.id === second)!.revision, changes: { order: -1 },
     } }), { code: "invalid_request" });
+    await sdk.sessions.organize(second, { order: 10 });
+    assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === second)!.order, 10);
     await assert.rejects(() => sdk.sessions.reorder([third, second]), /complete current sibling/);
     const unrelated = (await sdk.sessions.create(null)).id!;
     await assert.rejects(() => sdk.sessions.reorder([third, fixture.sessionId, second, unrelated]), /sibling/);

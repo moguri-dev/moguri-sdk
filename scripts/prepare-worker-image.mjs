@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
 
-const { values } = parseArgs({ options: { build: { type: "boolean" }, tag: { type: "string" } } });
+const { values } = parseArgs({ options: { build: { type: "boolean" }, tag: { type: "string" }, receipt: { type: "string" } } });
 const files = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs"];
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const containerfile = await readFile("scripts/worker-image/Containerfile", "utf8");
@@ -54,6 +54,7 @@ if (!values.build) {
     if (immutable[0]?.index?.digest !== digest) throw new Error("The immutable local image alias did not verify. No runtime readiness was claimed.");
     const receipt = { status: "PASS", primitive: "No-cache Linux arm64 workload, locked dependencies, compiled native PTY and exact worker payload", context, tag, image, digest, payload, ms: performance.now() - started, qualification: "Image primitive only. Genuine SendBox VM/control/containment and Remote-Linux qualification remain separate." };
     await writeFile(join(context, "qualification.json"), JSON.stringify(receipt, null, 2), { mode: 0o600 });
+    if (values.receipt) await writeFile(resolve(values.receipt), JSON.stringify(receipt, null, 2), { flag: "wx", mode: 0o600 });
     console.log(JSON.stringify(receipt, null, 2));
   }
 }

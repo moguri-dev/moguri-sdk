@@ -1,5 +1,6 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
+import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
@@ -78,7 +79,11 @@ export class MoguriSdk extends TransportClient {
     },
     context: (sessionId: string) => this.query({ type: "session.context", sessionId }),
     organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes, expectedRevision }),
-    reorder: (sessionIds: string[]) => this.command({ type: "session.reorder", sessions: sessionIds.map((sessionId) => ({ sessionId, revision: this.sessionRevision(sessionId) })) }),
+    reorder: (...args: [sessionIds: string[]] | [projectId: string | null, parentSessionId: string | null, groupId: string | null, archived: boolean, sessions: { sessionId: string; revision: number }[]]) => {
+      if (args.length === 1) return this.command({ type: "session.reorder", sessions: args[0].map((sessionId) => ({ sessionId, revision: this.sessionRevision(sessionId) })) });
+      const [projectId, parentSessionId, groupId, archived, sessions] = args;
+      return this.command({ type: "session.reorder", projectId, parentSessionId, groupId, archived, sessions });
+    },
     rename: (sessionId: string, title: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes: { title }, expectedRevision }),
     mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
     spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
@@ -298,12 +303,13 @@ export class MoguriSdk extends TransportClient {
     materialization: (jobId: string) => this.query({ type: "artifact.materialization", jobId }),
   };
   readonly questions = {
+    answerOther: (questionId: string, text: string, expectedRevision: number) => this.command({ type: "question.answer", questionId, text, expectedRevision, other: true }),
     answer: (questionId: string, text: string, expectedRevision: number, consumeDraft?: { sessionId: string; expectedRevision: number }) => this.command({ type: "question.answer", questionId, text, expectedRevision, ...(consumeDraft ? { consumeDraft } : {}) }),
-    answerDraft: (questionId: string, expectedRevision: number) => {
+    answerDraft: (questionId: string, expectedRevision: number, other = false) => {
       const question = this.getState().snapshot?.questions.find((question) => question.id === questionId);
       const session = this.getState().snapshot?.sessions.find((session) => session.id === question?.sessionId);
       if (!question || !session) throw new ClientError("question_missing", "Connect and review the actual pending question.");
-      return this.command({ type: "question.answer", questionId, text: session.draft.text, expectedRevision, consumeDraft: { sessionId: session.id, expectedRevision: session.draft.revision } });
+      return this.command({ type: "question.answer", questionId, text: session.draft.text, expectedRevision, ...(other ? { other: true as const } : {}), consumeDraft: { sessionId: session.id, expectedRevision: session.draft.revision } });
     },
   };
   readonly workspaces = {
@@ -349,7 +355,9 @@ export class MoguriSdk extends TransportClient {
   };
   readonly projects = {
     add: (path: string, name?: string) => this.command({ type: "project.add", path, ...(name !== undefined ? { name } : {}) }),
+    clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),
     configuration: (projectId: string) => this.query({ type: "project.configuration", projectId }),
+    repositories: (projectId: string) => this.query({ type: "project.repositories", projectId }),
     configure: (projectId: string, settings: ProjectSettings, expectedRevision: number) => this.command({ type: "project.settings", projectId, settings, expectedRevision }),
     organize: (projectId: string, presentation: { folderId: string | null; color: string; order: number }, expectedRevision: number) => this.command({ type: "project.organize", projectId, ...presentation, expectedRevision }),
     reorder: (folderId: string | null, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.reorder", folderId, projects }),
@@ -388,8 +396,13 @@ export class MoguriSdk extends TransportClient {
     if (!isRecord(result) || result.accepted !== true) throw new ClientError("terminal_input", "Terminal input acknowledgement was not confirmed. It was not automatically replayed.");
   }
   readonly terminal = {
-    openGlobal: (cols = 80, rows = 24) => this.command({ type: "terminal.global.open", cols, rows }),
-    open: (sessionId: string, cols = 80, rows = 24, scriptId?: string) => this.command({ type: "terminal.open", sessionId, cols, rows, ...(scriptId ? { scriptId } : {}) }),
+    open: (sessionId: string, cols = 80, rows = 24, scriptId?: string, root?: string) => this.command({ type: "terminal.open", sessionId, cols, rows, ...(scriptId ? { scriptId } : {}), ...(root ? { root } : {}) }),
+    openGlobal: (...args: [cols?: number, rows?: number] | [root: string, cols?: number, rows?: number]) => {
+      const [rootOrCols, colsOrRows, rows] = args;
+      return typeof rootOrCols === "string" ? this.command({ type: "terminal.open-global", root: rootOrCols, cols: colsOrRows ?? 80, rows: rows ?? 24 }) :
+        this.command({ type: "terminal.global.open", cols: rootOrCols ?? 80, rows: colsOrRows ?? 24 });
+    },
+    defaultRoot: () => this.query({ type: "terminal.default-root" }),
     input: async (terminalId: string, data: string, signal?: AbortSignal) => {
       if (!data.length) throw new ClientError("terminal_input", "Terminal input must contain at least one character.");
       const original = this.getState().snapshot?.terminals.find((terminal) => terminal.id === terminalId);
@@ -426,6 +439,51 @@ export class MoguriSdk extends TransportClient {
       this.command({ type: "settings.update", settings, expectedRevision, acknowledgePromptRisk }),
     reset: (section: SettingsSection | "all", expectedRevision: number) =>
       this.command({ type: "settings.reset", section, expectedRevision }),
+  };
+  readonly runtime = {
+    status: () => this.query({ type: "runtime.status" }),
+    retryPower: () => this.command({ type: "runtime.power.retry" }),
+  };
+  readonly application = {
+    status: () => this.query({ type: "application.status" }),
+    configure: (changes: Partial<import("../../protocol/src/application.ts").ApplicationPreferences>, expectedRevision: number) => this.command({ type: "application.configure", changes, expectedRevision }),
+    updates: {
+      status: () => this.query({ type: "application.update.status" }),
+      credential: () => this.query({ type: "application.update.credential" }),
+      read: (id: string) => this.query({ type: "application.update.read", id }),
+      history: () => this.query({ type: "application.update.history" }),
+      check: (automatic = false, commandId?: string) => this.command({ type: "application.update.check", automatic }, commandId),
+      cancel: (id: string) => this.command({ type: "application.update.cancel", id }),
+      setToken: async (token: string | null): Promise<void> => {
+        const value = await this.request("/v1/application", { action: "update-token", token });
+        if (!isRecord(value) || value.configured !== (token !== null)) throw new ClientError("update_credential_ack", "The updater's exact separate secret change was not acknowledged.");
+      },
+      installPreview: (id: string) => this.query({ type: "application.update.install_preview", id }),
+      install: async (id: string, expectedDigest: string, desktopPid: number, confirm: true): Promise<{ id: string; journal: string; intentDigest: string }> => {
+        const value = await this.request("/v1/application", { action: "update-install", id, expectedDigest, desktopPid, confirm });
+        if (!isRecord(value) || value.id !== id || value.accepted !== true || typeof value.journal !== "string" || typeof value.intentDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.intentDigest)) throw new ClientError("update_install_ack", "The exact original installation was not acknowledged. Inspect retained intent; no install or restart was replayed.");
+        return { id, journal: value.journal, intentDigest: value.intentDigest };
+      },
+    },
+    storage: {
+      status: () => this.query({ type: "application.storage.status" }),
+      preview: (path: string) => this.query({ type: "application.storage.preview", path }),
+      relocate: async (path: string, expectedDigest: string, confirm: true, id: string = crypto.randomUUID()): Promise<{ id: string; keyId: string }> => {
+        const result = await this.request("/v1/application", { action: "storage-relocate", id, path, expectedDigest, confirm });
+        if (!isRecord(result) || result.id !== id || result.accepted !== true || typeof result.keyId !== "string") throw new ClientError("storage_acknowledgement", "The original relocation was not acknowledged. Inspect its retained intent; no copy was retried.");
+        return { id, keyId: result.keyId };
+      },
+    },
+  };
+  readonly notifications = {
+    list: () => structuredClone(this.getState().snapshot?.notificationSounds ?? []),
+    importSound: (name: string, bytes: Uint8Array, commandId?: string) => this.command({ type: "notification.sound.import", name, audio: audioBase64(bytes) }, commandId),
+    sound: (id: string) => this.query({ type: "notification.sound.read", id }),
+    removeSound: (id: string, expectedDigest: string, confirm: true) => this.command({ type: "notification.sound.remove", id, expectedDigest, confirm }),
+  };
+  readonly integrations = {
+    githubConnection: () => this.query({ type: "github.connection" }),
+    sqlStatus: () => this.query({ type: "integrations.sql.status" }),
   };
   readonly prompt = {
     preview: (sessionId?: string) => this.query({ type: "prompt.preview", ...(sessionId ? { sessionId } : {}) }),
@@ -508,6 +566,25 @@ export class MoguriSdk extends TransportClient {
     readResult: (resultId: string, offset = 0, limit = 12000) => this.query({ type: "result.read", resultId, offset, limit }),
   };
   readonly voice = {
+    startCapture: async (sessionId: string, id: string = crypto.randomUUID()): Promise<{ id: string; token: string }> => {
+      if (this.getState().status !== "connected") throw new ClientError("disconnected", "Reconnect the original profile before capturing audio.");
+      const request = parse(SpeechCaptureRequestSchema, { action: "start", sessionId, id });
+      const result = await this.request("/v1/voice", request);
+      if (!isRecord(result) || result.id !== id || typeof result.token !== "string" || !/^[a-f0-9-]{36}$/.test(result.token)) throw new ClientError("speech_capture_response", "The service did not acknowledge the exact original capture. No microphone was started.");
+      await this.refresh(); return { id, token: result.token };
+    },
+    uploadCapture: async (sessionId: string, id: string, token: string, bytes: Uint8Array): Promise<void> => {
+      validateSpeechWav(bytes);
+      const request = parse(SpeechCaptureRequestSchema, { action: "upload", sessionId, id, token, audio: audioBase64(bytes) });
+      const result = await this.request("/v1/voice", request);
+      if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "The original audio intake was not acknowledged. It was not retried or sent to another recognizer.");
+      await this.refresh();
+    },
+    cancelCapture: async (sessionId: string, id: string, token: string): Promise<void> => {
+      const request = parse(SpeechCaptureRequestSchema, { action: "cancel", sessionId, id, token });
+      const result = await this.request("/v1/voice", request);
+      if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "Cancellation was not accepted by the original capture. No different profile or microphone was contacted.");
+    },
     status: () => this.query({ type: "voice.status" }),
     download: (acceptLicense: true) => this.command({ type: "voice.download", acceptLicense }),
     record: (sessionId: string) => this.command({ type: "voice.record", sessionId }),
@@ -517,6 +594,26 @@ export class MoguriSdk extends TransportClient {
   };
   readonly subagents = { run: (sessionId: string, prompt: string) => this.command({ type: "subagent.run", sessionId, prompt }) };
   readonly sandbox = {
+    setup: {
+      status: () => this.query({ type: "sandbox.setup.status" }),
+      review: (version?: string) => this.query({ type: "sandbox.setup.review", ...(version ? { version } : {}) }),
+      check: (automatic = false) => this.command({ type: "sandbox.setup.check", automatic }),
+      prepare: (version: string) => this.command({ type: "sandbox.setup.prepare", version, confirm: true }),
+      apply: (review: { version: string; digest: string; settingsRevision: number }) => this.command({ type: "sandbox.setup.apply",
+        version: review.version, expectedDigest: review.digest, expectedRevision: review.settingsRevision, confirm: true }),
+      operation: (operationId: string) => this.query({ type: "sandbox.setup.operation", operationId }),
+      cancel: (operationId: string) => this.command({ type: "sandbox.setup.cancel", operationId }),
+      wait: async (operationId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Extract<PlatformResponse, { type: "sandbox.setup.operation" }>> => {
+        const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
+        while (true) {
+          options.signal?.throwIfAborted();
+          const result = await this.sandbox.setup.operation(operationId);
+          if (["completed", "available", "review", "failed", "partial", "cancelled"].includes(result.operation.status)) return result;
+          if (Date.now() >= deadline) throw new ClientError("sandbox_setup_timeout", "The exact native setup is still active. Inspect its original operation; no installation or model was retried.");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      },
+    },
     status: () => this.query({ type: "sandbox.status" }),
     probe: () => this.command({ type: "sandbox.probe", confirm: true }),
     preview: (sessionId: string, paths: string[]) => this.query({ type: "sandbox.preview", sessionId, paths }),
@@ -549,6 +646,7 @@ export class MoguriSdk extends TransportClient {
   readonly cache = createCacheApi(this);
   readonly linear = {
     ...createLinearWorkflowApi(this),
+    connection: (verify = false) => this.query({ type: "linear.connection", verify }),
     status: (projectId: string) => this.query({ type: "linear.status", projectId }),
     setToken: (token: string) => this.command({ type: "linear.token.set", token }),
     clearToken: () => this.command({ type: "linear.token.clear" }),

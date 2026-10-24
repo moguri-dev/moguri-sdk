@@ -2,8 +2,9 @@ import { EventEmitter } from "node:events";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { PassThrough } from "node:stream";
+import { Type } from "typebox";
 import * as pty from "node-pty";
 import {
   isRecord, MoguriError, parse, PROTOCOL_VERSION, type NativeStage, type SandboxConfiguration, type SandboxExecution,
@@ -19,17 +20,42 @@ import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { runProgram } from "./program.ts";
 import { sandboxConfiguration, sandboxRunConfiguration, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
 import { PrivateControl } from "./private-control.ts";
+import { assertSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
+import type { SandboxSetupOptions } from "./sandbox-setup.ts";
 
 export type NativeChange = Partial<Pick<SandboxExecution, "nativeSessionId" | "planDigest" | "signerFingerprint" | "workerPid" | "status" | "cancellation" | "cleanup" | "cliExitCode" | "diagnostic">>;
 export interface SandboxOptions {
   vault?: SecretVault; changed?: () => void;
   command?: string[];
+  dns?: SandboxDns;
+  engineOnlyProbe?: () => boolean;
+  distribution?: string;
+  setup?: SandboxSetupOptions;
 }
 export interface NativeLaunch {
   id: string; stage: NativeStage; config: SandboxConfiguration; launchName: string; createdAfter: number; createdBefore: number;
   root: string | null;
+  providerProbe?: boolean;
 }
 interface NativeResult { exitCode: number; clean: boolean; status: BridgeStatus | null; failure: string | null }
+const nativeBootstrapSchema = Type.Object({
+  kind: Type.Literal("bootstrap"), protocol: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+}, { additionalProperties: false });
+export async function verifyNativeBootstrap(value: unknown, bindOriginalGuest: () => Promise<void>): Promise<void> {
+  const bootstrap = parse(nativeBootstrapSchema, value);
+  const mismatch = bootstrap.protocol !== PROTOCOL_VERSION ?
+    `The pinned SendBox workload uses Moguri protocol ${bootstrap.protocol}, but this app requires ${PROTOCOL_VERSION}. Rebuild and review the current workload image and worker/bridge digests; changing the JSON version or reusing older pins cannot upgrade its bytes.` : null;
+  try { await bindOriginalGuest(); }
+  catch (error) {
+    if (!mismatch) throw error;
+    throw new MoguriError("sandbox_protocol_owner", `${mismatch} Original guest ownership could not be verified: ${error instanceof Error ? error.message : "native ownership verification failed"}. No provider access or alternate owner was authorized.`, 409);
+  }
+  if (mismatch) throw new MoguriError("sandbox_protocol", `${mismatch} No worker initialization, provider credentials or Local fallback was authorized.`, 409);
+}
+export function sandboxHostEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const paths = (environment.PATH || "/usr/bin:/bin:/usr/sbin:/sbin").split(delimiter).filter(Boolean);
+  return { PATH: [...new Set([...paths, "/usr/local/bin", "/opt/homebrew/bin"])].join(delimiter), HOME: environment.HOME };
+}
 export interface NativeConnection extends WorkerConnection {
   verified: Promise<BridgeInfo>;
   finished: Promise<NativeResult>;
@@ -61,9 +87,9 @@ export async function verifySandboxArtifacts(value: SandboxConfiguration, cwd: s
   } catch { throw new MoguriError("sandbox_release", "The pinned signed release manifest is invalid. No VM was started.", 409); }
   if (!isRecord(manifest) || manifest.expected_host_version !== qualification.release || manifest.expected_guest_version !== qualification.release ||
     manifest.trust_root_id !== qualification.trustRootId || typeof manifest.release_sequence !== "number" || manifest.release_sequence < qualification.minimumReleaseSequence) stopped("The signed native host/guest release or rollback floor differs from the exact review.");
-  const version = await runProgram(config.executable, ["--version"], { cwd, signal, label: "Pinned SendBox release", timeoutMs: 5000, maxBytes: 4096 });
+  const version = await runProgram(config.executable, ["--version"], { cwd, signal, env: sandboxHostEnvironment(), label: "Pinned SendBox release", timeoutMs: 5000, maxBytes: 4096 });
   if (version.trim() !== `sendbox ${qualification.release}`) stopped("The installed CLI does not report the exact reviewed release.");
-  const image = await runProgram("container", ["image", "inspect", config.image], { cwd, signal, label: "Pinned native workload image", timeoutMs: 10_000, maxBytes: 256 * 1024 });
+  const image = await runProgram("container", ["image", "inspect", config.image], { cwd, signal, env: sandboxHostEnvironment(), label: "Pinned native workload image", timeoutMs: 10_000, maxBytes: 256 * 1024 });
   let inspected: unknown;
   try { inspected = JSON.parse(image); } catch { throw new MoguriError("sandbox_image", "Native image inspection returned invalid JSON. No mutable image or fallback was selected.", 409); }
   if (!Array.isArray(inspected) || inspected.length !== 1 || !isRecord(inspected[0]) || !isRecord(inspected[0].index) ||
@@ -72,7 +98,7 @@ export async function verifySandboxArtifacts(value: SandboxConfiguration, cwd: s
 }
 interface NativeContainer { id: string; status: string }
 async function nativeContainers(spec: NativeLaunch, cwd: string): Promise<NativeContainer[]> {
-  const output = await runProgram("container", ["ls", "--all", "--format", "json"], { cwd, signal: AbortSignal.timeout(10_000), label: "Owned native guest inspection", timeoutMs: 10_000, maxBytes: 1024 * 1024 });
+  const output = await runProgram("container", ["ls", "--all", "--format", "json"], { cwd, signal: AbortSignal.timeout(10_000), env: sandboxHostEnvironment(), label: "Owned native guest inspection", timeoutMs: 10_000, maxBytes: 1024 * 1024 });
   const values: unknown = JSON.parse(output);
   if (!Array.isArray(values)) throw new MoguriError("sandbox_inventory", "Native guest inventory is invalid. No process/container ownership was inferred.", 409);
   return values.filter(isRecord).flatMap((value) => {
@@ -103,49 +129,59 @@ export class SandboxRuntime {
     if (next !== this.signature) { this.signature = next; this.readiness = absent(); this.options.changed?.(); }
   }
   configured(): QualifiedSandboxConfiguration { return sandboxConfiguration(this.configuration()); }
+  get busy(): boolean { return this.probing || this.active.size > 0; }
   assertReady(): QualifiedSandboxConfiguration {
     const config = this.configured();
     if (!this.readiness.ready || this.readiness.configDigest !== frameDigest(config)) throw new MoguriError("sandbox_unready", this.readiness.diagnostic, 409);
     return config;
   }
   workerArgv(): string[] { return [...(this.options.command ?? ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"])]; }
-  async probe(profileId: string, id: string = randomUUID()): Promise<SandboxReadiness> {
+  async probe(profileId: string, id: string = randomUUID(), requested?: AbortSignal): Promise<SandboxReadiness> {
     if (this.closed) throw new MoguriError("sandbox_closed", "Native execution is closing. No VM was launched.", 409);
     if (this.active.size || this.probing) throw new MoguriError("sandbox_busy", "Stop/wait for owned native execution or qualification before a new probe. No guest was launched.", 409);
     this.probing = true;
     let resolveProbe!: () => void;
     this.probeDone = new Promise<void>((resolve) => { resolveProbe = resolve; });
     let worker: NativeWorker | undefined;
+    const abort = () => worker?.kill("SIGTERM");
+    requested?.addEventListener("abort", abort, { once: true });
     this.readiness = { ...absent(), configured: true, diagnostic: "Explicit native qualification is in progress. No new turn is admitted until its exact guest and cleanup are verified." };
     try {
+      requested?.throwIfAborted();
       this.options.changed?.();
-      const config = await verifySandboxArtifacts(this.configuration(), this.stateDir, AbortSignal.timeout(20_000)), signature = frameDigest(config);
+      const signal = requested ? AbortSignal.any([requested, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
+      const config = await verifySandboxArtifacts(this.configuration(), this.stateDir, signal), signature = frameDigest(config);
       const inputs = join(this.stateDir, "native-inputs", id), parent = join(this.stateDir, "native-stage-root");
       await mkdir(inputs, { recursive: true, mode: 0o700 }); await mkdir(parent, { recursive: true, mode: 0o700 });
       const source = await captureNativeSource(await realpath(inputs), [], { denied: [], readOnly: [] }, AbortSignal.timeout(5000));
       const stage = await materializeNativeStage(await realpath(parent), { profileId, sessionId: id, turnId: id }, source, AbortSignal.timeout(5000));
-      worker = this.open({ id, stage, config, root: null, launchName: `mg-${id.replaceAll("-", "").slice(0, 20)}`,
+      requested?.throwIfAborted();
+      worker = this.open({ id, stage, config, root: null, providerProbe: !this.options.engineOnlyProbe?.() && config.qualification.allowCopilot,
+        launchName: `mg-${id.replaceAll("-", "").slice(0, 20)}`,
         createdAfter: Math.floor(Date.now() / 1000) - 2, createdBefore: Math.ceil(Date.now() / 1000) + 120 }, () => {}, true);
       const info = await worker.verified, result = await worker.finished;
+      requested?.throwIfAborted();
       if (!result.clean || result.exitCode !== 0 || result.failure || this.closed || signature !== frameDigest(this.configuration())) throw new MoguriError("sandbox_probe", result.failure ?? "Native qualification did not finish under the exact current review with verified guest absence. No readiness was claimed.", 409);
       this.readiness = { ready: true, configured: true, configDigest: signature, release: config.qualification.release, workerDigest: info.workerDigest, image: config.image,
-        diagnostic: "Verified pinned SendBox 0.2.3 guest/worker and owned VM cleanup. New turns still need their exact reviewed staging root and provider scope." };
+        diagnostic: `Verified pinned SendBox ${config.qualification.release} guest/worker and owned VM cleanup. Private workspace and selected-provider admission remain policy-bound.` };
       return this.readiness;
     } catch (error) {
       this.readiness = { ...absent(), configured: true, diagnostic: error instanceof MoguriError ? error.message : "Native qualification failed; cleanup/readiness is unconfirmed. No Local fallback." };
       throw error;
     } finally {
+      requested?.removeEventListener("abort", abort);
       if (worker) {
         worker.kill("SIGTERM");
         const ended = await worker.finished;
-        if (!ended.clean) this.readiness = { ...absent(), configured: true, diagnostic: "The original qualification guest cleanup remains unconfirmed. Inspect its exact retained private intent; no model readiness or retry was authorized." };
+        if (!ended.clean) this.readiness = { ...absent(), configured: true, diagnostic: `${this.readiness.diagnostic} Original qualification ${id} guest cleanup remains unconfirmed. Inspect its exact retained private intent; no model readiness or retry was authorized.` };
       }
       this.probing = false; resolveProbe(); this.probeDone = undefined; this.options.changed?.();
     }
   }
   launch(execution: SandboxExecution, changed: (changes: NativeChange) => void | Promise<void>): NativeConnection {
     const config = this.assertReady();
-    if (execution.configDigest !== frameDigest(config) || execution.workerDigest !== config.qualification.workerDigest || execution.image !== config.image ||
+    assertSandboxNetwork(execution, config);
+    if (execution.workerDigest !== config.qualification.workerDigest || execution.image !== config.image ||
       execution.stage.sessionId !== execution.sessionId || execution.stage.profileId !== execution.profileId ||
       JSON.stringify(execution.command) !== JSON.stringify(this.workerArgv())) stopped("Native execution differs from its original profile/root/release review.");
     return this.open(execution, changed, false);
@@ -182,8 +218,8 @@ export class SandboxRuntime {
       execution.signerFingerprint !== null && execution.signerFingerprint !== binding.signerFingerprint ||
       guests.some((guest) => guest.id !== `${execution.launchName}-${sid}`)) stopped("Native inspection changed the original guest, plan or public signer.");
     for (const guest of guests) {
-      if (guest.status === "running") await runProgram("container", ["stop", "--time", "5", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), label: "Explicit exact native guest stop", timeoutMs: 15_000 });
-      await runProgram("container", ["delete", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), label: "Explicit exact native guest removal", timeoutMs: 15_000 });
+      if (guest.status === "running") await runProgram("container", ["stop", "--time", "5", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), env: sandboxHostEnvironment(), label: "Explicit exact native guest stop", timeoutMs: 15_000 });
+      await runProgram("container", ["delete", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), env: sandboxHostEnvironment(), label: "Explicit exact native guest removal", timeoutMs: 15_000 });
     }
     if ((await nativeContainers(execution, this.stateDir)).length) throw new MoguriError("sandbox_cleanup", "The original verified native guest is still present. Cleanup remains unconfirmed.", 409);
     return { nativeSessionId: sid, planDigest: binding.planDigest, signerFingerprint: binding.signerFingerprint, cleanup: "owned-guest-stopped",
@@ -235,20 +271,22 @@ class NativeWorker implements NativeConnection {
     if (this.stopping) throw new MoguriError("sandbox_stopped", "Native start was stopped before launch.", 409);
     const directory = join(this.stateDir, "native-executions", this.spec.id);
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    await writeFile(join(directory, "intent.json"), JSON.stringify({ id: this.spec.id, stage: this.spec.stage, configDigest: frameDigest(config), command: this.command }), { flag: "wx", mode: 0o600 });
+    await writeFile(join(directory, "intent.json"), JSON.stringify({ format: "moguri-native-intent", version: 1, id: this.spec.id, probe: this.probe,
+      stage: this.spec.stage, config, configDigest: frameDigest(config), launchName: this.spec.launchName, providerProbe: Boolean(this.spec.providerProbe),
+      createdAfter: this.spec.createdAfter, createdBefore: this.spec.createdBefore, command: this.command }), { flag: "wx", mode: 0o600 });
     const key = randomBytes(32).toString("hex");
     if (!this.probe) await this.vault.write(this.spec.id, key, AbortSignal.timeout(15_000));
     if (this.stopping) throw new MoguriError("sandbox_stopped", "Native start was stopped before the guest launch.", 409);
     const policy = join(directory, "sendbox.json");
     await writeFile(policy, JSON.stringify(sandboxRunConfiguration(config, this.spec.launchName, this.spec.stage.workspace, this.command)), { flag: "wx", mode: 0o600 });
-    await runProgram(config.executable, ["policy", "validate", "--config", policy], { cwd: directory, signal: AbortSignal.timeout(5000), label: "Exact native policy", timeoutMs: 5000, maxBytes: 16 * 1024 });
+    await runProgram(config.executable, ["policy", "validate", "--config", policy], { cwd: directory, signal: AbortSignal.timeout(5000), env: sandboxHostEnvironment(), label: "Exact native policy", timeoutMs: 5000, maxBytes: 16 * 1024 });
     if (this.stopping) throw new MoguriError("sandbox_stopped", "Native policy validation ended after stop; no guest was launched.", 409);
     const args = ["run", "--interactive", "--runtime", "apple", "--config", policy, "--image", config.image, "--bundle", config.bundlePath,
       "--trust-root", config.trustRootPath, "--trust-root-id", config.qualification.trustRootId, "--minimum-release-sequence", String(config.qualification.minimumReleaseSequence), "--", ...this.command];
     const input = new PassThrough(), output = new PassThrough(), wire = new JsonLineChannel(input, output, true);
     this.wire = wire;
     this.launchAttempted = true;
-    const terminal = pty.spawn(config.executable, args, { cwd: directory, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME, TERM: "xterm-256color" }, cols: 100, rows: 32 });
+    const terminal = pty.spawn(config.executable, args, { cwd: directory, env: { ...sandboxHostEnvironment(), TERM: "xterm-256color" }, cols: 100, rows: 32 });
     this.terminal = terminal;
     terminal.onData((data) => input.write(data)); output.on("data", (data: Buffer) => terminal.write(data.toString()));
     wire.on("error", (error) => this.fail(error));
@@ -256,32 +294,37 @@ class NativeWorker implements NativeConnection {
     wire.on("diagnostic", (text) => { diagnostics += Buffer.byteLength(text); if (diagnostics > 64 * 1024) this.fail(new Error("Native diagnostic output exceeded its bound.")); });
     wire.on("message", (raw) => {
       this.queue = this.queue.then(async () => {
-        const message = parse(BridgeEnvelopeSchema, this.privateControl ? this.privateControl.decode(raw) : raw);
-        if (message.kind === "bootstrap") {
+        const packet = this.privateControl ? this.privateControl.decode(raw) : raw;
+        if (isRecord(packet) && packet.kind === "bootstrap") {
           if (initialized || this.stopping) throw new MoguriError("sandbox_bootstrap", "Native bootstrap is duplicate or stopped. No access was sent.", 409);
           initialized = true;
-          const guests = await nativeContainers(this.spec, directory);
-          if (guests.length !== 1 || guests[0]!.status !== "running") stopped("Native bootstrap did not bind exactly one owned running guest.");
-          const sid = guests[0]!.id.slice(this.spec.launchName.length + 1);
-          if (!/^[a-f0-9]{32}$/.test(sid)) stopped("Native guest session identity is invalid.");
-          this.binding = await readNativeBoundary({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: sid, workspace: this.spec.stage.workspace,
-            image: config.image, command: { program: this.command[0]!, arguments: this.command.slice(1) },
-            createdAfter: this.spec.createdAfter, createdBefore: this.spec.createdBefore });
-          await this.changed({ nativeSessionId: sid, planDigest: this.binding.planDigest, signerFingerprint: this.binding.signerFingerprint });
+          await verifyNativeBootstrap(packet, async () => {
+            const guests = await nativeContainers(this.spec, directory);
+            if (guests.length !== 1 || guests[0]!.status !== "running") stopped("Native bootstrap did not bind exactly one owned running guest.");
+            const sid = guests[0]!.id.slice(this.spec.launchName.length + 1);
+            if (!/^[a-f0-9]{32}$/.test(sid)) stopped("Native guest session identity is invalid.");
+            this.binding = await readNativeBoundary({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: sid, workspace: this.spec.stage.workspace,
+              image: config.image, command: { program: this.command[0]!, arguments: this.command.slice(1) },
+              createdAfter: this.spec.createdAfter, createdBefore: this.spec.createdBefore });
+            await this.changed({ nativeSessionId: sid, planDigest: this.binding.planDigest, signerFingerprint: this.binding.signerFingerprint });
+            await writeFile(join(directory, "bootstrap-owner.json"), JSON.stringify({ id: this.spec.id, observedProtocol: packet.protocol,
+              nativeSessionId: sid, planDigest: this.binding.planDigest, signerFingerprint: this.binding.signerFingerprint }), { flag: "wx", mode: 0o600 });
+          });
           if (this.stopping || this.ended) throw new MoguriError("sandbox_stopped", "Native verification ended after stop. No worker start or model access was sent.", 409);
           if (!this.probe) this.privateControl = new PrivateControl(this.spec.id, Buffer.from(key, "hex"), "controller");
           wire.send({ action: this.probe ? "probe" : "start", protocol: PROTOCOL_VERSION, workerDigest: config.qualification.workerDigest,
             stateDir: `/workspace/.moguri/execution/${this.spec.id}`, root: this.spec.root,
-            ...(this.probe ? config.qualification.allowCopilot ? { nativeNetworkProbe: true } : {} :
+            ...(this.probe ? this.spec.providerProbe ? { nativeNetworkProbe: true } : {} :
               { runId: this.spec.id, key, after: 0, journal: true, sealed: true }) });
           return;
         }
+        const message = parse(BridgeEnvelopeSchema, packet);
         if (message.kind === "probe" || message.kind === "ready") {
           const info = message.info, native = info.native;
           if (!this.binding || info.platform !== "linux" || info.nodeVersion !== "26.12.0" || info.workerDigest !== config.qualification.workerDigest || info.root !== this.spec.root ||
             !native || native.bridgeDigest !== config.qualification.bridgeDigest || native.uid === 0 || native.noNewPrivs !== 1 || native.seccomp !== 2 ||
             !/^0+$/.test(native.capabilities) || !native.enforcedProxy || message.kind === "ready" && message.status.runId !== this.spec.id ||
-            this.probe && config.qualification.allowCopilot && (!native.networkProbe || native.networkProbe.url !== "https://api.githubcopilot.com" || native.networkProbe.status >= 500)) stopped("Actual guest runtime/build/process controls or explicitly reviewed cold provider networking differ from the exact native review.");
+            this.probe && this.spec.providerProbe && (!native.networkProbe || native.networkProbe.url !== "https://api.githubcopilot.com" || native.networkProbe.status >= 500)) stopped("Actual guest runtime/build/process controls or explicitly reviewed cold provider networking differ from the exact native review.");
           clearTimeout(this.deadline);
           this.ready = true; this.resolveVerified(info);
           if (message.kind === "ready") { this.status = message.status; await this.changed({ status: "running", workerPid: message.status.workerPid }); }
@@ -362,8 +405,8 @@ class NativeWorker implements NativeConnection {
           this.binding = binding;
           await this.changed({ nativeSessionId: sid, planDigest: binding.planDigest, signerFingerprint: binding.signerFingerprint });
         }
-        if (guest.status === "running") await runProgram("container", ["stop", "--time", "5", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), label: "Owned native VM stop", timeoutMs: 15_000 });
-        await runProgram("container", ["delete", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), label: "Owned native VM removal", timeoutMs: 15_000 });
+        if (guest.status === "running") await runProgram("container", ["stop", "--time", "5", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), env: sandboxHostEnvironment(), label: "Owned native VM stop", timeoutMs: 15_000 });
+        await runProgram("container", ["delete", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), env: sandboxHostEnvironment(), label: "Owned native VM removal", timeoutMs: 15_000 });
       }
       if (this.launchAttempted) clean = Boolean(this.binding) && (await nativeContainers(this.spec, this.stateDir)).length === 0;
       if (!clean) throw new MoguriError("sandbox_cleanup", "The exact owned native guest is still present. Cleanup remains unconfirmed.", 409);

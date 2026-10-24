@@ -60,7 +60,8 @@ test("SDK native source review, real guest model/tools, Manual approvals and sol
     assert.equal(result.files.find((file) => file.path === "fixture.txt")?.text, "generated native replacement\n");
     const proof = JSON.parse(result.files.find((file) => file.path === "generated-native-proof.json")!.text);
     assert.equal(proof.calls.length, 3);
-    assert.ok(proof.calls.every((call: { tools: string[] }) => call.tools.every((name) => ["ask_user", "list_files", "read_file", "write_file", "run_command"].includes(name))));
+    const expectedTools = ["fetch_page", "ask_user", "task_progress", "list_files", "read_file", "write_file", "run_command"].toSorted();
+    for (const call of proof.calls) assert.deepEqual(call.tools.toSorted(), expectedTools);
     assert.equal(await readFile(join(project, "fixture.txt"), "utf8"), "generated source original\n");
     assert.equal((await sdk.workspaces.file(created.id!, "fixture.txt")).text, "generated native replacement\n");
     await sdk.command({ type: "attachment.add", sessionId: created.id!, expectedRevision: session().draft.revision, path: "fixture.txt" });

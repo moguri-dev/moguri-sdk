@@ -7,6 +7,7 @@ import type { PreparedModel, ProviderAdapter } from "./provider.ts";
 export interface ModelRegistryOptions {
   vault?: SecretVault; fetch?: typeof fetch; idPrefix?: () => string; environments?: Controls["env"][];
   additional?: ModelRegistry; includeCopilot?: boolean; copilotEnvironments?: () => Controls["env"][];
+  localEnvironments?: (endpoint: LocalEndpoint) => Controls["env"][];
 }
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export const localModelId = (endpointId: string, modelId: string, prefix = "local") => `${prefix}.${endpointId}.${createHash("sha256").update(modelId).digest("hex").slice(0, 24)}`;
@@ -49,7 +50,11 @@ export class ModelRegistry implements ProviderAdapter {
   private publish(notify = true) {
     if (this.closed) return;
     const local = [...this.local.values()];
-    const models = [...this.copilot.state.models.map((model) => ({ ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id, endpointBoundary: model.endpointBoundary ?? "network" as const, environments: this.options.copilotEnvironments?.() ?? ["Local"] })), ...local.flatMap((entry) => entry.models), ...this.options.additional?.state.models ?? []];
+    const localModels = local.flatMap((entry) => entry.models.map((model) => {
+      const endpoint = this.endpoints().find((endpoint) => model.providerId === `${this.prefix}.${endpoint.id}`);
+      return endpoint && this.options.localEnvironments ? { ...model, environments: this.options.localEnvironments(endpoint) } : model;
+    }));
+    const models = [...this.copilot.state.models.map((model) => ({ ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id, endpointBoundary: model.endpointBoundary ?? "network" as const, environments: this.options.copilotEnvironments?.() ?? ["Local"] })), ...localModels, ...this.options.additional?.state.models ?? []];
     const connections: ProviderConnection[] = [...(this.options.includeCopilot === false ? [] : [{ id: "github-copilot", name: "GitHub Copilot", source: "copilot" as const, status: this.copilot.state.status, diagnostic: this.copilot.state.diagnostic }]), ...local.map((entry) => entry.connection), ...this.options.additional?.state.connections ?? []];
     this.state = { ...this.copilot.state, status: models.length ? "connected" : this.copilot.state.status, models, connections };
     if (!models.length && local.some((entry) => entry.connection.status === "error")) this.state = { ...this.state, status: this.copilot.state.status === "connecting" ? "connecting" : "error", diagnostic: "No usable model is available. Inspect the configured endpoint and Copilot connection diagnostics." };

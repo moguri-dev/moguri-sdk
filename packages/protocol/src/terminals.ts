@@ -6,13 +6,12 @@ const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ p
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 const binding = {
-  profileId: id, sessionId: id, projectId: id, workspaceId: nullable(id),
+  profileId: id, workspaceId: nullable(id),
   root: path, device: Type.String({ maxLength: 40 }), inode: Type.String({ maxLength: 40 }), digest: hash,
 };
 export const TerminalBindingSchema = Type.Union([
-  object({ ...binding, env: Type.Literal("Local") }),
-  object({ ...binding, sessionId: Type.Null(), projectId: Type.Null(), workspaceId: Type.Null(), env: Type.Literal("Local") }),
-  object({ ...binding, env: Type.Literal("Remote"), peerDigest: hash }),
+  object({ ...binding, sessionId: nullable(id), projectId: nullable(id), env: Type.Literal("Local") }),
+  object({ ...binding, sessionId: id, projectId: id, env: Type.Literal("Remote"), peerDigest: hash }),
 ]);
 export type TerminalBinding = Static<typeof TerminalBindingSchema>;
 export const RemoteTerminalBoundarySchema = object({ target: RemoteIdentitySchema, peerDigest: hash, bridgeDigest: hash, brokerDigest: hash });

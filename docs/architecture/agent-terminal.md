@@ -65,9 +65,11 @@ this feature does not copy user console bytes into that stream. No terminal
 input is replayed, no PID ownership is inferred, and a missing or partial
 result never becomes success. A clipped live tail is not full process output.
 
-Protocol/database 46 extends the existing read view and model tool schemas.
-There is no new durable event or SQL layout. The transactional version upgrade
-preserves existing ciphertext, grants, receipts and unknown accounting.
+The original desktop protocol/database 46 extends the existing read view and
+model tool schemas. It is included in protocol 53's
+[lineage-aware convergence](../sdk.md#retained-state-upgrades).
+There is no new durable event or SQL layout. The transactional upgrade preserves
+existing ciphertext, grants, receipts and unknown accounting.
 
 ## Required generated coverage
 

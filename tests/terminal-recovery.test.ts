@@ -12,7 +12,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { TerminalChannel } from "../apps/service/src/terminal-channel.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { writeLegacyState, removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 
 const native = { skip: process.platform !== "darwin" };
@@ -24,7 +24,8 @@ test("schema-23 marker failure preserves exact schema-22 ciphertext and restarts
   try {
     store.commit([{ event_type: "job.progress", profile_id: "default", payload: { jobId: "generated-source", progress: "Generated encrypted terminal migration source." } }]);
     const before = store.db.prepare("SELECT seq,id,payload FROM events ORDER BY seq").all();
-    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema','paste_file_schema','native_execution_schema','compound_workflow_schema','budget_winddown_schema','owned_decision_schema','task_progress_schema','document_attachment_schema','desktop_interaction_schema'); PRAGMA user_version=22;
+    removePost44FixtureMarkers(store.db);
+    store.db.exec(`BEGIN IMMEDIATE; DROP TABLE memory_scopes; DELETE FROM retention_metadata WHERE id IN ('remote_memory_schema','terminal_ownership_schema','remote_mcp_schema','remote_terminal_schema','remote_repository_schema','candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema','paste_file_schema','native_execution_schema','compound_workflow_schema','budget_winddown_schema','owned_decision_schema','task_progress_schema','document_attachment_schema'); PRAGMA user_version=22;
       CREATE TRIGGER generated_terminal_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='terminal_ownership_schema'
       BEGIN SELECT RAISE(ABORT,'Generated terminal marker failure'); END; COMMIT;`);
     store.close(); store = undefined;

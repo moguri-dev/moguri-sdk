@@ -3,6 +3,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { mkdtemp, readFile, realpath, rmdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { terminalEnvironment, terminalShell } from "./terminal-shell.ts";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import {
@@ -20,7 +21,7 @@ import type { TerminalLaunchOptions } from "./terminal-engine.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { RemoteConsoles, RemoteConsoleAdmission } from "./remote-terminals.ts";
 
-export interface TerminalOptions extends TerminalLaunchOptions { vault?: SecretVault; brokerPath?: string }
+export interface TerminalOptions extends TerminalLaunchOptions { vault?: SecretVault; brokerPath?: string; defaultRoot?: string }
 interface Host {
   snapshot(): Snapshot; changed(terminal: TerminalState): void; ownerChanged(owner: TerminalOwner): void;
   inputAllowed(terminal: TerminalState): void;
@@ -154,7 +155,7 @@ export class TerminalManager {
       this.admissionAbort.signal.throwIfAborted();
       const execArgv = this.brokerPath.endsWith(".ts") ? ["--import", createRequire(import.meta.url).resolve("tsx")] : [];
       child = fork(this.brokerPath, ["--moguri-terminal-owner", owner.id], { execArgv, detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"],
-        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? directory, LANG: "en_US.UTF-8" } });
+        env: terminalEnvironment(directory) });
       child.on("error", () => console.error("The newly owned terminal broker reported a process startup/control failure."));
       if (!child.pid) throw new Error("Terminal broker process identity is missing.");
       const owned = child;
@@ -298,13 +299,16 @@ export class TerminalManager {
     recheck(); const owner = await this.readyOwner(remote, recheck); recheck();
     if (this.closing) throw new MoguriError("terminal_closing", "Terminal admission was stopped before its PTY launch. No shell was replayed.", 409);
     const live = this.snapshot().terminals.filter((terminal) => !["closed", "failed", "acknowledged"].includes(terminal.status));
-    if (live.length >= 16 || live.filter((terminal) => terminal.sessionId === binding.sessionId).length >= 4) throw new MoguriError("terminal_limit", "Close or inspect existing terminals first: four per session and sixteen per profile are supported.", 409);
-    const id = randomUUID(), launch: TerminalLaunch = { executable: this.options.executable ?? (remote ? remote.launch.executable : process.env.SHELL ?? "/bin/sh"),
+    if (live.length >= 16 || live.filter((terminal) => terminal.sessionId === binding.sessionId).length >= (binding.sessionId === null ? 1 : 4)) throw new MoguriError("terminal_limit", "Close or inspect existing terminals first: one global, four per session and sixteen per profile are supported.", 409);
+    if (binding.sessionId === null && owner.buildDigest !== createHash("sha256").update(await readFile(this.brokerPath)).digest("hex")) throw new MoguriError("terminal_owner_upgrade", "The retained owner uses an earlier console build. Stop its known consoles explicitly before opening a global terminal; no owner was replaced.", 409);
+    recheck();
+    const id = randomUUID(), launch: TerminalLaunch = { executable: this.options.executable ?? (remote ? remote.launch.executable : terminalShell()),
       args: script ? ["-lc", script.command] : this.options.args ?? remote?.launch.args ?? ["-l"] };
+    const title = script?.name ?? (binding.sessionId === null ? "Global terminal" : "Terminal");
     const intent: TerminalState = { id, sessionId: binding.sessionId, projectId: binding.projectId, workspaceId: binding.workspaceId,
-      title: script?.name ?? "Terminal", pid: null, cols, rows, status: "starting", diagnostic: "User terminal intent retained before the exact PTY launch.",
+      title, pid: null, cols, rows, status: "starting", diagnostic: "User terminal intent retained before the exact PTY launch.",
       env: binding.env, binding, ownerId: owner.id, commandId: identity.id, commandDigest: identity.digest,
-      launchDigest: frameDigest([id, binding, launch, cols, rows, script?.name ?? "Terminal"]) };
+      launchDigest: frameDigest([id, binding, launch, cols, rows, title]) };
     this.host.changed(intent);
     try {
       recheck();

@@ -15,6 +15,7 @@ import {
 import { Value } from "typebox/value";
 import { GitHubWorkflows, githubCiState, validateGithubRef, validateGithubRemoteUrl, type GitHubWorkflowOptions } from "../apps/service/src/github-workflows.ts";
 import { digest, EventStore } from "../apps/service/src/store.ts";
+import { removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
 import { runProgram } from "../apps/service/src/program.ts";
 import type { WorkflowHost } from "../apps/service/src/workflow-host.ts";
 import type { WorkspaceFinish } from "../apps/service/src/session-workspace.ts";
@@ -617,7 +618,8 @@ test("restart terminalizes dispatched and undispatched original jobs without rep
 test("schema40 upgrades to the current schema without deleting existing generated project state", async () => {
   const f = await generated({ persistent: true });
   try {
-    f.store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('task_progress_schema','document_attachment_schema','desktop_interaction_schema'); PRAGMA user_version=40; COMMIT;");
+    removePost44FixtureMarkers(f.store.db);
+    f.store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('task_progress_schema','document_attachment_schema'); PRAGMA user_version=40; COMMIT;");
     const reopened = new EventStore(f.storePath, f.key);
     try {
       assert.equal(Number(reopened.db.prepare("PRAGMA user_version").get()?.user_version), PROTOCOL_VERSION);

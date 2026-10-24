@@ -12,6 +12,7 @@ import { runProgram } from "./program.ts";
 import { digest } from "./store.ts";
 import { readWorkspaceGit } from "./project-git.ts";
 import { prepareProjectDirectory } from "./project-directory.ts";
+import { repositoryLayout } from "./repository-layout.ts";
 
 export interface ReviewedGitFile { path: string; text: string; mode?: "100644" | "100755" }
 export interface ReviewedGitCommit { branch: string; base: string; commit: string }
@@ -35,7 +36,7 @@ export class ProjectService {
     if ([values.instructionsPath, values.mcpPath, values.planPath].some(isProtectedProjectPath)) throw new MoguriError("project_path", "Instruction, MCP and plan paths cannot enter protected directories.");
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(values.repo.upstream) || values.repo.mainBranch.startsWith("-") ||
       !/^[A-Za-z0-9._/{\}-]+$/.test(values.repo.branchPattern) || new Set(values.scripts.map((entry) => entry.id)).size !== values.scripts.length) throw new MoguriError("project_settings", "Use a safe upstream, branch pattern and unique script IDs.");
-    validateSettings({ ...defaultSettings(), mcpServers: values.mcpServers, ...(values.sandbox ? { sandbox: values.sandbox } : {}) });
+    validateSettings({ ...defaultSettings(), guidance: values.guidance, mcpServers: values.mcpServers, ...(values.sandbox ? { sandbox: values.sandbox } : {}) });
     if (projectId && values.mcpServers.some((server) => !server.id.startsWith(`p-${projectId.slice(0, 8)}-`) || this.snapshot().settings.values.mcpServers.some((global) => global.id === server.id))) throw new MoguriError("mcp_namespace", `Project MCP IDs must use the p-${projectId.slice(0, 8)}- prefix and cannot shadow global servers.`);
     if (projectId && values.mcpServers.some((server) => this.snapshot().projectConfigurations.some((other) => other.projectId !== projectId && other.values.mcpServers.some((entry) => entry.id === server.id)))) throw new MoguriError("mcp_namespace", "Project MCP IDs must also be unique across projects; choose a distinct server name before storing credentials.");
     if (/-----BEGIN .*PRIVATE KEY-----|(?:ghp|gho|github_pat)_[A-Za-z0-9_]{20,}/.test(JSON.stringify(values))) throw new MoguriError("project_secret", "Do not put credentials in project settings. Use the secret backend.");
@@ -61,6 +62,9 @@ export class ProjectService {
   }
   async context(project: Project): Promise<string> {
     return repositoryContext(project.path, this.configuration(project.id).values);
+  }
+  async repositories(project: Project, signal: AbortSignal) {
+    return { type: "project.repositories" as const, ...await repositoryLayout(project.path, this.configuration(project.id).values.deniedFolders, signal) };
   }
   private git(project: Project, args: string[], signal: AbortSignal, env?: NodeJS.ProcessEnv, extra: string[] = []) {
     return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsync=all", ...extra, "--literal-pathspecs", ...args], { cwd: project.path, signal, env, label: "Project Git operation", timeoutMs: 30_000, maxBytes: 512 * 1024 });

@@ -5,6 +5,71 @@ capability access, shared defaults, settings, cancellation and protocol
 negotiation; the service remains the sole durable authority. A new SDK operation
 must work without Electron and must be exposable by either client.
 
+## Desktop interaction maintenance, 2026-10-23
+
+Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
+settings/session SDK and pinned NeMo-Speech.cpp 0.2.0 (Apache-2.0). No dependency,
+protocol event or database migration is needed. Resizable desktop chrome is a
+local presentation preference, with compatibility for the previous fixed-width
+sidebar preference; settings and transcripts remain service-owned across clients.
+
+Enter sends and Shift+Enter inserts a newline. Cmd/Ctrl+Enter still holds a
+prompt without running it, and composition/repeated key events must not submit
+work. Both chat composers follow the same desktop convention. Sidebar resizing
+must also work with keyboard arrows, retain enough room for chat, and preserve
+unsaved panel edits. Collapsing the right pane leaves its icon rail available.
+Message copy controls appear on hover or keyboard focus, not persistently.
+
+Toggle/dropdown preference changes use the existing optimistic-revision writes.
+They cannot implicitly save other text edits, acknowledge prompt risk, apply a
+model proposal or retry over another client's changes. Text/JSON settings retain
+nearby explicit Save actions. A failed save preserves edits and surfaces the
+failure; an in-flight save continues to block navigation/submission as appropriate.
+The settings-focused conversation is presented as **ask Moguri**, without
+changing its reviewed proposal or scope boundaries.
+
+Compact layouts keep offered answers and composer actions visible together
+with a held queue down to 840 x 620. Long question/advice content scrolls with
+keyboard access instead of pushing Send below the window. Speech stop/discard
+and capability-job cancellation remain available during a held preference save;
+new recordings are blocked until the configuration settles.
+
+Ctrl+Space must reach the focused chat surface without auto-repeating start/stop.
+Native stop requests are idempotent and finalization has its own bounded deadline,
+separate from cancellation escalation. Cancellation discards output; nonzero and
+signal exits never become successful transcripts. Diagnostics retain the actual
+exit status/signal and bounded native errors. Tests use generated recognizers,
+including delayed finalization, startup/stop races, cancellation and native
+failure, never a microphone, model weights or a personal provider account.
+
+Before integration, the fresh Phase 0 run passed generated provider cancellation
+in **31.57 ms**, SQLite append p95 **0.054 ms** and crash rebuild **0.54 ms**,
+known PTY-group cancellation **151.94 ms**, OpenTUI updates **17.07 ms**, and
+hidden Electron cold start **196.53 ms**, aggregate memory **446.50 MiB** and
+10,000-row scrolling **11.97 ms/frame**. The 2,000-file Node baseline measured
+**0.88 ms** search and **6.20 ms** Git status. Platform vector/graph work passed
+in **6.04 ms** with real MCP discovery/call/result. Model-control forwarding and
+its unsupported-effort negative case passed in **55.32 ms**; retained-compartment
+and hidden Ghostty spikes passed in **123.95 ms** and **25.80 ms** respectively.
+The real pinned speech binary's version/help passed without audio or weights.
+
+Source qualification passed the locked install, type checks and production build,
+**1,074 unit/native checks with 9 gated skips in 977.11 s**, and the final hidden
+desktop suite with **76 passes and 1 native-Sandbox skip in 3.1 min**. All four
+packed external SDK entrypoints and installed-worker probes passed; the audit
+reported **zero vulnerabilities**. The nine generated speech checks include
+3.3-second finalization, repeated stop, cancellation, bounded stderr and the
+separate 30-second deadline. Hidden desktop coverage additionally holds a real
+settings request while stopping/discarding generated dictation, preserving the
+draft and rejecting a subsequent native signal failure.
+
+The original Phase 0 script still explicitly reports unavailable live provider,
+Rust/Linux, notarized packaging, native SendBox, evaluated multi-model quality,
+live decision-provider and configured SSH checks. Its historical initial-slice
+attachment/default labels do not supersede later qualified protocol slices.
+These maintenance measurements do not qualify those unavailable capabilities
+or claim real microphone capture or ASR accuracy.
+
 ## Requirements and delivery boundary
 
 Dark is the factory desktop theme. The visual identity is an original minimal
@@ -91,6 +156,13 @@ recording each have two-minute bounds; graceful SIGINT finalization has its own
 Cancelled, unready, empty and deadline-exceeded output never becomes a transcript.
 The composer inserts only a completed owned result against the current saved
 draft revision, never sends it, and preserves concurrent typing/conflicts.
+
+Protocol 53 converges main-line schemas 44-52 and desktop schemas 44-46 using
+retained provenance, not version-number guesses. Its atomic marker migration
+preserves both event sets and existing ciphertext, grants and receipts.
+Missing or corrupt source markers fail without repair-by-default. The
+[retained-state contract](../sdk.md#retained-state-upgrades) and generated
+reopen/rollback checks cover both histories and their known partial crossing.
 
 Root-install compatibility reuses MIT-licensed encoding-sniffer 1.0.2 and
 node-fetch-native 1.6.7 with Node 26's actual fetch/Response/DOMException rather

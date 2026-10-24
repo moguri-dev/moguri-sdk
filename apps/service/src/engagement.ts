@@ -142,7 +142,7 @@ export class Engagement {
     if (run) this.host.admit(controls);
     const id = randomUUID();
     const events: EventInput[] = [{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: scope, session_id: id, payload: {
-      title: context ? "Moguri suggestions" : "Moguri settings", kind: "metachat", controls, ...(startup ? { defaults: startup.defaults } : {}), ...(parent ? { parentSessionId: parent.id } : {}),
+      title: context ? "Moguri suggestions" : "ask Moguri", kind: "metachat", controls, ...(startup ? { defaults: startup.defaults } : {}), ...(parent ? { parentSessionId: parent.id } : {}),
       ...(sources ? { suggestionSources: sources } : {}),
       workspaceId: parent?.workspaceId ?? null,
       ...(context ? { contextDigest: this.store.putBlob(JSON.stringify([{ role: "user", content: context, timestamp: Date.now() }])) } : {}),

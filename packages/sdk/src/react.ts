@@ -5,7 +5,7 @@ import type { MoguriSdk } from "./index.ts";
 
 export function useTaskProgress(sdk: MoguriSdk, session: Session | undefined, connected: boolean) {
   const [state, setState] = useState<{ scope: string; progress: TaskProgress | null; error: string | null }>({ scope: "", progress: null, error: null });
-  const scope = JSON.stringify([sdk.profileId, session?.id, session?.turnId, session?.controls.env, session?.workspaceId, session?.sandboxWorkspaceId]);
+  const scope = JSON.stringify([sdk.profileId, session?.id, session?.turnId, session?.controls.env, session?.workspaceId, session?.sandboxWorkspaceId, session?.taskPlan?.revision]);
   useEffect(() => {
     let active = true, timer: ReturnType<typeof setTimeout>;
     setState({ scope, progress: null, error: null });

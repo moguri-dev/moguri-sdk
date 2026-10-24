@@ -92,7 +92,7 @@ The analysis chat retains only those exact approved excerpts as evidence, not
 unreviewed tails of a truncated source. Cross-project hints require the reviewed
 analysis path before becoming proposals.
 
-`/meta` and `/metachat` create a settings-focused conversation for the chosen
+The desktop **ask Moguri** action, `/meta` and `/metachat` create a settings-focused conversation for the chosen
 scope. Its tools read non-secret configuration or create exact reviewed
 proposals. They cannot edit files, execute commands, authenticate MCPs or
 approve/apply their own proposals. Normal optional evolution stays off.

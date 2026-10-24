@@ -27,6 +27,7 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "notification.sound_saved" ? `notification-sound/${input.payload.sound.id}` :
   input.event_type === "github.operation_recorded" || input.event_type === "linear.operation_recorded" ? input.payload.operation.id :
   input.event_type === "knowledge.saved" ? `knowledge/${input.payload.record.id}` :
   input.event_type === "sandbox.execution_recorded" ? input.payload.execution.id :
@@ -50,6 +51,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "notification.sound_saved": return [input.payload.sound.contentDigest];
     case "github.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.reviewDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "linear.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "knowledge.saved": return [input.payload.record.contentDigest];
@@ -256,12 +258,30 @@ export class EventStore {
       if (version < 43) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('document_attachment_schema','1');
         PRAGMA user_version=43; COMMIT;`);
-      if (version < 44) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('desktop_interaction_schema','1');
-        PRAGMA user_version=44; COMMIT;`);
-      if (version < 45) this.db.exec("BEGIN IMMEDIATE; PRAGMA user_version=45; COMMIT;");
-      if (version < 46) this.db.exec("BEGIN IMMEDIATE; PRAGMA user_version=46; COMMIT;");
+      if (version < 53) this.migrateDesktopMerge(version);
     } catch (error) { this.db.close(); throw error; }
+  }
+  private migrateDesktopMerge(version: number): void {
+    const markers = [
+      ["workspace_entry_schema", 44], ["settings_preferences_schema", 45], ["client_voice_capture_schema", 46],
+      ["notification_sound_schema", 47], ["application_preferences_schema", 48], ["state_location_schema", 49],
+      ["private_update_schema", 50], ["session_interactions_schema", 51], ["managed_sandbox_schema", 52],
+    ] as const;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const desktop = this.db.prepare("SELECT value FROM retention_metadata WHERE id='desktop_interaction_schema'").get();
+      if (desktop && desktop.value !== "1") throw new Error("Invalid desktop schema provenance. State was preserved.");
+      const repairBranch = version >= 44 && desktop?.value === "1";
+      for (const [id, introduced] of markers) {
+        const row = this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id);
+        if (!row) {
+          if (!repairBranch && version >= introduced) throw new Error(`Missing retained schema marker ${id}. State was preserved.`);
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?,?)").run(id, "1");
+        } else if (row.value !== "1") throw new Error(`Invalid retained schema marker ${id}. State was preserved.`);
+      }
+      if (!desktop) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES ('desktop_interaction_schema','1')").run();
+      this.db.exec("PRAGMA user_version=53; COMMIT;");
+    } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {
     const cached = this.keys.get(scope.scope);

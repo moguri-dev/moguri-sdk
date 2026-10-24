@@ -10,8 +10,17 @@ export const ProgressQuerySchema = Type.Object({
   type: Type.Literal("session.progress"), sessionId: Type.String({ minLength: 1, maxLength: 128 }),
 }, { additionalProperties: false });
 export type ProgressQuery = Static<typeof ProgressQuerySchema>;
+export const TaskPlanStepsSchema = Type.Array(Type.Object({
+  text: Type.String({ minLength: 1, maxLength: 500 }),
+  status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("done")]),
+}, { additionalProperties: false }), { minItems: 2, maxItems: 50 });
+export interface TaskPlan {
+  title: string; steps: Static<typeof TaskPlanStepsSchema>; revision: number;
+  turnId: string; binding: string; digest: string; source: ModelAdviceSource;
+}
 export const TaskProgressToolSchema = Type.Union([
   Type.Object({ action: Type.Literal("read") }, { additionalProperties: false }),
+  Type.Object({ action: Type.Literal("plan"), title: Type.String({ minLength: 1, maxLength: 160 }), steps: TaskPlanStepsSchema }, { additionalProperties: false }),
   Type.Object({
     action: Type.Literal("report"), percent: Type.Integer({ minimum: 0, maximum: 100 }),
     summary: Type.String({ minLength: 1, maxLength: 300 }),
@@ -25,6 +34,7 @@ export interface TaskProgressReport {
 export interface TaskProgress {
   sessionId: string; turnId: string | null; env: "Local" | "Remote" | "Sandbox";
   observedAt: string; longRunning: boolean;
+  plan?: TaskPlan | null;
   checklist: { path: string | null; digest: string | null; completed: number; total: number; percent: number | null; diagnostic: string | null };
   model: (TaskProgressReport & { reportedAt: string; stale: boolean }) | null;
   disagreement: boolean;

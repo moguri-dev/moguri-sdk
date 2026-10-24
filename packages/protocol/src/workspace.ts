@@ -1,4 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
+import type { GitHubConnection, LinearConnection } from "./preferences.ts";
 import { Value } from "typebox/value";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -75,6 +76,8 @@ export const WorkspaceCommandSchema = Type.Union([
 export type WorkspaceCommand = Static<typeof WorkspaceCommandSchema>;
 export const isWorkspaceCommand = (value: unknown): value is WorkspaceCommand => Value.Check(WorkspaceCommandSchema, value);
 export const WorkspaceQuerySchema = Type.Union([
+  object({ type: Type.Literal("github.connection") }),
+  object({ type: Type.Literal("linear.connection"), verify: Type.Boolean() }),
   object({ type: Type.Literal("board.get"), projectId: id }),
   object({ type: Type.Literal("cache.inspect"), projectId: id, workspaceId: Type.Optional(id), manager: PackageManagerSchema }),
   object({ type: Type.Literal("cache.registries") }),
@@ -106,6 +109,8 @@ export interface CacheReceipt {
 }
 export interface WorkspaceSnapshot { boards: IssueBoard[]; issues: LocalIssue[]; dependencyCaches: CacheReceipt[]; dependencyRegistries: DependencyRegistry[] }
 export type WorkspaceResponse =
+  | { type: "github.connection"; connection: GitHubConnection }
+  | { type: "linear.connection"; connection: LinearConnection }
   | { type: "board.get"; board: IssueBoard; issues: LocalIssue[] }
   | { type: "cache.inspect"; plan: DependencyPlan }
   | { type: "cache.registries"; registries: DependencyRegistryPreview[] }

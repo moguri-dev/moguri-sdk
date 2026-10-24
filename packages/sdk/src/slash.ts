@@ -40,8 +40,9 @@ export const slashCommands = [
   { name: "reorder-sessions", description: "Set the exact shared order of one complete sibling section", argument: "SESSION_ID..." },
   { name: "side", description: "Open parallel, question-only context" },
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
-  { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal, or a Local data-root global console", argument: "[global]" },
-  { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open|global|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
+  { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal, or a Local data-root global console", argument: "[global]", desktopOnly: true },
+  { name: "clone", description: "Explicitly clone a repository into a new Local project folder without inference", argument: '{\"repository\":\"URL\",\"path\":\"ABSOLUTE_NEW_PATH\"} confirm-clone' },
+  { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open [LOCAL_ROOT]|global [LOCAL_ROOT]|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
   { name: "agent-terminal", description: "Inspect this session's approved Agent command output, never its private User/Global consoles", argument: "[list [SEQUENCE ID]|read COMMAND_ID [UTF8_OFFSET|tail]]" },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
@@ -55,7 +56,7 @@ export const slashCommands = [
   { name: "winddown", description: "Inspect reserved finishing models and separately review actual-user accepted-work Git checkpoints", argument: "[status|list|read ID|commit-preview JSON|commit REV SHA confirm-git JSON|decline ID REV confirm-decline|stop ID confirm-stop]" },
   { name: "decisions", description: "Configure bounded decision advice and inspect actual actor/charges; never answer or approve", argument: "[status|list|read ID|stop ID confirm-stop|set POLICY_JSON]" },
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
-  { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer ID REV TEXT]" },
+  { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer|other ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
   { name: "dashboard", description: "Inspect model accounting, planned holds, tool/MCP outcomes and retained storage", argument: "[FILTERS_JSON|calls FILTERS_JSON|plans FILTERS_JSON|operations FILTERS_JSON|storage]" },
   { name: "repository", description: "Review explicit root-bound metadata; no automatic GitHub or model request", argument: "[preview|state|refresh BINDING REV confirm-lookup|clear REV confirm-clear|stop JOB_ID]" },
@@ -79,11 +80,14 @@ export const slashCommands = [
   { name: "queue", description: "Show queued prompts" },
   { name: "run", description: "Release a held prompt", argument: "ID" },
   { name: "settings", description: "Open shared settings" },
+  { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
+  { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
+  { name: "updates", description: "Inspect private-release updates or explicitly check/cancel; never authenticate or install", argument: "[status|history|read ID|check|cancel ID]" },
   { name: "models", description: "Choose an available model" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
-  { name: "sandbox", description: "Review native source staging, exact owned runs and separate user publication", argument: "[status|probe confirm-native|preview PATHS_JSON|prepare REVIEW_JSON confirm-stage|execution ID|result ID|stop ID confirm-stop|reconcile ID confirm-inspect|publish-preview ID PATHS_JSON|publish REVIEW_JSON confirm-publish|publication ID|stop-publication ID confirm-stop]" },
+  { name: "sandbox", description: "Review bundled setup, automatic workspaces, public runtime updates and exact retained native work", argument: "[setup [VERSION]|enable VERSION DIGEST REV confirm-setup|updates|prepare-version VERSION confirm-download|status|result ID|publication ID]" },
   { name: "mcp-remote", description: "Review exact Remote MCP grants and retained calls; never authenticate or approve a tool", argument: "[servers|preview SERVER|grant SERVER SHA256 REV confirm-reviewed [forward-access]|revoke SERVER REV confirm-revoke|calls|inspect OPERATION_ID]" },
   { name: "workspace", description: "Manage an explicit isolated Local checkout", argument: "[list|discover|create BRANCH [BASE]|new ID|bind ID|inspect ID|remove ID|reconcile ID]" },
   { name: "files", description: "Read the session's actual bound directory", argument: "[PATH]" },
@@ -113,6 +117,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "clone": {
+      const match = command.argument.match(/^([\s\S]+)\s+confirm-clone$/);
+      if (!match) throw new ClientError("clone_review", 'Use /clone {"repository":"URL","path":"ABSOLUTE_NEW_PATH"} confirm-clone after reviewing both values. Partial files are preserved.');
+      const input: unknown = JSON.parse(match[1]!);
+      if (!isRecord(input) || typeof input.repository !== "string" || typeof input.path !== "string" || Object.keys(input).some((key) => !["repository", "path"].includes(key))) throw new ClientError("clone_input", "Review exactly repository and path before cloning.");
+      const result = await sdk.projects.clone(input.repository, input.path, true);
+      return { kind: "text", text: JSON.stringify({ ...result, warning: "Independent Local clone job admitted, not completed. Inspect it in Settings / capability jobs or SDK jobs.wait; cancel preserves partial files. No model call or automatic retry." }, null, 2) };
+    }
     case "documents": return { kind: "text", text: JSON.stringify(await sdk.attachments.listDocuments(session.id, parse(DocumentListOptionsSchema, JSON.parse(command.argument || "{}"))), null, 2) };
     case "progress": return { kind: "text", text: JSON.stringify(await sdk.sessions.progress(session.id), null, 2) };
     case "activity": {
@@ -338,6 +350,30 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       }
       throw new ClientError("routing_command", "Use /kupo status, history or set POLICY_JSON. Configure the actual scoped pool before explicitly selecting /model kupo.");
     }
+    case "notification-sounds": {
+      const [action = "list", id, digest, confirmation, ...extra] = command.argument.split(/\s+/).filter(Boolean);
+      if (action === "list" && !id) return { kind: "text", text: JSON.stringify(sdk.notifications.list(), null, 2) };
+      if (action === "read" && id && !digest) return { kind: "text", text: JSON.stringify((await sdk.notifications.sound(id)).sound, null, 2) };
+      if (action === "remove" && id && digest && confirmation === "confirm-remove" && !extra.length) {
+        await sdk.notifications.removeSound(id, digest, true);
+        return { kind: "ok", message: "The unused sound's independent encrypted retention was removed. No alternative sound was selected." };
+      }
+      throw new ClientError("notification_sounds_command", "Use /notification-sounds list, read ID or remove ID SHA confirm-remove. Explicit file imports use CLI notification-sounds import FILE.wav --confirm-write or desktop Settings. No terminal audio playback.");
+    }
+    case "updates": {
+      const [action = "status", id, ...extra] = command.argument.split(/\s+/).filter(Boolean);
+      if (extra.length) throw new ClientError("update_command", "Use /updates status/history/read ID/check/cancel ID. Credentials and installation never enter chat.");
+      const result = !id && action === "status" ? await sdk.application.updates.status() : !id && action === "history" ? await sdk.application.updates.history() :
+        !id && action === "check" ? await sdk.application.updates.check() : id && action === "read" ? await sdk.application.updates.read(id) : id && action === "cancel" ? await sdk.application.updates.cancel(id) : null;
+      if (!result) throw new ClientError("update_command", "Use /updates status/history/read ID/check/cancel ID. This never grants an installer or provider permission.");
+      return { kind: "text", text: JSON.stringify(result, null, 2) };
+    }
+    case "runtime":
+      if (command.argument === "storage") return { kind: "text", text: JSON.stringify(await sdk.application.storage.status(), null, 2) };
+      if (command.argument.startsWith("storage-preview ")) return { kind: "text", text: JSON.stringify(await sdk.application.storage.preview(command.argument.slice("storage-preview ".length)), null, 2) };
+      if (command.argument && command.argument !== "power-retry") throw new ClientError("runtime_command", "Use /runtime or /runtime power-retry. This never resumes a model or changes an execution environment.");
+      if (command.argument === "power-retry") await sdk.runtime.retryPower();
+      return { kind: "text", text: JSON.stringify(await sdk.runtime.status(), null, 2) };
     case "profiles": return client === "cli" ? { kind: "text", text: JSON.stringify(await sdk.profiles.list(), null, 2) } : { kind: "profiles" };
     case "profile": {
       const [action, id, revision, ...name] = command.argument.split(/\s+/);
@@ -481,9 +517,11 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const [action, id, revision, ...text] = command.argument.split(/\s+/);
       const question = sdk.getState().snapshot!.questions.find((question) => question.id === session.pendingQuestionId && question.status === "open");
       if (!action) return { kind: "text", text: JSON.stringify({ question: question ?? null, diagnostic: "Only an actual answer endpoint resolves this state; heuristic attention or a queued prompt does not answer." }, null, 2) };
-      if (action !== "answer" || !id || !revision || !/^\d+$/.test(revision) || !text.length) throw new ClientError("question_answer", "Use /question, or explicitly /question answer ID REV TEXT. No answer or permission is inferred.");
+      if (!["answer", "other"].includes(action) || !id || !revision || !/^\d+$/.test(revision) || !text.length) throw new ClientError("question_answer", "Use /question, /question answer ID REV TEXT, or /question other ID REV TEXT. No answer or permission is inferred.");
       if (!question || question.id !== id) throw new ClientError("question_scope", "This is not the current question for this conversation.");
-      await sdk.questions.answer(id, text.join(" "), Number(revision)); return { kind: "ok", message: "Actual user answer recorded. Tool/Git permissions and policy were not changed." };
+      if (action === "other") await sdk.questions.answerOther(id, text.join(" "), Number(revision));
+      else await sdk.questions.answer(id, text.join(" "), Number(revision));
+      return { kind: "ok", message: "Actual user answer recorded. Tool/Git permissions and policy were not changed." };
     }
     case "project-removal": {
       if (!session.projectId) throw new ClientError("project_required", "Select a project for its explicit removal workflow. No previous project was inferred.");
@@ -562,6 +600,27 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "sandbox": {
       const [action = "", ...parts] = command.argument.split(/\s+/).filter(Boolean), [id, confirmation, extra] = parts;
       const text = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+      if (action === "setup") {
+        const status = await sdk.sandbox.setup.status();
+        if (!status.setup.supported) return text(status);
+        const value = await sdk.sandbox.setup.review(id);
+        return text({ ...value, confirmCommand: `/sandbox enable ${value.review.version} ${value.review.digest} ${value.review.settingsRevision} confirm-setup` });
+      }
+      if (action === "enable") {
+        const [version, digest, revision, confirm, ...remaining] = parts;
+        if (!version || !digest || !revision || !/^[0-9]+$/.test(revision) || confirm !== "confirm-setup" || remaining.length) {
+          throw new ClientError("sandbox_setup_review", "Use the exact /sandbox enable command from /sandbox setup after reviewing its version, package, worker, network and automatic-workspace policy.");
+        }
+        const admitted = await sdk.sandbox.setup.apply({ version, digest, settingsRevision: Number(revision) });
+        return text(await sdk.sandbox.setup.wait(admitted.id!));
+      }
+      if (action === "updates" && !id) { const admitted = await sdk.sandbox.setup.check(); return text(await sdk.sandbox.setup.wait(admitted.id!)); }
+      if (action === "prepare-version" && id && confirmation === "confirm-download" && !extra) {
+        const admitted = await sdk.sandbox.setup.prepare(id); return text(await sdk.sandbox.setup.wait(admitted.id!));
+      }
+      if (action === "cancel-setup" && id && confirmation === "confirm-stop" && !extra) {
+        await sdk.sandbox.setup.cancel(id); return text(await sdk.sandbox.setup.operation(id));
+      }
       if (!action && client === "desktop") return { kind: "panel", panel: "Sandbox" };
       if (!action || action === "status" && !id) {
         const snapshot = sdk.getState().snapshot!;
@@ -714,12 +773,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "panel", panel: "Terminal" };
     case "terminals": {
       const [action = "list", id, option, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
-      if (action === "global" && !id) {
-        const opened = await sdk.terminal.openGlobal();
+      if (action === "global") {
+        const root = command.argument.slice("global".length).trim();
+        const opened = root ? await sdk.terminal.openGlobal(root) : await sdk.terminal.openGlobal();
         return client === "desktop" ? { kind: "panel", panel: "Global Terminal" } : { kind: "text", text: JSON.stringify(opened, null, 2) };
       }
-      if (action === "open" && !id) {
-        const opened = await sdk.terminal.open(session.id);
+      if (action === "open") {
+        const root = command.argument.slice("open".length).trim() || undefined;
+        const opened = await sdk.terminal.open(session.id, 80, 24, undefined, root);
         return client === "desktop" ? { kind: "panel", panel: "Terminal" } : { kind: "text", text: JSON.stringify({ ...opened,
           terminal: sdk.getState().snapshot!.terminals.find((terminal) => terminal.id === opened.id), warning: "Explicit user console opened at its captured Local or SSH boundary. Input is not a composer command and never replays." }, null, 2) };
       }

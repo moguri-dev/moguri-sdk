@@ -1,18 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { Type } from "typebox";
 import {
   MoguriError, parse, type EventInput, type Project, type ProjectSettings, type SandboxCommand, type SandboxWorkspace,
   type SandboxWorkspacePreview, type Session, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
-import { captureNativeSource, materializeNativeStage, inspectNativeStage, assertNativeWorkspaceIdentity, type NativeSource } from "./native-staging.ts";
+import { captureNativeSource, captureNativeTree, materializeNativeStage, inspectNativeStage, assertNativeWorkspaceIdentity,
+  NATIVE_TREE_MAX_FILES, NATIVE_TREE_MAX_BYTES, NATIVE_TREE_FILE_BYTES, type NativeSource } from "./native-staging.ts";
 import { optionalGitBinding } from "./project-git.ts";
-import { folderPolicy } from "./project-policy.ts";
+import { folderPolicy, matchesFolder, type FolderPolicy } from "./project-policy.ts";
 import { digest, type EventStore } from "./store.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { SandboxRuntime } from "./sandbox-runtime.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import { readNativeCompletion } from "./native-evidence.ts";
+import { isProtectedProjectPath, scopedPath } from "./files.ts";
+import { ignoredPath } from "./ignore-rules.ts";
+import { repositoryIgnored } from "./repository-source.ts";
 
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" }), path = Type.String({ minLength: 1, maxLength: 4096 });
 const identity = Type.Object({ device: Type.String(), inode: Type.String() }, { additionalProperties: false });
@@ -23,10 +29,24 @@ const SourceSchema = Type.Object({
   }, { additionalProperties: false }), { maxItems: 200 }), digest: hash,
   policy: Type.Object({ denied: Type.Array(path), readOnly: Type.Array(path) }, { additionalProperties: false }),
 }, { additionalProperties: false });
-const InputSchema = Type.Object({
+const ReviewedInputSchema = Type.Object({
   format: Type.Literal("moguri-native-workspace"), version: Type.Literal(1), sessionId: Type.String(),
   source: Type.Union([SourceSchema, Type.Null()]), authorityDigest: hash, sourceHead: Type.Union([Type.String(), Type.Null()]),
 }, { additionalProperties: false });
+const TreeSourceSchema = Type.Object({
+  root: path, identity, capture: Type.Literal("tree-v1"),
+  files: Type.Array(Type.Object({ path, text: Type.Null(), digest: hash,
+    bytes: Type.Integer({ minimum: 0, maximum: NATIVE_TREE_FILE_BYTES }), mode: Type.Integer({ minimum: 0, maximum: 0o777 }),
+  }, { additionalProperties: false }), { maxItems: NATIVE_TREE_MAX_FILES }),
+  digest: hash, policy: SourceSchema.properties.policy,
+}, { additionalProperties: false });
+const AutomaticInputSchema = Type.Object({
+  format: Type.Literal("moguri-native-workspace"), version: Type.Literal(2), sessionId: Type.String(),
+  source: Type.Union([SourceSchema, TreeSourceSchema, Type.Null()]), workingSource: TreeSourceSchema,
+  authorityDigest: hash, sourceHead: Type.Union([Type.String(), Type.Null()]),
+  previousExecutionId: Type.Union([Type.String(), Type.Null()]),
+}, { additionalProperties: false });
+const InputSchema = Type.Union([ReviewedInputSchema, AutomaticInputSchema]);
 interface Host {
   snapshot(): Snapshot; project(session: Session): Project;
   settings(projectId: string | null): { revision: number; values: ProjectSettings };
@@ -36,6 +56,12 @@ export function nativeWorkspaceDocument(text: string) { return parse(InputSchema
 export class SandboxWorkspaces {
   private active = new Map<string, { abort: AbortController; task: Promise<unknown> }>();
   constructor(private readonly store: EventStore, private readonly stateDir: string, private readonly native: SandboxRuntime, private readonly host: Host) {}
+  get busy(): boolean { return this.active.size > 0; }
+  owns(sessionId: string): boolean { return this.active.has(sessionId); }
+  automatic(): boolean {
+    const management = this.host.snapshot().settings.values.sandboxManagement;
+    return Boolean(management?.enabled && management.automaticWorkspaces);
+  }
   private session(id: string): Session {
     const session = this.host.snapshot().sessions.find((value) => value.id === id);
     if (!session || session.status === "archived") throw new MoguriError("sandbox_session", "Select an existing unarchived session in this exact profile.", 409);
@@ -55,7 +81,7 @@ export class SandboxWorkspaces {
     if (session.turnId || this.active.has(session.id)) throw new MoguriError("sandbox_busy", "Stop/wait for the current owned turn or staging preparation before reviewing a new root.", 409);
     if (!session.projectId && paths.length) throw new MoguriError("project_required", "Project-free Sandbox chats have an empty private workspace. No host root was inferred.", 409);
     const selected = [...paths].sort(), project = session.projectId ? this.host.project(session) : null, policy = folderPolicy(this.host.settings(session.projectId).values);
-    const source: NativeSource | null = project ? await captureNativeSource(project.path, selected, policy, signal) : null;
+    const source = project ? await captureNativeSource(project.path, selected, policy, signal) : null;
     const sourceHead = project ? (await optionalGitBinding(project.path, signal))?.head ?? null : null;
     if (this.authority(this.session(sessionId)) !== authorityDigest || this.session(sessionId).sandboxWorkspaceId !== session.sandboxWorkspaceId) throw new MoguriError("sandbox_stale", "Source/policy/binding changed during native source review. No staged root or model call was created.", 409);
     const input = { format: "moguri-native-workspace" as const, version: 1 as const, sessionId, source, authorityDigest, sourceHead };
@@ -112,6 +138,108 @@ export class SandboxWorkspaces {
   }
   private event(workspace: SandboxWorkspace): EventInput {
     return { event_type: "sandbox.workspace_recorded", profile_id: this.host.snapshot().profileId, project_id: workspace.projectId, session_id: workspace.sessionId, payload: { workspace } };
+  }
+  async prepareAutomatic(sessionId: string, turnId: string, requested: AbortSignal) {
+    const session = this.session(sessionId);
+    if (!this.automatic()) return this.assert(session);
+    if (this.active.has(sessionId)) throw new MoguriError("sandbox_busy", "This session already owns native workspace preparation.", 409);
+    const abort = new AbortController(), signal = AbortSignal.any([requested, abort.signal]);
+    const task = this.prepareAutomaticOnce(session, turnId, signal).finally(() => this.active.delete(sessionId));
+    this.active.set(sessionId, { abort, task });
+    return task;
+  }
+  private async prepareAutomaticOnce(session: Session, turnId: string, signal: AbortSignal) {
+    const authorityDigest = this.authority(session), config = this.native.assertReady();
+    const current = () => {
+      signal.throwIfAborted();
+      const actual = this.session(session.id);
+      if (actual.turnId !== turnId || !this.automatic() || this.authority(actual) !== authorityDigest) {
+        throw new MoguriError("sandbox_stale", "Owning turn, workspace or policy changed during automatic preparation. No worker or model was admitted.", 409);
+      }
+      return actual;
+    };
+    current();
+    const previous = (this.host.snapshot().sandboxWorkspaces ?? []).find((value) => value.id === session.sandboxWorkspaceId);
+    if (previous?.stage && previous.status === "ready" && previous.authorityDigest === authorityDigest) {
+      try { await inspectNativeStage(previous.stage); current(); return { ...previous, stage: previous.stage }; }
+      catch (error) { if (!(error instanceof MoguriError && error.code === "native_stage")) throw error; }
+    }
+    const executions = (this.host.snapshot().sandboxExecutions ?? []).filter((value) => value.workspaceId === previous?.id);
+    const last = executions.at(-1);
+    if (last && (last.cleanup !== "owned-guest-stopped" || !last.resultDigest || !last.nativeSessionId || !last.planDigest || !last.signerFingerprint)) {
+      throw new MoguriError("sandbox_workspace", "The original native workspace has unconfirmed retained work or cleanup. Inspect that original result; automatic preparation cannot discard or replay it.", 409);
+    }
+    if (previous && (previous.projectId !== session.projectId || previous.sourceWorkspaceId !== session.workspaceId)) {
+      throw new MoguriError("sandbox_workspace", "The original private workspace belongs to another actual source binding. Retained work was not discarded or moved.", 409);
+    }
+    const project = session.projectId ? this.host.project(session) : null;
+    const id = randomUUID(), preparation = { version: 1 as const, kind: "automatic" as const, turnId };
+    const workspace: SandboxWorkspace = { id, sessionId: session.id, projectId: session.projectId, sourceWorkspaceId: session.workspaceId,
+      sourceRoot: project?.path ?? null, sourceHead: null, stage: null, authorityDigest, configDigest: frameDigest(config),
+      revision: 0, createdAt: new Date().toISOString(), commandId: turnId,
+      commandDigest: frameDigest(["moguri-native-automatic-v1", this.host.snapshot().profileId, session.id, turnId, authorityDigest]),
+      preparation, status: "preparing", diagnostic: null,
+      inputDigest: this.store.putBlob(JSON.stringify({ format: "moguri-native-preparation-intent", version: 1, sessionId: session.id, turnId,
+        previousExecutionId: last?.id ?? null, authorityDigest })) };
+    this.host.commit([this.event(workspace)]);
+    try {
+      const policy = folderPolicy(this.host.settings(session.projectId).values);
+      let source: ReturnType<typeof nativeWorkspaceDocument>["source"], sourceHead: string | null, workingSource: NativeSource;
+      if (last) {
+        const original = this.document(last);
+        if (original.source?.root !== (project?.path ?? undefined) && !(original.source === null && project === null)) {
+          throw new MoguriError("sandbox_workspace", "Retained native data has a different actual source root. No checkout or previous-root substitution.", 409);
+        }
+        source = original.source; sourceHead = original.sourceHead;
+        workingSource = await this.restoreAfter(last, id, policy, signal);
+      } else if (project) {
+        source = parse(TreeSourceSchema, await captureNativeTree(project.path, policy, signal)); workingSource = source;
+        sourceHead = (await optionalGitBinding(project.path, signal))?.head ?? null;
+      } else {
+        source = null; sourceHead = null;
+        const empty = join(this.stateDir, "native-inputs", id); await mkdir(empty, { recursive: true, mode: 0o700 });
+        workingSource = await captureNativeTree(await realpath(empty), { denied: [], readOnly: [] }, signal);
+      }
+      current();
+      const input = parse(AutomaticInputSchema, { format: "moguri-native-workspace", version: 2, sessionId: session.id,
+        source, workingSource, authorityDigest, sourceHead, previousExecutionId: last?.id ?? null });
+      const parent = join(this.stateDir, "native-stage-root"); await mkdir(parent, { recursive: true, mode: 0o700 });
+      const stage = await materializeNativeStage(await realpath(parent), { profileId: this.host.snapshot().profileId, sessionId: session.id, turnId: id }, workingSource, signal);
+      current();
+      const ready: SandboxWorkspace = { ...workspace, sourceHead, inputDigest: this.store.putBlob(JSON.stringify(input)), stage,
+        status: "ready", revision: 1 };
+      this.host.commit([this.event(ready), { event_type: "session.sandbox_bound", profile_id: this.host.snapshot().profileId,
+        project_id: session.projectId, session_id: session.id, payload: { workspaceId: ready.id } }]);
+      return { ...ready, stage };
+    } catch (error) {
+      this.host.commit([this.event({ ...workspace, status: "partial", revision: 1, diagnostic: signal.aborted ?
+        "Automatic private preparation stopped before worker admission. Original source and retained private intent were preserved." :
+        error instanceof MoguriError ? error.message : "Automatic private preparation failed. Source and partial owned files were retained; nothing was replayed." })]);
+      throw error;
+    }
+  }
+  private async restoreAfter(execution: import("../../../packages/protocol/src/index.ts").SandboxExecution, id: string, policy: FolderPolicy, signal: AbortSignal) {
+    const evidence = await readNativeCompletion({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: execution.nativeSessionId!,
+      workspace: execution.stage.workspace, image: execution.image, command: { program: execution.command[0]!, arguments: execution.command.slice(1) },
+      createdAfter: execution.createdAfter, createdBefore: execution.createdBefore, planDigest: execution.planDigest!, signerFingerprint: execution.signerFingerprint! });
+    signal.throwIfAborted();
+    const root = join(this.stateDir, "native-inputs", id); await mkdir(root, { recursive: true, mode: 0o700 });
+    const entries = evidence.entries.filter((entry) => entry.kind.type !== "directory" && !isProtectedProjectPath(entry.path) &&
+      !matchesFolder(entry.path, policy.denied) && !ignoredPath(root, join(root, entry.path), false, []))
+      .sort((a, b) => Number(b.path.endsWith(".gitignore")) - Number(a.path.endsWith(".gitignore")) || a.path.localeCompare(b.path));
+    const ignores = new Map<string, import("./ignore-rules.ts").IgnoreScope>();
+    let bytes = 0, files = 0;
+    for (const entry of entries) {
+      signal.throwIfAborted();
+      if (await repositoryIgnored(root, entry.path, ignores)) continue;
+      if (!["regular", "hardlink"].includes(String(entry.kind.type))) throw new MoguriError("sandbox_workspace", "Retained native work contains an unsupported non-regular path. Inspect the original result; no data was silently discarded.", 409);
+      const file = await evidence.read(entry.path, NATIVE_TREE_FILE_BYTES);
+      if (++files > NATIVE_TREE_MAX_FILES || (bytes += file.content.length) > NATIVE_TREE_MAX_BYTES) throw new MoguriError("sandbox_workspace", "Complete retained native work exceeds the automatic snapshot boundary. No subset or fresh checkout was substituted.", 409);
+      const target = join(root, entry.path); await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+      await scopedPath(root, entry.path, true); await writeFile(target, file.content, { flag: "wx", mode: 0o600 | (entry.mode & 0o100) });
+      if (entry.path.endsWith(".gitignore")) ignores.clear();
+    }
+    return captureNativeTree(await realpath(root), policy, signal);
   }
   current(session: Session): SandboxWorkspace & { stage: NonNullable<SandboxWorkspace["stage"]> } {
     const workspace = (this.host.snapshot().sandboxWorkspaces ?? []).find((value) => value.id === session.sandboxWorkspaceId);

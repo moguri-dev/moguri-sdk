@@ -53,10 +53,12 @@ GitHub/Linear actions retain their real reviewed operation provenance. Session
 actions with no owning turn remain separately labeled, never guessed into the
 nearest chat turn.
 
-Protocol/schema 45 is additive. The SQL layout is unchanged and the version
-upgrade is transactional; schema-44 ciphertext, keys, receipts and original
-operation coverage stay intact. New skill events cannot be relabeled as older
-history. Recovery and migration fixtures use generated data only.
+This slice originated on desktop protocol/schema 45 and is now included in
+protocol 53's [lineage-aware convergence](../sdk.md#retained-state-upgrades).
+The SQL layout is unchanged; original ciphertext, keys, receipts and operation
+coverage stay intact. New skill events cannot be relabeled as older history or
+main-line versions that did not contain them. Recovery and migration fixtures
+use generated data only.
 
 ## Truthful presentation
 

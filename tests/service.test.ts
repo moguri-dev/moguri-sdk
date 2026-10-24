@@ -57,6 +57,10 @@ test("two clients share durable drafts, queue races, idempotency and cancellatio
     assert.equal(race.filter((result) => result.status === "fulfilled").length, 1);
     assert.equal(race.filter((result) => result.status === "rejected").length, 1);
     await first.command({ type: "session.stop", sessionId: fixture.sessionId });
+    await fixture.terminal();
+    assert.equal(fixture.session().queue.length, 1);
+    assert.equal(fixture.session().queue[0]?.held, true);
+    await second.command({ type: "session.resume", sessionId: fixture.sessionId });
     await waitFor(() => fixture.session().status === "completed" && fixture.session().queue.length === 0);
     const events = fixture.service.controller.events(0);
     assert.ok(events.some((event) => event.event_type === "turn.stop_requested"));

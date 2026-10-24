@@ -316,7 +316,7 @@ test("schema-44 upgrades preserve existing ciphertext, receipts and scoped activ
     const sdk = await new MoguriSdk(fixture.service.connection).ready();
     try { await sdk.sessions.rename(fixture.sessionId, "Generated preserved activity"); } finally { sdk.disconnect(); }
     const before = retainedCiphertextRows(fixture.service.store.db), database = fixture.service.store.path;
-    await writeLegacyState(fixture.service, 44);
+    await writeLegacyState(fixture.service, 44, "desktop");
     store = new EventStore(database, fixture.retentionKey);
     assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(retainedCiphertextRows(store.db), before);

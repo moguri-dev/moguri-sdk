@@ -219,6 +219,23 @@ execution, Linux/Rust acceptance or complete descendant containment.
 - Check the latest policy and authenticated backend readiness before each new turn. No model request starts for a new turn until its required sandbox is ready. Guest loss interrupts that work and preserves failure or partial outcomes; no host retry is allowed. Supervision and teardown must account for both the SendBox process and guest workload, rather than treating a CLI exit as proof of complete cleanup.
 - Preserve the same typed commands, events, budgets, Git policies, and cancellation semantics across all envs. In Sandbox, terminals and agent file/tool operations stay within the approved guest workspace and brokers. Remote is off-machine execution, not an assertion of SendBox controls or protection of unrelated data on that remote host.
 
+**Managed desktop setup direction.** The owner now requires bundled SendBox
+0.2.3 and a compatible pinned Linux worker/runtime/dependency image, reviewed
+in-app setup and public-release update checks, automatic private workspaces
+without per-turn text previews, and selected-provider endpoint/CNAME resolution.
+[Managed Sandbox](managed-sandbox.md) records the prerequisite measurements,
+root-owned no-script installer requirement and exact data/egress authority.
+This supersedes the developer-tooling setup UX, not the root-ownership,
+private staging, no-replay, permission or budget boundaries. Legacy manual
+configurations are not silently granted the new managed policy.
+
+Explicitly reviewed `*.domain.com` tool rules use the existing released native
+matcher, qualified against the real 0.2.3 guest/proxy. Exact entries remain exact,
+the apex is separate, and actual provider endpoints/CNAME provenance stay exact.
+This adds no automatic wildcard, new dependency or release pin. The separately
+developing upstream GitHub Meta delegation is not activated by this adapter
+change; it requires a newly qualified signed release and effective-scope review.
+
 ## D11. kupo synthetic model and routing
 
 **Decision.** Users can select a fixed model or **kupo**. kupo is Moguri's own synthetic auto model: a classifier and versioned orchestration policy that choose among configured local and hosted models. It follows HydraFusion's public single, cascade, and independent critique/revision patterns, without assuming access to GitHub's internal implementation or a standalone HydraFusion API. [H1]
@@ -433,6 +450,9 @@ Both TUI and desktop import that SDK. SDK capabilities own API access and domain
 semantics; Electron adds only native affordances and presentation. Protocol 2
 and transactional database migration 2 extend existing state without reset.
 The [SDK platform contract](sdk-platform.md) records validation and gates.
+The [settings platform contract](settings-platform.md) extends this boundary
+with searchable grouped settings, profile-wide left navigation and reviewed
+native preferences. Desktop-only affordances do not become a second authority.
 
 User-viewable/editable system instructions have shared defaults and reset.
 Deterministic permissions cannot be weakened through prompt text. Repository
