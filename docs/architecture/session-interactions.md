@@ -37,6 +37,8 @@ The existing explicitly opened workspace-plan-file editor and its SDK/CLI/TUI
 save/retention transports remain separate from this model task checklist.
 
 Every model clarification offers Other with an explicit text submission.
+Read-only side chats render the same question card and exact answer endpoint;
+their custom-answer edits cannot switch side owners or consume the parent draft.
 `question.answer` carries an optional `other: true` and retains that actual-user
 choice. Ordinary strict-choice answers and automatic technical-choice delegation
 keep their original offered-choice checks. Other cannot impersonate a model
@@ -103,3 +105,37 @@ registry integrity changes and no forced major upgrade or audit bypass.
 `npm ci` restored the exact lock and the root audit reported zero vulnerabilities.
 The native interaction probe checks the actual running Electron version against
 the installed package, including when pointed at the packaged executable.
+
+## Final qualification
+
+All final runs below used the patched dependency lock, current protocol 51 and
+generated fixtures. No source or distribution files were rebuilt while a suite
+was running.
+
+| Exact check | Result |
+| --- | --- |
+| Full serialized unit/native suite | 1,167 passed, nine gated skips, zero failures; 1,176 total / 976,994.90 ms |
+| Complete hidden Electron suite | 104 passed, one native-Sandbox gate, zero failures; 105 total / 3.4 minutes |
+| Nine interaction and four shutdown cases in the actual newly packaged app | 13 passed / 16.6 seconds; actual Electron 44.9.3 verified |
+| Packed external root, React, Node and MCP entrypoints, approved install, shared SDK/CLI/TUI and installed worker | Passed; includes new ordered-session, explicit Other and task-plan types |
+| Fresh root and external-consumer audits | Zero vulnerabilities |
+| Actual ZIP/manifest through bounded production update consumer | Passed, 306,926,945 archive bytes / 94,215.92 ms; no app execution or quarantine bypass |
+| Actual read-only mounted DMG | Passed; real app and Applications shortcut, no app execution |
+
+Fault/race probes retain exact migration ciphertext and receipts, reject stale
+sibling sets, preserve independent documents, pause undispatched work through
+stop/restart and hold the clock until a delayed queue acknowledgement. Native
+drag/drop and Shift+F10/arrow/Escape exercise real menus and focus. Compact
+controls/popovers do not overlap, and a held first-console admission cannot
+race another Open into a duplicate shell. Existing Local/SSH workspace-file
+save/stop and dirty-binding retention remain qualified behind the separate
+workspace-file editor.
+The final side-question follow-up changed only desktop rendering/answer wiring;
+the complete Electron, packed-consumer and actual-package checks above were
+repeated afterward. Service/protocol/TUI code and the patched lock remain the
+same as the complete unit/native run.
+
+The existing dependency-deprecation, OpenTUI experimental FFI and lazy Ghostty
+chunk-size warnings remain. Packaging still reports the optional missing
+`.icon` format while `.icns` is present; the development bundle is ad-hoc signed,
+not an Apple-notarized release or proof of Linux readiness.
