@@ -66,9 +66,22 @@ export class SandboxSetup {
       console.error("Bundled Sandbox unavailable:", error instanceof MoguriError ? error.code : "sandbox_distribution");
       return;
     }
-    if (this.management().enabled && !this.host.busy()) {
+    let selected: Definition | undefined = this.bundled;
+    if (this.management().enabled && this.management().version !== selected.distribution.vendor.version) {
+      try { selected = await this.definition(this.management().version, AbortSignal.timeout(30_000)); }
+      catch (error) {
+        selected = undefined;
+        this.diagnostic = error instanceof MoguriError ? error.message : "The exact configured distribution is unavailable. No bundled-version or path fallback was selected.";
+      }
+    }
+    const lastAdmission = [...this.records.values()].findLast((operation) => ["apply", "qualify"].includes(operation.kind));
+    const accepted = [...this.records.values()].some((operation) => operation.kind === "apply" && operation.status === "completed" &&
+      operation.acceptance && operation.distributionDigest === selected?.digest && operation.selectedVersion === this.management().version);
+    if (this.management().enabled && selected && (!accepted || lastAdmission?.status === "partial")) {
+      this.diagnostic = "The original managed setup/qualification has not completed or remains unconfirmed. Inspect its retained operation and explicitly review setup again; no new guest or installer was started automatically.";
+    } else if (this.management().enabled && selected && !this.host.busy()) {
       const configured = this.host.snapshot().settings.values.sandbox;
-      if (configured.image === this.bundled.distribution.worker.image && configured.qualification?.workerDigest === this.bundled.distribution.worker.workerDigest) {
+      if (configured.image === selected.distribution.worker.image && configured.qualification?.workerDigest === selected.distribution.worker.workerDigest) {
         const id = `system-${randomUUID()}`, operation = this.start("qualify", this.management().version, id,
           frameDigest(["moguri-native-startup-qualification-v1", this.store.profileId, id]), true);
         this.own(operation, async (signal) => {
@@ -110,7 +123,11 @@ export class SandboxSetup {
     if (version === this.bundled.distribution.vendor.version) return readSandboxDistribution(this.bundled.root, signal);
     const prepared = [...this.records.values()].findLast((record) => record.kind === "prepare" && record.selectedVersion === version && record.status === "review" && record.sourceDirectory);
     if (!prepared?.sourceDirectory) throw new MoguriError("sandbox_release_prepare", "Prepare this exact public version for review first. The selected version was not replaced by the bundled or latest release.", 409);
-    return readSandboxDistribution(prepared.sourceDirectory, signal);
+    const definition = await readSandboxDistribution(prepared.sourceDirectory, signal);
+    if (definition.distribution.worker.payloadDigest !== this.bundled.distribution.worker.payloadDigest) {
+      throw new MoguriError("sandbox_distribution", "This prepared version belongs to an earlier Moguri worker/dependency build. Prepare it again with the current bundled worker for a new exact review; no previous image was substituted.", 409);
+    }
+    return definition;
   }
   async review(version: string, signal = AbortSignal.timeout(30_000)): Promise<SandboxSetupReview> {
     const definition = await this.definition(version, signal), state = this.host.snapshot(), existing = state.settings.values.sandbox;

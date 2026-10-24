@@ -5,10 +5,10 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { Header } from "tar";
 import { test } from "node:test";
-import { MoguriSdk, type SandboxSetupOperation } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, defaultSandboxManagement, type SandboxSetupOperation } from "../packages/sdk/src/index.ts";
 import { generatedSandboxDistribution } from "./fixtures/sandbox-distribution.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { readSandboxDistribution } from "../apps/service/src/sandbox-distribution.ts";
+import { readSandboxDistribution, distributionConfiguration } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxInstallerScript } from "../apps/service/src/sandbox-installer.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
 
@@ -168,6 +168,10 @@ test("recovered setup operations are partial and never replay an installer or im
   const generated = await generatedSandboxDistribution();
   const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false } } } });
   try {
+    const live = await new MoguriSdk(fixture.service.connection).ready(), current = live.settings.get()!;
+    await live.settings.update({ ...current.values, sandbox: distributionConfiguration(generated.distribution),
+      sandboxManagement: { ...defaultSandboxManagement(), enabled: true } }, current.revision);
+    live.disconnect();
     const now = new Date().toISOString();
     const operation: SandboxSetupOperation = { version: 1, id: "generated-original", profileId: "default", revision: 0,
       kind: "apply", status: "installing", commandId: "generated-original-command", commandDigest: "1".repeat(64), automatic: false,
@@ -184,6 +188,8 @@ test("recovered setup operations are partial and never replay an installer or im
       const sdk = await new MoguriSdk(reopened.connection).ready();
       const result = await sdk.sandbox.setup.operation(operation.id);
       assert.equal(result.operation.status, "partial"); assert.equal(result.operation.revision, 1); assert.equal(installs, 0);
+      assert.equal((await sdk.sandbox.setup.status()).setup.operation?.id, operation.id);
+      assert.equal(reopened.store.events().filter((event) => event.event_type === "sandbox.setup_recorded" && event.payload.operation.kind === "qualify").length, 0);
       sdk.disconnect();
     } finally { await reopened.close(); }
   } finally { await fixture.close(); await generated.close(); }
