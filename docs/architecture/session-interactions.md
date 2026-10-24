@@ -18,7 +18,12 @@ owning project or Chats group detaches. Keyboard menu actions provide the same
 operations. Other profiles and projects cannot be adopted by a drag payload.
 
 Session actions open from right-click, a macOS two-finger click, Context Menu or
-Shift+F10. Ordinary click opens the chat. Archive is not a chat-header action.
+Shift+F10. Ordinary click opens the chat; double-click opens the existing Rename
+dialog for project and project-free sessions. The name is focused and selected
+after the modal opens, and Escape or Cancel leaves it unchanged. Rename uses the
+same SDK command and service-owned metadata event as the context menu, without
+changing drafts, workspaces, controls or permissions. No schema or migration is
+added. Archive is not a chat-header action.
 Routine archive/delete confirmation preferences are profile-owned settings, not
 permissions, automatic deletion grants or a way around project/artifact review.
 Failure to save a requested preference prevents the action; failed resource
@@ -95,6 +100,23 @@ matrix FAIL/unqualified. These are the baseline's separate gates, not capabiliti
 silently enabled by this UI slice. Later qualified contracts are not replaced by
 those initial-checkpoint labels. No personal login, shell, clipboard, microphone
 or paid inference was a prerequisite fixture.
+
+## Double-click rename prerequisites and qualification
+
+The 2026-10-24 prerequisite rerun passed all six available generated baseline
+groups before implementation: cancellation 31.77 ms, SQLite append p95 0.053 ms
+and rebuild 0.90 ms, owned PTY cancellation 151.85 ms with zero survivors, TUI
+updates 16.98 ms, hidden Electron cold start 179.87 ms / 443.98 MiB /
+11.43 ms per scroll frame, and 2,000-file search/Git 1.01/8.40 ms.
+The baseline's separate unavailable live/native/release groups remain
+FAIL/unqualified, not newly enabled by a metadata shortcut.
+
+The new generated desktop regression fails before the handler exists and
+passes for both project and project-free sessions, actual typed replacement,
+Escape cancellation/focus return, keyboard Rename, shared SDK observation and
+reload persistence without inference. Type checks and production build pass;
+the shared session/interaction gate passes 15 cases, and the hidden navigation,
+drag, profile, terminal and rename gate passes 21 cases in 36.8 seconds.
 
 ## Dependency security follow-up
 
