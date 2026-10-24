@@ -229,6 +229,13 @@ This supersedes the developer-tooling setup UX, not the root-ownership,
 private staging, no-replay, permission or budget boundaries. Legacy manual
 configurations are not silently granted the new managed policy.
 
+Explicitly reviewed `*.domain.com` tool rules use the existing released native
+matcher, qualified against the real 0.2.3 guest/proxy. Exact entries remain exact,
+the apex is separate, and actual provider endpoints/CNAME provenance stay exact.
+This adds no automatic wildcard, new dependency or release pin. The separately
+developing upstream GitHub Meta delegation is not activated by this adapter
+change; it requires a newly qualified signed release and effective-scope review.
+
 ## D11. kupo synthetic model and routing
 
 **Decision.** Users can select a fixed model or **kupo**. kupo is Moguri's own synthetic auto model: a classifier and versioned orchestration policy that choose among configured local and hosted models. It follows HydraFusion's public single, cascade, and independent critique/revision patterns, without assuming access to GitHub's internal implementation or a standalone HydraFusion API. [H1]

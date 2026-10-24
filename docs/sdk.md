@@ -230,7 +230,12 @@ Explicit advanced `sandbox.probe()` verifies the configured root-owned release,
 immutable workload and real guest controls/cleanup. Configure `settings.sandbox`
 only with independently reviewed executable/bundle/key paths, SHA-256 pins,
 release/trust-root/sequence, workload/worker/bridge digests, resource caps and
-exact DNS hosts. `configPath` must be null to select the managed deny-first
+canonical DNS hosts or explicit `*.domain.com` tool rules. Wildcards match
+subdomains at any depth, not the apex or suffix lookalikes; exact entries remain
+exact. They never substitute for actual provider URL/CNAME admission or grant
+provider credentials. The captured scope retains literal reviewed rules alongside
+exact provider/alias hosts, with a complete 32-entry limit.
+`configPath` must be null to select the managed deny-first
 policy; legacy policies are never silently replaced. Copilot access is opt-in,
 with a separate actual cold guest networking check. An observed alias is not
 a grant. Automatic aliases require the separately approved managed policy.

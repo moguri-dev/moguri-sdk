@@ -5,15 +5,18 @@ import { canonicalNetworkHostname } from "./public-network.ts";
 export type QualifiedSandboxConfiguration = SandboxConfiguration & {
   image: string; bundlePath: string; trustRootPath: string; qualification: SandboxQualification;
 };
+export function canonicalSandboxDomainRule(value: string): boolean {
+  return value.length <= 253 && canonicalNetworkHostname(value.startsWith("*.") ? value.slice(2) : value);
+}
 export function sandboxConfiguration(value: SandboxConfiguration): QualifiedSandboxConfiguration {
   const config = structuredClone(parse(SandboxConfigurationSchema, value));
   if (!config.qualification || !config.image || !config.bundlePath || !config.trustRootPath) throw new MoguriError("sandbox_setup", "Explicitly configure and review exact SendBox 0.2.3 release/image qualification before native execution. No Local fallback.", 409);
-  if (config.configPath !== null) throw new MoguriError("sandbox_policy", "Legacy external policies are not silently reused or replaced. Select the managed deny-by-default native policy explicitly, with configPath null and exact reviewed hosts.", 409);
+  if (config.configPath !== null) throw new MoguriError("sandbox_policy", "Legacy external policies are not silently reused or replaced. Select the managed deny-by-default native policy explicitly, with configPath null and reviewed domain rules.", 409);
   for (const path of [config.executable, config.bundlePath, config.trustRootPath]) {
     if (!isAbsolute(path) || /[\0\r\n]/.test(path)) throw new MoguriError("sandbox_path", "Select canonical absolute installed release artifacts explicitly; no PATH or previous-installation fallback.", 409);
   }
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:-]*@sha256:[a-f0-9]{64}$/.test(config.image)) throw new MoguriError("sandbox_image", "Native execution requires one exact digest-pinned workload image, not a mutable tag.", 409);
-  if (config.qualification.allowedDomains.some((host) => !canonicalNetworkHostname(host))) throw new MoguriError("sandbox_domains", "Review exact canonical DNS hosts only. Wildcards, IP/private-address grants, ports, URLs and unapproved aliases are not allowed.", 409);
+  if (config.qualification.allowedDomains.some((host) => !canonicalSandboxDomainRule(host))) throw new MoguriError("sandbox_domains", "Review canonical DNS hosts or explicit *.domain.com tool rules. Bare wildcards, IP/private-address grants, ports and URLs are not allowed.", 409);
   return { ...config, image: config.image, bundlePath: config.bundlePath, trustRootPath: config.trustRootPath, qualification: config.qualification };
 }
 export function sandboxProviderDestination(value: SandboxConfiguration, baseUrl: string): URL {

@@ -1,6 +1,6 @@
 import { Resolver, lookup } from "node:dns/promises";
 import { MoguriError, type SandboxConfiguration, type SandboxExecution, type SandboxNetworkScope } from "../../../packages/protocol/src/index.ts";
-import { sandboxConfiguration, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
+import { canonicalSandboxDomainRule, sandboxConfiguration, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
 import { canonicalNetworkHostname, publicAddress } from "./public-network.ts";
 import { frameDigest } from "./worker-wire.ts";
 
@@ -69,7 +69,7 @@ Promise<{ configuration: QualifiedSandboxConfiguration; scope: SandboxNetworkSco
       signal.throwIfAborted();
       if (!addresses.length || addresses.some((address) => !publicAddress(address))) throw new MoguriError("sandbox_dns", "The selected provider or alias resolves to private, metadata or reserved addresses. No native access was authorized.", 403);
       allowed.add(current);
-      if (allowed.size > 32) throw new MoguriError("sandbox_dns", "The complete reviewed tool/provider DNS scope exceeds 32 exact hosts. No destination was silently dropped.", 409);
+      if (allowed.size > 32) throw new MoguriError("sandbox_dns", "The complete reviewed tool/provider DNS scope exceeds 32 domain rules and exact provider hosts. No destination was silently dropped.", 409);
       const targets = await dns.aliases(current, signal);
       signal.throwIfAborted();
       if (targets.length > 1) throw new MoguriError("sandbox_dns", "The provider DNS response has ambiguous aliases. No arbitrary target was selected.", 409);
@@ -83,7 +83,7 @@ Promise<{ configuration: QualifiedSandboxConfiguration; scope: SandboxNetworkSco
   return { configuration: { ...config, qualification: { ...config.qualification, allowedDomains } },
     scope: { version: 1, reviewedConfigDigest: frameDigest(config), providerUrls: origins, providerHosts, aliases, allowedDomains, resolvedAt: new Date().toISOString() } };
 }
-export function assertSandboxNetwork(execution: SandboxExecution, value: SandboxConfiguration): void {
+export function assertSandboxNetwork(execution: Pick<SandboxExecution, "config" | "configDigest" | "networkScope">, value: SandboxConfiguration): void {
   const base = sandboxConfiguration(value), scope = execution.networkScope;
   if (!scope) {
     if (execution.configDigest !== frameDigest(base)) throw new MoguriError("sandbox_changed", "The original exact native configuration changed. No new access was sent.", 409);
@@ -94,7 +94,9 @@ export function assertSandboxNetwork(execution: SandboxExecution, value: Sandbox
   expected.qualification.allowedDomains = [...base.qualification.allowedDomains];
   const hosts = [...new Set([...base.qualification.allowedDomains, ...scope.providerHosts, ...scope.aliases.flatMap((alias) => alias.targets)])].sort();
   if (scope.version !== 1 || scope.reviewedConfigDigest !== frameDigest(base) || frameDigest(expected) !== frameDigest(base) ||
-    execution.configDigest !== frameDigest(execution.config) || hosts.length > 32 || hosts.some((host) => !canonicalNetworkHostname(host)) ||
+    execution.configDigest !== frameDigest(execution.config) || hosts.length > 32 || hosts.some((host) => !canonicalSandboxDomainRule(host)) ||
+    scope.providerHosts.some((host) => !canonicalNetworkHostname(host)) ||
+    scope.aliases.some((alias) => !canonicalNetworkHostname(alias.host) || alias.targets.some((host) => !canonicalNetworkHostname(host))) ||
     JSON.stringify(hosts) !== JSON.stringify(scope.allowedDomains) || JSON.stringify(hosts) !== JSON.stringify(execution.config.qualification?.allowedDomains) ||
     scope.providerUrls.some((value) => !scope.providerHosts.includes(providerUrl(value).hostname))) {
     throw new MoguriError("sandbox_changed", "The captured provider/DNS scope differs from its exact reviewed native base. No later grant, credential or fallback was accepted.", 409);

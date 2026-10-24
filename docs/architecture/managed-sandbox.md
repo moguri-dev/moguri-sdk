@@ -118,9 +118,9 @@ actual transport. Controller loopback endpoints are not guest endpoints.
 Managed setup explicitly authorizes automatic selected-provider endpoints and
 their bounded public DNS CNAME chains. Resolve only actual admitted provider
 resources, never names supplied by model text. Reject malformed credentials,
-wildcards, IP/private/metadata destinations, cycles and excessive chains; do not
-override a deny policy. Capture the effective exact scope with its original
-execution and recheck the provider before handing over any credential. A changed
+wildcards in provider URLs/aliases, IP/private/metadata destinations, cycles and
+excessive chains; do not override a deny policy. Capture the effective exact scope
+with its original execution and recheck the provider before handing over any credential. A changed
 endpoint/alias during a turn cannot launch another guest, replay a paid role or
 silently broaden its already installed policy.
 
@@ -153,6 +153,34 @@ stale/changed source and binary bounds, refused aliases/private addresses,
 actual allowed GitHub/denied Google egress, wrong artifact/package identity,
 cancelled/lost install, no replay, root-owned guest checks and packaged cold
 setup with generated fixtures. Actual administrator interaction stays manual.
+
+## Explicit wildcard prerequisite
+
+Before changing Moguri's exact-host adapter, the actual pinned SendBox 0.2.3
+guest/proxy was qualified with only `*.github.com` and `*.githubcopilot.com`
+tool rules. In **4,586.82 ms**, the anonymous GitHub API returned HTTP 200,
+the nested `api.individual.githubcopilot.com` resource returned HTTP 400, and
+`github.com`, `githubcopilot.com`, `notgithub.com` and `google.com` each returned
+policy-denied SOCKS reply 2. Signed completion, native process controls and
+original owned VM absence passed on the same immutable worker image below.
+No credential, inference, administrator prompt or personal-profile change was used.
+
+The first attempt used the page reader's Accept header and failed its
+application response check; its original signed owner and guest absence were
+verified separately. The successful probe uses the API's documented media type,
+not a wider network rule. Run the prerequisite with `--wildcards` on
+`scripts/managed-sandbox-spike.mjs`; this qualifies the released wildcard
+primitive, not the separately developing GitHub Meta expansion.
+
+Moguri forwards an explicitly reviewed tool rule such as `*.domain.com` without
+expanding it into an apex, a host list or another wildcard. Exact entries remain
+exact. The native runtime enforces DNS-label boundaries and private-address
+protections. Actual provider URLs and CNAME hosts stay exact, including when a
+matching tool wildcard is present; they cannot be relabeled as wildcard provenance
+or inherit credential approval. Captured settings/rules and their review digest
+remain unchanged through reopen, and revocation still invalidates admission.
+The existing typed string fields/events are sufficient: no new durable shape,
+migration, dependency, worker loop or release pin is introduced.
 
 ## Integrated qualification
 

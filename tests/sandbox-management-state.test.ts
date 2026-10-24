@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { defaultSettings, PROTOCOL_VERSION, projectEvents } from "../packages/protocol/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { extractSandboxRelease } from "../apps/service/src/sandbox-distribution.ts";
+import { sandboxRunConfiguration } from "../apps/service/src/sandbox-policy.ts";
 
 test("protocol-51 migration preserves encrypted settings and manual grants without enabling managed permissions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-managed-sandbox-migration-")), path = join(directory, "state.sqlite"), key = Buffer.alloc(32, 51);
@@ -29,6 +30,34 @@ test("protocol-51 migration preserves encrypted settings and manual grants witho
       assert.equal(state.settings.values.sandboxManagement?.enabled, false);
       assert.equal(state.settings.values.sandboxManagement?.version, "0.2.3");
       assert.equal(state.settings.revision, 4); assert.equal(state.settings.permissionRevision, 3);
+    } finally { reopened.close(); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("explicit tool rules survive encrypted reopen without granting model access or relabeling retained settings", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-wildcard-reopen-")), path = join(directory, "state.sqlite"), key = Buffer.alloc(32, 52);
+  const settings = defaultSettings(), hash = "1".repeat(64), domains = ["api.generated.test", "*.tools.generated.test"];
+  settings.sandbox = { executable: "/generated/sendbox", configPath: null, image: `generated/worker@sha256:${hash}`,
+    bundlePath: "/generated/bundle", trustRootPath: "/generated/key", qualification: { release: "0.2.3",
+      hostSha256: hash, keySha256: hash, manifestSha256: hash, workerDigest: hash, bridgeDigest: hash,
+      trustRootId: "generated", minimumReleaseSequence: 7, allowedDomains: domains, allowCopilot: false,
+      resources: { cpus: 2, memoryMb: 2048, diskMb: 2048 } } };
+  try {
+    const original = new EventStore(path, key);
+    original.commit([{ event_type: "settings.updated", profile_id: "default", payload: { settings, revision: 6, permissionRevision: 7 } }]);
+    const rows = original.db.prepare("SELECT seq,data FROM events ORDER BY seq").all(); original.close();
+    const reopened = new EventStore(path, key);
+    try {
+      const state = projectEvents(reopened.events());
+      assert.deepEqual(reopened.db.prepare("SELECT seq,data FROM events ORDER BY seq").all(), rows);
+      assert.deepEqual(state.settings.values.sandbox.qualification!.allowedDomains, domains);
+      assert.equal(state.settings.values.sandbox.qualification!.allowCopilot, false);
+      assert.equal(state.settings.values.sandboxManagement?.enabled, false);
+      assert.equal(state.settings.revision, 6); assert.equal(state.settings.permissionRevision, 7);
+      const policy = sandboxRunConfiguration(state.settings.values.sandbox, "generated-reopen", "/generated/private-stage",
+        ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"]);
+      assert.deepEqual(policy.policy.network.allowed_domains, domains);
+      assert.equal(state.sandboxExecutions?.length, 0); assert.equal(state.budgetEntries.length, 0);
     } finally { reopened.close(); }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

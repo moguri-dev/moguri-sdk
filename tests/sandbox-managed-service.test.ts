@@ -18,7 +18,8 @@ test("actual managed native turns need no preview, use the prepared provider res
   const { sdk, service, project, provider } = fixture; let passed = false;
   try {
     const settings = structuredClone(sdk.settings.get()!);
-    settings.values.sandbox = fixture.reviewedConfiguration;
+    settings.values.sandbox = { ...fixture.reviewedConfiguration, qualification: { ...fixture.reviewedConfiguration.qualification!,
+      allowedDomains: [...fixture.reviewedConfiguration.qualification!.allowedDomains, "*.generated-tools.test"] } };
     settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
     await sdk.settings.update(settings.values, settings.revision); await sdk.sandbox.probe();
     const bound = await sdk.command({ type: "project.add", path: project }), created = await sdk.sessions.create(bound.id!);
@@ -43,6 +44,7 @@ test("actual managed native turns need no preview, use the prepared provider res
     const stageId = session().sandboxWorkspaceId, first = service.controller.snapshot().sandboxExecutions!.find((value) => value.sessionId === created.id)!;
     assert.equal(service.controller.snapshot().sandboxWorkspaces!.find((value) => value.id === stageId)?.preparation?.kind, "automatic");
     assert.deepEqual(first.networkScope?.providerHosts, ["api.individual.githubcopilot.com"]);
+    assert.ok(first.networkScope?.allowedDomains.includes("*.generated-tools.test"));
     assert.equal(await readFile(join(project, "fixture.txt"), "utf8"), "generated source original\n");
     assert.equal((await sdk.workspaces.file(created.id!, "fixture.txt")).text, "generated native replacement\n");
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: session().draft.revision, text: "Generated native follow-up.", attachments: [] });
