@@ -121,6 +121,25 @@ glyph, one-line caption and visible title at 232/180-pixel sidebar widths in
 selected and unselected states, without changing required input or card padding.
 Both states also pass in the actual newly packaged hidden app.
 
+Unread session names use modest 550-weight emphasis instead of an extra dot;
+read names retain weight 400 and the same typeface/size. The existing manual
+unread flag and enabled unacknowledged attention state drive that presentation,
+with an accessible unread description. Choosing a session or explicitly
+marking it read clears the corresponding flag/attention acknowledgement through
+existing SDK actions. Mark read captures its exact attention IDs before yielding;
+a later question cannot be acknowledged by an older held action. Read acknowledgement never answers a question, approves
+a tool, completes work or removes an actual yellow question/approval marker.
+The separate top-bar notification indicator is unchanged. Manual unread remains
+visible when in-app notifications are disabled. No event/schema/settings change
+or client-owned durable read state is introduced.
+
+Before this typography follow-up, all six available generated prerequisites
+passed: provider cancellation 31.47 ms; SQLite append p95 0.175 ms/rebuild
+2.173 ms; owned PTY cancellation 151.96 ms with zero survivors; TUI updates
+17.19 ms; hidden Electron cold start 426.72 ms / 439.88 MiB / 8.07 ms per frame;
+2,000-file search/Git 2.658/25.924 ms. The baseline's separate live/native/
+notarized/Linux/quality gates remain FAIL/unqualified.
+
 `session.pr_observed` retains version-1 metadata in the owning session, bound to
 the actual profile, session, canonical PR URL, project, managed workspace/root/revision,
 configured access mode and configuration revision. Its projection does not
