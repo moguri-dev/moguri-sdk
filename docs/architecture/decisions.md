@@ -230,11 +230,16 @@ private staging, no-replay, permission or budget boundaries. Legacy manual
 configurations are not silently granted the new managed policy.
 
 Explicitly reviewed `*.domain.com` tool rules use the existing released native
-matcher, qualified against the real 0.2.3 guest/proxy. Exact entries remain exact,
+matcher, qualified against the real 0.2.3 guest/proxy. In that release exact entries remain exact,
 the apex is separate, and actual provider endpoints/CNAME provenance stay exact.
-The adapter adds no automatic wildcard or dependency. Changing the bundled
-default to 0.2.4 does not enable broader GitHub Meta delegation; that still
-requires explicit qualification and effective-scope review. The
+The adapter adds no wildcard or dependency. For the 0.2.4 default, the owner
+explicitly selected GitHub Meta delegation with clear setup disclosure. The
+`github.com` grant includes Meta domains and IPv4/IPv6 CIDRs, including
+shared-cloud ranges, refreshed before readiness and hourly. It is not labeled
+exact-host-only egress; the service's review digest binds this warning and
+activation still requires the user's network-policy acknowledgement. Actual
+0.2.4 guest qualification remains separate from authenticated artifact/package
+verification. The
 [default release pins](managed-sandbox.md#default-sendbox-024) preserve older
 selected versions, signed history and separate setup approval.
 

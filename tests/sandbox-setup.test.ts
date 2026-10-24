@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { MoguriSdk, defaultSandboxManagement, type SandboxSetupOperation } from "../packages/sdk/src/index.ts";
 import { generatedSandboxDistribution } from "./fixtures/sandbox-distribution.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { readSandboxDistribution, distributionConfiguration } from "../apps/service/src/sandbox-distribution.ts";
+import { readSandboxDistribution, distributionConfiguration, SENDBOX_023 } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxInstallerScript } from "../apps/service/src/sandbox-installer.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
 
@@ -50,6 +50,7 @@ test("SDK managed setup needs exact explicit review, preserves user defaults, an
   try {
     const review = (await sdk.sandbox.setup.review()).review;
     assert.equal(review.version, "0.2.4"); assert.equal(review.installed, true);
+    assert.match(review.diagnostic, /GitHub Meta.*shared-cloud.*hourly/);
     assert.equal(review.management.automaticWorkspaces, true); assert.equal(review.management.automaticProviderNetwork, true);
     assert.deepEqual(review.configuration.qualification!.allowedDomains, ["github.com", "api.github.com"]);
     await assert.rejects(() => sdk.sandbox.setup.apply({ ...review, digest: "0".repeat(64) }), /review|changed/);
@@ -61,6 +62,20 @@ test("SDK managed setup needs exact explicit review, preserves user defaults, an
     const settings = sdk.getState().snapshot!.settings.values;
     assert.equal(settings.sandboxManagement?.enabled, true); assert.deepEqual(settings.startup.global, {});
     assert.equal(settings.sandbox.image, generated.distribution.worker.image); assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
+});
+
+test("an explicitly selected pre-Meta release retains its exact-host review rather than inheriting new delegation", native, async () => {
+  const generated = await generatedSandboxDistribution(SENDBOX_023);
+  const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false, installed: async () => true } } } });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const settings = sdk.settings.get()!;
+    await sdk.settings.update({ ...settings.values, sandboxManagement: { ...defaultSandboxManagement(), version: "0.2.3" } }, settings.revision);
+    const review = (await sdk.sandbox.setup.review()).review;
+    assert.equal(review.version, "0.2.3"); assert.equal(review.diagnostic.includes("GitHub Meta"), false);
+    assert.equal(sdk.settings.get()!.values.sandboxManagement?.enabled, false);
+    assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
 });
 

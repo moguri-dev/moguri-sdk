@@ -78,9 +78,20 @@ worker/dependency payload. Old cache pointers are misses, not authority to reuse
 0.2.3 as 0.2.4; matching entries still reverify actual package/image bytes and
 vendor identity. Old distribution artifacts and explicitly retained 0.2.3
 settings are not deleted, rewritten, implicitly installed or switched.
-Fresh use of the new bundle retains the original exact setup review,
-side-by-side administrator approval and readiness gates. No broader GitHub Meta,
-wildcard, provider, Local fallback or model permission is granted by the bump.
+Fresh use of the new bundle retains the original setup review, side-by-side
+administrator approval and readiness gates. The owner explicitly chose to keep
+the 0.2.4 default `github.com` grant with clear Meta disclosure: it delegates
+GitHub Meta domains and IPv4/IPv6 CIDRs, including shared-cloud ranges, refreshed
+before readiness and hourly. This is broader than exact-host-only egress and
+must not be described as strict GitHub-only access.
+
+The service places that warning into the version/network-bound review
+diagnostic, hence its canonical digest; desktop shows it before Enable Sandbox
+and its user/network-policy acknowledgement. CLI/TUI/SDK use the same review.
+Existing 0.2.3 reviews retain their earlier exact-host semantics. The decision
+does not grant tool permission, a new wildcard, provider credentials or Local
+fallback. Artifact/package verification does not claim an actual 0.2.4 guest
+or dynamic effective-scope qualification.
 
 The primary Settings flow shows these actual defaults and requires review and
 approval, not JSON authoring, a developer build or a SHA command. A matching
@@ -155,8 +166,10 @@ with its original execution and recheck the provider before handing over any cre
 endpoint/alias during a turn cannot launch another guest, replay a paid role or
 silently broaden its already installed policy.
 
-Default tool egress includes `github.com` and `api.github.com`; unrelated
-`google.com` stays denied. Provider aliases are not a general wildcard or approval
+Default tool grants include `github.com` and `api.github.com`. The earlier
+0.2.3 qualification rejected unrelated `google.com`; 0.2.4's disclosed GitHub
+Meta delegation is broader and those old exact-host guarantees are not carried
+forward. Provider aliases are not a general wildcard or approval
 for web/MCP/browser features without a qualified native transport. Show effective
 provider hosts separately from manually configured tool destinations.
 
@@ -227,8 +240,9 @@ Node/service/resource discovery in **4,673.06 ms**. The updated
 **744,768,834-byte** ZIP passes the bounded production updater in
 **102,215.62 ms**, and its read-only DMG passes the real Applications layout
 check. These are focused follow-up measurements, not a claim that the earlier
-complete suites below were rerun. GitHub Meta delegation still requires its own
-new signed upstream release and reviewed qualification; it is not enabled here.
+complete suites below were rerun. Those 0.2.3 measurements did not enable or
+qualify GitHub Meta. The later 0.2.4 default and explicit review disclosure are
+documented separately above.
 
 ## Earlier managed-setup qualification
 

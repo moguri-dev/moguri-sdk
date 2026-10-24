@@ -382,9 +382,14 @@ only with independently reviewed executable/bundle/key paths, SHA-256 pins,
 release/trust-root/sequence, workload/worker/bridge digests, resource caps and
 canonical DNS hosts or explicit `*.domain.com` tool rules. Wildcards match
 subdomains at any depth, not the apex or suffix lookalikes; exact entries remain
-exact. They never substitute for actual provider URL/CNAME admission or grant
+exact except `github.com` in SendBox 0.2.4+, which delegates GitHub Meta domains
+and IPv4/IPv6 ranges including shared-cloud addresses, refreshed before readiness
+and hourly. The service binds that broader delegation into setup review's
+diagnostic/digest, and activation requires the existing explicit user/network
+acknowledgement. These rules never substitute for actual provider URL/CNAME admission or grant
 provider credentials. The captured scope retains literal reviewed rules alongside
-exact provider/alias hosts, with a complete 32-entry limit.
+exact provider/alias hosts, with a 32-entry limit on Moguri's logical rules.
+That limit is not a claim about the size of the upstream Meta expansion.
 `configPath` must be null to select the managed deny-first
 policy; legacy policies are never silently replaced. Copilot access is opt-in,
 with a separate actual cold guest networking check. An observed alias is not

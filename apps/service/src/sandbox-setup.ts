@@ -139,6 +139,8 @@ export class SandboxSetup {
       installed = true;
     } else installed = await (this.options.installed ?? installedSandboxRelease)(configuration, definition.distribution.vendor);
     const management = { ...this.management(), enabled: true, version };
+    const githubMeta = semver.gte(version, "0.2.4") && configuration.qualification!.allowedDomains.includes("github.com");
+    const networkDisclosure = githubMeta ? "GitHub Meta network delegation: github.com also allows GitHub Meta domains and IPv4/IPv6 ranges, including shared-cloud addresses. SendBox refreshes them before readiness and hourly; this is broader than exact-host-only egress. " : "";
     const value = { distributionDigest: definition.digest, settingsRevision: state.settings.revision, version, protocol: PROTOCOL_VERSION,
       configuration, management, installed, administratorRequired: !installed,
       destination: installed ? dirname(configuration.executable) : sandboxInstallationRoot(version),
@@ -146,8 +148,8 @@ export class SandboxSetup {
       installerSha512: definition.distribution.vendor.installer.sha512, installerBytes: definition.distribution.vendor.installer.bytes,
       imageArchivePath: join(definition.root, definition.distribution.worker.archive.path),
       imageArchiveSha512: definition.distribution.worker.archive.sha512, imageArchiveBytes: definition.distribution.worker.archive.bytes,
-      diagnostic: installed ? "Reuse these verified configured root-owned release bytes, import the matching bundled worker and qualify. No developer tooling or source preview is required." :
-        "Install this exact no-script versioned package with administrator approval, import the compatible bundled worker and qualify. No existing SendBox installation is overwritten." };
+      diagnostic: networkDisclosure + (installed ? "Reuse these verified configured root-owned release bytes, import the matching bundled worker and qualify. No developer tooling or source preview is required." :
+        "Install this exact no-script versioned package with administrator approval, import the compatible bundled worker and qualify. No existing SendBox installation is overwritten.") };
     return { ...value, digest: frameDigest(["moguri-managed-sandbox-review-v1", this.store.profileId, value]) };
   }
   private event(operation: SandboxSetupOperation): EventInput {
