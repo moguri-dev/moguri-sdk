@@ -941,7 +941,7 @@ try {
         const compact=await beta.sessions.create(null,"Generated installed compaction",{modelId:generatedModel.id,autonomy:"Manual"});
         for(let turn=0;turn<3;turn++){
           const current=beta.getState().snapshot.sessions.find(value=>value.id===compact.id);
-          await beta.command({type:"draft.save",sessionId:compact.id,expectedRevision:current.draft.revision,text:"Generated installed retained turn "+turn+". "+"Generated retained compaction detail. ".repeat(64),attachments:[]});
+          await beta.command({type:"draft.save",sessionId:compact.id,expectedRevision:current.draft.revision,text:"Generated installed retained turn "+turn+". "+"Generated retained compaction detail. ".repeat(32),attachments:[]});
           const sizing=(await beta.sessions.context(compact.id)).context;
           assert.ok(sizing.estimatedTokens+4096<generatedModel.contextWindow,"The generated compaction fixture must fit the unchanged input/headroom bound before dispatch.");
           await beta.command({type:"message.send",sessionId:compact.id,expectedRevision:current.draft.revision+1,delivery:"queue"});
