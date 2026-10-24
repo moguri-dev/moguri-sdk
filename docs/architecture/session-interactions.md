@@ -149,6 +149,35 @@ Rust/Linux, signed/notarized, physical SendBox, model-routing, live decision and
 personal SSH gates remain FAIL/unqualified, not enabled by these indicators.
 No personal login, repository content, microphone or paid inference was used.
 
+### Protocol-54 qualification
+
+Source `234ed00` passed the following generated gates with the same frozen
+production build; no source or distribution was rebuilt during a suite.
+
+| Exact check | Observed result |
+| --- | --- |
+| Type checks and production build | PASS |
+| Focused indicators, PR reads, lifecycle races and both retained lineages | 45 passed, zero failures / 2,487.23 ms |
+| Existing native-management retention and archive gates | 4 passed, zero failures / 299.44 ms |
+| Complete serialized unit/integration/worker/CLI/native-TUI suite | 1,289 passed, 14 physical-native skips, zero failures; 1,303 total / 1,170,944.47 ms |
+| Complete hidden Electron suite | 123 passed, 2 physical-native skips, zero failures; 125 total / 4.3 minutes |
+| Actual packed external SDK | Root/React/Node/MCP imports, declarations, approved install, exact profile/root-null PR metadata and shared TUI PR commands pass; all 12 installed-worker probes pass |
+| Actual new packaged app | Both indicator scenarios and double-click rename pass hidden: 3 cases / 6.6 seconds |
+| Fresh root, external-consumer and no-cache image dependency audits | Zero vulnerabilities |
+| Actual protocol-54 native distribution | Bundled SendBox 0.2.4 and exact no-script side-by-side installer/image bytes verified without installation or administrator UI |
+| Production update consumer and read-only DMG layout | PASS; 740,542,481-byte ZIP/manifest / 101,567.60 ms; app never executed by the update verifier |
+
+The rebuilt no-cache Linux arm64 worker image is
+`docker.io/library/moguri-worker@sha256:2b9a68d46acb5696d3762123a0be292f903619fa96e7a2c27a521a21eb25553d`.
+That proves the compiled artifact/protocol and locked dependencies, not physical
+SendBox guest/effective-network containment or Linux release readiness.
+The development app is ad-hoc signed, not notarized. Existing OpenTUI FFI,
+large-chunk and optional `.icon` notices remain non-blocking; minimal external
+SDK hosts still need their own documented compatibility overrides for the
+upstream deprecation notices. Root and image installs emit neither requested
+deprecated-package notice. No personal account, microphone, real speech weights
+or paid inference was used.
+
 ## Fresh prerequisites
 
 The generated baseline commands completed before implementation. Passed probes:
