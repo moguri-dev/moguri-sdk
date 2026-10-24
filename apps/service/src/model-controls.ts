@@ -39,6 +39,6 @@ export function modelRequest(model: Model<Api> & Pick<ModelWindowCapability, "su
   const normalized = normalizeContext(context);
   const estimatedTokens = estimateNormalizedContext(normalized);
   if (estimatedTokens + CONTEXT_HEADROOM >= selected.contextWindow) throw new MoguriError("model_context", "The estimated request exceeds the working context window. Shorten the prompt or start a new session; no history was truncated and no model request was sent.", 409);
-  const maxTokens = clampMaxTokensToContext(selected, normalized, Math.min(model.maxTokens, 8192, selected.contextWindow - estimatedTokens - CONTEXT_HEADROOM));
+  const maxTokens = clampMaxTokensToContext(selected, normalized, Math.min(model.maxTokens, selected.contextWindow - estimatedTokens - CONTEXT_HEADROOM));
   return { model: { ...selected, maxTokens }, maxTokens, estimatedTokens, thinkingEffort: options?.thinkingEffort };
 }

@@ -33,6 +33,39 @@ eligible as an anchor. Output is capped against the same estimate and headroom.
 This preserves finite-budget/context admission with stable source timestamps;
 it does not change actual usage, prices or billed-cost provenance.
 
+## Per-response output and reasoning
+
+Ordinary requests use the prepared model's declared output maximum, bounded by
+the selected working window, fresh normalized input estimate and existing
+4,096-token context headroom. There is no additional fixed 8,192-token ceiling.
+That former application cap could exhaust reasoning capacity before a small
+README operation produced its next complete tool call. The maintained provider
+adapter receives the resulting bound, including explicit supported effort,
+without adding another thinking allowance outside it.
+
+Budget admission can reduce this bound further to the exact remaining token/USD
+capacity under all applicable session, profile and global policies. Larger model
+capacity never changes those policies, prices or unknown holds. Explicit
+router, compactor, candidate, owned-role and wind-down bounds still apply.
+Existing ledger entries retain the limit actually forwarded at their original
+admission; no historical output limits or charges are rewritten. No schema,
+dependency, permission, model substitution or automatic retry is introduced.
+
+A genuine provider length stop remains partial. Its diagnostic reports the
+actual forwarded response limit, explains shared reasoning capacity when
+applicable and states that pending tools from that incomplete response did not
+run. Earlier acknowledged effects are not undone or described as absent.
+Inspection/resume cannot replay that model response or execute its pending
+arguments; only a new explicit authorized turn can continue.
+
+The 2026-10-24 generated transport prerequisite passes Responses, Anthropic and
+provider-controlled Completions option probes in 249.73 ms without inference.
+Regression coverage exercises actual 32,768-token payload bounds, supported
+high reasoning without exceeding them, an approved existing README edit with
+9,500 reported output tokens, exact 64-token finite admission and a genuinely
+truncated tool request that cannot write or replay. Provider output usage remains
+separate from visible response length and unknown/billed costs.
+
 ## Domain and persistence
 
 Issue #17 replaces arbitrary numeric windows with one browser-safe SDK contract:

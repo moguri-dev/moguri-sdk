@@ -186,11 +186,11 @@ async function run(start: WorkerStart): Promise<void> {
           await finish("partial", "The provider deferred completion. Deferred continuation is not supported; no result or retry is assumed.");
           return;
         }
+        const calls = toolCalls(message);
         if (message.stopReason === "length") {
-          await finish("partial", "The model reached its output limit. Review the partial response before continuing.");
+          await finish("partial", `The model reached this response's ${boundary.maxTokens}-token output limit.${model.reasoning ? " Reasoning counts toward this limit." : ""}${calls.length ? " No tools from this incomplete response were executed." : ""} Review the partial response before continuing.`);
           return;
         }
-        const calls = toolCalls(message);
         if (start.readOnly && calls.length) throw new Error("The read-only subagent requested tools. No tools were executed.");
         if (calls.length === 0) {
           if (boundary.phase === "solver" || boundary.phase === undefined) await lifecycle("turn.end");

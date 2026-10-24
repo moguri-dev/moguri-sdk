@@ -82,6 +82,23 @@ test("actual concurrent project-free calls cannot overbook profile capacity, and
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("a large model output ceiling still forwards only the exact remaining finite token allowance", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({ maxOutputTokens: 32768, contextWindow: 262144 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure();
+    await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "Generated finite large-model response.", attachments: [] });
+    const input = Math.ceil((await sdk.sessions.context(fixture.sessionId)).context.estimatedTokens), cap = input + 64;
+    await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, budget: { kind: "limited", basis: "estimate", tokens: cap } });
+    await sdk.command({ type: "message.send", sessionId: fixture.sessionId, expectedRevision: 1, delivery: "queue" });
+    assert.equal((await fixture.terminal()).status, "completed");
+    const request = fixture.requests[0]!, entry = fixture.service.controller.snapshot().budgetEntries[0]!;
+    assert.equal(request.max_tokens ?? request.max_completion_tokens, 64);
+    assert.equal(entry.inputEstimate, input); assert.equal(entry.outputLimit, 64); assert.equal(entry.reservedTokens, cap);
+    assert.equal((await sdk.budgets.status(fixture.sessionId)).status.remainingTokens, cap - 42);
+    assert.equal(fixture.requests.length, 1);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
 test("stale/unknown USD prices fail closed, while explicit zero prices stay labeled estimates and never billed costs", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture({ maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
