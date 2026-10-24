@@ -144,6 +144,32 @@ No runtime, SDK, CLI, TUI or desktop source changed after the earlier complete
 does not relabel those as another full-suite run. Known optional `.icon` and
 development-signing limitations remain.
 
+## Global and session sidebar placement
+
+The owner clarified that the six global items belong on the **left**, ordered
+Dashboard, Artifacts, Candidates, Sandbox, Suggestions, Global Terminal. The
+**right** rail contains only Terminal, Browser, Insights, Changes, Files, Plan,
+Side chat, in that order. The left resource group is a named native navigation
+landmark; repeated selection still returns to chat after existing dirty/terminal
+checks. Existing styles, model controls and session hierarchy are unchanged.
+
+This reuses React/native navigation (MIT) and existing SDK/resource routing.
+No dependency, setting, API, durable event, schema or migration is added.
+Legacy saved global-panel names still restore their independent full-page
+resource rather than becoming invalid preferences or another right-rail tab;
+widths remain intact. PR and attention actions remain auxiliary, not new primary
+rail items. Hiding an auxiliary panel returns keyboard focus to Insights.
+Globals still create no hidden session/inference, terminal opening remains
+one-shot and hiding a live owner keeps its existing review/opt-out. Read-only/
+profile/root, cancellation and retained-resource behavior are unchanged.
+
+Fresh prerequisite probes passed all six available generated groups before
+implementation: cancellation 31.16 ms; SQLite append p95 0.045 ms/rebuild
+0.540 ms; owned PTY cancellation 151.87 ms with zero survivors; TUI updates
+17.23 ms; hidden Electron cold start 259.31 ms / 442.02 MiB / 8.29 ms per frame;
+2,000-file search/Git 0.958/5.865 ms. Separate baseline live/native/notarized/
+Linux/quality gates remain FAIL/unqualified, not enabled by navigation changes.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
