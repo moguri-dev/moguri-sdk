@@ -153,3 +153,47 @@ stale/changed source and binary bounds, refused aliases/private addresses,
 actual allowed GitHub/denied Google egress, wrong artifact/package identity,
 cancelled/lost install, no replay, root-owned guest checks and packaged cold
 setup with generated fixtures. Actual administrator interaction stays manual.
+
+## Integrated qualification
+
+The complete checkpoint at `fd8c1ee` passed **1,211 unit/native tests**, with no
+failures or skips, in **1,179,127.55 ms**. Its complete hidden desktop suite passed
+**107 tests**, with no skips, in **4.3 minutes**. These are baseline measurements
+before the final deletion-ownership correction, not a claim that the complete
+suites were repeated after that change.
+
+The final executable at `51c505c` adds the original native-admission/preparation
+owners to session/project deletion settlement. Its generated regression fails
+without the guard: deletion succeeds while its original provider preparation is
+still held. With the guard, deletion waits for acknowledgement; ignoring
+cancellation instead produces `cleanup_unconfirmed` and preserves the session.
+
+| Final qualification after the correction | Result |
+| --- | --- |
+| Type checks and production build | PASS |
+| Focused automatic setup, migration, session and deletion checks | 30/30, no skips; 13,982.65 ms |
+| Genuine native setup, project/root-less turns, private edits, cancellation, rollback/restoration and controller SIGKILL recovery | 9/9, no skips; 46,452.27 ms |
+| Packed external SDK entrypoints/types/runtime and approved, audited consumer installation | PASS |
+| Actual packaged managed-review/autosave and no-preview native chat | 2/2 hidden desktop checks, no skips; 17.7 seconds |
+| Bundled Node/service path-free discovery, exact worker bytes and root-owned no-script installer BOM | PASS; 4,684.98 ms |
+| Final 744,768,529-byte ZIP through the bounded production updater | PASS; 97,663.03 ms |
+| Actual read-only DMG and drag-to-Applications layout | PASS |
+
+The unchanged immutable worker image is
+`docker.io/library/moguri-worker@sha256:7fe078f11ffdf21f99fd569dabfa8d65e9adb7469702e57f607d5050ec133e3e`.
+Its bundled OCI archive is **421,990,400 bytes**; the SendBox 0.2.3 installer is
+**16,381,472 bytes**. The independent genuine network probe on this image
+completed in **4,937.18 ms**: GitHub content was readable, Google returned
+policy-denied SOCKS reply 2, and the actual individual Copilot HTTPS resource
+responded anonymously with HTTP 400. The original signed owned VM was absent.
+This proves the admitted transport/egress boundary, not live paid inference.
+
+Managed fixtures use generated state, intercepted provider responses and generated
+credentials; the network probe uses anonymous public endpoints. No personal
+profile, login, administrator authorization or paid inference was used. Packaged
+service discovery also forbids network and keychain access. Real native execution
+reuses the previously reviewed root-owned release;
+the fresh administrator installation path was package/BOM/command-inspected,
+not interactively installed. The macOS app remains an ad-hoc-signed development
+build, not notarized. General native browser/MCP/console, multi-model and Max
+transports remain outside this qualification.
