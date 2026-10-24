@@ -105,7 +105,9 @@ replaying copying, model calls or effects. No model budget is consumed by setup.
 ## Provider and tool networking
 
 The screenshots' website prompts failed at provider admission, before either
-website was contacted. Resolve the actual prepared provider HTTPS resource
+website was contacted. Managed engine qualification is local and does not contact
+Copilot or any unselected provider. Legacy manual cold-provider qualification
+keeps its explicit prior semantics. Resolve the actual prepared provider HTTPS resource
 before launching a managed guest. Do not assume every Copilot account uses
 `api.githubcopilot.com`; configured hosted provider endpoints use their own
 actual transport. Controller loopback endpoints are not guest endpoints.
@@ -123,6 +125,13 @@ Default tool egress includes `github.com` and `api.github.com`; unrelated
 `google.com` stays denied. Provider aliases are not a general wildcard or approval
 for web/MCP/browser features without a qualified native transport. Show effective
 provider hosts separately from manually configured tool destinations.
+
+The approved native `fetch_page` reader uses the actual enforced proxy and normal
+tool authorization, works in project-free chats, follows only bounded safe HTTPS
+redirects and returns untrusted text. It does not enable interactive browser or
+general MCP transports. The final generated native network probe reads GitHub,
+observes Google's policy-denied SOCKS reply and checks the actual prepared Copilot
+resource without credentials or a model call.
 
 ## Shared schema, ownership and verification
 

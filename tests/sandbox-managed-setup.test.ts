@@ -1,12 +1,32 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { test } from "node:test";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
+import { SandboxRuntime } from "../apps/service/src/sandbox-runtime.ts";
+import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 
 const configuration = await nativeConfiguration(), distribution = process.env.MOGURI_SANDBOX_DISTRIBUTION;
+test("managed engine qualification never requires Copilot or any unselected provider network", { skip: !configuration, timeout: 90_000 }, async () => {
+  assert.ok(configuration);
+  await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
+  const root = await realpath(await mkdtemp(".native/qualification/managed-engine-")), state = join(root, "state");
+  await mkdir(state, { mode: 0o700 });
+  const config = { ...configuration, qualification: { ...configuration.qualification!, allowCopilot: true, allowedDomains: ["github.com", "api.github.com"] } };
+  let dnsReads = 0, passed = false;
+  const runtime = new SandboxRuntime(state, () => config, { vault: new GeneratedFileVault(join(root, "generated-vault.json")),
+    engineOnlyProbe: () => true, dns: {
+      addresses: async () => { dnsReads++; throw new Error("Generated unselected Copilot provider is unreachable."); },
+      aliases: async () => { dnsReads++; throw new Error("Generated provider must not be resolved during engine setup."); },
+    } });
+  try {
+    assert.equal((await runtime.probe("generated-independent-engine")).ready, true);
+    assert.equal(dnsReads, 0); passed = true;
+  } finally { await runtime.close(); if (passed) await rm(root, { recursive: true, force: true }); }
+});
 test("actual bundled setup imports its pinned worker, qualifies the configured release and requalifies after restart without replaying installation", {
   skip: !configuration || !distribution, timeout: 120_000,
 }, async () => {

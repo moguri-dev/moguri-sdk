@@ -57,7 +57,7 @@ export function distributionConfiguration(distribution: SandboxDistribution, roo
     trustRootPath: join(root, "guest/aarch64/release-public.key"), qualification: {
       release: vendor.version, hostSha256: vendor.hostSha256, keySha256: vendor.keySha256, manifestSha256: vendor.manifestSha256,
       workerDigest: worker.workerDigest, bridgeDigest: worker.bridgeDigest, trustRootId: vendor.trustRootId,
-      minimumReleaseSequence: vendor.minimumReleaseSequence, allowedDomains: ["github.com", "api.github.com", "api.githubcopilot.com"],
+      minimumReleaseSequence: vendor.minimumReleaseSequence, allowedDomains: ["github.com", "api.github.com"],
       allowCopilot: true, resources: { cpus: 2, memoryMb: 4096, diskMb: 8192 },
     } };
 }

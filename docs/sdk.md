@@ -213,7 +213,9 @@ An accepted retained distribution is reused only with its original digest;
 there is no app-directory scan or mutable image pull.
 
 After managed setup approval and explicit Env selection, ordinary Send prepares
-the bound project/worktree privately and automatically. Root-less chats require
+the bound project/worktree privately and automatically. Engine-only qualification
+has no dependency on an unselected Copilot account or endpoint; turn admission
+resolves only the actual selected provider. Root-less chats require
 no empty preview. Complete regular-file snapshots support 20,000 files, 256 MiB
 total and 32 MiB per file, including binary/large sources, without expanding
 model context or silently choosing a subset. Protected, ignored and denied paths

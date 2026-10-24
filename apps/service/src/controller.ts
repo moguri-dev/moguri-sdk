@@ -172,7 +172,7 @@ export class ControlPlane extends EventEmitter {
     });
     this.sandbox = new SandboxRuntime(platformOptions.stateDir ?? dirname(store.path), () => this.projection.settings.values.sandbox, {
       ...platformOptions.sandbox, vault: platformOptions.sandbox?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.sandbox-runs`),
-      automaticProviderNetwork: () => Boolean(this.projection.settings.values.sandboxManagement?.enabled && this.projection.settings.values.sandboxManagement.automaticProviderNetwork),
+      engineOnlyProbe: () => Boolean(this.projection.settings.values.sandboxManagement?.enabled),
       changed: () => { this.provider?.synchronize(); platformOptions.sandbox?.changed?.(); this.emit("change", []); },
     });
     this.remoteModels = new ModelRegistry({

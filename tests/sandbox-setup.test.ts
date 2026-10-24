@@ -51,7 +51,7 @@ test("SDK managed setup needs exact explicit review, preserves user defaults, an
     const review = (await sdk.sandbox.setup.review()).review;
     assert.equal(review.version, "0.2.3"); assert.equal(review.installed, true);
     assert.equal(review.management.automaticWorkspaces, true); assert.equal(review.management.automaticProviderNetwork, true);
-    assert.deepEqual(review.configuration.qualification!.allowedDomains, ["github.com", "api.github.com", "api.githubcopilot.com"]);
+    assert.deepEqual(review.configuration.qualification!.allowedDomains, ["github.com", "api.github.com"]);
     await assert.rejects(() => sdk.sandbox.setup.apply({ ...review, digest: "0".repeat(64) }), /review|changed/);
     assert.equal(imports, 0); assert.equal(probes, 0);
     const admitted = await sdk.sandbox.setup.apply(review), result = await sdk.sandbox.setup.wait(admitted.id!);

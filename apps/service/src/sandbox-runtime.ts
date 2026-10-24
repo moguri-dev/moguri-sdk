@@ -20,7 +20,7 @@ import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { runProgram } from "./program.ts";
 import { sandboxConfiguration, sandboxRunConfiguration, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
 import { PrivateControl } from "./private-control.ts";
-import { assertSandboxNetwork, resolveSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
+import { assertSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
 import type { SandboxSetupOptions } from "./sandbox-setup.ts";
 
 export type NativeChange = Partial<Pick<SandboxExecution, "nativeSessionId" | "planDigest" | "signerFingerprint" | "workerPid" | "status" | "cancellation" | "cleanup" | "cliExitCode" | "diagnostic">>;
@@ -28,13 +28,14 @@ export interface SandboxOptions {
   vault?: SecretVault; changed?: () => void;
   command?: string[];
   dns?: SandboxDns;
-  automaticProviderNetwork?: () => boolean;
+  engineOnlyProbe?: () => boolean;
   distribution?: string;
   setup?: SandboxSetupOptions;
 }
 export interface NativeLaunch {
   id: string; stage: NativeStage; config: SandboxConfiguration; launchName: string; createdAfter: number; createdBefore: number;
   root: string | null;
+  providerProbe?: boolean;
 }
 interface NativeResult { exitCode: number; clean: boolean; status: BridgeStatus | null; failure: string | null }
 const nativeBootstrapSchema = Type.Object({
@@ -149,15 +150,14 @@ export class SandboxRuntime {
       requested?.throwIfAborted();
       this.options.changed?.();
       const signal = requested ? AbortSignal.any([requested, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
-      const reviewed = await verifySandboxArtifacts(this.configuration(), this.stateDir, signal), signature = frameDigest(reviewed);
-      const config = this.options.automaticProviderNetwork?.() && reviewed.qualification.allowCopilot ?
-        (await resolveSandboxNetwork(reviewed, ["https://api.githubcopilot.com"], signal, this.options.dns)).configuration : reviewed;
+      const config = await verifySandboxArtifacts(this.configuration(), this.stateDir, signal), signature = frameDigest(config);
       const inputs = join(this.stateDir, "native-inputs", id), parent = join(this.stateDir, "native-stage-root");
       await mkdir(inputs, { recursive: true, mode: 0o700 }); await mkdir(parent, { recursive: true, mode: 0o700 });
       const source = await captureNativeSource(await realpath(inputs), [], { denied: [], readOnly: [] }, AbortSignal.timeout(5000));
       const stage = await materializeNativeStage(await realpath(parent), { profileId, sessionId: id, turnId: id }, source, AbortSignal.timeout(5000));
       requested?.throwIfAborted();
-      worker = this.open({ id, stage, config, root: null, launchName: `mg-${id.replaceAll("-", "").slice(0, 20)}`,
+      worker = this.open({ id, stage, config, root: null, providerProbe: !this.options.engineOnlyProbe?.() && config.qualification.allowCopilot,
+        launchName: `mg-${id.replaceAll("-", "").slice(0, 20)}`,
         createdAfter: Math.floor(Date.now() / 1000) - 2, createdBefore: Math.ceil(Date.now() / 1000) + 120 }, () => {}, true);
       const info = await worker.verified, result = await worker.finished;
       requested?.throwIfAborted();
@@ -272,7 +272,7 @@ class NativeWorker implements NativeConnection {
     const directory = join(this.stateDir, "native-executions", this.spec.id);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(join(directory, "intent.json"), JSON.stringify({ format: "moguri-native-intent", version: 1, id: this.spec.id, probe: this.probe,
-      stage: this.spec.stage, config, configDigest: frameDigest(config), launchName: this.spec.launchName,
+      stage: this.spec.stage, config, configDigest: frameDigest(config), launchName: this.spec.launchName, providerProbe: Boolean(this.spec.providerProbe),
       createdAfter: this.spec.createdAfter, createdBefore: this.spec.createdBefore, command: this.command }), { flag: "wx", mode: 0o600 });
     const key = randomBytes(32).toString("hex");
     if (!this.probe) await this.vault.write(this.spec.id, key, AbortSignal.timeout(15_000));
@@ -314,7 +314,7 @@ class NativeWorker implements NativeConnection {
           if (!this.probe) this.privateControl = new PrivateControl(this.spec.id, Buffer.from(key, "hex"), "controller");
           wire.send({ action: this.probe ? "probe" : "start", protocol: PROTOCOL_VERSION, workerDigest: config.qualification.workerDigest,
             stateDir: `/workspace/.moguri/execution/${this.spec.id}`, root: this.spec.root,
-            ...(this.probe ? config.qualification.allowCopilot ? { nativeNetworkProbe: true } : {} :
+            ...(this.probe ? this.spec.providerProbe ? { nativeNetworkProbe: true } : {} :
               { runId: this.spec.id, key, after: 0, journal: true, sealed: true }) });
           return;
         }
@@ -324,7 +324,7 @@ class NativeWorker implements NativeConnection {
           if (!this.binding || info.platform !== "linux" || info.nodeVersion !== "26.12.0" || info.workerDigest !== config.qualification.workerDigest || info.root !== this.spec.root ||
             !native || native.bridgeDigest !== config.qualification.bridgeDigest || native.uid === 0 || native.noNewPrivs !== 1 || native.seccomp !== 2 ||
             !/^0+$/.test(native.capabilities) || !native.enforcedProxy || message.kind === "ready" && message.status.runId !== this.spec.id ||
-            this.probe && config.qualification.allowCopilot && (!native.networkProbe || native.networkProbe.url !== "https://api.githubcopilot.com" || native.networkProbe.status >= 500)) stopped("Actual guest runtime/build/process controls or explicitly reviewed cold provider networking differ from the exact native review.");
+            this.probe && this.spec.providerProbe && (!native.networkProbe || native.networkProbe.url !== "https://api.githubcopilot.com" || native.networkProbe.status >= 500)) stopped("Actual guest runtime/build/process controls or explicitly reviewed cold provider networking differ from the exact native review.");
           clearTimeout(this.deadline);
           this.ready = true; this.resolveVerified(info);
           if (message.kind === "ready") { this.status = message.status; await this.changed({ status: "running", workerPid: message.status.workerPid }); }
