@@ -9,6 +9,22 @@ Protocol 25 separately extends this to
 [owned pinned SSH consoles](remote-user-consoles.md), preserving the Local
 version-1 format and never relabeling an existing Local process.
 
+Protocol/migration 44 adds one independently owned **Global Local terminal**
+per profile, with real null session/project identities rather than a synthetic
+conversation. The user explicitly opens the disclosed canonical home root or
+another explicit SDK/CLI root. Project-free Local session consoles likewise need
+an explicit root; neither grants workspace authority to its model. The same
+broker and launch digests bind null scopes, exact root/inode and actual profile.
+Remote still requires non-null session/project/peer ownership. Global intent
+survives unrelated session/project deletion; concurrent opens cannot start a
+second global PTY, and missing receipts cannot resurrect closed original work.
+Existing owner metadata/builds are retained, not silently upgraded or replaced.
+Version-1 binding digests also retain their original serialized field order;
+the independent-scope extension must not invalidate an existing Local or SSH
+root merely by reordering equivalent metadata. Null project/session IDs do not
+remove the captured root's protection against worktree removal or artifact
+publication while that console is still live.
+
 The [prerequisite spike](terminal-reattachment-primitives.md) qualified the real
 PTY, process-loss, framing and authentication primitives before integration.
 Reuse Node and `node-pty` (MIT), TypeBox (MIT), existing process-group stopping,
@@ -18,7 +34,7 @@ request, plaintext production key file or model capability is added.
 ## Authority and identities
 
 Retain a profile-root `terminal.owner_changed` event before the owner process,
-then a session-scoped `terminal.changed` intent before an actual PTY launch.
+then a session- or independent profile-scoped `terminal.changed` intent before an actual PTY launch.
 The owner records its ID/profile, private protocol/build/scope digests, actual
 observed PID, canonical private runtime endpoint, lifecycle and private-resource
 cleanup stage. `retained`, `pending` and `removed` distinguish keeping resources
@@ -63,6 +79,16 @@ inspection. Ordinary service stop, default embedded disposal and an explicit
 terminal close retain owned-group stop semantics. Closing or hiding the
 desktop panel detaches its view, not the shell.
 
+Closing the desktop app itself is different from hiding its terminal panel.
+After unsaved-window close is actually accepted, the app fences reconnects,
+awaits any in-flight connection admission, and sends ordinary stop only to its
+captured private root/connection fingerprint. It waits for service shutdown
+before Electron exit. This stops all profile-owned workers and known terminal
+groups, not arbitrary named/PID-discovered processes. Cancelled unsaved close
+does not stop the service. Rotated ownership or failed cleanup blocks successful
+exit and remains retryable. Verified update/storage restart completion retains
+its separate preserve-terminal handoff instead of issuing a later ordinary stop.
+
 The authenticated lifecycle endpoint acknowledges **acceptance**, not completed
 shutdown. Opposite in-flight stop/restart actions conflict. Clients wait for
 the private registry to disappear and detect explicit unconfirmed shutdown.
@@ -102,7 +128,7 @@ without the broker retaining excess bytes. A complete-window inspection retries
 when page bases differ, while streaming clients handle the advertised gap.
 Private control frames are limited to **512 KiB**; ordinary worker frame
 behavior is unchanged. At most four live consoles per session and sixteen per
-profile are admitted. Each broker retains at most 32 closed terminal buffers
+profile, including at most one independent global console, are admitted. Each broker retains at most 32 closed terminal buffers
 and 4,096 seen launch identities; reaching that identity bound requires explicit
 ownership shutdown, not silent history reuse.
 

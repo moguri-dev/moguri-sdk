@@ -7,6 +7,7 @@ import {
   type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
 import { ControlPlane, type ProfileHooks } from "./controller.ts";
+import { localRootsOverlap } from "./project-clone.ts";
 import { budgetCharges } from "./budgets.ts";
 import { digest, EventStore } from "./store.ts";
 import { writeArtifactExport } from "./artifact-export.ts";
@@ -33,7 +34,7 @@ export class ProfileRuntime {
       extendCommit: (id, events) => this.extend(id, events),
       committed: (id, events) => this.committed(id, events),
       globalBudget: () => this.globalBudget(),
-      foreignRootBusy: (id, root) => this.foreignRootBusy(id, root),
+      foreignRootBusy: (id, root, includeNested) => this.foreignRootBusy(id, root, includeNested),
     };
   }
   catalog(): ProfileCatalog {
@@ -46,6 +47,18 @@ export class ProfileRuntime {
       if (event.event_type === "global.budget_changed") catalog.globalBudget = structuredClone(event.payload);
     }
     return { ...catalog, profiles: [...profiles.values()] };
+  }
+  maintenanceFacts() {
+    const catalog = this.catalog(), activeOwners: string[] = [], roots: string[] = [];
+    for (const profile of catalog.profiles) {
+      const state = this.controllers.get(profile.id)?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      for (const session of state.sessions) if (session.turnId) activeOwners.push(`turn/${profile.id}/${session.turnId}`);
+      for (const job of state.jobs) if (["running", "waiting_input"].includes(job.status)) activeOwners.push(`job/${profile.id}/${job.id}`);
+      for (const terminal of state.terminals) if (!["closed", "failed"].includes(terminal.status)) activeOwners.push(`terminal/${profile.id}/${terminal.id}`);
+      if (profile.status === "creating") activeOwners.push(`profile-setup/${profile.id}`);
+      roots.push(...state.projects.map((project) => project.path), ...state.managedWorkspaces.filter((workspace) => workspace.status !== "removed").map((workspace) => workspace.path));
+    }
+    return { profiles: catalog.profiles.map((profile) => profile.id), activeOwners, roots };
   }
   async snapshot(id: string) {
     const control = await this.control(id);
@@ -175,12 +188,13 @@ export class ProfileRuntime {
     const charges = budgetCharges(entries, plans);
     return { limit, chargedTokens: charges.tokens, chargedUsdMicros: charges.usdMicros };
   }
-  private foreignRootBusy(id: string, root: string): boolean {
+  private foreignRootBusy(id: string, root: string, includeNested = false): boolean {
     for (const profile of this.catalog().profiles) {
       if (profile.id === id) continue;
       const control = this.controllers.get(profile.id);
-      if (control?.ownedWriteRoots().includes(root)) return true;
+      if (control?.ownedWriteRoots().some((owned) => includeNested ? localRootsOverlap(root, owned) : owned === root)) return true;
       const state = control?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      if (state.jobs.some((job) => job.projectClone && ["running", "waiting_input"].includes(job.status) && localRootsOverlap(root, job.projectClone.path))) return true;
       if (remoteRootQuarantined(state, root) || githubRootQuarantined(state, root) || state.projects.some((project) => project.path === root && state.blockedProjects.includes(project.id)) ||
         state.managedWorkspaces.some((workspace) => workspace.path === root && state.blockedWorkspaces.includes(workspace.id))) return true;
     }
@@ -272,10 +286,11 @@ export class ProfileRuntime {
   private async shutdown(options: RuntimeCloseOptions): Promise<void> {
     this.closed = true;
     for (const active of this.active.values()) active.abort.abort();
+    const closing = Promise.allSettled([...this.controllers.values()].map((controller) => controller.close(options)));
     await Promise.all([...this.active.values()].map((active) => active.done));
     const loaded = await Promise.allSettled([...this.loading.values()]);
     for (const result of loaded) if (result.status === "rejected") console.error("Profile initialization ended during shutdown:", result.reason instanceof MoguriError ? result.reason.code : "profile_initialization");
-    const settled = await Promise.allSettled([...this.controllers.values()].map((controller) => controller.close(options)));
+    const settled = await closing;
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Profile cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "profile_cleanup");
     if (failed?.status === "rejected") throw failed.reason;

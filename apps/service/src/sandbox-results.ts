@@ -25,7 +25,7 @@ export function sandboxResult(text: string): SandboxResult {
   if (total > 2 * 1024 * 1024) throw new MoguriError("sandbox_result", "Retained native output exceeds its exact 2-MiB boundary. No content was truncated or published.", 409);
   return result;
 }
-export async function captureSandboxResult(execution: SandboxExecution, key: Buffer, sourcePaths: string[]) {
+export async function captureSandboxResult(execution: SandboxExecution, key: Buffer, sourcePaths: string[], originalDigests?: ReadonlyMap<string, string>) {
   if (!execution.nativeSessionId || !execution.planDigest || !execution.signerFingerprint) throw new MoguriError("sandbox_result", "The original native session/plan/signer was never durably bound. No after-state or replacement was inferred.", 409);
   const evidence = await readNativeCompletion({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: execution.nativeSessionId,
     workspace: execution.stage.workspace, image: execution.image, command: { program: execution.command[0]!, arguments: execution.command.slice(1) },
@@ -36,6 +36,7 @@ export async function captureSandboxResult(execution: SandboxExecution, key: Buf
   for (const entry of evidence.entries) {
     if (entry.kind.type === "directory") continue;
     if (isProtectedProjectPath(entry.path)) { exclude(entry.path, "Protected runtime, credentials or control state is not a client output file."); continue; }
+    if (originalDigests && entry.kind.type === "regular" && originalDigests.get(entry.path) === entry.kind.content_hash) continue;
     if (!["regular", "hardlink"].includes(String(entry.kind.type))) { exclude(entry.path, "Only bounded regular text outputs can be retained or published."); continue; }
     if (typeof entry.kind.size !== "number" || entry.kind.size > 128 * 1024 || files.length >= 200 || total + entry.kind.size > 2 * 1024 * 1024) {
       exclude(entry.path, "Outside the disclosed 200-file, 128-KiB-per-file and 2-MiB aggregate text output boundary."); continue;
@@ -68,9 +69,11 @@ export async function captureSandboxResult(execution: SandboxExecution, key: Buf
     frames.length = 0; cursor = execution.lastSequence;
     journal = { status: "unconfirmed", diagnostic: error instanceof MoguriError ? error.message : "Original native journal is missing, corrupt or unavailable. Model holds remain unknown; no effect or model call was replayed." };
   }
+  const deleted = sourcePaths.filter((path) => !paths.has(path));
+  for (const path of deleted.slice(200)) exclude(path, "Additional deleted paths remain in the signed native snapshot, outside the bounded text-publication descriptor.");
   const result = sandboxResult(JSON.stringify({ format: "moguri-native-result", version: 1, executionId: execution.id, workspaceId: execution.workspaceId,
     inputDigest: execution.inputDigest, nativeSessionId: execution.nativeSessionId, planDigest: evidence.planDigest, signerFingerprint: evidence.signerFingerprint,
     auditDigest: evidence.auditDigest, beforeId: evidence.beforeId, afterId: evidence.afterId, afterBinding: evidence.afterBinding, rollback: evidence.rollback, exitCode: evidence.exitCode,
-    files, excluded, excludedCount, deletedPaths: sourcePaths.filter((path) => !paths.has(path)), journal }));
+    files, excluded, excludedCount, deletedPaths: deleted.slice(0, 200), journal }));
   return { result, frames, cursor, more };
 }

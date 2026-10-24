@@ -22,7 +22,10 @@ try {
   execFileSync("npm", ["rebuild", manifest.name, "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["audit", "--audit-level=moderate"], { cwd: consumer, stdio: "inherit" });
   const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
+  const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
+  const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
   const documentInputs = generatedDocuments ? [
@@ -48,13 +51,29 @@ try {
   if (installedProtocol >= 41 && (!help.includes("moguri github") || !help.includes("moguri marketplace") || !help.includes("moguri containment"))) throw new Error("The installed CLI is missing the protocol-41 platform workflow surface.");
   await writeFile(join(consumer, "consumer.ts"), `
     import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}${installedProtocol >= 34 ? ", type ModelEvidenceReport" : ""}} from "moguri";
-    import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService} from "moguri/node";
+    import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService${upgradeDiscovery ? ", ensureConnection, ServiceProtocolMismatch, ServiceUpgradeCancelled, type ServiceUpgradeReview" : ""}} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     async function typedConsumer() {
+      ${upgradeDiscovery ? `
+      void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
+      const upgradeReview = async (review:ServiceUpgradeReview):Promise<boolean> => {void review.fingerprint;void review.observedProtocol;return false;};
+      const reviewedConnection = (stateDir:string) => ensureConnection({stateDir,confirmUpgrade:upgradeReview});void reviewedConnection;
+      ` : ""}
+      ${capturedServiceStop ? `
+      const stopCaptured = (stateDir:string, captured:Awaited<ReturnType<typeof createRuntime>>["connection"]) => stopMoguriService(stateDir,{expectedConnection:captured});
+      void stopCaptured;
+      ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 44 ? `
+      await sdk.projects.add("/generated/folder");
+      const cloned=await sdk.projects.clone("https://example.invalid/generated.git","/generated/new-folder",true);void cloned.id;
+      const defaultRoot=(await sdk.terminal.defaultRoot()).root;
+      const globalConsole=await sdk.terminal.openGlobal(defaultRoot);void globalConsole.id;
+      await sdk.terminal.open("generated-id",80,24,undefined,defaultRoot);
+      ` : ""}
       ${installedProtocol >= 43 ? `
       const selection:DocumentReadOptions={sheet:"Generated sheet",range:"A1:C1",offset:0,limit:4096};
       const literal:DocumentSearchOptions={query:"Generated",limit:2};
@@ -70,6 +89,14 @@ try {
       ${installedProtocol >= 34 ? 'const evidence:ModelEvidenceReport=(await sdk.models.evidence("generated-model")).evidence;void evidence.claimed.family;void evidence.source.familyField;' : ""}
       const snapshot = sdk.settings.get();
       if (!snapshot) throw new Error("Not connected");
+      ${installedProtocol >= 51 ? `
+      await sdk.sessions.reorder(null,null,null,false,[{sessionId:"generated-id",revision:0}]);
+      await sdk.questions.answerOther("generated-question","Generated explicit other answer",0);
+      await sdk.questions.answerDraft("generated-question",0,true);
+      const currentPlan=(await sdk.sessions.progress("generated-id")).progress.plan;
+      void currentPlan?.source.callId;void currentPlan?.steps[0]?.status;void currentPlan?.binding;
+      void snapshot.values.retention.confirmArchive;void snapshot.values.retention.confirmDelete;
+      ` : ""}
       ${installedProtocol >= 28 ? "const candidate:CandidateRecord|undefined=sdk.getState().snapshot?.candidates[0];void candidate?.stageIntent.commandId;" : ""}
       ${installedProtocol >= 29 ? `
       const patch:CandidatePatch={kind:"patch",summary:"Generated typed candidate.",edits:[{path:"generated.ts",baseDigest:"absent",text:"Generated typed bytes."}]};
@@ -1019,13 +1046,17 @@ try {
         assert.equal(after.data.split("GENERATED_INSTALLED_CONSOLE_READY").length-1,1);
         const read=JSON.parse((await invoke(["terminal","read",opened.id])).stdout);assert.equal(read.terminal.pid,before.terminal.pid);
         const tui=await consoleSdk.slash(session.id,"/terminals read "+opened.id,"tui");assert.equal(tui.kind,"text");assert.equal(JSON.parse(tui.text).terminal.pid,before.terminal.pid);
-        await consoleSdk.terminal.close(opened.id);consoleSdk.disconnect();await stopMoguriService(consoleState);
+        await consoleSdk.terminal.close(opened.id);consoleSdk.disconnect();await stopMoguriService(consoleState,{expectedConnection:consoleRuntime.connection});
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }
     console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/CLI/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
   execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
+  if (installedProtocol >= 44) {
+    const { qualifyWorkspaceEntry } = await import("./qualify-workspace-entry.mjs");
+    console.log(await qualifyWorkspaceEntry({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-entry") }));
+  }
   if (installedProtocol >= 40 && process.platform === "darwin") {
     const { qualifyDecisions } = await import("./qualify-decisions.mjs");
     console.log(await qualifyDecisions({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-decisions") }));

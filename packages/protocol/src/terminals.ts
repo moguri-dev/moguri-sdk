@@ -6,12 +6,12 @@ const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ p
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 const binding = {
-  profileId: id, sessionId: id, projectId: id, workspaceId: nullable(id),
+  profileId: id, workspaceId: nullable(id),
   root: path, device: Type.String({ maxLength: 40 }), inode: Type.String({ maxLength: 40 }), digest: hash,
 };
 export const TerminalBindingSchema = Type.Union([
-  object({ ...binding, env: Type.Literal("Local") }),
-  object({ ...binding, env: Type.Literal("Remote"), peerDigest: hash }),
+  object({ ...binding, sessionId: nullable(id), projectId: nullable(id), env: Type.Literal("Local") }),
+  object({ ...binding, sessionId: id, projectId: id, env: Type.Literal("Remote"), peerDigest: hash }),
 ]);
 export type TerminalBinding = Static<typeof TerminalBindingSchema>;
 export const RemoteTerminalBoundarySchema = object({ target: RemoteIdentitySchema, peerDigest: hash, bridgeDigest: hash, brokerDigest: hash });
@@ -44,7 +44,7 @@ export type RemoteTerminalOwner = Static<typeof RemoteTerminalOwnerSchema>;
 export const TerminalOwnerSchema = Type.Union([LocalTerminalOwnerSchema, RemoteTerminalOwnerSchema]);
 export type TerminalOwner = Static<typeof TerminalOwnerSchema>;
 export const TerminalStateSchema = object({
-  id, sessionId: id, projectId: id, workspaceId: Type.Optional(nullable(id)),
+  id, sessionId: nullable(id), projectId: nullable(id), workspaceId: Type.Optional(nullable(id)),
   title: Type.String({ maxLength: 160 }), pid: nullable(Type.Integer({ minimum: 2, maximum: Number.MAX_SAFE_INTEGER })),
   cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }),
   status: Type.Union([Type.Literal("starting"), Type.Literal("reattaching"), Type.Literal("running"), Type.Literal("stopping"), Type.Literal("closed"), Type.Literal("failed"), Type.Literal("unconfirmed"), Type.Literal("acknowledged")]),

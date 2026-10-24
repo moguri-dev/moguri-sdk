@@ -8,6 +8,136 @@ The [protocol-40 source requalification](#protocol-40-source-requalification)
 below adds the actual shared SDK/client lifecycle. Historical protocol-36/37
 receipts remain scoped to their original payloads and are not relabeled.
 
+## Desktop launch environment
+
+Finder-launched apps may omit `/usr/local/bin` and `/opt/homebrew/bin` from
+`PATH`, even when Apple's `container` CLI is installed. The macOS adapter
+appends these standard installation directories for its host-side release,
+image, policy, guest inventory, launch and cleanup processes. Existing explicit
+`PATH` order is preserved; only `PATH` and `HOME` are inherited by these native
+host operations, not other host credentials.
+
+The same environment reaches SendBox's own subprocesses. This does not change
+the guest environment, grant network access, relax exact release/image pins,
+source a shell startup file or select a different provider. Missing binaries
+and unsuccessful cleanup remain errors. The actual adapter regression runs
+qualification and verified guest teardown with Finder's minimal system `PATH`;
+without explicit current native receipts it remains skipped, not a native pass.
+
+The isolated protocol-50 compatibility build passes that actual Finder-PATH
+guest/cleanup case in **1,465.76 ms**, and encrypted IPC with denied model access
+and retained rollback in **2,968.82 ms**, using existing image
+`sha256:517fba3d59a3be64c04166dff9de038168580ce67315c4de538503636e3680b0`.
+Its worker/bridge pins are unchanged. This is model-free host-launch evidence,
+not fresh provider-network qualification or qualification of a later protocol.
+
+## Protocol-51 bootstrap and private qualification
+
+The protocol-50 image above is not compatible with a protocol-51 service.
+Its configuration remains valid JSON and passes the settings schema; the old
+guest's initial bridge packet was the source of the generic protocol-schema
+error. Rebuilding requires new actual image and bridge/worker pins, not editing
+a protocol number or relabeling the historical image.
+
+Native bootstrap now validates only the initial packet's bounded structural
+shape before capturing the original host-signed guest ownership. The immutable
+image, exact managed stage, foreground command, captured time window, native
+session ID, plan digest and public signer must still agree. An exact protocol
+check then refuses an older or newer guest before initialization, transport keys,
+provider credentials or model access. Shared bridge init/info/envelope schemas
+remain exact-version schemas. A refusal retains both the version mismatch and
+any ownership-verification failure; no matching name or PID is adopted.
+
+New create-only private intents carry format/version, probe identity, original
+configuration digest, launch name and captured time bounds. A separate
+create-only bootstrap-owner receipt records the observed protocol and verified
+signed owner. These records precede initialization and support honest exact
+cleanup, not replay or fresh permission. Old private intents are not rewritten,
+inferred from current inventory, automatically reconciled or erased. Unconfirmed
+original cleanup remains unconfirmed even when a new independent probe succeeds.
+
+Sandbox user consoles still have no qualified transport. Their optional build
+metadata must not resolve a restricted guest UID's login shell or block core
+native-agent qualification. Local/SSH console discovery checks actual helper
+bytes first and uses the configured `SHELL` or actual account shell; an expected
+OS account-lookup failure produces an explicit console-unavailable diagnostic,
+never a guessed `/bin/sh` or Local fallback. Unexpected lookup errors propagate.
+
+Provider catalogue connection failures are distinct from bootstrap/build errors.
+Diagnostics identify the endpoint and a bounded proxy CONNECT status when
+available, without copying raw exceptions, credentials or headers. Actual
+provider HTTP responses remain responses, not proxy refusals. Caller-owned
+cancellation keeps its original reason. DNS aliases need exact user review;
+neither error handling nor qualification adds host grants.
+
+This repair reuses Node/Node-PTY and existing TypeBox/protocol helpers (MIT),
+and the existing SendBox adapter (Apache-2.0), without a new dependency, domain
+event, durable database schema or migration. The private intent format is
+additive for new operations only. CLI/TUI, desktop and SDK retain one shared
+readiness/error authority; no client-specific readiness or provider fallback
+was added. Generated bootstrap, shell, catalogue, actual-guest cleanup and
+restart/cancellation cases cover these boundaries.
+
+### Protocol-51 current payload and reviewed network scope
+
+The fresh no-cache arm64 image builds in **32,867.98 ms** with Node 26.12.0
+and protocol 51. Installation, signed bundle, public key, release sequence and
+trust-root pins remain the 0.2.3 values recorded below.
+
+| Workload field | Actual immutable value |
+| --- | --- |
+| Image | `docker.io/library/moguri-worker@sha256:078095a44e5e1ffc2bedb93b89774eb49d519cae9f140e49655a2beabdeb4f52` |
+| Worker SHA-256 | `35540ae6a293cb99786b16280dd5770ee955b410e3f0100699d2cac74cc18065` |
+| Bridge SHA-256 | `dda52fb76a14fd5c8514c9f376edbb137179261ecf0004c3d2257a415668d048` |
+| MCP worker SHA-256 | `3964c359c92a081c8cc9a99b1ae5813cd4c17b9238c6ca0915503636186dc9ae` |
+
+| Gate against the stated image | Outcome |
+| --- | --- |
+| Historical protocol-50 image refusal | PASS negative regression, **8,444.59 ms**; original signed owner captured, precise version error, exact guest absent |
+| Actual guest/worker/process controls and cleanup with Finder's minimal PATH | PASS, **1,505.91 ms**; no model call |
+| Encrypted IPC, denied model admission and retained failed after-state despite rollback | PASS, **3,079.87 ms** |
+| Fresh API-only cold provider scope | **FAIL**, **1,569.23 ms**; explicit network diagnostic and proxy CONNECT 403, not a passing gate |
+| Fresh API plus separately user-reviewed exact CNAME | PASS, **2,038.55 ms**; credential-free metadata reachability and verified owned VM absence |
+
+The controller's single approved-host CNAME observation returned
+`glb-db52c2cf8be544.github.com`. The user explicitly approved adding only that
+hostname to the proposed configuration alongside `api.githubcopilot.com`.
+The passing generated probe preserves the original 2 CPU, 4,096 MiB memory,
+8,192 MiB disk and Copilot-enabled scope. Its configuration digest is
+`73de94b9e849a5286f6517495b13376a5770306beefd9638dad8b1bf8b11680c`.
+This is not a built-in alias grant, a wildcard, permission to allow a future
+different alias, or evidence of authenticated inference/model availability.
+There were no personal credentials, paid calls or saved Default-profile changes.
+The original failed private probe remains intact.
+
+The native SDK fixture also verifies the exact currently offered six-tool
+inventory, including the existing `task_progress` advice tool, rather than
+using the stale five-tool assertion from before explicit model plans. This
+does not enable native MCP/subagents, broaden workspace permissions or treat
+a plan as acceptance.
+
+The final combined native/SSH/console/source suite passes **47/47**, with no
+skips or failures, in **68,557.53 ms**. This includes actual controller SIGKILL,
+late metering without replay, native guest loss/cancellation, observed
+double-fork descendant containment, Manual source publication with index/HEAD
+preservation, SSH host/root rejection and authenticated console reattachment.
+Type checks and packed external SDK/CLI/runtime entrypoints and approved
+consumer installation pass; both root and consumer audits report zero
+vulnerabilities. Generated inference receipts remain distinct from live-provider
+and billed-usage evidence.
+
+The actual packaged hidden Electron flow passes **8/8** with no skips in
+**13.8 s**, including committed configuration review/verification, exact native
+staging, returning from the global Sandbox workspace without losing the draft,
+guest tool approvals, separately reviewed publication, storage controls and
+owner-bound shutdown/admission failure handling. Packaged worker/bridge/MCP
+bytes match the exact image receipt. The **306,928,578-byte** ZIP passes the
+bounded production update consumer in **97,814.56 ms**, and a separate read-only
+DMG mount verifies the real app and `/Applications` shortcut. The installer is
+ad-hoc signed, not notarized. Existing large-frontend-chunk and optional macOS
+`.icon` format warnings remain; they are not native qualification failures.
+No personal app, authorization, microphone or paid model was opened.
+
 ## Protocol-41 detached-descendant source qualification
 
 The owner explicitly selected qualified SendBox for sessions requiring a

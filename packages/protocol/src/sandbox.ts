@@ -3,6 +3,8 @@ import { Value } from "typebox/value";
 import { CandidatePatchSchema } from "./candidates.ts";
 import type { CapabilityJob } from "./platform.ts";
 import { MoguriError } from "./core.ts";
+import { SandboxVersionSchema, SandboxSetupCommandSchema, SandboxSetupQuerySchema, type SandboxSetupResponse, type SandboxNetworkScope } from "./sandbox-management.ts";
+export * from "./sandbox-management.ts";
 
 const object = <T extends Record<string, import("typebox").TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -10,7 +12,7 @@ const path = Type.String({ minLength: 1, maxLength: 4096 });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const revision = Type.Integer({ minimum: 0 });
 export const SandboxQualificationSchema = object({
-  release: Type.Literal("0.2.3"), hostSha256: hash, keySha256: hash, manifestSha256: hash,
+  release: SandboxVersionSchema, hostSha256: hash, keySha256: hash, manifestSha256: hash,
   workerDigest: hash, bridgeDigest: hash,
   trustRootId: Type.String({ minLength: 1, maxLength: 128 }),
   minimumReleaseSequence: Type.Integer({ minimum: 7, maximum: Number.MAX_SAFE_INTEGER }),
@@ -40,6 +42,7 @@ export interface SandboxWorkspace {
   sourceRoot: string | null; sourceHead: string | null; inputDigest: string;
   stage: NativeStage | null; authorityDigest: string; configDigest: string; revision: number; createdAt: string;
   commandId: string; commandDigest: string;
+  preparation?: { version: 1; kind: "automatic"; turnId: string };
   status: "preparing" | "ready" | "partial" | "closed"; diagnostic: string | null;
 }
 export interface SandboxExecution {
@@ -54,6 +57,7 @@ export interface SandboxExecution {
   cleanup: "pending" | "owned-guest-stopped" | "unconfirmed" | "acknowledged";
   diagnostic: string | null; lastSequence: number; workerPid: number | null; cliExitCode: number | null;
   resultDigest: string | null; revision: number;
+  networkScope?: SandboxNetworkScope;
   workerOutcome?: "completed" | "stopped" | "failed" | "partial";
   workerDiagnostic?: string | null;
   inspectionIntent?: { commandId: string; commandDigest: string; status: "running" | "completed" | "partial" };
@@ -142,6 +146,7 @@ export const SandboxPublicationResultSchema = object({
 });
 export type SandboxPublicationResult = Static<typeof SandboxPublicationResultSchema>;
 export const SandboxCommandSchema = Type.Union([
+  SandboxSetupCommandSchema,
   object({ type: Type.Literal("sandbox.probe"), confirm: Type.Literal(true) }),
   object({ type: Type.Literal("sandbox.prepare"), sessionId: id, paths: Type.Array(path, { maxItems: 200, uniqueItems: true }), expectedDigest: hash, expectedRevision: revision, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("sandbox.reconcile"), executionId: id, confirm: Type.Literal(true) }),
@@ -152,6 +157,7 @@ export const SandboxCommandSchema = Type.Union([
 export type SandboxCommand = Static<typeof SandboxCommandSchema>;
 export const isSandboxCommand = (value: unknown): value is SandboxCommand => Value.Check(SandboxCommandSchema, value);
 export const SandboxQuerySchema = Type.Union([
+  SandboxSetupQuerySchema,
   object({ type: Type.Literal("sandbox.preview"), sessionId: id, paths: Type.Array(path, { maxItems: 200, uniqueItems: true }) }),
   object({ type: Type.Literal("sandbox.execution"), executionId: id }),
   object({ type: Type.Literal("sandbox.result"), executionId: id }),
@@ -161,6 +167,7 @@ export const SandboxQuerySchema = Type.Union([
 export type SandboxQuery = Static<typeof SandboxQuerySchema>;
 export const isSandboxQuery = (value: unknown): value is SandboxQuery => Value.Check(SandboxQuerySchema, value);
 export type SandboxResponse =
+  | SandboxSetupResponse
   | { type: "sandbox.preview"; preview: SandboxWorkspacePreview }
   | { type: "sandbox.execution"; execution: SandboxExecution }
   | { type: "sandbox.result"; result: SandboxResult | null }

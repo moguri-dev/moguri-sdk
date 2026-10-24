@@ -2,7 +2,8 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
 import { McpServerSchema, SandboxSchema } from "./config.ts";
-import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot } from "./sessions.ts";
+import { SandboxManagementSchema, defaultSandboxManagement } from "./sandbox-management.ts";
+import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot, type ProjectCloneIntent } from "./sessions.ts";
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
@@ -10,6 +11,14 @@ import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 export * from "./progress.ts";
+import { AppearanceSchema, GuidanceSchema, type PowerStatus, type SqlConnection } from "./preferences.ts";
+export * from "./preferences.ts";
+import { NotificationSoundCommandSchema, NotificationSoundQuerySchema, type NotificationSound, type NotificationSoundResponse } from "./notification-sounds.ts";
+export * from "./notification-sounds.ts";
+import { ApplicationCommandSchema, ApplicationQuerySchema, type ApplicationResponse } from "./application.ts";
+import { StorageQuerySchema, type StorageResponse } from "./storage-location.ts";
+import { UpdateQuerySchema, type UpdateResponse } from "./application-updates.ts";
+export * from "./application.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
 import { ManagedWorkspaceCommandSchema, ManagedWorkspaceQuerySchema, type ManagedWorkspaceResponse, type ManagedWorkspace, type ChangeSet } from "./worktrees.ts";
 import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type ArtifactMaterializationPreview } from "./artifacts.ts";
@@ -75,6 +84,7 @@ const id = Type.String({ minLength: 1, maxLength: 128 });
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 const revision = Type.Integer({ minimum: 0 });
 const decision = Type.Union([Type.Literal("ask"), Type.Literal("allow"), Type.Literal("deny")]);
+const notificationSound = object({ enabled: Type.Boolean(), id: Type.String({ minLength: 1, maxLength: 128 }) });
 
 export const DEFAULT_SYSTEM_PROMPT = `You are Moguri, a practical software engineering agent.
 
@@ -89,10 +99,12 @@ Push, merge, rebase, branch deletion, scheduled actions, and changes to Moguri's
 Finish with the outcome and any real blocker. Do not claim access to hidden reasoning or billable-usage information the provider did not supply.`;
 
 export const SettingsSchema = object({
-  appearance: object({ theme: Type.Union([Type.Literal("dark"), Type.Literal("light"), Type.Literal("system")]) }),
+  appearance: AppearanceSchema,
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
+  guidance: Type.Optional(GuidanceSchema),
   permissions: object({
+    defaultDecision: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("deny")])),
     tools: Type.Array(object({ id, tool: Type.String({ minLength: 1, maxLength: 80 }), decision, pathPrefix: Type.String({ maxLength: 4096 }) }), { maxItems: 100 }),
     commands: Type.Array(object({ id, command: Type.String({ minLength: 1, maxLength: 16384 }), decision }), { maxItems: 100 }),
   }),
@@ -103,50 +115,88 @@ export const SettingsSchema = object({
   voice: object({
     language: Type.String({ minLength: 1, maxLength: 16 }),
     backend: Type.Union([Type.Literal("auto"), Type.Literal("cpu"), Type.Literal("metal")]),
+    inputDeviceId: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+    shortcut: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+    pushToTalk: Type.Optional(Type.Boolean()),
   }),
+  shortcuts: Type.Optional(object({
+    commands: Type.String({ minLength: 1, maxLength: 80 }),
+    terminalCopy: Type.String({ minLength: 1, maxLength: 80 }),
+  })),
+  lifecycle: Type.Optional(object({ keepAwake: Type.Boolean(), tailMinutes: Type.Integer({ minimum: 0, maximum: 1440 }) })),
+  integrations: Type.Optional(object({ sql: object({ enabled: Type.Boolean(), endpoint: Type.String({ minLength: 1, maxLength: 2048 }) }) })),
   sandbox: SandboxSchema,
-  retention: object({ deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }) }),
+  sandboxManagement: Type.Optional(SandboxManagementSchema),
+  retention: object({
+    deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }),
+    archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
+    confirmArchive: Type.Optional(Type.Boolean()), confirmDelete: Type.Optional(Type.Boolean()),
+  }),
   artifacts: object({ retainAnswers: Type.Boolean() }),
   budgets: BudgetSettingsSchema,
   kupo: KupoSettingsSchema,
   winddown: WinddownSettingsSchema,
   decisions: DecisionSettingsSchema,
-  notifications: object({ inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean() }),
+  notifications: object({
+    inApp: Type.Boolean(), os: Type.Boolean(), previewContent: Type.Boolean(),
+    needsInputSound: Type.Optional(notificationSound), completedSound: Type.Optional(notificationSound), soundWhileFocused: Type.Optional(Type.Boolean()),
+  }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
-  appearance: { theme: "dark" }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "",
-  permissions: { tools: [], commands: [] },
+  appearance: { theme: "dark", palette: "moguri", custom: {} }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
+  permissions: { defaultDecision: "ask", tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [],
-  voice: { language: "auto", backend: "auto" },
+  voice: { language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
+  shortcuts: { commands: "Primary+KeyK", terminalCopy: "Primary+Shift+KeyC" },
+  lifecycle: { keepAwake: false, tailMinutes: 5 },
+  integrations: { sql: { enabled: false, endpoint: "http://127.0.0.1:9147" } },
   sandbox: { executable: "sendbox", configPath: null, image: null, bundlePath: null, trustRootPath: null },
-  retention: { deleteArchived: false, afterDays: 30 },
+  sandboxManagement: defaultSandboxManagement(),
+  retention: { deleteArchived: false, afterDays: 7, archiveCompleted: false, archiveAfterDays: 7, confirmArchive: true, confirmDelete: true },
   artifacts: { retainAnswers: true },
   budgets: { rates: [], maxPriceAgeDays: 30 },
   kupo: defaultKupoSettings(),
   winddown: defaultWinddownSettings(),
   decisions: defaultDecisionSettings(),
-  notifications: { inApp: true, os: false, previewContent: false },
+  notifications: { inApp: true, os: false, previewContent: false,
+    needsInputSound: { enabled: true, id: "default" }, completedSound: { enabled: true, id: "default" }, soundWhileFocused: false },
   localModels: [], startup: { global: {}, profile: {} },
   remote: null,
 });
+export function normalizeSettings(settings: Partial<UserSettings>): UserSettings {
+  const defaults = defaultSettings();
+  return { ...defaults, ...settings,
+    appearance: { ...defaults.appearance, ...settings.appearance },
+    permissions: { ...defaults.permissions, ...settings.permissions },
+    voice: { ...defaults.voice, ...settings.voice },
+    retention: { ...defaults.retention, ...settings.retention },
+    notifications: { ...defaults.notifications, ...settings.notifications },
+    sandboxManagement: { ...defaultSandboxManagement(), ...(settings.sandbox?.qualification ? { version: settings.sandbox.qualification.release } : {}), ...settings.sandboxManagement },
+  };
+}
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
-  Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("retention"),
+  Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("startup"),
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
   Type.Literal("kupo"),
   Type.Literal("winddown"),
   Type.Literal("decisions"),
+  Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  ApplicationCommandSchema,
+  NotificationSoundCommandSchema,
+  object({ type: Type.Literal("runtime.power.retry") }),
+  object({ type: Type.Literal("project.clone"), repository: Type.String({ minLength: 1, maxLength: 2048 }), path, confirm: Type.Literal(true) }),
   GithubCommandSchema,
   LinearCommandSchema,
   ExtensionCommandSchema,
@@ -198,6 +248,12 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  UpdateQuerySchema,
+  StorageQuerySchema,
+  ApplicationQuerySchema,
+  NotificationSoundQuerySchema,
+  object({ type: Type.Literal("runtime.status") }),
+  object({ type: Type.Literal("integrations.sql.status") }),
   ProgressQuerySchema,
   GithubQuerySchema,
   LinearQuerySchema,
@@ -260,6 +316,7 @@ export interface Proposal {
   baseDigest?: string;
 }
 export interface CapabilityJob {
+  projectClone?: ProjectCloneIntent;
   operationId?: string;
   workspaceId?: string | null;
   materialization?: ArtifactMaterializationPreview;
@@ -298,6 +355,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   oauthAuthorizations: McpAuthorization[];
   configurationProposals: ConfigurationProposal[];
   attention: Attention[];
+  notificationSounds: NotificationSound[];
   executions: RemoteExecution[];
   sandboxWorkspaces?: SandboxWorkspace[];
   sandboxExecutions?: SandboxExecution[];
@@ -311,6 +369,12 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse
+  | UpdateResponse
+  | StorageResponse
+  | ApplicationResponse
+  | NotificationSoundResponse
+  | { type: "runtime.status"; runtime: { directory: string; power: PowerStatus } }
+  | { type: "integrations.sql.status"; connection: SqlConnection }
   | GithubResponse
   | LinearResponse
   | ExtensionResponse

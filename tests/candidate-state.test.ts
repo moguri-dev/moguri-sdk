@@ -5,6 +5,7 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
 import { performance } from "node:perf_hooks";
 import { EventStore, digest } from "../apps/service/src/store.ts";
 import { ArtifactRuntime } from "../apps/service/src/artifacts.ts";
@@ -348,6 +349,7 @@ test("schema-29 ownership migration preserves old independent candidate cipherte
     const f = candidate(store); seed(store, f);
     store.commit([], { id: f.record.stageIntent.commandId, digest: f.record.stageIntent.commandDigest, result: { id: f.record.id } });
     const before = retainedRows(store.db);
+    removePost44FixtureMarkers(store.db);
     store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema','paste_file_schema','native_execution_schema','compound_workflow_schema','budget_winddown_schema','owned_decision_schema','task_progress_schema','document_attachment_schema'); PRAGMA user_version=28;
       CREATE TRIGGER generated_candidate_execution_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='candidate_execution_schema'
       BEGIN SELECT RAISE(ABORT,'Generated candidate execution migration failure'); END; COMMIT;`);
@@ -379,6 +381,7 @@ test("schema-28 marker failure leaves schema-27 ciphertext, keys, receipts and d
       { id: "generated-legacy-command", digest: "7".repeat(64), result: { id: f.record.id } });
     store.db.prepare("INSERT INTO memory_scopes VALUES (?,?,?,?,?,?)").run("generated-locator", "generated-scope", "default", f.record.projectId, null, "{\"generated\":\"retained\"}");
     const before = retainedRows(store.db);
+    removePost44FixtureMarkers(store.db);
     store.db.exec(`BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('candidate_workflow_schema','candidate_execution_schema','budget_planning_schema','candidate_generation_schema','role_sequence_schema','candidate_role_schema','model_evidence_schema','owned_role_contract_schema','paste_file_schema','native_execution_schema','compound_workflow_schema','budget_winddown_schema','owned_decision_schema','task_progress_schema','document_attachment_schema'); PRAGMA user_version=27;
       CREATE TRIGGER generated_candidate_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='candidate_workflow_schema'
       BEGIN SELECT RAISE(ABORT,'Generated candidate migration interruption'); END; COMMIT;`);

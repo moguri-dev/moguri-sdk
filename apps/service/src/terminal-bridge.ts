@@ -12,6 +12,7 @@ import { terminalBrokerPath, terminalBuildDigests } from "./terminal-build.ts";
 import { TERMINAL_FRAME_BYTES, TerminalRequestSchema } from "./terminal-protocol.ts";
 import { RemoteTerminalInitSchema } from "./remote-terminal-protocol.ts";
 import { JsonLineChannel } from "./worker-wire.ts";
+import { terminalEnvironment } from "./terminal-shell.ts";
 
 const ownerName = (owner: RemoteTerminalOwner) => `mo-${createHash("sha256").update(owner.scopeDigest).digest("hex").slice(0, 12)}`;
 const marker = (owner: RemoteTerminalOwner) => JSON.stringify({ format: "moguri-remote-console-owner", version: 1, id: owner.id, profileId: owner.profileId,
@@ -63,7 +64,7 @@ async function start(owner: PreparedRemoteTerminalOwner, key: string): Promise<P
   }
   const path = terminalBrokerPath(), child = fork(path, ["--moguri-terminal-owner", owner.id], {
     execArgv: path.endsWith(".ts") ? ["--import", createRequire(import.meta.url).resolve("tsx")] : [], detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"],
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? owner.directory, LANG: "en_US.UTF-8" },
+    env: terminalEnvironment(owner.directory),
   });
   if (!child.pid) throw new MoguriError("terminal_remote_pid", "Remote broker admission has no observed PID. Preserve its original key/endpoint; no retry.", 409);
   const expected = { ...owner, pid: child.pid };

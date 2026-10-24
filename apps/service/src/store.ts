@@ -27,6 +27,7 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "notification.sound_saved" ? `notification-sound/${input.payload.sound.id}` :
   input.event_type === "github.operation_recorded" || input.event_type === "linear.operation_recorded" ? input.payload.operation.id :
   input.event_type === "knowledge.saved" ? `knowledge/${input.payload.record.id}` :
   input.event_type === "sandbox.execution_recorded" ? input.payload.execution.id :
@@ -50,6 +51,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "notification.sound_saved": return [input.payload.sound.contentDigest];
     case "github.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.reviewDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "linear.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "knowledge.saved": return [input.payload.record.contentDigest];
@@ -255,6 +257,33 @@ export class EventStore {
       if (version < 43) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('document_attachment_schema','1');
         PRAGMA user_version=43; COMMIT;`);
+      if (version < 44) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT OR IGNORE INTO retention_metadata(id,value) VALUES ('workspace_entry_schema','1');
+        PRAGMA user_version=44; COMMIT;`);
+      if (version < 45) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('settings_preferences_schema','1');
+        PRAGMA user_version=45; COMMIT;`);
+      if (version < 46) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('client_voice_capture_schema','1');
+        PRAGMA user_version=46; COMMIT;`);
+      if (version < 47) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('notification_sound_schema','1');
+        PRAGMA user_version=47; COMMIT;`);
+      if (version < 48) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('application_preferences_schema','1');
+        PRAGMA user_version=48; COMMIT;`);
+      if (version < 49) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('state_location_schema','1');
+        PRAGMA user_version=49; COMMIT;`);
+      if (version < 50) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('private_update_schema','1');
+        PRAGMA user_version=50; COMMIT;`);
+      if (version < 51) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('session_interactions_schema','1');
+        PRAGMA user_version=51; COMMIT;`);
+      if (version < 52) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('managed_sandbox_schema','1');
+        PRAGMA user_version=52; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
+import { homedir } from "node:os";
 import {
   MoguriError, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
@@ -15,9 +16,11 @@ import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.
 import { remoteTerminalPeer, terminalBinding } from "./terminal-identity.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { RemoteConsoles } from "./remote-terminals.ts";
+import { canAutoArchive } from "./session-lifecycle.ts";
+import { KeepAwake, type PowerDriver } from "./keep-awake.ts";
 
 export type WorkspaceFinish = ((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => CommandResult) & { intent?: { id: string; digest: string } };
-export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number }
+export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number; power?: PowerDriver }
 export interface SessionWorkspaceHost {
   snapshot(): Snapshot;
   commit(events: EventInput[], forget?: ForgetRequest): void;
@@ -35,6 +38,7 @@ export interface SessionWorkspaceHost {
   startup(projectId: string | null): ResolvedControls;
   project(session: Pick<Session, "projectId" | "workspaceId">): Project;
   rootBusy(projectId: string, workspaceId: string | null): boolean;
+  localRootBusy(root: string): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   nativeRead?(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   remotePlanBinding(session: Session): PlanBinding;
@@ -43,14 +47,18 @@ export interface SessionWorkspaceHost {
 export class SessionWorkspace {
   readonly projects: ProjectService;
   readonly terminals: TerminalManager;
+  readonly power: KeepAwake;
   private timer?: ReturnType<typeof setInterval>;
+  private powerTimer?: ReturnType<typeof setInterval>;
   private cleaning = false;
+  private globalOpening?: Promise<TerminalState>;
   constructor(private readonly host: SessionWorkspaceHost, stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
     this.projects = new ProjectService(() => host.snapshot(), stateDir);
+    this.power = new KeepAwake(() => this.snapshot(), options.power, options.now);
     this.terminals = new TerminalManager({
       snapshot: () => this.snapshot(),
       changed: (terminal) => {
-        if (!this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) throw new MoguriError("terminal_session_removed", "Terminal state cannot resurrect a removed session.", 409);
+        if (terminal.sessionId !== null && !this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) throw new MoguriError("terminal_session_removed", "Terminal state cannot resurrect a removed session.", 409);
         this.host.commit([{ event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId, payload: { terminal } }]);
       },
       ownerChanged: (owner) => this.host.commit([{ event_type: "terminal.owner_changed", profile_id: this.snapshot().profileId, payload: { owner } }]),
@@ -76,61 +84,121 @@ export class SessionWorkspace {
   private event(session: Session, event: EventInput): EventInput { return { ...event, profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id }; }
   async recover(): Promise<void> {
     await this.terminals.recover();
-    this.timer = setInterval(() => { void this.retention().catch((error: unknown) => console.error("Archived-session retention failed:", error instanceof Error ? error.message : "Unknown retention failure")); }, 60_000);
+    this.timer = setInterval(() => { void this.retention().catch((error: unknown) => console.error("Session retention failed:", error instanceof Error ? error.message : "Unknown retention failure")); }, 60_000);
     this.timer.unref();
+    this.power.update();
+    this.powerTimer = setInterval(() => this.power.update(), 1000);
+    this.powerTimer.unref();
   }
-  async retention(): Promise<{ deleted: number }> {
+  async retention(): Promise<{ deleted: number; archived: number }> {
     const policy = this.snapshot().settings.values.retention;
-    if (!policy.deleteArchived || this.cleaning) return { deleted: 0 };
+    if ((!policy.deleteArchived && !policy.archiveCompleted) || this.cleaning) return { deleted: 0, archived: 0 };
     this.cleaning = true;
-    let deleted = 0;
+    let deleted = 0, archived = 0;
     try {
-      const cutoff = (this.options.now?.() ?? Date.now()) - policy.afterDays * 86400_000;
-      for (const session of this.snapshot().sessions.filter((session) => session.status === "archived" && session.archivedAt && Date.parse(session.archivedAt) <= cutoff)) {
-        if (!this.snapshot().settings.values.retention.deleteArchived) break;
+      const now = this.options.now?.() ?? Date.now();
+      const newlyArchived = new Set<string>();
+      for (const session of this.snapshot().sessions) {
+        const snapshot = this.snapshot(), current = snapshot.sessions.find((value) => value.id === session.id);
+        if (current && canAutoArchive(snapshot, current, now)) {
+          this.host.commit([this.event(current, { profile_id: snapshot.profileId, event_type: "session.archived", payload: {} })]);
+          newlyArchived.add(current.id);
+          archived++;
+        }
+      }
+      for (const session of this.snapshot().sessions) {
+        const policy = this.snapshot().settings.values.retention;
+        if (!policy.deleteArchived) break;
+        if (newlyArchived.has(session.id) || session.status !== "archived" || !session.archivedAt || Date.parse(session.archivedAt) > now - policy.afterDays * 86400_000) continue;
         await this.host.deleteSession(session, (events, result = {}, forget) => { this.host.commit(events, forget); return result; });
         deleted++;
       }
-      return { deleted };
+      return { deleted, archived };
     } finally { this.cleaning = false; }
   }
-  async close(options: RuntimeCloseOptions = {}): Promise<void> { clearInterval(this.timer); await this.terminals.closeAll(options); }
+  async close(options: RuntimeCloseOptions = {}): Promise<void> {
+    clearInterval(this.timer); clearInterval(this.powerTimer);
+    await Promise.all([this.power.close(), this.terminals.closeAll(options)]);
+  }
   async input(request: TerminalInput): Promise<void> {
     const terminal = this.snapshot().terminals.find((terminal) => terminal.id === request.terminalId);
     if (!terminal) throw new MoguriError("terminal_missing", "Terminal is outside this profile.", 404);
-    this.session(terminal.sessionId); await this.terminals.input(request);
+    if (terminal.sessionId !== null) this.session(terminal.sessionId);
+    await this.terminals.input(request);
   }
-  private terminalContext(sessionId: string, scriptId?: string) {
+  private localTerminalPolicy(): void {
+    if (!this.snapshot().policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.some((value) => value.env === "Local" && value.ready)) {
+      throw new MoguriError("terminal_env", "Local user consoles are blocked by the current execution policy. No Remote or Sandbox fallback was used.", 409);
+    }
+  }
+  private async globalTerminal(root: string, cols: number, rows: number, intent: NonNullable<WorkspaceFinish["intent"]>): Promise<TerminalState> {
+    if (!isAbsolute(root)) throw new MoguriError("terminal_root", "Choose an explicit absolute directory for the global Local console.");
+    const canonical = await realpath(root);
+    const binding = terminalBinding({ profileId: this.snapshot().profileId, sessionId: null, projectId: null, workspaceId: null, root: canonical });
+    const recheck = () => {
+      this.localTerminalPolicy();
+      if (this.host.localRootBusy(canonical)) throw new MoguriError("workspace_busy", "An owned writer holds this exact Local root. No independent terminal was started.", 409);
+      if (terminalBinding(binding).digest !== binding.digest) throw new MoguriError("terminal_root_changed", "The chosen global terminal root changed. No replacement or input was replayed.", 409);
+    };
+    recheck();
+    if (this.globalOpening) {
+      const existing = await this.globalOpening; recheck();
+      if (existing.binding?.digest !== binding.digest) throw new MoguriError("terminal_global_exists", "The global terminal is already starting in another exact root. Inspect it instead of replacing it.", 409);
+      return existing;
+    }
+    const existing = this.snapshot().terminals.find((terminal) => terminal.sessionId === null && !["closed", "failed", "acknowledged"].includes(terminal.status));
+    if (existing) {
+      if (existing.status !== "running" || existing.binding?.digest !== binding.digest) throw new MoguriError("terminal_global_exists", "Inspect or close the original global terminal before opening another root. No shell was replaced.", 409);
+      return existing;
+    }
+    const work = this.terminals.open(binding, cols, rows, intent, recheck);
+    this.globalOpening = work;
+    try { return await work; } finally { if (this.globalOpening === work) this.globalOpening = undefined; }
+  }
+  private terminalContext(sessionId: string, scriptId?: string, explicitRoot?: string) {
     const session = this.session(sessionId), env = session.controls.env;
     if (session.status === "archived") throw new MoguriError("archived", "Restore this session before opening or typing into its terminal.", 409);
     if (!["Local", "Remote"].includes(env) || !this.snapshot().policy.allowedEnvs.includes(env) || !this.snapshot().capabilities.find((capability) => capability.env === env)?.ready) throw new MoguriError("terminal_env", "No qualified terminal transport exists for this environment/policy; no Local fallback.", 409);
     if (env === "Remote" && session.workspaceId !== null) throw new MoguriError("terminal_remote_workspace", "Remote consoles require an explicitly mapped project, not an implicit Local worktree.", 409);
-    const project = env === "Remote" ? this.project(session.projectId) : this.host.project(session);
-    if (env === "Local" && this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
-    const configuration = this.projects.configuration(project.id), script = scriptId ? configuration.values.scripts.find((script) => script.id === scriptId) : undefined;
+    const project = session.projectId === null ? null : env === "Remote" ? this.project(session.projectId) : this.host.project(session);
+    if (!project && (env !== "Local" || !explicitRoot)) throw new MoguriError("project_required", "Select a project, or explicitly choose a Local root for this project-free user console. No previous root was reused.", 409);
+    if (!project && explicitRoot && this.host.localRootBusy(explicitRoot)) throw new MoguriError("workspace_busy", "An owned writer holds this exact Local root. No project-free terminal was started.", 409);
+    if (project && explicitRoot !== undefined) throw new MoguriError("terminal_root", "Project consoles use their bound workspace. An explicit alternate root requires a separate global console.", 409);
+    if (project && env === "Local" && this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
+    const configuration = project ? this.projects.configuration(project.id) : null, script = scriptId ? configuration?.values.scripts.find((script) => script.id === scriptId) : undefined;
     if (scriptId && !script) throw new MoguriError("project_script", "Choose an existing explicitly configured project script.", 404);
-    const remote = env === "Remote" ? this.host.remoteConsoles?.admission() : undefined, root = env === "Remote" ? configuration.values.remotePath : project.path;
+    const remote = env === "Remote" ? this.host.remoteConsoles?.admission() : undefined, root = env === "Remote" ? configuration?.values.remotePath : project?.path ?? explicitRoot;
     if (env === "Remote" && !remote) throw new MoguriError("terminal_remote_unqualified", "Remote console admission is not wired on this service. No Local broker was selected.", 409);
     if (!root || !root.startsWith("/") || /[\0\r\n]/.test(root)) throw new MoguriError("terminal_root", "Configure this exact execution environment's absolute project root. No previous or Local root was substituted.", 409);
-    const scope = { profileId: this.snapshot().profileId, sessionId: session.id, projectId: project.id, workspaceId: session.workspaceId, root };
-    return { session, project, script, scope, remote, signature: frameDigest([scope, env, configuration.revision, this.snapshot().policy.revision, script ?? null, remote ?? null]) };
+    const scope = { profileId: this.snapshot().profileId, sessionId: session.id, projectId: project?.id ?? null, workspaceId: session.workspaceId, root };
+    return { session, project, script, scope, remote, signature: frameDigest([scope, env, configuration?.revision ?? null, this.snapshot().policy.revision, script ?? null, remote ?? null]) };
   }
-  private async terminalAdmission(sessionId: string, scriptId?: string) {
-    const captured = this.terminalContext(sessionId, scriptId);
-    const binding = captured.remote ? await this.host.remoteConsoles!.binding({ ...captured.scope, workspaceId: null }, captured.remote.boundary, AbortSignal.timeout(10_000)) :
-      terminalBinding(captured.scope);
-    this.terminalRecheck(sessionId, scriptId, captured.signature, binding);
-    return { ...captured, binding };
+  private async terminalAdmission(sessionId: string, scriptId?: string, explicitRoot?: string) {
+    if (explicitRoot !== undefined) {
+      if (!isAbsolute(explicitRoot)) throw new MoguriError("terminal_root", "Choose an explicit absolute Local console root.");
+      explicitRoot = await realpath(explicitRoot);
+    }
+    const captured = this.terminalContext(sessionId, scriptId, explicitRoot);
+    const binding = captured.remote && captured.project ? await this.host.remoteConsoles!.binding({ ...captured.scope, projectId: captured.project.id, workspaceId: null }, captured.remote.boundary, AbortSignal.timeout(10_000)) : terminalBinding(captured.scope);
+    this.terminalRecheck(sessionId, scriptId, captured.signature, binding, explicitRoot);
+    return { ...captured, binding, explicitRoot };
   }
-  private terminalRecheck(sessionId: string, scriptId: string | undefined, signature: string, binding: import("../../../packages/protocol/src/index.ts").TerminalBinding): void {
-    const current = this.terminalContext(sessionId, scriptId);
+  private terminalRecheck(sessionId: string, scriptId: string | undefined, signature: string, binding: import("../../../packages/protocol/src/index.ts").TerminalBinding, explicitRoot?: string): void {
+    const current = this.terminalContext(sessionId, scriptId, explicitRoot);
     if (current.signature !== signature || binding.env === "Local" && terminalBinding(current.scope).digest !== binding.digest) throw new MoguriError("terminal_scope_changed", "Terminal root/script/authority changed during admission. Original effects remain inspectable; no launch was replayed.", 409);
   }
   private terminalInputAllowed(terminal: TerminalState): void {
+    if (terminal.sessionId === null) {
+      this.localTerminalPolicy();
+      const binding = terminal.binding;
+      if (terminal.env !== "Local" || binding?.env !== "Local" || binding.profileId !== this.snapshot().profileId ||
+        binding.sessionId !== null || binding.projectId !== null || binding.workspaceId !== null || terminalBinding(binding).digest !== binding.digest) throw new MoguriError("terminal_root_changed", "The global console no longer owns its exact Local null scope and root. No input or replacement was sent.", 409);
+      return;
+    }
     const session = this.session(terminal.sessionId), binding = terminal.binding;
     if (!binding || terminal.env !== session.controls.env || session.status === "archived" || !this.snapshot().policy.allowedEnvs.includes(binding.env)) throw new MoguriError("terminal_root_changed", "This retained terminal no longer has its original allowed execution environment/policy. No input/resize was sent.", 409);
     if (binding.env === "Local") {
-      const current = this.terminalContext(terminal.sessionId);
+      const current = this.terminalContext(terminal.sessionId, undefined, session.projectId === null ? binding.root : undefined);
       if (current.remote || binding.digest !== terminalBinding(current.scope).digest) throw new MoguriError("terminal_root_changed", "The retained Local root changed. No input/resize or replacement was sent.", 409);
     } else {
       const owner = this.snapshot().terminalOwners.find((owner) => owner.id === terminal.ownerId), target = this.snapshot().settings.values.remote;
@@ -143,6 +211,8 @@ export class SessionWorkspace {
   }
   async query(query: SessionWorkspaceQuery): Promise<SessionWorkspaceResponse> {
     switch (query.type) {
+      case "project.repositories": return this.projects.repositories(this.project(query.projectId), AbortSignal.timeout(5000));
+      case "terminal.default-root": return { type: query.type, root: await realpath(this.options.terminal?.defaultRoot ?? homedir()) };
       case "session.context": return { type: query.type, context: await this.host.contextPreview(this.session(query.sessionId)) };
       case "project.configuration": return { type: query.type, configuration: this.projects.configuration(query.projectId) };
       case "project.sources": return this.projects.sources(this.project(query.projectId));
@@ -180,6 +250,22 @@ export class SessionWorkspace {
   }
   async execute(command: SessionWorkspaceCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     switch (command.type) {
+      case "session.reorder": {
+        const current = this.snapshot().sessions.filter((session) => session.projectId === command.projectId &&
+          (session.parentSessionId ?? null) === command.parentSessionId &&
+          (command.parentSessionId !== null || session.groupId === command.groupId) &&
+          (session.status === "archived") === command.archived);
+        const ids = new Set(command.sessions.map((session) => session.sessionId));
+        if (ids.size !== command.sessions.length || ids.size !== current.length || current.some((session) => !ids.has(session.id))) {
+          throw new MoguriError("session_order", "Reorder exactly the current sibling sessions. Reload after a session is added, moved, archived or removed.", 409);
+        }
+        const events = command.sessions.map((item, order) => {
+          const session = current.find((session) => session.id === item.sessionId)!;
+          this.revision(session.revision, item.revision);
+          return this.event(session, { event_type: "session.organized", profile_id: this.snapshot().profileId, payload: { changes: { order } } });
+        });
+        return finish(events);
+      }
       case "session.organize": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
         if (command.changes.title !== undefined && !command.changes.title.trim()) throw new MoguriError("session_title", "A session name cannot be empty.");
@@ -191,7 +277,15 @@ export class SessionWorkspace {
             if (visited.has(parent) || visited.size > 8) throw new MoguriError("session_cycle", "Session attachment must be acyclic and at most eight levels deep.");
             visited.add(parent); const ancestor = this.session(parent);
             if (ancestor.projectId !== session.projectId) throw new MoguriError("session_project", "Attach sessions only within the same project.");
+            if (ancestor.kind === "subagent") throw new MoguriError("session_parent", "Model-owned subagents cannot adopt user sessions or change their cancellation ownership.", 409);
             parent = ancestor.parentSessionId ?? null;
+          }
+          const pending = [{ id: session.id, depth: visited.size - 1 }], descendants = new Set<string>();
+          while (pending.length) {
+            const next = pending.pop()!;
+            if (descendants.has(next.id) || next.depth > 8) throw new MoguriError("session_cycle", "The complete attached subtree must remain acyclic and at most eight levels deep.");
+            descendants.add(next.id);
+            for (const child of this.snapshot().sessions.filter((child) => child.parentSessionId === next.id)) pending.push({ id: child.id, depth: next.depth + 1 });
           }
         }
         if (command.changes.groupId && !this.snapshot().sessionGroups.some((group) => group.id === command.changes.groupId && group.projectId === session.projectId)) throw new MoguriError("session_group", "Choose a group in this project.");
@@ -272,6 +366,10 @@ export class SessionWorkspace {
         } else {
           updated.values = command.type === "project.mcp.import" ? await this.projects.importMcp(project, command.expectedDigest) : command.settings;
           this.projects.validate(updated.values, project.id);
+          if (updated.values.repo.upstream !== current.values.repo.upstream) {
+            const layout = await this.projects.repositories(project, AbortSignal.timeout(5000));
+            if (!layout.complete || layout.roots.length !== 1) throw new MoguriError("project_upstream", "An upstream preference requires exactly one verified repository in the attached Local folder. No source root was inferred.", 409);
+          }
         }
         const latest = this.projects.configuration(project.id); this.revision(latest.revision, command.expectedRevision);
         const result = finish([{ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: project.id, payload: { configuration: updated } }], { revision: updated.revision });
@@ -324,11 +422,16 @@ export class SessionWorkspace {
         }
       }
       case "terminal.open": {
-        const captured = await this.terminalAdmission(command.sessionId, command.scriptId);
+        const captured = await this.terminalAdmission(command.sessionId, command.scriptId, command.root);
         if (!finish.intent) throw new MoguriError("terminal_intent", "Terminal launch needs its canonical user command identity. No shell was started.", 409);
         const terminal = await this.terminals.open(captured.binding, command.cols, command.rows, finish.intent, () => {
-          this.terminalRecheck(command.sessionId, command.scriptId, captured.signature, captured.binding);
+          this.terminalRecheck(command.sessionId, command.scriptId, captured.signature, captured.binding, captured.explicitRoot);
         }, captured.script, captured.remote);
+        return finish([], { id: terminal.id });
+      }
+      case "terminal.open-global": {
+        if (!finish.intent) throw new MoguriError("terminal_intent", "A global launch requires its actual user command identity. No console was started.", 409);
+        const terminal = await this.globalTerminal(command.root, command.cols, command.rows, finish.intent);
         return finish([], { id: terminal.id });
       }
       case "terminal.reconcile": {
@@ -356,8 +459,8 @@ export class SessionWorkspace {
           payload: { terminal: { ...terminal, status: "acknowledged", diagnostic: "The user acknowledged process inspection. This does not retrospectively prove cleanup." } } }]);
       }
       case "retention.run": {
-        if (!this.snapshot().settings.values.retention.deleteArchived) throw new MoguriError("retention_disabled", "Enable archived-session deletion explicitly first.");
-        const result = await this.retention(); return finish([], { revision: result.deleted });
+        if (!this.snapshot().settings.values.retention.deleteArchived && !this.snapshot().settings.values.retention.archiveCompleted) throw new MoguriError("retention_disabled", "Enable automatic completed-session archive or archived-session deletion explicitly first.");
+        const result = await this.retention(); return finish([], { revision: result.deleted + result.archived });
       }
     }
   }

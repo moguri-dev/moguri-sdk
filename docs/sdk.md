@@ -5,7 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **43** for
+Current source uses protocol **52** for [managed Sandbox](architecture/managed-sandbox.md),
+following protocol **51** for
+[session interactions](architecture/session-interactions.md), following the
+protocol-44 through 50 settings/native lifecycle slices and protocol-43
 [document attachments](architecture/document-attachments.md), including
 protocol-42 [task completion estimates](architecture/task-progress.md), extending the
 protocol-41 owner-requested
@@ -16,11 +19,52 @@ wind-down and owned bounded decisions. It does not replace the immutable qualifi
 See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
 for the actual generated VM evidence and remaining client/environment gates.
 
-`sessions.progress(sessionId)` reads the bound plan checklist and compares it
-with optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
+`sessions.progress(sessionId)` reads the explicit current model plan when present,
+otherwise the separately bound workspace-file checklist, and compares it with
+optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
 every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
+
+## Session interaction contract
+
+`sessions.reorder(projectId, parentSessionId, groupId, archived, sessions)`
+requires the complete sibling set as `{sessionId, revision}` entries. It checks
+all revisions before appending the existing `session.organized` events atomically.
+`Session.order` and the browser-safe `compareSessions` helper provide shared
+presentation order with pin priority; they do not change worker admission
+priority. Existing `sessions.organize(id, {parentSessionId}, revision)` keeps
+same-project, no-active-reparenting, model-subagent and cycle/depth boundaries.
+No move transfers model context, roots, Env or permissions.
+
+`settings.values.retention.confirmArchive` and `confirmDelete` default to true
+and scope to the current profile. They are routine client-confirmation
+preferences, not CP permission grants or automatic retention policy. Actual
+session deletion still requires its existing explicit confirmation/revision and
+successful owned cleanup.
+
+`questions.answerOther(questionId, text, revision)` explicitly records a real
+user's alternative, including for a strict-choice question. It does not add a
+model-offered choice, expand automatic technical-choice delegation or consume
+the chat draft. `questions.answerDraft(id, revision, true)` is the separate
+explicit Other path that atomically consumes only the exact saved text revision.
+Ordinary `answer`/`answerDraft` retain their original validation. CLI
+`moguri question answer-other ID ANSWER_FILE --revision N` and shared
+`/question other ID REV TEXT` use the same endpoint. Neither operation grants
+tool/Git permission.
+
+The owning worker's existing `task_progress` tool accepts `action: "plan"` with
+a title and two to fifty distinct `{text, status}` steps (`pending`,
+`in_progress`, `done`). `task.plan_updated` and `Session.taskPlan` retain its
+actual model/step/call, binding hash, revision and turn. `progress.plan` is null
+for another task/root; polling and ordinary messages cannot create a plan or
+start another inference. The desktop shows this checklist only in Plan.
+
+Resume admits one queued prompt per settled owned turn. New explicit stop intent
+uses `turn.stop_requested.payload.holdQueue` to retain undispatched prompts
+through restart without changing legacy event interpretation. Explicit Interrupt
+keeps its own next-turn semantics; cancellation and unknown accounting never
+become completed work or authorization for a replay.
 
 ## Document attachments
 
@@ -97,6 +141,28 @@ all call these APIs. Examples and exact errors/lifecycle limits are in
 [Linear](architecture/linear-workflows.md) and
 [dependency cache scopes](architecture/dependency-cache-scopes.md).
 
+### Shared preference maintenance
+
+Protocol 45 preserves old event/control bytes and explicitly saved retention
+values while filling new nested defaults. `settings.update/reset` includes
+typed `guidance`, named/custom `appearance`, default `permissions.defaultDecision`,
+optional session `verbosity`, `lifecycle` and existing-daemon integration settings.
+Global/project guidance is recorded in actual future prompt snapshots.
+`runtime.status()` reports the encrypted directory and real owned idle-sleep
+state; `runtime.retryPower()` retries only that original helper, never a model.
+
+`projects.repositories(id)` is a bounded, explicitly Local, non-link-following
+inspection. Upstream configuration requires one completely verified repository,
+including a nested root. Incomplete/denied/multi-repository layouts do not
+guess or rebind the session's workspace.
+
+`integrations.githubConnection()` explicitly verifies the controller GitHub CLI
+account without Copilot/update credentials. `linear.connection(false)` reads only
+credential presence; `linear.connection(true)` verifies the actual account and
+workspace without inventing a project/team. `integrations.sqlStatus()` makes
+only the enabled, explicitly configured existing daemon's bounded health read.
+These observations do not grant files, tools, repository writes or model access.
+
 ## Decision-provider development surface
 
 `decisions.status(sessionId)` reports actual compatible provider readiness,
@@ -129,21 +195,57 @@ See [the owned decision contract](architecture/owned-decisions.md).
 
 ## Native SDK development surface
 
+The primary managed flow uses `sandbox.setup.status()` and
+`sandbox.setup.review(version?)` to inspect the actual supplied runtime/image,
+network/workspace policy and exact installer location. After actual user review,
+call `sandbox.setup.apply(review)` and observe its original ID with
+`sandbox.setup.operation(id)` or `sandbox.setup.wait(id)`. Administrator approval
+is requested only when the exact root-owned release is not already installed.
+`sandbox.setup.cancel(id)` targets only that owned operation. No setup call
+starts a model or silently selects a provider, Env or new runtime version.
+
+`sandbox.setup.check()` observes the fixed public SendBox release feed;
+`sandbox.setup.prepare(version)` downloads and verifies that exact eligible
+archive and prepares a no-script package for a separate review. The app bundles
+0.2.3 and a current-protocol worker OCI archive with Linux Node/native dependencies.
+Source/Node embeddings may pass `platform.sandbox.distribution` explicitly.
+An accepted retained distribution is reused only with its original digest;
+there is no app-directory scan or mutable image pull.
+
+After managed setup approval and explicit Env selection, ordinary Send prepares
+the bound project/worktree privately and automatically. Engine-only qualification
+has no dependency on an unselected Copilot account or endpoint; turn admission
+resolves only the actual selected provider. Root-less chats require
+no empty preview. Complete regular-file snapshots support 20,000 files, 256 MiB
+total and 32 MiB per file, including binary/large sources, without expanding
+model context or silently choosing a subset. Protected, ignored and denied paths
+stay out. Successful private changes persist; verified after-state restoration
+creates a new owned stage after rollback. Source publication remains separate.
+Selected-provider HTTPS endpoints and bounded public CNAME chains are captured
+per original execution; `fetch_page` reads only approved public pages inside the
+guest without controller credentials or a Local fetch.
+
 `sandbox.status()` reports actual configuration-bound readiness.
-Explicit `sandbox.probe()` verifies the root-owned SendBox 0.2.3 release,
+Explicit advanced `sandbox.probe()` verifies the configured root-owned release,
 immutable workload and real guest controls/cleanup. Configure `settings.sandbox`
 only with independently reviewed executable/bundle/key paths, SHA-256 pins,
 release/trust-root/sequence, workload/worker/bridge digests, resource caps and
-exact DNS hosts. `configPath` must be null to select the managed deny-first
+canonical DNS hosts or explicit `*.domain.com` tool rules. Wildcards match
+subdomains at any depth, not the apex or suffix lookalikes; exact entries remain
+exact. They never substitute for actual provider URL/CNAME admission or grant
+provider credentials. The captured scope retains literal reviewed rules alongside
+exact provider/alias hosts, with a complete 32-entry limit.
+`configPath` must be null to select the managed deny-first
 policy; legacy policies are never silently replaced. Copilot access is opt-in,
 with a separate actual cold guest networking check. An observed alias is not
-a grant and is never added automatically.
+a grant. Automatic aliases require the separately approved managed policy.
 
-After explicitly selecting Sandbox in a session, use
+For optional advanced exact-file staging after selecting Sandbox, use
 `sandbox.preview(sessionId, paths)` to inspect an exact source set, then
 `sandbox.prepare(sessionId, paths, preview.digest, session.revision)` only after
 user review. A project-free chat uses `[]` and retains a null model root. The
-physical stage is private and independent of the source checkout. Ordinary
+physical stage is private and independent of the source checkout; this review
+is not required by managed automatic staging. Ordinary
 SDK send/queue/stop/approval APIs retain their shared authority. Qualified native
 `read_file` calls can page scoped pasted files through the controller broker.
 
@@ -410,7 +512,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single or declared Compound policy/configure with an observed settings revision. Ordinary Single history remains separate from retained public compound reports. Finite Local turns need explicit qualified reserved wind-down; images and synthetic-model tuning remain blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
-| `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, terminal/owner reconciliation and explicit process-inspection acknowledgements. Immutable env/peer/root and authenticated per-profile ownership survive explicit restart. Input/resize bypass durable receipts. |
+| `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
@@ -422,6 +524,15 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 ### Owned Local and Remote user consoles
 
 `terminal.open(sessionId)` is an explicit user action, not an agent tool.
+`terminal.defaultRoot()` discloses the canonical home directory without starting
+a process. `terminal.openGlobal(root)` explicitly opens one profile-owned Local
+console with actual null session/project fields. It does not create a fake chat,
+inherit a repository or grant workspace access to a model. Concurrent opens
+reuse the same exact live root/intent rather than creating another global PTY.
+`terminal.open(sessionId, cols, rows, undefined, root)` supports a project-free
+Local user console only when that root is explicitly supplied. A project-bound
+console still uses the exact selected project/worktree, never an alternate root.
+
 `terminal.read(id, offset, limit)` returns the exact Local or Remote binding, actual
 attachment generation, bounded volatile data and base/next offsets. A missing
 prefix or expired buffer is not reconstructed as a transcript.
@@ -683,10 +794,13 @@ validated commands used by both clients.
 ### Project-free chats and reviewed configuration
 
 `sessions.create()` or `sessions.create(null)` creates a real project-free chat.
-Raw `session.create` also permits an omitted/null `projectId`. No workspace root,
-attachments, commands, terminal or repository memory is available, and failure
+Raw `session.create` also permits an omitted/null `projectId`. No model workspace
+root, project-file attachments, agent commands or repository memory is available, and failure
 quarantines only the affected general chat. Scope cannot be reassigned by a
 navigation selection. Explicit global MCPs remain subject to normal approvals.
+Separate explicit user consoles do not change that model boundary. Autopilot may
+be selected without a project or preexisting allow rule; this adds no tool
+permissions, and undelegated operations still require human review.
 
 ```ts
 const general = await sdk.sessions.create(null);
@@ -719,6 +833,94 @@ Preferences are `settings.values.notifications`: `inApp: true`, `os: false`,
 `previewContent: false` by default. Native OS delivery/navigation is an Electron
 binding of service events, not a second notification state store.
 
+Root application configuration is separate from profile settings:
+`application.status()` returns the current root `configuration`;
+`application.configure({menuBar: false}, observedRevision)` saves only that leaf.
+Competing profiles share one revision and do not copy native preferences into
+their own configuration.
+
+Node `ensureConnection` and `connectMoguri` accept an optional
+`confirmUpgrade(review)` callback. Discovery validates private loopback metadata
+and authenticated health before classifying a responsive older service as
+`ServiceProtocolMismatch`, rather than calling every version mismatch corrupt.
+The review exposes only root/PID/protocol/fingerprint facts, not its connection
+token. A true result allows one exact fingerprint-rechecked authenticated
+terminal-preserving restart; a false result raises `ServiceUpgradeCancelled`
+without stopping anything. Newer/unverified owners are never offered as an
+automatic downgrade/restart. Without a callback, callers receive the actionable
+mismatch and may choose an explicit lifecycle operation themselves.
+`autoStart: false` stays strict and never invokes upgrade/launch effects.
+
+Native desktop exit calls `stopMoguriService(capturedStateDir,
+{expectedConnection: capturedConnection})`, not a freshly inferred default root.
+The private registry fingerprint and authenticated PID/protocol must still match
+that captured owner before sending the existing ordinary-stop lifecycle request.
+A missing registry is considered already stopped only with no writer lock and a
+refused captured endpoint. A rotated/new owner is never stopped implicitly.
+Window close waits for this acknowledgement, while unsaved-edit cancellation
+does not begin shutdown. Explicit terminal-preserving restart remains separate.
+
+`application.storage.status()` and `application.storage.preview(path)` expose the
+actual runtime authority and exact review. After actual all-profile review,
+`application.storage.relocate(path, review.digest, true, optionalOriginalId)`
+uses transient authenticated intake, retains intent and closes every writer.
+It does not refresh/reconnect a profile after requesting that shutdown. Node
+consumers can use `waitForStorageRelocation(actualLocatorDirectory, id, keyId)`;
+the directory comes from actual storage status, not a guessed Home path.
+`readDefaultStateLocation`, `readStateLocation` and `stateLocationDirectory`
+are explicit Node exports. Source receipts, master-key identity, independent
+retention grants, unknown budgets and original resource roots remain intact.
+No original move ID can redispatch a copy, even after a missing receipt.
+Embedded `createRuntime` consumers must explicitly configure `storage` authority
+to enable a first move. Once a store records that authority, later views cannot
+discard it or substitute another locator to open a stale copy.
+
+`application.updates.status()`, `history()`, `read(id)`, `credential()`,
+`setToken(tokenOrNull)`, `check(automatic?, optionalOriginalCommandId)` and
+`cancel(id)` use root-owned update state and a purpose-specific secure PAT.
+Credential intake is transient; normal provider/CLI credentials are not read.
+No raw token enters durable commands, receipts, event diagnostics or model
+history. Inspection and staging do not execute downloaded code.
+
+After actual human review, `application.updates.installPreview(id)` binds fresh
+old/new tree digests and the canonical owned packaged destination/backup.
+`install(id, review.digest, actualDesktopPid, true)` is a transient shutdown
+request, not a normal command followed by automatic reconnect. Its acknowledgement
+identifies one private journal and immutable intent digest. Node
+`waitForUpdateInstallArm(journal, id, intentDigest)` waits for the original
+durable shutdown/arm acknowledgement before the native owner exits. It never
+replaces a missing helper or retries filesystem effects. Root configuration,
+update and store-relocation intents remain separate from per-profile settings
+and session retention; a pending installation blocks store relocation.
+Source/embedded runtimes need explicit `updates` authority to check releases;
+production derives the packaged installation root from the actual pinned Node
+runtime, never a user-selected arbitrary application path.
+
+`needsInputSound` and `completedSound` each default to
+`{enabled: true, id: "default"}`; `soundWhileFocused` defaults false. Sounds do
+not depend on the banner flag. `notifications.importSound(name, pcmWav,
+optionalCommandId)`, `notifications.list()`, `notifications.sound(id)` and
+`notifications.removeSound(id, observedContentDigest, true)` use immutable,
+profile-owned encrypted snapshots. Imports require canonical mono 16-kHz PCM16
+WAV up to ten seconds and at most 32 retained sounds. Removal rejects currently
+selected resources, even when the corresponding alert is disabled. An original
+import command cannot recreate removed audio after receipt loss. File loading
+is explicit Node client delivery through `loadNotificationSoundFile(path)`;
+the browser-safe SDK never gains arbitrary filesystem authority. No TUI/CLI
+operation automatically plays audio.
+
+Desktop dictation uses `voice.startCapture(sessionId, optionalOriginalId)`,
+`voice.uploadCapture(sessionId, id, token, wavBytes)` and
+`voice.cancelCapture(sessionId, id, token)`. These use transient authenticated
+`/v1/voice` requests, not durable commands. The original profile/session/job and
+one-use nonce stay bound through cancellation and disconnect. The maximum
+normalized clip is 120 seconds / 3,840,044 bytes; malformed rates/channels,
+noncanonical base64, duplicate upload and reused job identity are rejected.
+Audio and upload nonces are never retained in events/receipts. Actual ASR jobs
+and explicit transcript insertion still use existing shared APIs. Root exports
+`encodeSpeechWav`, `validateSpeechWav`, shortcut parsing/matching helpers and
+typed preferences without importing native/provider runtime.
+
 ### Held prompts, modes and retained plans
 
 ```ts
@@ -749,6 +951,18 @@ request; immediate restriction and model-declared tools are service-enforced.
 
 Project settings use `projects.configuration` and
 `projects.configure(projectId, settings, observedRevision)`.
+`projects.add(absolutePath)` registers an existing canonical directory.
+`projects.clone(repositoryUrl, newAbsolutePath, true)` returns an independently
+retained `project.clone` capability job, not a completed project. Wait with
+`jobs.wait(id)` and inspect its actual status before using
+`job.projectClone.projectId`. Successful project registration and `job.finished`
+commit atomically. The intent retains canonical destination/parent identity,
+containing-root leases and original command ID/digest. Cancel, restart or a lost
+receipt never repeats the original Git operation or deletes partial files.
+Cloning does not run hooks/checkout filters/submodules, initiate personal login
+or start inference. Existing destinations and embedded URL credentials fail
+before effects.
+
 `projects.sources` returns the actual instruction/MCP source and `mcpDigest`;
 `projects.importMcp(projectId, observedRevision, true, reviewedDigest)` rejects
 file changes after review and installs supported entries disabled.

@@ -1,19 +1,36 @@
 import { lookup } from "node:dns/promises";
 import { request } from "node:https";
-import { isIP } from "node:net";
 import { load } from "cheerio";
 import { MoguriError } from "../../../packages/protocol/src/index.ts";
+import { publicAddress } from "./public-network.ts";
+import { boundedBody } from "./network.ts";
 
-function publicAddress(address: string): boolean {
-  if (isIP(address) === 4) {
-    const parts = address.split(".").map(Number);
-    return parts[0] !== 0 && parts[0] !== 10 && parts[0] !== 127 && parts[0]! < 224 &&
-      !(parts[0] === 169 && parts[1] === 254) && !(parts[0] === 192 && parts[1] === 168) &&
-      !(parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31) &&
-      !(parts[0] === 100 && parts[1]! >= 64 && parts[1]! <= 127);
+function pageText(url: URL, body: string, type: string): { source: "untrusted-web"; url: string; title: string; text: string } {
+  if (!/text\/(?:html|plain)/i.test(type)) throw new MoguriError("web_format", "The page is not HTML or plain text; no conversion service was used.");
+  if (type.includes("text/plain")) return { source: "untrusted-web", url: url.toString(), title: url.hostname, text: body.slice(0, 50_000) };
+  const document = load(body);
+  document("script,style,noscript,iframe,form").remove();
+  return { source: "untrusted-web", url: url.toString(), title: document("title").text().trim(),
+    text: (document("main").text() || document("article").text() || document("body").text()).replace(/\s+/g, " ").trim().slice(0, 50_000) };
+}
+export async function fetchNativePage(input: string, signal: AbortSignal, redirects = 0): Promise<ReturnType<typeof pageText>> {
+  if (process.platform !== "linux" || process.env.NODE_USE_ENV_PROXY !== "1" || !process.env.HTTPS_PROXY || !process.env.ALL_PROXY) {
+    throw new MoguriError("native_web_boundary", "Native public-page reads require the actual verified guest's enforced proxy. No controller or Local fetch was attempted.", 409);
   }
-  const lower = address.toLowerCase();
-  return isIP(address) === 6 && !["::", "::1"].includes(lower) && !lower.startsWith("fc") && !lower.startsWith("fd") && !lower.startsWith("fe80:") && !lower.includes("::ffff:");
+  const url = new URL(input);
+  if (url.protocol !== "https:" || url.username || url.password || url.port || redirects > 3) throw new MoguriError("web_destination", "Use a public HTTPS page without credentials and at most three approved redirects.");
+  const records = await lookup(url.hostname, { all: true });
+  if (!records.length || records.some((record) => !publicAddress(record.address))) throw new MoguriError("web_destination", "Private, loopback, metadata and reserved destinations are denied.");
+  const response = await fetch(url, { redirect: "manual", signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    headers: { "User-Agent": "Moguri native public-page tool", Accept: "text/html,text/plain" } });
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    const location = response.headers.get("Location"); await response.body?.cancel();
+    if (!location) throw new MoguriError("web_destination", "The approved native page redirect has no exact destination.");
+    return fetchNativePage(new URL(location, url).href, signal, redirects + 1);
+  }
+  if (!response.ok) { await response.body?.cancel(); throw new MoguriError("web_failed", `Native page returned HTTP ${response.status}. The configured guest network policy was not broadened.`, 502); }
+  const content = await boundedBody(response, 1024 * 1024, signal);
+  return pageText(url, content.toString("utf8"), response.headers.get("Content-Type") ?? "");
 }
 export async function fetchPage(input: string, signal: AbortSignal, redirects = 0): Promise<{ source: "untrusted-web"; url: string; title: string; text: string }> {
   const url = new URL(input);
@@ -42,9 +59,5 @@ export async function fetchPage(input: string, signal: AbortSignal, redirects = 
   });
   if ([301, 302, 303, 307, 308].includes(response.status) && response.location) return fetchPage(new URL(response.location, url).toString(), signal, redirects + 1);
   if (response.status < 200 || response.status >= 300) throw new MoguriError("web_failed", `Page returned HTTP ${response.status}.`);
-  if (!/text\/(?:html|plain)/i.test(response.type)) throw new MoguriError("web_format", "The page is not HTML or plain text; no conversion service was used.");
-  if (response.type.includes("text/plain")) return { source: "untrusted-web", url: url.toString(), title: url.hostname, text: response.body.slice(0, 50_000) };
-  const document = load(response.body);
-  document("script,style,noscript,iframe,form").remove();
-  return { source: "untrusted-web", url: url.toString(), title: document("title").text().trim(), text: (document("main").text() || document("article").text() || document("body").text()).replace(/\s+/g, " ").trim().slice(0, 50_000) };
+  return pageText(url, response.body, response.type);
 }

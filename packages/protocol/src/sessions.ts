@@ -6,6 +6,7 @@ import { ControlDefaultsSchema } from "./controls.ts";
 import { ProjectArtifactChoiceSchema, type RetainedArtifact } from "./artifacts.ts";
 import type { PlanBinding } from "./plan-saves.ts";
 import type { TerminalState } from "./terminals.ts";
+import { WorkflowGuidanceSchema } from "./preferences.ts";
 export * from "./terminals.ts";
 export type { RetainedArtifact } from "./artifacts.ts";
 
@@ -33,6 +34,7 @@ export const ProjectSettingsSchema = object({
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }), planPath: path,
   defaults: ControlDefaultsSchema,
   remotePath: Type.Union([path, Type.Null()]),
+  guidance: Type.Optional(WorkflowGuidanceSchema),
 });
 export type ProjectSettings = Static<typeof ProjectSettingsSchema>;
 export const defaultProjectSettings = (): ProjectSettings => ({
@@ -48,17 +50,27 @@ export const defaultProjectConfiguration = (projectId: string): ProjectConfigura
 });
 export interface NavigationFolder { id: string; name: string; order: number; revision: number }
 export interface SessionGroup extends NavigationFolder { projectId: string }
+export const ProjectCloneIntentSchema = object({
+  version: Type.Literal(1), projectId: id, repository: Type.String({ minLength: 1, maxLength: 2048 }), path, parent: path,
+  device: Type.String({ minLength: 1, maxLength: 40 }), inode: Type.String({ minLength: 1, maxLength: 40 }),
+  leaseRoots: Type.Array(path, { minItems: 1, maxItems: 1000 }),
+  policyRevision: revision, commandId: id, commandDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+});
+export type ProjectCloneIntent = Static<typeof ProjectCloneIntentSchema>;
 export interface SessionWorkspaceSnapshot {
   projectConfigurations: ProjectConfiguration[]; projectFolders: NavigationFolder[]; sessionGroups: SessionGroup[];
   artifacts: RetainedArtifact[]; terminals: TerminalState[];
 }
 export const SessionChangesSchema = object({
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), pinned: Type.Optional(Type.Boolean()), unread: Type.Optional(Type.Boolean()),
+  order: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
   groupId: Type.Optional(nullableId), parentSessionId: Type.Optional(nullableId), prUrl: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()])),
 });
 export type SessionChanges = Static<typeof SessionChangesSchema>;
 export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema }),
+  object({ type: Type.Literal("session.reorder"), projectId: nullableId, parentSessionId: nullableId, groupId: nullableId, archived: Type.Boolean(),
+    sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.mode"), sessionId: id, expectedRevision: revision, mode: SessionModeSchema }),
   object({ type: Type.Literal("session.spawn"), sessionId: id, kind: Type.Union([Type.Literal("agent"), Type.Literal("side")]), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })) }),
   object({ type: Type.Literal("session.from-work"), projectId: id, workspaceId: Type.Optional(id), issueId: Type.Optional(id), prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })) }),
@@ -76,7 +88,8 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.browser"), sessionId: id, url: Type.String({ minLength: 1, maxLength: 2048 }) }),
   object({ type: Type.Literal("artifact.capture"), sessionId: id, path: Type.Optional(path) }),
   object({ type: Type.Literal("plan.save"), sessionId: id, text: Type.String({ maxLength: 128 * 1024 }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }), expectedBinding: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })) }),
-  object({ type: Type.Literal("terminal.open"), sessionId: id, scriptId: Type.Optional(id), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
+  object({ type: Type.Literal("terminal.open"), sessionId: id, root: Type.Optional(path), scriptId: Type.Optional(id), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
+  object({ type: Type.Literal("terminal.open-global"), root: path, cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
   object({ type: Type.Literal("terminal.close"), terminalId: id }),
   object({ type: Type.Literal("terminal.reconcile"), terminalId: id }),
   object({ type: Type.Literal("terminal.acknowledge"), terminalId: id, confirmInspection: Type.Literal(true) }),
@@ -85,6 +98,9 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("retention.run") }),
 ]);
 export type SessionWorkspaceCommand = Static<typeof SessionWorkspaceCommandSchema>;
+export function compareSessions(a: { pinned: boolean; order?: number; createdAt: string; id: string }, b: { pinned: boolean; order?: number; createdAt: string; id: string }): number {
+  return Number(b.pinned) - Number(a.pinned) || (a.order ?? 0) - (b.order ?? 0) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
+}
 export const isSessionWorkspaceCommand = (value: unknown): value is SessionWorkspaceCommand => Value.Check(SessionWorkspaceCommandSchema, value);
 export const TerminalInputSchema = Type.Union([
   object({ action: Type.Literal("input"), terminalId: id, data: Type.String({ minLength: 1, maxLength: 16384 }) }),
@@ -92,6 +108,7 @@ export const TerminalInputSchema = Type.Union([
 ]);
 export type TerminalInput = Static<typeof TerminalInputSchema>;
 export const SessionWorkspaceQuerySchema = Type.Union([
+  object({ type: Type.Literal("project.repositories"), projectId: id }),
   object({ type: Type.Literal("session.context"), sessionId: id }),
   object({ type: Type.Literal("project.configuration"), projectId: id }),
   object({ type: Type.Literal("project.git"), projectId: id, diff: Type.Boolean() }),
@@ -99,14 +116,18 @@ export const SessionWorkspaceQuerySchema = Type.Union([
   object({ type: Type.Literal("project.porto"), projectId: id }),
   object({ type: Type.Literal("plan.read"), sessionId: id }),
   object({ type: Type.Literal("terminal.read"), terminalId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 65536 }) }),
+  object({ type: Type.Literal("terminal.default-root") }),
 ]);
 export type SessionWorkspaceQuery = Static<typeof SessionWorkspaceQuerySchema>;
 export const isSessionWorkspaceQuery = (value: unknown): value is SessionWorkspaceQuery => Value.Check(SessionWorkspaceQuerySchema, value);
 export type SessionWorkspaceResponse =
+  | ({ type: "project.repositories" } & ProjectRepositoryLayout)
   | { type: "session.context"; context: ModelContextPreview }
   | { type: "project.configuration"; configuration: ProjectConfiguration }
   | { type: "project.git"; branch: string; repository: string | null; status: string; diff: string }
   | { type: "project.sources"; instructions: string | null; mcp: string | null; instructionsPath: string; mcpPath: string; mcpDigest: string | null }
   | { type: "project.porto"; output: string }
+  | { type: "terminal.default-root"; root: string }
   | ({ type: "plan.read"; path: string; text: string; digest: string; exists: boolean } & Partial<PlanBinding>)
   | { type: "terminal.read"; terminal: TerminalState; data: string; baseOffset: number; nextOffset: number };
+export interface ProjectRepositoryLayout { roots: string[]; complete: boolean; diagnostic: string }

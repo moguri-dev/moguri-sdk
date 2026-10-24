@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import { Value } from "typebox/value";
 import {
-  defaultSettings, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
+  defaultSettings, guidanceText, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
   defaultBoard,
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
@@ -19,17 +19,21 @@ import {
   isDecisionCommand, isDecisionQuery, type DecisionCommand, type DecisionQuery, type DecisionResponse,
   isBudgetCommand, isBudgetQuery, isTelemetryQuery, isRepositoryCommand, isRepositoryQuery, type RepositoryScope,
   isProfileCommand, isProfileQuery,
+  isApplicationCommand, isApplicationQuery,
   isCompactionCommand, isCompactionQuery, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   isPlanSaveCommand, isPlanSaveQuery, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse,
   isRemoteMcpCommand, isRemoteMcpQuery, type RemoteMcpCommand, type RemoteMcpQuery, type RemoteMcpResponse,
   type MemoryTarget, type MemoryBinding, type MemoryIndex, type MemoryHit, type GraphNode, type GraphEdge,
   type CapabilityEntry, type CapabilityJob, type CommandResult, type EventInput, type McpServerConfig, type McpServerInfo, type McpToolInfo,
   type RuntimeCloseOptions,
+  type SpeechCaptureRequest, type SpeechCaptureResponse,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
 import { RepositoryMemory, memoryIndexId, memoryLocator } from "./memory.ts";
 import { McpGateway, McpKeychain, type SecretVault } from "./gateway.ts";
 import { LocalDictation, type SpeechOptions } from "./voice.ts";
+import { sqlConnection } from "./sql-connection.ts";
+import { cleanupSpeechSpool, withSpeechSpool } from "./voice-spool.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
 import { validateSettings } from "./permissions.ts";
 import { WorkspaceRuntime, type WorkspaceOptions } from "./workspace.ts";
@@ -71,6 +75,7 @@ import { isLinearCommand, isLinearQuery } from "../../../packages/protocol/src/l
 import type { WorkflowHost } from "./workflow-host.ts";
 import { TaskProgressRuntime } from "./task-progress.ts";
 import type { DocumentParserOptions } from "./documents.ts";
+import { cloneProject, prepareProjectClone } from "./project-clone.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -142,6 +147,7 @@ export interface PlatformHost {
   globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
   foreignRootBusy(root: string): boolean;
   localRootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean): boolean;
+  cloneRootBusy(root: string, exceptJobId?: string): boolean;
   sharedGlobals: boolean;
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions }
@@ -167,8 +173,11 @@ export class PlatformRuntime {
   readonly telemetry: OperationTelemetry;
   readonly repositories: RepositoryTelemetry;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
+  private shuttingDown = false;
+  private speechCleanupError: string | null = null;
+  private voiceCaptures = new Map<string, { sessionId: string; token: string; consumed: boolean; input: ReturnType<typeof Promise.withResolvers<Uint8Array>> }>();
   private readonly memoryIndexes = new Map<string, string>();
-  constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, options: PlatformOptions = {}) {
+  constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, private readonly options: PlatformOptions = {}) {
     this.knowledge = new TieredKnowledge(store, { snapshot: () => this.snapshot(), events: host.events, sandbox: host.sandboxStatus });
     this.extensions = new Extensions(store, { snapshot: () => this.snapshot(), events: host.events,
       project: (id) => this.project(id), projects: () => this.sessions.projects,
@@ -196,7 +205,9 @@ export class PlatformRuntime {
       writeBusy: (projectId, workspaceId) => {
         const workspace = this.snapshot().managedWorkspaces.find((workspace) => workspace.id === workspaceId);
         return this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) ||
-          Boolean(workspace && (this.engagement.writeRoots().includes(workspace.path) || host.localRootBusy(workspace.path)));
+          Boolean(workspace && (this.engagement.writeRoots().includes(workspace.path) || host.localRootBusy(workspace.path) ||
+            this.snapshot().terminals.some((terminal) => terminal.binding?.env === "Local" && terminal.binding.root === workspace.path &&
+              !["closed", "failed", "acknowledged"].includes(terminal.status))));
       },
       remoteRead: host.remoteRead,
       nativeRead: host.nativeRead,
@@ -226,6 +237,7 @@ export class PlatformRuntime {
       retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session) => this.managed.project(session),
       rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
+      localRootBusy: host.localRootBusy,
       wake: host.wake,
       verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
@@ -460,6 +472,11 @@ export class PlatformRuntime {
     return result;
   }
   async recover(): Promise<void> {
+    try { await cleanupSpeechSpool(this.stateDir); }
+    catch (error) {
+      this.speechCleanupError = error instanceof Error ? error.message : "Private speech cleanup was not confirmed.";
+      console.error("Moguri private speech cleanup:", this.speechCleanupError);
+    }
     this.managed.recover();
     this.github.recover();
     const linear = this.linear.recover();
@@ -492,7 +509,7 @@ export class PlatformRuntime {
     for (const entry of entries) this.extensions.assertCompatible(entry);
     const knowledge = entries.map((entry) => `[${entry.kind}: ${entry.name}; source=${entry.source}; sha256=${entry.contentDigest}]\n${this.store.blob(entry.contentDigest)}`).join("\n\n").slice(0, 16_384);
     return `${snapshot.settings.values.systemPrompt}
-${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}
+${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}${guidanceText(snapshot.settings.values.guidance, project ? this.sessions.projects.values(project.id).guidance : undefined)}${session?.controls.verbosity && verbosityGuidance[session.controls.verbosity] ? `\n<response-verbosity>${verbosityGuidance[session.controls.verbosity]}</response-verbosity>` : ""}
 
 <moguri-execution-contract>
 Project: ${project ? session?.controls.env === "Remote" ? this.sessions.projects.configuration(project.id).values.remotePath ?? "(remote workspace not configured)" : project.path : "(no active project)"}
@@ -558,6 +575,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isApplicationQuery(query)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (isGithubQuery(query)) return this.github.query(query);
     if (isLinearQuery(query)) return this.linear.query(query);
     if (isExtensionQuery(query)) return this.extensions.query(query);
@@ -587,6 +605,13 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (isSessionWorkspaceQuery(query)) return this.sessions.query(query);
     if (isWorkspaceQuery(query)) return this.workspace.query(query);
     switch (query.type) {
+      case "runtime.status": return { type: query.type, runtime: { directory: dirname(this.store.path), power: this.sessions.power.status() } };
+      case "integrations.sql.status": return { type: query.type, connection: await sqlConnection(this.snapshot().settings.values, this.options.integrations?.fetch) };
+      case "notification.sound.read": {
+        const sound = this.snapshot().notificationSounds.find((sound) => sound.id === query.id);
+        if (!sound) throw new MoguriError("notification_sound_missing", "The requested sound is missing or removed from this profile. No default sound was substituted.", 404);
+        return { type: query.type, sound, audio: this.store.blob(sound.contentDigest) };
+      }
       case "prompt.preview": {
         const session = query.sessionId ? this.session(query.sessionId) : undefined;
         return { type: query.type, editable: this.snapshot().settings.values.systemPrompt, effective: session ? await this.effectivePrompt(session) : this.prompt(), warning: SYSTEM_PROMPT_WARNING };
@@ -694,9 +719,14 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (expectedRevision !== snapshot.settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before saving.", 409);
     if (settings.systemPrompt !== snapshot.settings.values.systemPrompt && !acknowledge) throw new MoguriError("prompt_warning", SYSTEM_PROMPT_WARNING, 409);
     validateSettings(settings);
+    for (const choice of [settings.notifications.needsInputSound, settings.notifications.completedSound]) {
+      if (choice && choice.id !== "default" && !snapshot.notificationSounds.some((sound) => sound.id === choice.id)) throw new MoguriError("notification_sound_missing", "Choose an existing sound from this actual profile. No missing sound was silently replaced.", 409);
+    }
     this.budgets.validateSettings(settings);
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
-    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote, settings.kupo, settings.winddown, settings.decisions]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions]);
+    const managementPolicy = (values: UserSettings) => [values.sandboxManagement?.enabled ?? false,
+      values.sandboxManagement?.automaticWorkspaces ?? true, values.sandboxManagement?.automaticProviderNetwork ?? true];
+    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote, settings.kupo, settings.winddown, settings.decisions, settings.sandbox, managementPolicy(settings)]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions, snapshot.settings.values.sandbox, managementPolicy(snapshot.settings.values)]);
     return { event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
   }
   private skill(content: string) {
@@ -720,9 +750,12 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (!owner) throw new MoguriError("winddown_cleanup_unconfirmed", "This retained Git job has no live owned process/abort handle. Inspect the original ref/intent; no stop or retry was fabricated.", 409);
     owner.abort.abort();
   }
-  private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void, start?: (job: CapabilityJob) => void, workspaceId?: string, lifecycle?: CandidateJobLifecycle): string {
+  private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void, start?: (job: CapabilityJob) => void, workspaceId?: string, lifecycle?: CandidateJobLifecycle, id: string = randomUUID()): string {
+    if (this.shuttingDown) throw new MoguriError("shutting_down", "The capability service is closing. No new owned job was started.", 503);
     if (projectId && this.host.closingProject(projectId)) throw new MoguriError("project_removing", "No new job can start while this project is being removed.", 409);
-    const id = randomUUID();
+    if (this.snapshot().jobs.some((job) => job.id === id)) throw new MoguriError("job_no_replay", "This original job identity already exists. No work was replayed.", 409);
+    const speech = ["voice.capture", "voice.record", "voice.transcribe"];
+    if (speech.includes(kind) && [...this.active.values()].some((job) => speech.includes(job.kind))) throw new MoguriError("speech_busy", "One original speech job already owns this profile. Finish or cancel it first.", 409);
     const job: CapabilityJob = { id, kind, projectId, sessionId, workspaceId: workspaceId ?? (sessionId ? this.session(sessionId).workspaceId : null), parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
     if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job } }]);
     const owner = this.snapshot().jobs.find((job) => job.id === id), candidateId = owner?.candidate?.candidateId;
@@ -750,7 +783,87 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     this.active.set(id, { abort, done, sessionId: sessionId ?? undefined, projectId: projectId ?? undefined, kind });
     return id;
   }
+  async captureVoice(request: SpeechCaptureRequest): Promise<SpeechCaptureResponse> {
+    if (this.shuttingDown) throw new MoguriError("shutting_down", "The original capture controller is closing. No audio was accepted.", 503);
+    const session = this.session(request.sessionId);
+    if (session.status === "archived") throw new MoguriError("archived", "Restore the actual session before capturing speech.", 409);
+    if (request.action !== "start") {
+      const lease = this.voiceCaptures.get(request.id), job = this.snapshot().jobs.find((job) => job.id === request.id);
+      if (request.action === "cancel" && !lease && job?.kind === "voice.capture" && job.sessionId === session.id && !["running", "waiting_input"].includes(job.status)) return { id: request.id, accepted: true };
+      if (!lease || lease.sessionId !== session.id || request.action === "upload" && lease.consumed || job?.kind !== "voice.capture" || job.status !== "running") throw new MoguriError("speech_capture_owner", "This original client capture is missing, consumed or no longer running. No audio or ASR work was replayed.", 409);
+      const supplied = Buffer.from(request.token), actual = Buffer.from(lease.token);
+      if (supplied.length !== actual.length || !timingSafeEqual(supplied, actual)) throw new MoguriError("speech_capture_scope", "This audio does not own the original capture lease. No input was accepted.", 403);
+      if (request.action === "cancel") {
+        this.active.get(request.id)?.abort.abort(); return { id: request.id, accepted: true };
+      }
+      const bytes = Buffer.from(request.audio, "base64");
+      if (bytes.toString("base64") !== request.audio) throw new MoguriError("speech_audio", "Use canonical base64 for the bounded local WAV.");
+      try { validateSpeechWav(bytes); } catch (error) { throw new MoguriError("speech_audio", error instanceof Error ? error.message : "Local WAV validation failed."); }
+      lease.consumed = true; lease.input.resolve(bytes);
+      return { id: request.id, accepted: true };
+    }
+    const ready = await this.voice.status();
+    if (this.shuttingDown) throw new MoguriError("shutting_down", "Capture was withdrawn before microphone startup.", 503);
+    if (!ready.runtimeReady || !ready.modelReady) throw new MoguriError("speech_not_ready", ready.diagnostic!, 409);
+    if (this.speechCleanupError) throw new MoguriError("speech_cleanup", this.speechCleanupError, 409);
+    if (this.snapshot().jobs.some((job) => job.id === request.id)) throw new MoguriError("speech_capture_no_replay", "This capture identity already exists. Inspect its original outcome; no lease or recognizer was replayed.", 409);
+    if ([...this.active.values()].some((job) => ["voice.capture", "voice.record", "voice.transcribe"].includes(job.kind))) throw new MoguriError("speech_busy", "Finish or cancel the original local capture before starting another.", 409);
+    const current = this.session(session.id);
+    if (current.status === "archived") throw new MoguriError("archived", "The session was archived before capture admission.", 409);
+    const lease = { sessionId: current.id, token: randomUUID(), consumed: false, input: Promise.withResolvers<Uint8Array>() };
+    const settings = structuredClone(this.snapshot().settings.values.voice);
+    this.voiceCaptures.set(request.id, lease);
+    try {
+      this.job("voice.capture", current.projectId, current.id, async (signal, progress, id) => {
+        const cancelled = () => lease.input.reject(new DOMException("The original client capture was cancelled. No audio was replayed.", "AbortError"));
+        const deadline = setTimeout(() => lease.input.reject(new MoguriError("speech_capture_timeout", "The client capture did not deliver audio within its bounded deadline. No transcript was accepted.")), 150_000);
+        signal.addEventListener("abort", cancelled, { once: true });
+        try {
+          signal.throwIfAborted(); progress("Waiting for the explicitly selected client microphone. Raw audio is transient and never sent to a model.");
+          const bytes = await lease.input.promise;
+          signal.throwIfAborted();
+          return await withSpeechSpool(this.stateDir, id, bytes, signal, (path) => this.voice.transcribe(id, path, settings, signal, progress));
+        } finally { clearTimeout(deadline); signal.removeEventListener("abort", cancelled); this.voiceCaptures.delete(id); }
+      }, undefined, undefined, undefined, undefined, request.id);
+    } catch (error) { this.voiceCaptures.delete(request.id); throw error; }
+    return { id: request.id, token: lease.token };
+  }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isApplicationCommand(command)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
+    if (command.type === "project.clone") {
+      if (!finish.intent) throw new MoguriError("clone_intent", "Repository cloning requires its original user command identity. No process was started.", 409);
+      const previous = this.snapshot().jobs.find((job) => job.projectClone?.commandId === finish.intent!.id);
+      if (previous) {
+        if (previous.projectClone?.commandDigest !== finish.intent.digest) throw new MoguriError("idempotency_conflict", "This clone command ID belongs to different original input. No process was replayed.", 409);
+        return finish([], { id: previous.id });
+      }
+      const originalPolicy = this.snapshot().policy;
+      if (!originalPolicy.allowedEnvs.includes("Local")) throw new MoguriError("clone_policy", "Cloning a Local project is blocked by the current Local execution policy. No other host was selected.", 403);
+      const prepared = await prepareProjectClone(command.repository, command.path, originalPolicy.revision, finish.intent);
+      const intent = { ...prepared, leaseRoots: [...new Set([prepared.path, ...this.snapshot().projects.map((project) => project.path),
+        ...this.snapshot().managedWorkspaces.filter((workspace) => workspace.status !== "removed").map((workspace) => workspace.path)]
+        .filter((root) => root === prepared.path || prepared.path.startsWith(`${root}/`)))] };
+      let jobId: string | undefined;
+      const current = () => {
+        if (this.snapshot().policy.revision !== intent.policyRevision || !this.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("clone_policy_changed", "Local clone policy changed. Original effects must be inspected; nothing was replayed.", 409);
+        if (this.host.cloneRootBusy(intent.path, jobId)) throw new MoguriError("clone_root_busy", "An owned writer holds this clone destination or its containing project/worktree. Wait for the original owner; no effects were replayed.", 409);
+      };
+      current();
+      if (this.snapshot().jobs.some((job) => job.projectClone?.path === intent.path && ["running", "waiting_input", "partial"].includes(job.status))) throw new MoguriError("clone_pending", "This destination already has retained clone intent. Inspect its original job and files; no clone was replayed.", 409);
+      let created = false;
+      const id = this.job("project.clone", null, null, (signal, progress) => cloneProject(intent, signal, progress, current, () => { created = true; }), undefined,
+        (job) => this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, payload: { job: { ...job, projectClone: intent } } }]), undefined, {
+          completed: (value) => {
+            current();
+            if (!isRecord(value) || value.id !== intent.projectId || value.path !== intent.path || typeof value.name !== "string") throw new MoguriError("clone_result", "Clone result lost its original project/root binding. Inspect retained files; no complete success was recorded.", 409);
+            return [{ event_type: "project.added", profile_id: this.snapshot().profileId, project_id: intent.projectId, payload: { project: { id: intent.projectId, name: value.name, path: intent.path } } }];
+          },
+          failed: (error, cancelled) => ({ events: [], status: created ? "partial" : cancelled ? "cancelled" : "failed",
+            error: `${created ? `Clone may be partial at ${intent.path}. Files were preserved; inspect before any explicit retry.` : "Clone did not create a project."} ${error instanceof Error ? error.message : "Inspect the original clone job."}` }),
+        });
+      jobId = id;
+      return finish([], { id });
+    }
     if (isGithubCommand(command)) return this.github.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
     if (isExtensionCommand(command)) return this.extensions.execute(command, finish);
@@ -783,6 +896,34 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     if (isWorkspaceCommand(command)) return this.workspace.execute(command, finish);
     const snapshot = this.snapshot();
     switch (command.type) {
+      case "notification.sound.import": {
+        if (!finish.intent) throw new MoguriError("notification_sound_intent", "Sound import requires its original user command identity. No audio was retained.", 409);
+        const commandId = finish.intent.id;
+        const original = snapshot.notificationSounds.find((sound) => sound.commandId === commandId);
+        if (original) {
+          if (this.store.blob(original.contentDigest) !== command.audio || original.name !== command.name.trim()) throw new MoguriError("notification_sound_command", "The original sound command identifies different retained bytes or a different name. No duplicate was imported.", 409);
+          return finish([], { id: original.id });
+        }
+        if (this.store.events().some((event) => event.event_type === "notification.sound_removed" && event.payload.commandId === commandId)) throw new MoguriError("notification_sound_deleted", "The original sound was explicitly removed. Its command cannot resurrect retained audio, even without a receipt.", 409);
+        const bytes = Buffer.from(command.audio, "base64");
+        if (bytes.toString("base64") !== command.audio) throw new MoguriError("notification_audio", "Use canonical base64 for the explicitly selected sound.");
+        let audio;
+        try { audio = validateNotificationWav(bytes); } catch (error) { throw new MoguriError("notification_audio", error instanceof Error ? error.message : "Sound validation failed."); }
+        if (snapshot.notificationSounds.length >= 32) throw new MoguriError("notification_sound_limit", "This profile already retains 32 sounds. Explicitly remove an unused sound before importing another.", 409);
+        const name = command.name.trim();
+        if (!name || /[\u0000-\u001f\u007f]/.test(name)) throw new MoguriError("notification_sound_name", "Choose a non-empty sound name without control characters.");
+        const sound = { id: randomUUID(), commandId, name, contentDigest: this.store.putBlob(command.audio), bytes: bytes.length,
+          durationMs: audio.durationMs, createdAt: new Date().toISOString() };
+        return finish([{ event_type: "notification.sound_saved", profile_id: snapshot.profileId, payload: { sound } }], { id: sound.id });
+      }
+      case "notification.sound.remove": {
+        const sound = snapshot.notificationSounds.find((sound) => sound.id === command.id);
+        if (!sound || sound.contentDigest !== command.expectedDigest) throw new MoguriError("notification_sound_changed", "The sound is missing or changed. Review the actual retained bytes before removing it.", 409);
+        if ([snapshot.settings.values.notifications.needsInputSound, snapshot.settings.values.notifications.completedSound].some((choice) => choice?.id === sound.id)) throw new MoguriError("notification_sound_in_use", "This sound is in use. Explicitly choose another sound before removing it; no default was substituted.", 409);
+        return finish([{ event_type: "notification.sound_removed", profile_id: snapshot.profileId, payload: { id: sound.id, commandId: sound.commandId } }], { id: sound.id }, { artifacts: [`notification-sound/${sound.id}`] });
+      }
+      case "runtime.power.retry":
+        await this.sessions.power.retry(); return finish([]);
       case "models.token.set":
       case "models.token.clear": return this.host.modelCredential(command.endpointId, command.type === "models.token.set" ? command.token : undefined, finish);
       case "settings.update":
@@ -918,10 +1059,10 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "voice.record":
       case "voice.transcribe": {
         const session = this.session(command.sessionId);
-        if ([...this.active.values()].some((job) => job.kind === "voice.record" || job.kind === "voice.transcribe")) throw new MoguriError("speech_busy", "Finish or cancel the current local dictation first.", 409);
+        if ([...this.active.values()].some((job) => ["voice.record", "voice.transcribe", "voice.capture"].includes(job.kind))) throw new MoguriError("speech_busy", "Finish or cancel the current local dictation first.", 409);
         const ready = await this.voice.status();
         if (!ready.modelReady || !ready.runtimeReady) throw new MoguriError("speech_not_ready", ready.diagnostic!, 409);
-        return finish([], { id: this.job(command.type, session.projectId, session.id, (signal, _, id) => this.voice.transcribe(id, command.type === "voice.record" ? "microphone" : resolve(command.path), snapshot.settings.values.voice, signal)) });
+        return finish([], { id: this.job(command.type, session.projectId, session.id, (signal, progress, id) => this.voice.transcribe(id, command.type === "voice.record" ? "microphone" : resolve(command.path), snapshot.settings.values.voice, signal, progress)) });
       }
       case "voice.stop": {
         const job = snapshot.jobs.find((job) => job.id === command.jobId);
@@ -1041,6 +1182,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     await this.gateway.oauth.cancelScope(id);
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
+    this.shuttingDown = true;
     this.github.close();
     this.linear.close();
     this.workspace.close();
