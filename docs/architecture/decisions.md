@@ -219,6 +219,16 @@ execution, Linux/Rust acceptance or complete descendant containment.
 - Check the latest policy and authenticated backend readiness before each new turn. No model request starts for a new turn until its required sandbox is ready. Guest loss interrupts that work and preserves failure or partial outcomes; no host retry is allowed. Supervision and teardown must account for both the SendBox process and guest workload, rather than treating a CLI exit as proof of complete cleanup.
 - Preserve the same typed commands, events, budgets, Git policies, and cancellation semantics across all envs. In Sandbox, terminals and agent file/tool operations stay within the approved guest workspace and brokers. Remote is off-machine execution, not an assertion of SendBox controls or protection of unrelated data on that remote host.
 
+**Managed desktop setup direction.** The owner now requires bundled SendBox
+0.2.3 and a compatible pinned Linux worker/runtime/dependency image, reviewed
+in-app setup and public-release update checks, automatic private workspaces
+without per-turn text previews, and selected-provider endpoint/CNAME resolution.
+[Managed Sandbox](managed-sandbox.md) records the prerequisite measurements,
+root-owned no-script installer requirement and exact data/egress authority.
+This supersedes the developer-tooling setup UX, not the root-ownership,
+private staging, no-replay, permission or budget boundaries. Legacy manual
+configurations are not silently granted the new managed policy.
+
 ## D11. kupo synthetic model and routing
 
 **Decision.** Users can select a fixed model or **kupo**. kupo is Moguri's own synthetic auto model: a classifier and versioned orchestration policy that choose among configured local and hosted models. It follows HydraFusion's public single, cascade, and independent critique/revision patterns, without assuming access to GitHub's internal implementation or a standalone HydraFusion API. [H1]
