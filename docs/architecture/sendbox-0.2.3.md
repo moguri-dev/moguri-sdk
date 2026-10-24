@@ -126,6 +126,18 @@ consumer installation pass; both root and consumer audits report zero
 vulnerabilities. Generated inference receipts remain distinct from live-provider
 and billed-usage evidence.
 
+The actual packaged hidden Electron flow passes **8/8** with no skips in
+**13.8 s**, including committed configuration review/verification, exact native
+staging, returning from the global Sandbox workspace without losing the draft,
+guest tool approvals, separately reviewed publication, storage controls and
+owner-bound shutdown/admission failure handling. Packaged worker/bridge/MCP
+bytes match the exact image receipt. The **306,928,578-byte** ZIP passes the
+bounded production update consumer in **97,814.56 ms**, and a separate read-only
+DMG mount verifies the real app and `/Applications` shortcut. The installer is
+ad-hoc signed, not notarized. Existing large-frontend-chunk and optional macOS
+`.icon` format warnings remain; they are not native qualification failures.
+No personal app, authorization, microphone or paid model was opened.
+
 ## Protocol-41 detached-descendant source qualification
 
 The owner explicitly selected qualified SendBox for sessions requiring a
