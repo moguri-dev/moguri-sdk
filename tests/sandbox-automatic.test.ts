@@ -103,3 +103,42 @@ test("revoked provider-network policy during DNS resolution blocks admission wit
     assert.match(fixture.session().lastError!, /scope|policy|changed/);
   } finally { release.resolve(); await fixture.close(); }
 });
+
+test("session deletion waits for the exact native admission to acknowledge cancellation before forgetting its state", native, async (context) => {
+  const fixture = await automaticFixture(context), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  context.mock.method(fixture.provider, "prepare", async () => {
+    entered.resolve(); await release.promise;
+    throw new Error("Generated delayed metadata cancellation acknowledged.");
+  });
+  let deleting: Promise<{ error: unknown }> | undefined;
+  try {
+    await fixture.send("Generated delete during native admission."); await entered.promise;
+    await waitFor(() => fixture.sdk.getState().snapshot!.sessions.find((session) => session.id === fixture.sessionId)?.revision === fixture.session().revision);
+    let deleted = false;
+    deleting = fixture.sdk.sessions.delete(fixture.sessionId, true).then(() => { deleted = true; return { error: undefined }; }, (error: unknown) => ({ error }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(deleted, false, "Pending owned native metadata/copy work cannot outlive successful session deletion.");
+    assert.ok(fixture.controller.snapshot().sessions.some((session) => session.id === fixture.sessionId));
+    release.resolve(); const outcome = await deleting;
+    if (outcome.error !== undefined) throw outcome.error;
+    assert.equal(fixture.controller.snapshot().sessions.some((session) => session.id === fixture.sessionId), false);
+    assert.equal(fixture.executions.length, 0); assert.equal(fixture.requests.length, 0);
+  } finally { release.resolve(); await deleting; await fixture.close(); }
+});
+
+test("unacknowledged native cancellation refuses deletion and preserves the session until its original owner settles", native, async (context) => {
+  const fixture = await automaticFixture(context), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  context.mock.method(fixture.provider, "prepare", async () => {
+    entered.resolve(); await release.promise;
+    throw new Error("Generated delayed metadata cancellation acknowledged.");
+  });
+  try {
+    await fixture.send("Generated unacknowledged native cancellation."); await entered.promise;
+    await waitFor(() => fixture.sdk.getState().snapshot!.sessions.find((session) => session.id === fixture.sessionId)?.revision === fixture.session().revision);
+    await assert.rejects(fixture.sdk.sessions.delete(fixture.sessionId, true), { code: "cleanup_unconfirmed" });
+    assert.ok(fixture.controller.snapshot().sessions.some((session) => session.id === fixture.sessionId));
+    release.resolve(); await waitFor(() => fixture.session().status === "stopped");
+    assert.equal(fixture.executions.length, 0); assert.equal(fixture.requests.length, 0);
+    assert.equal(fixture.controller.snapshot().budgetEntries.length, 0);
+  } finally { release.resolve(); await fixture.close(); }
+});

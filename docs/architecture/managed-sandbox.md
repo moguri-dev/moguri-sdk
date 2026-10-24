@@ -98,6 +98,9 @@ Source publication remains a separate exact byte/base/policy-checked action.
 
 Preparation belongs to the actual turn, not a fabricated user file-review.
 Stop, profile/session removal and shutdown must abort it before worker admission.
+Session/project deletion waits for the original admission and workspace-preparation
+owners to settle. Unacknowledged cancellation refuses deletion within the bounded
+cleanup window and preserves the source state; an abort request is not completion.
 Changing root, policy, settings, mode or ownership while copying cannot admit a
 stale stage. Restart retains partial intent and holds queued prompts without
 replaying copying, model calls or effects. No model budget is consumed by setup.

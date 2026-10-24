@@ -1017,10 +1017,12 @@ export class ControlPlane extends EventEmitter {
       await this.platform.sessions.terminals.closeSession(session.id);
     }
     const deadline = Date.now() + 6500;
-    const active = () => sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) || this.decisions.owns(session.id)) ||
+    const active = () => sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) || this.decisions.owns(session.id) ||
+      this.nativeAdmissions.has(session.id) || this.sandboxWorkspaces.owns(session.id)) ||
       this.projection.executions.some((execution) => sessions.some((session) => session.id === execution.sessionId) && this.remote.owns(execution.id));
     while (active() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-    if (sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) || this.decisions.owns(session.id))) throw new MoguriError("cleanup_unconfirmed", "Owned work has not settled. Nothing was deleted; inspect processes first.", 409);
+    if (sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) || this.decisions.owns(session.id) ||
+      this.nativeAdmissions.has(session.id) || this.sandboxWorkspaces.owns(session.id))) throw new MoguriError("cleanup_unconfirmed", "Owned work has not settled. Nothing was deleted; inspect processes first.", 409);
     if (this.projection.terminals.some((terminal) => sessions.some((session) => session.id === terminal.sessionId) && terminal.status === "unconfirmed")) throw new MoguriError("cleanup_unconfirmed", "A previous terminal has unconfirmed cleanup. Inspect and acknowledge it before deletion.", 409);
     if (this.projection.executions.some((execution) => sessions.some((session) => session.id === execution.sessionId) && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("remote_cleanup", "Reconcile or explicitly acknowledge inspection of owned remote execution before deletion. SSH exit is not cleanup proof.", 409);
     if ((this.projection.sandboxExecutions ?? []).some((execution) => sessions.some((session) => session.id === execution.sessionId) &&

@@ -57,6 +57,7 @@ export class SandboxWorkspaces {
   private active = new Map<string, { abort: AbortController; task: Promise<unknown> }>();
   constructor(private readonly store: EventStore, private readonly stateDir: string, private readonly native: SandboxRuntime, private readonly host: Host) {}
   get busy(): boolean { return this.active.size > 0; }
+  owns(sessionId: string): boolean { return this.active.has(sessionId); }
   automatic(): boolean {
     const management = this.host.snapshot().settings.values.sandboxManagement;
     return Boolean(management?.enabled && management.automaticWorkspaces);
