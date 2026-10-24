@@ -116,6 +116,16 @@ using the stale five-tool assertion from before explicit model plans. This
 does not enable native MCP/subagents, broaden workspace permissions or treat
 a plan as acceptance.
 
+The final combined native/SSH/console/source suite passes **47/47**, with no
+skips or failures, in **68,557.53 ms**. This includes actual controller SIGKILL,
+late metering without replay, native guest loss/cancellation, observed
+double-fork descendant containment, Manual source publication with index/HEAD
+preservation, SSH host/root rejection and authenticated console reattachment.
+Type checks and packed external SDK/CLI/runtime entrypoints and approved
+consumer installation pass; both root and consumer audits report zero
+vulnerabilities. Generated inference receipts remain distinct from live-provider
+and billed-usage evidence.
+
 ## Protocol-41 detached-descendant source qualification
 
 The owner explicitly selected qualified SendBox for sessions requiring a
