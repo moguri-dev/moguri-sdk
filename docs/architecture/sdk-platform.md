@@ -49,6 +49,35 @@ physical SendBox, routing-quality, live decision and personal SSH gates remain
 FAIL/unqualified. No personal terminal, microphone, account or paid inference
 was used.
 
+### TUI and product-context qualification
+
+Runtime/TUI source `f218085` passes the complete gates below. The separately
+committed external-consumer fixture change `1186ef5` reduces only generated
+compaction filler, retaining all three original turns and the unchanged
+4,096-token headroom assertion. The added product context is fully counted;
+neither production context/window nor budget limits are loosened or truncated.
+Runtime, distribution and Node fixtures stayed unchanged during the full run.
+
+| Exact check | Result |
+| --- | --- |
+| Before-fix regression | Both plain-Enter modes, Shift newline and both first-party prompt cases fail for the reported missing behavior |
+| Type checks, build and compiled TUI help | PASS; help advertises send/newline/hold without opening a terminal UI |
+| Focused native TUI, prompt and model-window gates | 64 passed, one physical-native skip, zero failures / 43.21 seconds |
+| Final direct keyboard and custom/project-free prompt cases | 13 passed, zero failures / 5.03 seconds |
+| Complete unit/integration/worker/CLI/native-TUI suite | 1,294 passed, 14 physical-native skips, zero failures; 1,308 total / 1,171,138.75 ms |
+| Complete hidden Electron suite | 123 passed, two physical-native skips, zero failures; 125 total / 4.3 minutes |
+| Actual packed SDK | All entrypoints/declarations, approved/audited install and installed compaction flow pass; all 12 installed-worker probes pass |
+| Actual packaged Node/service/worker | One generated root-null model request includes source/setup facts and unchanged saved prompt; Node 26.12.0, owned loopback only |
+| Actual macOS bundle/native distribution/update consumer/DMG | PASS; exact existing protocol-54 / SendBox-0.2.4 image reverified; 740,544,106-byte ZIP/manifest / 97,197.29 ms; read-only DMG layout passes |
+| Fresh root and external-consumer audits | Zero vulnerabilities |
+
+These generated checks prove actual input handling, prompt delivery and retained
+policy/accounting behavior, not live model answer quality or physical terminal
+support beyond a reported modifier. No personal terminal/account/microphone,
+paid inference, native administrator install or personal application/browser
+was used; Electron ran only hidden generated fixtures. Existing FFI, optional `.icon`, large-chunk and documented
+external-host deprecation notices remain; the app is ad-hoc signed, not notarized.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
