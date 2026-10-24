@@ -4,14 +4,17 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readSandboxDistribution } from "../apps/service/src/sandbox-distribution.ts";
-import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
+import { readSandboxDistribution, SENDBOX_024 } from "../apps/service/src/sandbox-distribution.ts";
+import { defaultSandboxManagement, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 
 if (process.platform !== "darwin" || process.arch !== "arm64") throw new Error("Packaged native setup verification requires macOS arm64.");
 const version = JSON.parse(await readFile("package.json", "utf8")).version;
 const app = resolve(process.argv[2] ?? `release/builds.noindex/${version}/Moguri-darwin-arm64/Moguri.app`);
 const resources = join(app, "Contents", "Resources"), runtime = join(resources, "app"), started = performance.now();
 const definition = await readSandboxDistribution(join(resources, "moguri-native"), AbortSignal.timeout(60_000));
+const { installer, ...vendor } = definition.distribution.vendor;
+assert.deepEqual(vendor, SENDBOX_024, "The actual app must contain the exact current pinned release, not an old cached installer.");
+assert.equal(vendor.version, defaultSandboxManagement().version);
 for (const [name, expected] of [["worker", definition.distribution.worker.workerDigest],
   ["remote-bridge", definition.distribution.worker.bridgeDigest], ["mcp-worker", definition.distribution.worker.mcpWorkerDigest]]) {
   assert.equal(createHash("sha256").update(await readFile(join(runtime, "dist", `${name}.mjs`))).digest("hex"), expected);
