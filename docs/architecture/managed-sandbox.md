@@ -166,7 +166,7 @@ original owned VM absence passed on the same immutable worker image below.
 No credential, inference, administrator prompt or personal-profile change was used.
 
 The first attempt used the page reader's Accept header and failed its
-application response check; its original signed owner and guest absence were
+application response check after **3,405.03 ms**; its original signed owner and guest absence were
 verified separately. The successful probe uses the API's documented media type,
 not a wider network rule. Run the prerequisite with `--wildcards` on
 `scripts/managed-sandbox-spike.mjs`; this qualifies the released wildcard
@@ -182,7 +182,24 @@ remain unchanged through reopen, and revocation still invalidates admission.
 The existing typed string fields/events are sufficient: no new durable shape,
 migration, dependency, worker loop or release pin is introduced.
 
-## Integrated qualification
+The adapter at `9670646` passes type checks/build and **28/28** focused
+policy/network/setup/client/migration/reopen/cancellation checks in
+**14,539.68 ms**, with no skips. Its **9/9** actual native SDK setup, wildcard-bearing
+multi-turn editing, root-less execution, rollback/restoration, cancellation and
+SIGKILL recovery checks pass in **38,951.23 ms**, with no skips.
+The packed external SDK and approved/audited installed consumer pass again.
+The actual packaged review/autosave and wildcard-bearing no-preview chat pass
+**2/2** hidden desktop checks in **20.0 seconds**.
+
+The same unchanged worker/image and root-owned no-script installer pass packaged
+Node/service/resource discovery in **4,673.06 ms**. The updated
+**744,768,834-byte** ZIP passes the bounded production updater in
+**102,215.62 ms**, and its read-only DMG passes the real Applications layout
+check. These are focused follow-up measurements, not a claim that the earlier
+complete suites below were rerun. GitHub Meta delegation still requires its own
+new signed upstream release and reviewed qualification; it is not enabled here.
+
+## Earlier managed-setup qualification
 
 The complete checkpoint at `fd8c1ee` passed **1,211 unit/native tests**, with no
 failures or skips, in **1,179,127.55 ms**. Its complete hidden desktop suite passed
