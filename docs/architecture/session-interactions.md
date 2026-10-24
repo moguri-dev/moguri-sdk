@@ -93,3 +93,13 @@ matrix FAIL/unqualified. These are the baseline's separate gates, not capabiliti
 silently enabled by this UI slice. Later qualified contracts are not replaced by
 those initial-checkpoint labels. No personal login, shell, clipboard, microphone
 or paid inference was a prerequisite fixture.
+
+## Dependency security follow-up
+
+The final audit surfaced new advisories for the previously installed Electron
+44.9.0, body-parser 2.3.0 and fast-uri 3.1.8. Existing dependencies were upgraded
+to compatible Electron 44.9.3, body-parser 2.4.0 and fast-uri 3.1.9, with reviewed
+registry integrity changes and no forced major upgrade or audit bypass.
+`npm ci` restored the exact lock and the root audit reported zero vulnerabilities.
+The native interaction probe checks the actual running Electron version against
+the installed package, including when pointed at the packaged executable.
