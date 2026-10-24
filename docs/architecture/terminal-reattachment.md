@@ -174,6 +174,9 @@ profile preference suppresses only that dialog. The console's X button closes
 the exact console without confirmation, and does not itself trigger another
 launch. A later explicit reopening can request a new console; it is a new
 canonical command, not replay of the closed intent.
+The shell consumes each opening intent when an existing console is shown or a
+new launch is requested. A User/Agent tab remount, Settings round trip or X
+termination cannot renew that intent or reopen a closed console.
 Navigation through left resources, session selection, Start, native Settings
 and profile switching uses the same hide review. Cancelling Start's hide review
 creates no chat and leaves the original console and Start chooser intact.
