@@ -117,6 +117,33 @@ hidden Electron cold start 173.56 ms / 439.69 MiB / 7.78 ms per frame;
 2,000-file search/Git 1.022/6.201 ms. The baseline's unavailable live/native/
 notarized/Linux/quality gates remain FAIL/unqualified, not enabled by packaging.
 
+### Installer-layout qualification
+
+The pre-change actual DMG fails the new native-layout gate because it has no
+`.DS_Store`. The replacement image passes it without Finder or app execution.
+Type checks and production build pass. Ten focused layout, archive, updater,
+interruption and native-distribution cases pass in 11.45 seconds, followed by
+both repeated geometry/image cases with explicit 72/144-DPI checks in
+10.56 seconds. Altered window bounds are refused rather than accepted as a
+scaled approximation.
+
+The actual packaged Node/service/native-distribution checks pass with protocol
+54 and SendBox 0.2.4. The production update consumer accepts the
+740,544,970-byte ZIP/manifest in 98,495.72 ms. A separate read-only mount verifies
+the real Finder dimensions/centers, icon, two exact background rasters and DPI,
+on-volume background file identity, Applications target and unchanged signed
+application hash. All mounts are detached and no personal UI is opened.
+
+The resulting DMG is 754,146,585 bytes, SHA-256
+`a9304372e507d4414e68d2adbdb2a3725cc25a3715978d8373d96f2ac955e1ce`.
+Fresh complete OSV results report no advisories for all three exact Python
+build tools; the Node audit reports zero vulnerabilities. The build used a
+private Python 3.15 environment and did not change system packages.
+No runtime, SDK, CLI, TUI or desktop source changed after the earlier complete
+1,294-pass Node and 123-pass hidden Electron baseline; this packaging-only slice
+does not relabel those as another full-suite run. Known optional `.icon` and
+development-signing limitations remain.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
