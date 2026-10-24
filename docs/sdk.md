@@ -5,8 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **45** for
-[chat activity and compact usage](architecture/chat-activity.md), retaining
+Current source uses protocol **46** for
+[the separate Agent terminal](architecture/agent-terminal.md), retaining
+protocol-45 [chat activity and compact usage](architecture/chat-activity.md) and
 protocol-44 [desktop interactions](setup.md#desktop-interactions), including profile-owned
 confirmation preferences, atomic session ordering, global Local consoles and
 typed GitHub file snapshots. It retains protocol-43
@@ -26,9 +27,32 @@ every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
 
+## Agent command output
+
+`agentTerminals.list(sessionId, { before?, limit? })` returns original
+`run_command` requests/results for that exact profile/session, not User or
+Global consoles, other tools, workflow jobs or private model context.
+`agentTerminals.read(sessionId, commandId, { offset?, limit?, tail? })` returns
+up to 16,384 retained UTF-8 bytes. Follow `nextOffset`, or request `tail: true`
+without an offset. The tail starts on a complete code point; null output is
+unavailable, never empty successful execution. Original environment and outcome
+stay attached to the command, regardless of current settings.
+
+The model executes through `run_command` and can request the separately
+approved read-only `read_agent_terminal` list/read capability. It has no access
+to private console input/output and no interactive stdin route. Each command
+owns its existing bounded PTY; this is not a persistent shell or new executor.
+Policy changes and cancellation invalidate held reads before source return.
+
+CLI `agent-terminal list [SEQUENCE ID] --session ID` and
+`agent-terminal read COMMAND_ID [UTF8_OFFSET|tail] --session ID` share
+`/agent-terminal list/read` in desktop/TUI. Opening or reading the Agent view
+never starts a process/model or adopts a saved PID. Schema 46 changes no SQL
+layout and preserves original retained bytes/receipts on upgrade.
+
 ## Retained chat activity
 
-`activity.list(sessionId, { before?, limit? })` returns up to 100 exact source
+`activity.list(sessionId, { before?, limit?, toolName? })` returns up to 100 exact source
 entries and public-message positions. `sequence` places an operation in the
 conversation; `updatedSequence` follows its latest observed event. Pagination
 uses the returned `nextBefore` sequence/ID cursor, so a late result for an old operation
@@ -37,7 +61,7 @@ The ID disambiguates operations updated by the same cancellation event.
 `current` separately returns up to 100 running/waiting entries with an exact
 `currentCount`, so history pagination cannot hide an old still-running call.
 
-`activity.read(sessionId, activityId, "arguments" | "output", { offset?, limit? })`
+`activity.read(sessionId, activityId, "arguments" | "output", { offset?, limit?, toolName?, tail? })`
 reads the original session-scoped source, up to 16,384 UTF-8 bytes per page.
 Follow `content.nextOffset`; null content means unavailable, not empty success.
 Output size is retained response bytes, not total process/network I/O.
@@ -51,6 +75,8 @@ copies public assistant text only from the authenticated snapshot.
 earlier-page loading and stale-response isolation. No refresh runs a model,
 tool, provider metadata lookup or terminal. Thought sources are already-public
 provider reasoning only; request time is not separate thinking time.
+Its optional fourth `toolName` argument narrows the service-owned view and its
+scope key; it is not an execution grant.
 
 CLI `activity list [SEQUENCE ID]`, `activity turn TURN_ID`, and
 `activity read ACTIVITY_ID arguments|output [UTF8_OFFSET]` require `--session ID`.
@@ -505,6 +531,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
 | `activity` | Exact session-scoped operation metadata and lazy original arguments/results; public response copy and original owning-turn information. No private reasoning, terminal buffers or recovery from a deleted source. |
+| `agentTerminals` | Original agent `run_command` requests/results and bounded UTF-8 output/tails. No private User/Global console access, stdin, new execution or implicit persistent shell. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single or declared Compound policy/configure with an observed settings revision. Ordinary Single history remains separate from retained public compound reports. Finite Local turns need explicit qualified reserved wind-down; images and synthetic-model tuning remain blocked. |

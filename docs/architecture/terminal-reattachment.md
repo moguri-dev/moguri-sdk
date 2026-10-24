@@ -158,6 +158,17 @@ attachment between chunks. An unacknowledged or partly delivered input remains
 uncertain; it is not resent. Empty output pages are not passed to Ghostty's
 zero-length WASM allocation/write path.
 
+### Separate Agent command view
+
+Protocol 46 adds an Agent tab beside the private User console. It reads original
+agent `run_command` requests/results, not a user terminal owner or buffer.
+Models execute through the existing approved command worker and can request an
+exact, separately authorized `read_agent_terminal` read. No User/Global input
+or output enters that model history, and the Agent Ghostty viewer has no stdin
+route. Each command owns its existing PTY; no persistent interactive shell,
+user-console takeover or PID adoption is introduced. See
+[the Agent contract](agent-terminal.md).
+
 ## Qualification
 
 Generated integration covers actual service SIGKILL and explicit lifecycle

@@ -260,6 +260,7 @@ export class EventStore {
         INSERT INTO retention_metadata(id,value) VALUES ('desktop_interaction_schema','1');
         PRAGMA user_version=44; COMMIT;`);
       if (version < 45) this.db.exec("BEGIN IMMEDIATE; PRAGMA user_version=45; COMMIT;");
+      if (version < 46) this.db.exec("BEGIN IMMEDIATE; PRAGMA user_version=46; COMMIT;");
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

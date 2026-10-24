@@ -145,8 +145,8 @@ export class MoguriSdk extends TransportClient {
     storage: () => this.query({ type: "telemetry.storage" }),
   };
   readonly activity = {
-    list: (sessionId: string, options: { before?: ActivityCursor; limit?: number } = {}) => this.query({ type: "activity.list", sessionId, ...options }),
-    read: (sessionId: string, activityId: string, part: "arguments" | "output", options: { offset?: number; limit?: number } = {}) =>
+    list: (sessionId: string, options: { before?: ActivityCursor; limit?: number; toolName?: string } = {}) => this.query({ type: "activity.list", sessionId, ...options }),
+    read: (sessionId: string, activityId: string, part: "arguments" | "output", options: { offset?: number; limit?: number; tail?: boolean; toolName?: string } = {}) =>
       this.query({ type: "activity.read", sessionId, activityId, part, ...options }),
     turn: (sessionId: string, turnId: string) => this.query({ type: "activity.turn", sessionId, turnId }),
     response: (sessionId: string, turnId: string): string => {
@@ -154,6 +154,11 @@ export class MoguriSdk extends TransportClient {
       if (!session || !session.messages.some((message) => message.turnId === turnId)) throw new ClientError("activity_scope", "Choose an original turn in this profile's retained session.");
       return responseText(session.messages, turnId);
     },
+  };
+  readonly agentTerminals = {
+    list: (sessionId: string, options: { before?: ActivityCursor; limit?: number } = {}) => this.activity.list(sessionId, { ...options, toolName: "run_command" }),
+    read: (sessionId: string, commandId: string, options: { offset?: number; limit?: number; tail?: boolean } = {}) =>
+      this.activity.read(sessionId, commandId, "output", { ...options, toolName: "run_command" }),
   };
   readonly budgets = {
     status: (sessionId: string) => this.query({ type: "budget.status", sessionId }),

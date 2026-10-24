@@ -25,7 +25,7 @@ export async function assertFolderAccess(root: string, input: string, write: boo
   const name = relative(root, path) || ".";
   assertFolderName(name, write, policy);
 }
-export const readTools = new Set(["list_files", "read_file", "list_documents", "read_document", "search_document", "memory_search", "ask_user", "task_progress"]);
+export const readTools = new Set(["list_files", "read_file", "list_documents", "read_document", "search_document", "read_agent_terminal", "memory_search", "ask_user", "task_progress"]);
 export async function assertSessionTool(session: Session, root: string | null, settings: ProjectSettings, call: ToolCall, inspectFilesystem = true): Promise<void> {
   if ((session.mode === "read-only" || session.pendingMode === "read-only" || session.kind === "side") && !readTools.has(call.name)) throw new MoguriError("read_only", "This session is question/read-only. Edit, shell, MCP execution, Git and evolution tools are disabled.", 403);
   if (typeof call.arguments.path === "string" && isPasteFilePath(call.arguments.path)) {
@@ -33,7 +33,7 @@ export async function assertSessionTool(session: Session, root: string | null, s
     return;
   }
   const policy = folderPolicy(settings);
-  if (!root && ["list_files", "read_file", "write_file", "run_command", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(call.name)) throw new MoguriError("project_required", "Select a project for workspace files, commands or repository knowledge. No previous root was reused.", 403);
+  if (!root && ["list_files", "read_file", "write_file", "run_command", "read_agent_terminal", "memory_search", "propose_skill", "propose_script", "propose_memory"].includes(call.name)) throw new MoguriError("project_required", "Select a project for workspace files, commands or repository knowledge. No previous root was reused.", 403);
   if (root && ["list_files", "read_file", "write_file"].includes(call.name)) {
     if (inspectFilesystem) await assertFolderAccess(root, String(call.arguments.path), call.name === "write_file", policy);
     else { validateProjectPath(String(call.arguments.path)); assertFolderName(String(call.arguments.path), call.name === "write_file", policy); }

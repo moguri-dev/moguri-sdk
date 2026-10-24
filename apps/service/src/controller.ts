@@ -8,7 +8,7 @@ import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  TaskProgressToolSchema,
+  TaskProgressToolSchema, AgentTerminalReadSchema,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
   CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
@@ -2798,21 +2798,24 @@ export class ControlPlane extends EventEmitter {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
-      if (isDocumentTool(request.call.name) || request.call.name === "read_file" && typeof request.call.arguments.path === "string" && isPasteFilePath(request.call.arguments.path)) {
+      if (request.call.name === "read_agent_terminal" || isDocumentTool(request.call.name) || request.call.name === "read_file" && typeof request.call.arguments.path === "string" && isPasteFilePath(request.call.arguments.path)) {
         try {
           run.abort.signal.throwIfAborted();
           const policy = run.scopedReadPolicies.get(request.call.id);
-          if (!policy || policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed after this exact scoped-file approval. No source text was read; request fresh approval.", 409);
+          if (!policy || policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed after this exact scoped-read approval. No source text was read; request fresh approval.", 409);
           await this.assertCurrentTool(session, request.call);
           const authorization = authorizeTool(this.projection.settings.values, request.call, null);
           if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
           run.abort.signal.throwIfAborted();
-          if (policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed during the scoped-file read. No source text was returned.", 409);
-          const result = isDocumentTool(request.call.name) ? this.platform.inputs.documentTool(session.id, request.call) :
+          if (policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed during the scoped read. No source text was returned.", 409);
+          const result = request.call.name === "read_agent_terminal" ? await this.platform.activity.agentTerminal(session.id, parse(AgentTerminalReadSchema, request.call.arguments)) :
+            isDocumentTool(request.call.name) ? this.platform.inputs.documentTool(session.id, request.call) :
             this.platform.inputs.readFile(session.id, String(request.call.arguments.path), request.call.arguments);
+          run.abort.signal.throwIfAborted();
+          if (policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed during this scoped read. No source text was returned.", 409);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: JSON.stringify(result), isError: false, outcome: "completed" } });
         } catch (error) {
-          this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Scoped file read stopped or failed. No workspace fallback was attempted.", isError: true, outcome: run.abort.signal.aborted ? "stopped" : "failed" } });
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Scoped read stopped or failed. No alternate source was accessed.", isError: true, outcome: run.abort.signal.aborted ? "stopped" : "failed" } });
         }
         return;
       }

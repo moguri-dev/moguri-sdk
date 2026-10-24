@@ -1,6 +1,6 @@
 import {
   MAX_TEXT, MoguriError, responseText, type ActivityEntry, type ActivityKind, type ActivityQuery, type ActivityResponse, type ActivityStatus,
-  type BudgetResponse, type Session, type Snapshot, type StoredEvent, type ToolCall, type TurnInfo,
+  type AgentTerminalRead, type AgentTerminalToolResult, type BudgetResponse, type Session, type Snapshot, type StoredEvent, type ToolCall, type TurnInfo,
 } from "../../../packages/protocol/src/index.ts";
 import { digest, type EventStore } from "./store.ts";
 import { textFilePage } from "./files.ts";
@@ -42,6 +42,7 @@ export function describeActivityCall(call: ToolCall, snapshot: Snapshot): { kind
   if (call.name === "list_files" || call.name === "list_documents") return { kind: "search-files", label: call.name === "list_files" ? "List files" : "List documents", subject };
   if (["memory_search", "search_document"].includes(call.name)) return { kind: "search-files", label: call.name === "memory_search" ? "Search repository memory" : "Search document", subject };
   if (call.name === "run_command") return { kind: "command", label: call.hook ? "Run configured script" : "Run command", subject: text(args.command) };
+  if (call.name === "read_agent_terminal") return { kind: "command", label: "Read agent terminal", subject: text(args.commandId) ?? "Command history" };
   if (call.name === "ask_user") return { kind: "ask-user", label: "Asked user", subject: text(args.question) };
   if (call.name === "mcp_gateway") {
     const tool = text(args.tool), server = text(args.serverId);
@@ -61,6 +62,21 @@ export function describeActivityCall(call: ToolCall, snapshot: Snapshot): { kind
 
 export class ChatActivity {
   constructor(private readonly host: Host, private readonly store: EventStore) {}
+  async agentTerminal(sessionId: string, input: AgentTerminalRead): Promise<AgentTerminalToolResult> {
+    if (input.action === "list") {
+      const result = await this.query({ type: "activity.list", sessionId, toolName: "run_command", limit: input.limit ?? 20, ...(input.before ? { before: input.before } : {}) });
+      if (result.type !== "activity.list") throw new MoguriError("agent_terminal_source", "The original command list changed response type. No alternate console was read.", 409);
+      return { type: "agent-terminal.list", sessionId, commands: result.activity.entries.map((entry) => {
+        const characters = entry.subject === null ? [] : Array.from(entry.subject);
+        return { id: entry.id, turnId: entry.turnId, status: entry.status, env: entry.env, startedAt: entry.startedAt, finishedAt: entry.finishedAt, outputBytes: entry.outputBytes,
+          command: entry.subject === null ? null : characters.slice(0, 160).join(""), commandClipped: characters.length > 160 };
+      }), nextBefore: result.activity.nextBefore };
+    }
+    const result = await this.query({ type: "activity.read", sessionId, activityId: input.commandId, part: "output", toolName: "run_command", offset: input.offset ?? 0, limit: input.limit ?? 16384 });
+    if (result.type !== "activity.read") throw new MoguriError("agent_terminal_source", "The original command output changed response type. No alternate console was read.", 409);
+    return { type: "agent-terminal.read", sessionId, commandId: result.entry.id, status: result.entry.status, env: result.entry.env ?? "unknown", outputBasis: result.entry.outputBasis,
+      output: result.content?.text ?? null, bytes: result.content?.bytes ?? null, offset: result.content?.offset ?? null, nextOffset: result.content?.nextOffset ?? null };
+  }
   private session(id: string): Session {
     const session = this.host.snapshot().sessions.find((session) => session.id === id);
     if (!session) throw new MoguriError("activity_scope", "The retained session is outside this profile or was deleted. No earlier source was recovered.", 404);
@@ -114,6 +130,7 @@ export class ChatActivity {
       const entry: ActivityEntry = {
         id: operation.id, sessionId: session.id, turnId: operation.turnId, stepId: operation.stepId, messageId: null,
         sequence: original?.first.seq ?? operation.sourceSeq, updatedSequence: Math.max(original?.updatedSequence ?? 0, operation.sourceSeq), source: "tool", actor: operation.actor, ...description,
+        env: operation.env, ...(unambiguous ? { toolName: original.call.name } : {}),
         status: original?.ambiguous ? "unknown" : question ? "waiting_input" : operation.outcome,
         startedAt: operation.startedAt, finishedAt: operation.finishedAt, durationMs: operation.elapsedMs, durationBasis: "observed-lifecycle",
         outputBytes: output === null ? null : Buffer.byteLength(output), outputBasis: original?.completed ? "retained-utf8" : "retained-tail", hasArguments: Boolean(unambiguous), hasOutput: output !== null,
@@ -194,20 +211,29 @@ export class ChatActivity {
     if (query.type === "activity.turn") return { type: query.type, info: this.turn(session, query.turnId) };
     const { sources, messageOrder } = this.sources(session);
     if (query.type === "activity.list") {
-      const matching = sources.filter((source) => query.before === undefined || source.entry.updatedSequence < query.before.sequence ||
+      const scoped = query.toolName === undefined ? sources : sources.filter((source) => source.entry.toolName === query.toolName);
+      const matching = scoped.filter((source) => query.before === undefined || source.entry.updatedSequence < query.before.sequence ||
         source.entry.updatedSequence === query.before.sequence && source.entry.id.localeCompare(query.before.id) < 0)
         .sort((a, b) => a.entry.updatedSequence - b.entry.updatedSequence || a.entry.id.localeCompare(b.entry.id));
       const entries = matching.slice(-(query.limit ?? 100)).map((source) => source.entry);
-      const current = sources.map((source) => source.entry).filter((entry) => entry.status === "running" || entry.status === "waiting_input");
+      const current = scoped.map((source) => source.entry).filter((entry) => entry.status === "running" || entry.status === "waiting_input");
       return { type: query.type, activity: { sessionId: session.id, sequence: this.host.snapshot().seq, entries, messageOrder,
         current: current.slice(-100), currentCount: current.length,
         nextBefore: matching.length > entries.length ? { sequence: entries[0]!.updatedSequence, id: entries[0]!.id } : null } };
     }
+    if (query.tail && (query.offset !== undefined || query.part !== "output")) throw new MoguriError("activity_paging", "Tail reads require output with no byte offset. Choose one paging mode; no source was substituted.");
     const source = sources.find((source) => source.entry.id === query.activityId);
-    if (!source) throw new MoguriError("activity_missing", "This exact activity has no retained source in this session/profile. No other operation was substituted.", 404);
+    if (!source || query.toolName !== undefined && source.entry.toolName !== query.toolName) throw new MoguriError("activity_missing", "This exact activity has no matching retained source in this session/profile. No other operation was substituted.", 404);
     const content = query.part === "arguments" ? await source.arguments() : source.output();
     if (content === null) return { type: query.type, entry: source.entry, part: query.part, content: null };
-    const page = textFilePage(content, { offset: query.offset ?? 0, limit: query.limit ?? 16384 });
+    const limit = query.limit ?? 16384;
+    let offset = query.offset ?? 0;
+    if (query.tail) {
+      const bytes = Buffer.from(content);
+      offset = Math.max(0, bytes.length - limit);
+      while (offset < bytes.length && (bytes[offset]! & 0xc0) === 0x80) offset++;
+    }
+    const page = textFilePage(content, { offset, limit });
     return { type: query.type, entry: source.entry, part: query.part, content: { text: page.text, bytes: page.bytes, offset: page.offset, nextOffset: page.nextOffset } };
   }
 }

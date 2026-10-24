@@ -24,8 +24,8 @@ export function useTaskProgress(sdk: MoguriSdk, session: Session | undefined, co
   return state.scope === scope ? state : { scope, progress: null, error: null };
 }
 
-export function useSessionActivity(sdk: MoguriSdk, session: Session, snapshot: Snapshot) {
-  const scope = JSON.stringify([sdk.profileId, session.id]);
+export function useSessionActivity(sdk: MoguriSdk, session: Session, snapshot: Snapshot, toolName?: string) {
+  const scope = JSON.stringify([sdk.profileId, session.id, toolName ?? null]);
   const owner = useRef({ sdk, scope }); owner.current = { sdk, scope };
   const [state, setState] = useState<{ sdk: MoguriSdk; scope: string; activity: SessionActivity | null; error: string | null; loading: boolean }>({
     sdk, scope, activity: null, error: null, loading: true,
@@ -57,7 +57,7 @@ export function useSessionActivity(sdk: MoguriSdk, session: Session, snapshot: S
     let active = true, timer: ReturnType<typeof setTimeout> | undefined;
     const check = async () => {
       try {
-        const result = await sdk.activity.list(session.id);
+        const result = await sdk.activity.list(session.id, { ...(toolName === undefined ? {} : { toolName }) });
         if (result.activity.sessionId !== session.id) throw new Error("Activity returned a different session. No source was substituted.");
         if (active) setState((previous) => ({ sdk, scope, activity: merge(previous.sdk === sdk && previous.scope === scope ? previous.activity : null, result.activity), error: null, loading: false }));
         if (active && (session.turnId || result.activity.currentCount > 0 || result.activity.entries.some((entry) => entry.status === "pending"))) timer = setTimeout(() => void check(), 1000);
@@ -75,7 +75,7 @@ export function useSessionActivity(sdk: MoguriSdk, session: Session, snapshot: S
     if (!current || state.activity?.nextBefore === null || state.activity?.nextBefore === undefined || earlierLoading) return;
     const captured = owner.current; setEarlierLoading(true);
     try {
-      const result = await sdk.activity.list(session.id, { before: state.activity.nextBefore });
+      const result = await sdk.activity.list(session.id, { before: state.activity.nextBefore, ...(toolName === undefined ? {} : { toolName }) });
       if (result.activity.sessionId !== session.id) throw new Error("Earlier activity returned a different session. No source was substituted.");
       if (owner.current.sdk === captured.sdk && owner.current.scope === captured.scope) setState((previous) => ({ sdk, scope, activity: merge(previous.activity, result.activity, true), error: null, loading: false }));
     } catch (error) {

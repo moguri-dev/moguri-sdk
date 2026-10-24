@@ -54,6 +54,7 @@ try {
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 45 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
+    ${installedProtocol >= 46 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
     async function typedConsumer() {
       const sdk = await connectMoguri({autoStart:false});
       ${installedProtocol >= 43 ? `
@@ -73,6 +74,12 @@ try {
       const detail:ActivityContent|null=(await sdk.activity.read("generated-id","generated-activity","output",{offset:0,limit:4096})).content;void detail?.nextOffset;
       const turn:TurnInfo=(await sdk.activity.turn("generated-id","generated-turn")).info;void turn.context?.window;
       const response:string=sdk.activity.response("generated-id","generated-turn");void response;void useSessionActivity;
+      ` : ""}
+      ${installedProtocol >= 46 ? `
+      const agentRead:AgentTerminalRead={action:"read",commandId:"generated-command",offset:0,limit:4096};void agentRead;
+      const agentCommands=await sdk.agentTerminals.list("generated-id",{limit:20});void agentCommands.activity.entries[0]?.env;
+      const agentOutput=await sdk.agentTerminals.read("generated-id","generated-command",{tail:true,limit:4096});void agentOutput.content?.offset;
+      const typedAgentHook=(view:MoguriSdk,session:Session,state:Snapshot)=>useSessionActivity(view,session,state,"run_command");void typedAgentHook;
       ` : ""}
       ${installedProtocol >= 34 ? 'const evidence:ModelEvidenceReport=(await sdk.models.evidence("generated-model")).evidence;void evidence.claimed.family;void evidence.source.familyField;' : ""}
       const snapshot = sdk.settings.get();
@@ -446,6 +453,16 @@ try {
       assert.equal((await sdk.slash(activitySession.id,"/activity","tui")).kind,"text");
       const activityCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"activity","list","--session",activitySession.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
       assert.equal(JSON.parse(activityCli.stdout).activity.entries[0].id,loaded.id);
+      ${installedProtocol >= 46 ? `
+      assert.deepEqual((await sdk.agentTerminals.list(activitySession.id)).activity.entries,[]);
+      await assert.rejects(()=>sdk.agentTerminals.read(activitySession.id,loaded.id),{code:"activity_missing"});
+      await assert.rejects(()=>beta.agentTerminals.list(activitySession.id),{code:"activity_scope"});
+      const agentCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"agent-terminal","list","--session",activitySession.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+      assert.deepEqual(JSON.parse(agentCli.stdout).activity.entries,[]);
+      const agentShared=await sdk.slash(activitySession.id,"/agent-terminal list","tui");
+      assert.equal(agentShared.kind,"text");assert.deepEqual(JSON.parse(agentShared.text).activity.entries,[]);
+      console.log("Installed protocol-46 Agent SDK/React/CLI/TUI views preserve exact session/profile/source filters; a retained skill cannot masquerade as a command and inspection starts no shell or inference.");
+      ` : ""}
       await sdk.sessions.delete(activitySession.id,true);
       await assert.rejects(()=>sdk.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
       await sdk.projects.remove(activityProject.id,true,(await sdk.projects.configuration(activityProject.id)).configuration.revision);

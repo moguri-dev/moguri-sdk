@@ -42,6 +42,7 @@ export const slashCommands = [
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
   { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal, or a Local data-root global console", argument: "[global]" },
   { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open|global|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
+  { name: "agent-terminal", description: "Inspect this session's approved Agent command output, never its private User/Global consoles", argument: "[list [SEQUENCE ID]|read COMMAND_ID [UTF8_OFFSET|tail]]" },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
@@ -123,6 +124,17 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         kind: "text", text: JSON.stringify(await sdk.activity.read(session.id, id, part, { offset: Number(offset ?? 0) }), null, 2),
       };
       throw new ClientError("activity_input", "Use /activity, /activity before SEQUENCE ID, /activity turn ID or /activity read ID arguments|output [UTF8_OFFSET]. No source is inferred.");
+    }
+    case "agent-terminal": {
+      const [action, id, offset, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if ((!action || action === "list") && !id) return { kind: "text", text: JSON.stringify(await sdk.agentTerminals.list(session.id), null, 2) };
+      if (action === "list" && id && /^\d+$/.test(id) && Number.isSafeInteger(Number(id)) && offset && !extra) return {
+        kind: "text", text: JSON.stringify(await sdk.agentTerminals.list(session.id, { before: { sequence: Number(id), id: offset } }), null, 2),
+      };
+      if (action === "read" && id && !extra && (!offset || offset === "tail" || /^\d+$/.test(offset) && Number.isSafeInteger(Number(offset)))) return {
+        kind: "text", text: JSON.stringify(await sdk.agentTerminals.read(session.id, id, offset === "tail" ? { tail: true } : { offset: Number(offset ?? 0) }), null, 2),
+      };
+      throw new ClientError("agent_terminal_input", "Use /agent-terminal list [SEQUENCE ID] or /agent-terminal read COMMAND_ID [UTF8_OFFSET|tail]. No user console was accessed.");
     }
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument);
