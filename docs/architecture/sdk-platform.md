@@ -170,6 +170,33 @@ implementation: cancellation 31.16 ms; SQLite append p95 0.045 ms/rebuild
 2,000-file search/Git 0.958/5.865 ms. Separate baseline live/native/notarized/
 Linux/quality gates remain FAIL/unqualified, not enabled by navigation changes.
 
+### Sidebar and attention-row qualification
+
+Navigation source `ad075e8` and attention-row source `27a6bf7` reuse the same
+frozen build for final checks. The new navigation regression fails against the
+old 13-button right rail; the attention regression reproduces the 34-pixel
+approval marker and wrapped caption before the scoped-style fix.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/audit | PASS; zero vulnerabilities |
+| Focused native navigation/terminal/settings cases | 20 passed, zero failures / 38.7 seconds |
+| Shared session/workspace/settings gates | 22 passed, zero failures / 6,484.58 ms |
+| Final compact attention/lifecycle/sidebar cases | 6 passed, zero failures / 9.4 seconds |
+| Complete final hidden Electron suite | 126 passed, 2 physical-native skips, zero failures; 128 total / 4.5 minutes |
+| Actual packed external SDK/install | All entrypoints and existing flows pass; all 12 installed-worker probes pass |
+| Actual newly packaged hidden app | Both attention states, both navigation cases and safe global-terminal toggling: 5 passed / 7.6 seconds |
+| Actual bundle/native distribution/ZIP/DMG | PASS; protocol 54 / SendBox 0.2.4; 740,545,018-byte ZIP/manifest / 99,738.95 ms; exact native installer layout and unchanged signed app verified |
+
+The final DMG is 754,146,974 bytes, SHA-256
+`a7d2e24d76a70117b55737c7c3b0bdec77e138223226037cc163aa2a082518de`.
+The prior installer-layout identity remains a historical artifact, not this
+new desktop build. No service, SDK, CLI, TUI or durable protocol source changed
+from the preserved complete 1,294-pass Node baseline; that full run is not
+relabeled as a new one. Only generated fixtures/hidden windows and explicitly
+owned read-only verification mounts were used. Personal Finder windows,
+accounts, terminals and ongoing owners were not closed or adopted.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned

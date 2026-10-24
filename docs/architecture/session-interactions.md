@@ -114,6 +114,13 @@ stays one line with ellipsis at narrow widths, while the full session title and
 actual input/approval descriptions remain accessible. The main approval card
 keeps its own layout and permission controls.
 
+Actual native regression coverage measures rendered bounds, not only nominal
+CSS width: the prior approval point is 34 pixels wide, and the narrow question
+caption wraps to 23 pixels high. Fixed rows retain the 6-pixel point, 15-pixel
+glyph, one-line caption and visible title at 232/180-pixel sidebar widths in
+selected and unselected states, without changing required input or card padding.
+Both states also pass in the actual newly packaged hidden app.
+
 `session.pr_observed` retains version-1 metadata in the owning session, bound to
 the actual profile, session, canonical PR URL, project, managed workspace/root/revision,
 configured access mode and configuration revision. Its projection does not
