@@ -220,7 +220,7 @@ execution, Linux/Rust acceptance or complete descendant containment.
 - Preserve the same typed commands, events, budgets, Git policies, and cancellation semantics across all envs. In Sandbox, terminals and agent file/tool operations stay within the approved guest workspace and brokers. Remote is off-machine execution, not an assertion of SendBox controls or protection of unrelated data on that remote host.
 
 **Managed desktop setup direction.** The owner now requires bundled SendBox
-0.2.3 and a compatible pinned Linux worker/runtime/dependency image, reviewed
+0.2.4 and a compatible pinned Linux worker/runtime/dependency image, reviewed
 in-app setup and public-release update checks, automatic private workspaces
 without per-turn text previews, and selected-provider endpoint/CNAME resolution.
 [Managed Sandbox](managed-sandbox.md) records the prerequisite measurements,
@@ -232,9 +232,11 @@ configurations are not silently granted the new managed policy.
 Explicitly reviewed `*.domain.com` tool rules use the existing released native
 matcher, qualified against the real 0.2.3 guest/proxy. Exact entries remain exact,
 the apex is separate, and actual provider endpoints/CNAME provenance stay exact.
-This adds no automatic wildcard, new dependency or release pin. The separately
-developing upstream GitHub Meta delegation is not activated by this adapter
-change; it requires a newly qualified signed release and effective-scope review.
+The adapter adds no automatic wildcard or dependency. Changing the bundled
+default to 0.2.4 does not enable broader GitHub Meta delegation; that still
+requires explicit qualification and effective-scope review. The
+[default release pins](managed-sandbox.md#default-sendbox-024) preserve older
+selected versions, signed history and separate setup approval.
 
 ## D11. kupo synthetic model and routing
 

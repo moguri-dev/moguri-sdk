@@ -7,7 +7,7 @@ The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
 ## Prerequisite measurements
 
-The generated distribution spike uses the exact public SendBox 0.2.3 arm64
+The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64
 archive, freshly verified against SHA-256
 `ab9508dffa9f3299621248d6cff8efb8fd84b44556f630b6e343329ab1eafb3e`
 and its GitHub attestation. No personal model credential, inference, admin
@@ -45,11 +45,42 @@ node --import tsx scripts/managed-sandbox-spike.mjs \
 
 The macOS app carries a compatible immutable OCI worker archive, including
 Moguri's compiled worker/bridge, Linux Node and locked native dependencies.
-It also carries the pinned public SendBox 0.2.3 release and a no-script component
+It also carries the pinned public SendBox 0.2.4 release and a no-script component
 installer. A bounded distribution descriptor binds protocol, actual worker
 bytes, OCI index/archive hashes, vendor archive, CLI/key/manifest and installer
 hashes. Source/embedded runtimes can explicitly supply this same descriptor;
 missing bundled artifacts are an explicit setup limitation, not a mutable pull.
+
+### Default SendBox 0.2.4
+
+Factory management and the packaged producer now select the requested stable
+[0.2.4 release](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.4).
+The 16,582,697-byte macOS arm64 archive matches its adjacent checksum and verified
+GitHub artifact attestation, whose source is tag `v0.2.4` at
+`5e83a179ed83ef2b3b184b60b7fef82105aa504c`.
+SendBox remains Apache-2.0; no Node dependency or durable schema changes.
+
+| Exact release identity | SHA-256 / value |
+| --- | --- |
+| Public host archive | `94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31` |
+| Host executable | `cfa71d5db3ec747ab785c86c6d79dce174893955066ff80ecf6eab827afd2e73` |
+| Existing trusted guest key | `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88` |
+| Signed guest manifest | `afdf6182b6935322454ccc4d0f8426fafadcc1dbe27a35c88963646e1b34b91d` |
+| Trust root / minimum release sequence | `external-release-root` / `8` |
+
+Actual artifact inspection verifies the unchanged Ed25519 root, host/guest
+0.2.4 binding, every signed guest byte/mode and the real CLI version/help before
+any executable admission. This does not claim privileged installation or a
+live 0.2.4 guest. Earlier 0.2.3 VM/network measurements remain historical.
+
+The producer cache binds the exact vendor pins, current Moguri protocol and
+worker/dependency payload. Old cache pointers are misses, not authority to reuse
+0.2.3 as 0.2.4; matching entries still reverify actual package/image bytes and
+vendor identity. Old distribution artifacts and explicitly retained 0.2.3
+settings are not deleted, rewritten, implicitly installed or switched.
+Fresh use of the new bundle retains the original exact setup review,
+side-by-side administrator approval and readiness gates. No broader GitHub Meta,
+wildcard, provider, Local fallback or model permission is granted by the bump.
 
 The primary Settings flow shows these actual defaults and requires review and
 approval, not JSON authoring, a developer build or a SHA command. A matching

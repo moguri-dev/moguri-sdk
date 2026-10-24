@@ -15,7 +15,7 @@ export const SandboxManagementSchema = object({
 });
 export type SandboxManagement = Static<typeof SandboxManagementSchema>;
 export const defaultSandboxManagement = (): SandboxManagement => ({
-  enabled: false, version: "0.2.3", automaticUpdates: true, automaticWorkspaces: true, automaticProviderNetwork: true,
+  enabled: false, version: "0.2.4", automaticUpdates: true, automaticWorkspaces: true, automaticProviderNetwork: true,
 });
 export interface SandboxNetworkScope {
   version: 1; reviewedConfigDigest: string; providerUrls: string[]; providerHosts: string[];

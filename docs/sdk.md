@@ -354,10 +354,13 @@ starts a model or silently selects a provider, Env or new runtime version.
 `sandbox.setup.check()` observes the fixed public SendBox release feed;
 `sandbox.setup.prepare(version)` downloads and verifies that exact eligible
 archive and prepares a no-script package for a separate review. The app bundles
-0.2.3 and a current-protocol worker OCI archive with Linux Node/native dependencies.
+0.2.4 and a current-protocol worker OCI archive with Linux Node/native dependencies.
 Source/Node embeddings may pass `platform.sandbox.distribution` explicitly.
 An accepted retained distribution is reused only with its original digest;
 there is no app-directory scan or mutable image pull.
+Factory defaults do not rewrite an explicitly retained older version. A changed
+bundled vendor or any of its exact pins invalidates the producer cache even when
+the worker payload is identical; actual artifact hashes are still reverified.
 
 After managed setup approval and explicit Env selection, ordinary Send prepares
 the bound project/worktree privately and automatically. Engine-only qualification

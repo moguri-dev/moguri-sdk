@@ -49,7 +49,7 @@ test("SDK managed setup needs exact explicit review, preserves user defaults, an
   });
   try {
     const review = (await sdk.sandbox.setup.review()).review;
-    assert.equal(review.version, "0.2.3"); assert.equal(review.installed, true);
+    assert.equal(review.version, "0.2.4"); assert.equal(review.installed, true);
     assert.equal(review.management.automaticWorkspaces, true); assert.equal(review.management.automaticProviderNetwork, true);
     assert.deepEqual(review.configuration.qualification!.allowedDomains, ["github.com", "api.github.com"]);
     await assert.rejects(() => sdk.sandbox.setup.apply({ ...review, digest: "0".repeat(64) }), /review|changed/);
@@ -83,20 +83,39 @@ test("cancelled image admission retains a partial owned operation and does not c
   } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
 });
 
+test("a newer bundled default does not replace an explicitly saved older release or enable it without review", native, async () => {
+  const generated = await generatedSandboxDistribution(); let imports = 0, installs = 0;
+  const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false,
+    installed: async () => true, importImage: async () => { imports++; }, install: async () => { installs++; },
+  } } } });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const settings = sdk.settings.get()!;
+    await sdk.settings.update({ ...settings.values, sandboxManagement: { ...defaultSandboxManagement(), version: "0.2.3" } }, settings.revision);
+    const status = (await sdk.sandbox.setup.status()).setup;
+    assert.equal(status.bundledVersion, "0.2.4"); assert.equal(status.selectedVersion, "0.2.3");
+    await assert.rejects(() => sdk.sandbox.setup.review(), /exact|Prepare/);
+    assert.equal((await sdk.sandbox.setup.review("0.2.4")).review.version, "0.2.4");
+    assert.equal(sdk.settings.get()!.values.sandboxManagement?.version, "0.2.3");
+    assert.equal(sdk.settings.get()!.values.sandboxManagement?.enabled, false);
+    assert.equal(imports, 0); assert.equal(installs, 0); assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
+});
+
 test("public release checks use no private credential and never replace the user's configured version", native, async () => {
   const generated = await generatedSandboxDistribution(), requested: string[] = [];
   const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false,
     fetch: async (input, init) => {
       requested.push(String(input)); assert.equal(new Headers(init?.headers).has("Authorization"), false);
-      return Response.json([{ id: 101, tag_name: "v0.2.4", draft: false, prerelease: false, published_at: "2026-01-01T00:00:00.000Z",
-        assets: [{ id: 102, name: "sendbox-0.2.4-macos-arm64.tar.gz", size: 50, digest: `sha256:${"4".repeat(64)}` }] }]);
+      return Response.json([{ id: 101, tag_name: "v0.2.5", draft: false, prerelease: false, published_at: "2026-01-01T00:00:00.000Z",
+        assets: [{ id: 102, name: "sendbox-0.2.5-macos-arm64.tar.gz", size: 50, digest: `sha256:${"4".repeat(64)}` }] }]);
     },
   } } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const admitted = await sdk.sandbox.setup.check(), result = await sdk.sandbox.setup.wait(admitted.id!);
-    assert.equal(result.operation.status, "available"); assert.equal(result.operation.release?.version, "0.2.4");
-    assert.equal((await sdk.sandbox.setup.status()).setup.selectedVersion, "0.2.3");
+    assert.equal(result.operation.status, "available"); assert.equal(result.operation.release?.version, "0.2.5");
+    assert.equal((await sdk.sandbox.setup.status()).setup.selectedVersion, "0.2.4");
     assert.deepEqual(requested, ["https://api.github.com/repos/mbianchidev/sendbox/releases?per_page=10"]);
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
@@ -105,8 +124,8 @@ test("public release checks use no private credential and never replace the user
 test("an eligible release without a digest fails visibly rather than reporting a clean update check", native, async () => {
   const generated = await generatedSandboxDistribution();
   const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false,
-    fetch: async () => Response.json([{ id: 101, tag_name: "v0.2.4", draft: false, prerelease: false, published_at: "2026-01-01T00:00:00.000Z",
-      assets: [{ id: 102, name: "sendbox-0.2.4-macos-arm64.tar.gz", size: 50 }] }]),
+    fetch: async () => Response.json([{ id: 101, tag_name: "v0.2.5", draft: false, prerelease: false, published_at: "2026-01-01T00:00:00.000Z",
+      assets: [{ id: 102, name: "sendbox-0.2.5-macos-arm64.tar.gz", size: 50 }] }]),
   } } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -122,7 +141,7 @@ test("a public runtime update is unpacked, signature-checked and prepared for se
   await writeFile(join(generated.directory, "manifest.json"), JSON.stringify(generated.distribution));
   const guest = Buffer.from("Generated signed guest, never executed.");
   const payload = JSON.stringify({ schema_version: 1, domain: "dev.sendbox.guest.artifact-manifest.v1", trust_root_id: "external-release-root",
-    release_sequence: 8, minimum_accepted_sequence: 1, expected_host_version: "0.2.4", expected_guest_version: "0.2.4", architecture: "aarch64",
+    release_sequence: 9, minimum_accepted_sequence: 1, expected_host_version: "0.2.5", expected_guest_version: "0.2.5", architecture: "aarch64",
     artifacts: [{ kind: "guest_binary", path: "bin/sendbox-guest", sha256: sha(guest), mode: 0o555, uid: 0, gid: 0 }] });
   const files = [
     { path: "sendbox", content: Buffer.from("Generated host, never executed."), mode: 0o555 },
@@ -132,7 +151,7 @@ test("a public runtime update is unpacked, signature-checked and prepared for se
   ];
   const blocks: Buffer[] = [];
   for (const file of files) {
-    const header = new Header({ path: `sendbox-0.2.4-macos-arm64/${file.path}`, type: "File", size: file.content.length, mode: file.mode });
+    const header = new Header({ path: `sendbox-0.2.5-macos-arm64/${file.path}`, type: "File", size: file.content.length, mode: file.mode });
     header.encode(); if (!header.block) throw new Error("Generated update archive has no TAR header.");
     blocks.push(header.block, file.content, Buffer.alloc((512 - file.content.length % 512) % 512));
   }
@@ -140,26 +159,26 @@ test("a public runtime update is unpacked, signature-checked and prepared for se
   const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false,
     fetch: async (input, init) => {
       assert.equal(new Headers(init?.headers).has("Authorization"), false);
-      if (String(input).endsWith("/releases?per_page=10")) return Response.json([{ id: 101, tag_name: "v0.2.4", draft: false, prerelease: false,
-        published_at: "2026-01-01T00:00:00.000Z", assets: [{ id: 102, name: "sendbox-0.2.4-macos-arm64.tar.gz", size: archive.length, digest: `sha256:${sha(archive)}` }] }]);
+      if (String(input).endsWith("/releases?per_page=10")) return Response.json([{ id: 101, tag_name: "v0.2.5", draft: false, prerelease: false,
+        published_at: "2026-01-01T00:00:00.000Z", assets: [{ id: 102, name: "sendbox-0.2.5-macos-arm64.tar.gz", size: archive.length, digest: `sha256:${sha(archive)}` }] }]);
       assert.equal(String(input), "https://api.github.com/repos/mbianchidev/sendbox/releases/assets/102");
       return new Response(archive);
     },
     package: async (root, version, output) => {
-      packages++; assert.equal(version, "0.2.4"); assert.equal((await readFile(join(root, "guest/aarch64/bundle/bin/sendbox-guest"))).equals(guest), true);
+      packages++; assert.equal(version, "0.2.5"); assert.equal((await readFile(join(root, "guest/aarch64/bundle/bin/sendbox-guest"))).equals(guest), true);
       await writeFile(output, "Generated reviewed package, never installed.", { mode: 0o600 });
     },
     install: async () => { installs++; },
   } } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
-    const admitted = await sdk.sandbox.setup.prepare("0.2.4"), result = await sdk.sandbox.setup.wait(admitted.id!);
+    const admitted = await sdk.sandbox.setup.prepare("0.2.5"), result = await sdk.sandbox.setup.wait(admitted.id!);
     assert.equal(result.operation.status, "review", result.operation.diagnostic ?? "");
-    const review = (await sdk.sandbox.setup.review("0.2.4")).review;
-    assert.equal(review.version, "0.2.4"); assert.equal(review.configuration.qualification!.minimumReleaseSequence, 8);
+    const review = (await sdk.sandbox.setup.review("0.2.5")).review;
+    assert.equal(review.version, "0.2.5"); assert.equal(review.configuration.qualification!.minimumReleaseSequence, 9);
     assert.equal(review.configuration.image, generated.distribution.worker.image);
     assert.equal((await stat(review.imageArchivePath)).size, generated.distribution.worker.archive.bytes);
-    assert.equal((await sdk.sandbox.setup.status()).setup.selectedVersion, "0.2.3");
+    assert.equal((await sdk.sandbox.setup.status()).setup.selectedVersion, "0.2.4");
     assert.equal(packages, 1); assert.equal(installs, 0); assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
 });
