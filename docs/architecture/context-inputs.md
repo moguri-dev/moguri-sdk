@@ -102,3 +102,50 @@ Durable schema evolution preserves legacy text attachments and existing
 identities/grants. Tests cover malformed/oversized images, source races,
 symlinks/protected paths, ignore rules, cross-session authorization, stale
 previews, unsupported models, deletion, migration and restart.
+
+## Desktop interaction revision
+
+Protocol/database 44 keeps source selection in the SDK/service.
+The desktop attachment menu has five entries: project file or folder (`@`),
+issue/PR or GitHub file (`#`, or `@owner/repo/path`), session (`:`), local file
+(`^`) and local folder (`^/absolute/path/`). Documents and images use the same
+local-file picker. Bare shortcuts remain literal until explicit selection.
+Local project identifiers contain only ASCII letters, digits, hyphens and
+underscores; ambiguous project/repository references must not guess a source.
+
+Clickable attachment chips inspect the retained encrypted snapshot, not a
+fresh read of the original. Removing draft context never edits a sent message
+or controls its source. Session drops fetch a destination-bound snapshot before
+confirmation. An explicit profile preference can suppress subsequent session
+attachment dialogs, but not digest/revision checks, source isolation, or model
+admission rules. Other aggregate sources still require exact review.
+
+React, Electron, TypeBox, Ghostty, Node-PTY and the existing encrypted store
+(MIT) are reused. New settings and sibling-session order are durable,
+optimistically revised service data shared by every client. The additive
+migration preserves schema-43 ciphertext, receipts and existing grants.
+Generated fixtures cover shortcut resolution, previews/removal, drag/drop,
+source/destination races, settings persistence, cancellation and restart.
+
+Before implementation on 2026-10-24, the provider, store, PTY, OpenTUI, Electron
+and filesystem baseline spikes passed: generated OAuth cancellation 31.70 ms,
+SQLite append p95 0.060 ms, nested PTY cancellation 151.83 ms with no observed
+survivor, OpenTUI update 17.12 ms, hidden Electron cold start 203.37 ms / 449.73
+MiB / scroll frame 12.89 ms, and 2,000-file search/Git status 0.97/6.15 ms.
+The vector/MCP primitives passed (500 vector rows in 6.20 ms). Retention
+compartments passed (500 events, 250 independently retained artifacts, 137.90
+ms), and real hidden-Electron Ghostty input passed (423,045-byte WASM, 25.90
+ms). The pinned speech CLI's version/help passed without weights or microphone
+access. These are generated-fixture prerequisite results, not live inference,
+real microphone, Linux, SendBox, signing or release qualification.
+The baseline's live-provider, Rust/Linux, signed-packaging, physical SendBox/SSH,
+live kupo/System One and full-model-pool groups remain FAIL/unavailable. This
+interaction change does not relabel those historical release/milestone gates.
+
+The post-dependency-patch rerun passed the same six baseline primitives:
+generated cancellation 31.01 ms, SQLite append p95 0.056 ms, PTY cancellation
+151.77 ms with no observed survivor, OpenTUI update 16.91 ms, Electron cold
+start 184.54 ms / 445.14 MiB / scroll 8.28 ms, and filesystem/Git status
+0.98/6.26 ms. The unavailable baseline groups retained their explicit FAIL
+results. Root `npm ci` emitted neither reported deprecation warning, and the
+moderate-or-higher dependency audit reported zero vulnerabilities.

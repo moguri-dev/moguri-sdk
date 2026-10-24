@@ -247,7 +247,7 @@ export class PlatformRuntime {
       artifact: (publication) => this.artifacts.nativePublication(publication),
       job: (projectId, workspaceId, execute, start, settled, lifecycle) => this.job("sandbox.publish", projectId, null, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
-    this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir, options.documents);
+    this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path), project: (session) => this.managed.project(session) }, stateDir, options.documents);
     this.progress = new TaskProgressRuntime({
       profileId: store.profileId, session: (id) => this.session(id), events: host.events, commit: host.commit,
       binding: (session) => JSON.stringify([session.id, session.turnId, session.controls.env, session.workspaceId, session.sandboxWorkspaceId,
@@ -921,7 +921,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         if ([...this.active.values()].some((job) => job.kind === "voice.record" || job.kind === "voice.transcribe")) throw new MoguriError("speech_busy", "Finish or cancel the current local dictation first.", 409);
         const ready = await this.voice.status();
         if (!ready.modelReady || !ready.runtimeReady) throw new MoguriError("speech_not_ready", ready.diagnostic!, 409);
-        return finish([], { id: this.job(command.type, session.projectId, session.id, (signal, _, id) => this.voice.transcribe(id, command.type === "voice.record" ? "microphone" : resolve(command.path), snapshot.settings.values.voice, signal)) });
+        return finish([], { id: this.job(command.type, session.projectId, session.id, (signal, progress, id) => this.voice.transcribe(id, command.type === "voice.record" ? "microphone" : resolve(command.path), snapshot.settings.values.voice, signal, progress)) });
       }
       case "voice.stop": {
         const job = snapshot.jobs.find((job) => job.id === command.jobId);

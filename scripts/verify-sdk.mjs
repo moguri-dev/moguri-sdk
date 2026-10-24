@@ -398,6 +398,24 @@ try {
       assert.equal(sdk.profileId,"default");assert.equal(beta.profileId,profile.id);
       assert.equal(beta.getState().snapshot.projects.length,0);assert.equal(beta.getState().snapshot.sessions.length,0);
       assert.equal(beta.getState().snapshot.provider.status,"disconnected");
+      ${installedProtocol >= 44 ? `
+      assert.deepEqual(sdk.settings.get().values.interactions,{confirmSessionAttachments:true,confirmTerminalClose:true});
+      const interactionRoot=join(root,"generated-interaction-project");await mkdir(interactionRoot);
+      await writeFile(join(interactionRoot,"generated.txt"),"Generated installed interaction snapshot.");
+      const interactionProject=await sdk.projects.add(interactionRoot,"generated_interactions");
+      const first=await sdk.sessions.create(interactionProject.id,"Generated installed first"),second=await sdk.sessions.create(interactionProject.id,"Generated installed second");
+      await sdk.sessions.reorder([second.id,first.id]);
+      assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===second.id).order,0);
+      const source=await sdk.attachments.projectPath(first.id,interactionProject.id,"generated.txt");
+      assert.equal(source.kind,"file");assert.equal(source.path,join(await realpath(interactionRoot),"generated.txt"));
+      const captured=await sdk.attachments.file(first.id,source.path);
+      assert.equal((await sdk.attachments.read(first.id,captured.id)).content.text,"Generated installed interaction snapshot.");
+      await assert.rejects(()=>beta.attachments.read(first.id,captured.id),{code:"attachment_session"});
+      await sdk.slash(first.id,"/reorder-sessions "+first.id+" "+second.id,"tui");
+      assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===first.id).order,0);
+      await sdk.sessions.delete(first.id,true);await sdk.sessions.delete(second.id,true);await sdk.projects.remove(interactionProject.id,true,0);
+      console.log("Installed protocol-44 browser-safe SDK and TUI commands preserve safe identifiers, exact Local context resolution, profile-private snapshots and atomic shared sibling order without inference.");
+      ` : ""}
       const betaSession=await beta.sessions.create(null,"Generated installed Beta chat");
       assert.equal(beta.getState().snapshot.sessions[0].controls.modelId,null);
       const betaDocument=await beta.artifacts.create(betaSession.id,{kind:"decision",name:"Generated Beta private note",text:"Generated Beta-only installed bytes."});
@@ -1019,7 +1037,17 @@ try {
         assert.equal(after.data.split("GENERATED_INSTALLED_CONSOLE_READY").length-1,1);
         const read=JSON.parse((await invoke(["terminal","read",opened.id])).stdout);assert.equal(read.terminal.pid,before.terminal.pid);
         const tui=await consoleSdk.slash(session.id,"/terminals read "+opened.id,"tui");assert.equal(tui.kind,"text");assert.equal(JSON.parse(tui.text).terminal.pid,before.terminal.pid);
-        await consoleSdk.terminal.close(opened.id);consoleSdk.disconnect();await stopMoguriService(consoleState);
+        await consoleSdk.terminal.close(opened.id);
+        if(PROTOCOL_VERSION>=44&&mode==="Local"){
+          const global=await consoleSdk.terminal.openGlobal(),globalState=(await consoleSdk.terminal.read(global.id)).terminal;
+          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(consoleState));
+          const globalCli=JSON.parse((await invoke(["terminal","read",global.id])).stdout);assert.equal(globalCli.terminal.id,global.id);
+          const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
+          await consoleSdk.sessions.delete(session.id,true);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);
+          await consoleSdk.terminal.close(global.id);
+          console.log("Installed protocol-44 global Local console owns the exact data directory independently of sessions/projects through SDK, CLI and TUI, with no model context or launch replay.");
+        }
+        consoleSdk.disconnect();await stopMoguriService(consoleState);
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }

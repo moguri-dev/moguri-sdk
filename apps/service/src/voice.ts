@@ -26,13 +26,14 @@ export interface SpeechOptions {
   model?: typeof NEMOTRON_MODEL;
   fetch?: typeof globalThis.fetch;
   modelDirectory?: string;
+  finalizationTimeoutMs?: number;
 }
 export class LocalDictation {
   private readonly executable: string;
   private readonly model;
   private readonly modelPath: string;
   private verified = "";
-  private active = new Map<string, { child: ChildProcess | null; stopping: boolean; terminate?: (signal: NodeJS.Signals) => void }>();
+  private active = new Map<string, { child: ChildProcess | null; stopping: boolean; ready: boolean; terminate?: (signal: NodeJS.Signals) => void }>();
   constructor(stateDir: string, private readonly options: SpeechOptions = {}) {
     this.executable = options.executable ?? fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../../../.native/speech/bin/nemo-speech" : "./native/speech/bin/nemo-speech", import.meta.url));
     this.model = options.model ?? NEMOTRON_MODEL;
@@ -106,13 +107,14 @@ export class LocalDictation {
     if (hash.digest("hex") !== this.model.sha256) throw new MoguriError("speech_integrity", "Installed model integrity failed. Reinstall it explicitly; no download or cloud fallback was attempted.");
     this.verified = fingerprint;
   }
-  async transcribe(jobId: string, source: string | "microphone", settings: UserSettings["voice"], signal: AbortSignal): Promise<{ text: string; modelId: string; language: string; source: "local" }> {
-    const active: { child: ChildProcess | null; stopping: boolean; terminate?: (signal: NodeJS.Signals) => void } = { child: null, stopping: false };
+  async transcribe(jobId: string, source: string | "microphone", settings: UserSettings["voice"], signal: AbortSignal, progress: (message: string) => void = () => {}): Promise<{ text: string; modelId: string; language: string; source: "local" }> {
+    const active: { child: ChildProcess | null; stopping: boolean; ready: boolean; terminate?: (signal: NodeJS.Signals) => void } = { child: null, stopping: false, ready: source !== "microphone" };
     this.active.set(jobId, active);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let escalation: ReturnType<typeof setTimeout> | undefined;
     const cancel = () => active.terminate?.("SIGTERM");
     try {
+      progress("Preparing local dictation...");
       await this.verify(signal);
       if (active.stopping) throw new MoguriError("speech_stopped", "Recording was stopped before microphone startup. No audio was captured and the draft is unchanged.", 409);
       if (settings.language !== "auto" && !VOICE_LOCALES.some((locale) => locale.code === settings.language && locale.tier !== "adaptation")) {
@@ -124,10 +126,18 @@ export class LocalDictation {
       }
       signal.throwIfAborted();
       if (active.stopping) throw new MoguriError("speech_stopped", "Recording was stopped before microphone startup. No audio was captured and the draft is unchanged.", 409);
-      const args = [...(this.options.prefixArgs ?? []), "--quiet", "transcribe", ...(source === "microphone" ? ["--live"] : [source]), "--model", this.modelPath, "--format", "text", "--language", settings.language, "--backend", settings.backend];
+      const args = [...(this.options.prefixArgs ?? []), ...(source === "microphone" ? [] : ["--quiet"]), "transcribe", ...(source === "microphone" ? ["--live"] : [source]), "--model", this.modelPath, "--format", "text", ...(settings.language === "auto" ? [] : ["--language", settings.language]), "--backend", settings.backend];
       const child = spawn(this.executable, args, { stdio: ["ignore", "pipe", "pipe"], env: { PATH: process.env.PATH, HOME: process.env.HOME, NO_COLOR: "1" } });
       active.child = child;
-      active.terminate = (signal) => { child.kill(signal); escalation ??= setTimeout(() => child.kill("SIGKILL"), 3000); };
+      let finalizationTimedOut = false;
+      active.terminate = (requested) => {
+        child.kill(requested); clearTimeout(escalation); clearTimeout(timer);
+        if (requested === "SIGINT") progress("Finalizing local dictation...");
+        escalation = setTimeout(() => {
+          finalizationTimedOut = requested === "SIGINT";
+          child.kill("SIGKILL");
+        }, requested === "SIGINT" ? this.options.finalizationTimeoutMs ?? 60_000 : 3000);
+      };
       const chunks: Buffer[] = [];
       let bytes = 0;
       let oversized = false;
@@ -138,19 +148,35 @@ export class LocalDictation {
         if (bytes > 128 * 1024) { oversized = true; active.terminate!("SIGTERM"); }
         else chunks.push(chunk);
       });
-      child.stderr.resume();
-      signal.addEventListener("abort", cancel, { once: true });
-      if (signal.aborted) cancel();
-      timer = setTimeout(() => {
+      let diagnostic = Buffer.alloc(0);
+      const finishRecording = () => {
         active.stopping = true;
         timedOut = source !== "microphone";
         active.terminate!(source === "microphone" ? "SIGINT" : "SIGTERM");
-      }, source === "microphone" ? 120_000 : 300_000);
+      };
+      child.stderr.on("data", (chunk: Buffer) => {
+        if (source === "microphone" && active.ready) return;
+        diagnostic = Buffer.concat([diagnostic, chunk]).subarray(-4096);
+        if (source === "microphone" && /^\[live\] listening on .+ at [1-9]\d* Hz; press Ctrl-C to stop\r?$/m.test(diagnostic.toString("utf8"))) {
+          active.ready = true; diagnostic = Buffer.alloc(0); clearTimeout(timer);
+          progress("Recording locally. Stop to transcribe.");
+          timer = setTimeout(finishRecording, 120_000);
+        }
+      });
+      if (source === "microphone") timer = setTimeout(() => { timedOut = true; active.terminate!("SIGTERM"); }, 120_000);
+      else { progress("Transcribing local audio..."); timer = setTimeout(finishRecording, 300_000); }
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
       const code = await new Promise<number | null>((resolve, reject) => { child.once("close", resolve); child.once("error", reject); });
       signal.throwIfAborted();
       if (oversized) throw new MoguriError("speech_limit", "Local transcription exceeded the bounded output limit.");
-      if (timedOut) throw new MoguriError("speech_timeout", "Local transcription exceeded its five-minute deadline. The draft is unchanged.");
-      if (code !== 0) throw new MoguriError("speech_failed", `Local speech exited with status ${code ?? "signal"}. Check microphone permission, WAV format, model integrity and runtime compatibility.`);
+      if (timedOut) throw new MoguriError("speech_timeout", source === "microphone" ? "Local microphone initialization exceeded two minutes. Cancelled startup produced no transcript; your draft is unchanged." : "Local transcription exceeded its five-minute deadline. The draft is unchanged.");
+      if (finalizationTimedOut) throw new MoguriError("speech_finalize_timeout", "Local speech did not finish within its finalization deadline. The recognizer was stopped and your draft is unchanged. Try a shorter recording or a faster backend.");
+      if (code !== 0) {
+        const detail = diagnostic.toString("utf8").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "").trim();
+        throw new MoguriError("speech_failed", `Local speech exited with status ${code ?? child.signalCode ?? "signal"}.${detail ? ` ${detail}` : " Check microphone permission, WAV format, model integrity and runtime compatibility."}`);
+      }
+      if (source === "microphone" && !active.ready) throw new MoguriError("speech_readiness", "The pinned runtime did not confirm microphone readiness. No transcript was inserted; inspect its version, startup and microphone permissions before retrying.");
       const text = Buffer.concat(chunks).toString("utf8");
       if (!text.trim()) throw new MoguriError("speech_empty", "No speech was recognized. The existing draft was not changed.");
       return { text: text.trim(), modelId: this.model.id, language: settings.language, source: "local" };
@@ -163,6 +189,8 @@ export class LocalDictation {
   stop(jobId: string): void {
     const active = this.active.get(jobId);
     if (!active) throw new MoguriError("speech_not_recording", "This recording is no longer running.", 409);
+    if (active.stopping) throw new MoguriError("speech_finalizing", "This recording is already finalizing. Wait for its transcript or explicitly cancel and discard it.", 409);
+    if (active.child && !active.ready) throw new MoguriError("speech_preparing", "The local recognizer is still initializing the microphone. Wait for Recording, or cancel and discard setup; no transcript is available yet.", 409);
     active.stopping = true;
     active.terminate?.("SIGINT");
   }

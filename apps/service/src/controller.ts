@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
+import { projectIdentifier } from "../../../packages/protocol/src/sessions.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1637,7 +1638,8 @@ export class ControlPlane extends EventEmitter {
         if (!(await stat(path)).isDirectory()) throw new MoguriError("invalid_project", "A project must be an existing local directory.");
         const existing = this.projection.projects.find((project) => project.path === path);
         if (existing) return finish([], { id: existing.id });
-        const project = { id: randomUUID(), name: basename(path), path };
+        if (command.name && this.projection.projects.some((project) => project.name.toLowerCase() === command.name!.toLowerCase())) throw new MoguriError("project_name", "Choose a unique local project name containing only letters, numbers, hyphens or underscores.", 409);
+        const project = { id: randomUUID(), name: command.name ?? projectIdentifier(basename(path), this.projection.projects.map((project) => project.name)), path };
         return finish([{ event_type: "project.added", profile_id: this.profileId, project_id: project.id, payload: { project } }], { id: project.id });
       }
       case "session.create": {

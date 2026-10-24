@@ -9,7 +9,7 @@ interface OwnedTerminal { state: TerminalState; pty: pty.IPty; output: string; b
 export class TerminalEngine {
   private owned = new Map<string, OwnedTerminal>();
   constructor(private readonly changed: (terminal: TerminalState) => void, private readonly options: TerminalLaunchOptions = {}) {}
-  open(scope: { id?: string; sessionId: string; projectId: string; workspaceId?: string | null; root: string }, cols: number, rows: number, script?: { name: string; command: string }, options = this.options): TerminalState {
+  open(scope: { id?: string; sessionId: string | null; projectId: string | null; workspaceId?: string | null; root: string }, cols: number, rows: number, script?: { name: string; command: string }, options = this.options): TerminalState {
     if (scope.id && this.owned.has(scope.id)) throw new MoguriError("terminal_duplicate", "This terminal identity already owns a process. No replacement shell was started.", 409);
     if ([...this.owned.values()].filter((entry) => entry.state.status === "running").length >= 16 ||
       [...this.owned.values()].filter((entry) => entry.state.sessionId === scope.sessionId && entry.state.status === "running").length >= 4) throw new MoguriError("terminal_limit", "Close a running terminal first. At most four per session and sixteen overall are supported.");

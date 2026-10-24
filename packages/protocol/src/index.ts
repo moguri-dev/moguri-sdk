@@ -7,7 +7,7 @@ export * from "./platform.ts";
 export * from "./model.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
-import { defaultProjectSettings } from "./sessions.ts";
+import { defaultProjectSettings, projectIdentifier } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
 import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
@@ -44,7 +44,7 @@ import type { TaskProgressReport } from "./progress.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 43;
+export const PROTOCOL_VERSION = 44;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -58,7 +58,7 @@ export const CommandSchema = object({
   id,
   profileId: id,
   command: Type.Union([
-    object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }) }),
+    object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }), name: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Za-z0-9_-]+$" })) }),
     object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema }),
     object({ type: Type.Literal("session.archive"), ...sessionId }),
@@ -174,6 +174,7 @@ export interface Session {
   pendingMode: SessionMode | null;
   kind: SessionKind;
   pinned: boolean;
+  order?: number;
   unread: boolean;
   groupId: string | null;
   archivedAt: string | null;
@@ -294,7 +295,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
-  "session.organized": { changes: SessionChanges };
+  "session.organized": { changes: SessionChanges & { order?: number } };
   "session.mode_requested": { mode: SessionMode };
   "session.mode_changed": { mode: SessionMode };
   "session.browser_changed": { url: string };
@@ -669,6 +670,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const terminal = event.payload.terminal, previous = terminals.get(terminal.id);
       if (!Value.Check(TerminalStateSchema, terminal)) throw new MoguriError("terminal_corrupt", "Terminal state is invalid. Retained history was preserved.", 409);
       if (terminal.binding && terminal.env !== terminal.binding.env) throw new MoguriError("terminal_corrupt", "Terminal execution env differs from its captured binding. No boundary was relabeled.", 409);
+      if (terminal.sessionId === null || terminal.projectId === null) {
+        const owner = terminal.ownerId ? terminalOwners.get(terminal.ownerId) : undefined;
+        if (terminal.sessionId !== null || terminal.projectId !== null || (terminal.workspaceId ?? null) !== null || terminal.env !== "Local" ||
+          terminal.binding?.env !== "Local" || terminal.binding.sessionId !== null || terminal.binding.projectId !== null || terminal.binding.profileId !== profileId ||
+          !owner || owner.remote || event.session_id !== null || event.project_id !== null) throw new MoguriError("terminal_corrupt", "Global Terminal must retain its exact profile-owned Local data root without a session or project.", 409);
+      }
       if (terminal.env === "Remote") {
         const owner = terminal.ownerId ? terminalOwners.get(terminal.ownerId) : undefined;
         if (!owner?.remote || terminal.binding?.env !== "Remote" || terminal.binding.peerDigest !== owner.remote.peerDigest ||
@@ -685,7 +692,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       terminals.set(terminal.id, { ...terminal });
       if (event.payload.terminal.status === "unconfirmed") {
         if (event.payload.terminal.workspaceId) blockedWorkspaces.add(event.payload.terminal.workspaceId);
-        else blockedProjects.add(event.payload.terminal.projectId);
+        else if (event.payload.terminal.projectId) blockedProjects.add(event.payload.terminal.projectId);
       }
     }
     if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
@@ -840,10 +847,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (workspaceId) blockedWorkspaces.delete(workspaceId); else blockedProjects.delete(event.project_id);
     }
     if (event.event_type === "session.resumed" && event.session_id) blockedSessions.delete(event.session_id);
-    if (event.event_type === "project.added") projects.set(event.payload.project.id, event.payload.project);
+    if (event.event_type === "project.added") {
+      const project = event.payload.project;
+      projects.set(project.id, { ...project, name: projectIdentifier(project.name, [...projects.values()].filter((entry) => entry.id !== project.id).map((entry) => entry.name)) });
+    }
     if (event.event_type === "project.relocated" && event.project_id) {
       const project = projects.get(event.project_id);
-      if (project) projects.set(project.id, { ...project, ...event.payload });
+      if (project) projects.set(project.id, { ...project, ...event.payload, name: projectIdentifier(event.payload.name, [...projects.values()].filter((entry) => entry.id !== project.id).map((entry) => entry.name)) });
     }
     if (event.event_type === "policy.updated") {
       policy = event.payload.policy;
@@ -858,7 +868,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         lastError: null, localFinishing: false, createdAt: event.timestamp, updatedAt: event.timestamp,
         parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
-        kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, unread: false, groupId: null, archivedAt: null,
+        kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, order: event.seq, unread: false, groupId: null, archivedAt: null,
         prUrl: event.payload.prUrl ?? null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
         suggestionSources: event.payload.suggestionSources,
         inheritedImages: event.payload.inheritedImages,
@@ -889,6 +899,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const changes = event.payload.changes;
         if (changes.title !== undefined) session.title = changes.title;
         if (changes.pinned !== undefined) session.pinned = changes.pinned;
+        if (changes.order !== undefined) session.order = changes.order;
         if (changes.unread !== undefined) session.unread = changes.unread;
         if (changes.groupId !== undefined) session.groupId = changes.groupId;
         if (changes.parentSessionId !== undefined) session.parentSessionId = changes.parentSessionId ?? undefined;

@@ -80,6 +80,25 @@ Voice tests use generated audio or a generated recognizer, never real
 microphone capture; runtime/model absence must be actionable, never cloud
 fallback. Both clients must expose the same operation rather than duplicate it.
 
+Protocol 44 distinguishes speech initialization, actual microphone readiness and
+final transcript draining. The pinned 0.2.0 CLI runs with its non-interactive
+readiness announcement visible on stderr; microphone device names/live preview
+text are not retained as job progress. No quiet-mode startup guess substitutes
+for that phase signal. This announcement is operational status, not permission.
+Automatic language selection omits the language override. Initialization and
+recording each have two-minute bounds; graceful SIGINT finalization has its own
+60-second bound, distinct from cancellation/output-limit TERM/KILL escalation.
+Cancelled, unready, empty and deadline-exceeded output never becomes a transcript.
+The composer inserts only a completed owned result against the current saved
+draft revision, never sends it, and preserves concurrent typing/conflicts.
+
+Root-install compatibility reuses MIT-licensed encoding-sniffer 1.0.2 and
+node-fetch-native 1.6.7 with Node 26's actual fetch/Response/DOMException rather
+than a deprecated DOMException shim. Generated decoding, native response and
+abort fixtures qualify the overrides; no provider, credential or hosted
+inference behavior is substituted. Electron 44.9.3 and patched allowed
+transitives address the observed install advisories.
+
 ## Validation measurements, 2026-10-18
 
 On the same macOS arm64 / Node 26 host, sqlite-vec 0.1.9 successfully loaded into

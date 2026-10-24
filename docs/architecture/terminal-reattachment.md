@@ -124,11 +124,33 @@ from bounded piped UTF-8 stdin, never command arguments or receipts. Shared
 `/terminals` commands let CLI/native TUI inspect/read/reconcile/close existing
 consoles. `/terminal` remains the desktop Ghostty action.
 
+### Global Local consoles and pane confirmation
+
+Protocol/database 44 adds `terminal.global.open` / `terminal.openGlobal()` as an
+explicit user operation. Global consoles bind the canonical Local Moguri data
+directory's device/inode and the immutable profile, with null session, project
+and workspace IDs. Their intents are profile-retained, not session-retained.
+They reuse the authenticated Local broker, input protocol, four-per-scope/
+sixteen-per-profile bounds and known-group cleanup. Project/session deletion
+cannot close or erase them. Local policy, exact root identity, shutdown
+admission checks and owner/build authentication remain mandatory. No selected
+project, previous session or SSH mapping supplies a fallback root.
+
+The desktop starts an eligible console on explicit pane opening, including
+Global Terminal with no selected session. It waits for actual Remote readiness
+for project consoles rather than using Local. A restored pane or selected
+session change is not new launch intent. Hiding a running terminal pane asks
+for confirmation by default, then detaches without terminating. The explicit
+profile preference suppresses only that dialog. The console's X button closes
+the exact console without confirmation, and does not itself trigger another
+launch. A later explicit reopening can request a new console; it is a new
+canonical command, not replay of the closed intent.
+
 Every actual attachment has a new SDK `attachmentId`. Ghostty reconnects that
 generation, labels disabled input, and shows its actual retained Local owner
 and root. No retained terminal status triggers automatic replacement. New
-consoles require an explicit action; even reopening a closed console does not
-create another process.
+consoles require an explicit action. Restoring or reconciling a closed console
+does not create another process; only a new explicit opening can do that.
 
 Queued unsent UI input is discarded on detach, error, service/profile/session
 change or reconnect. SDK multi-chunk input checks cancellation and the actual

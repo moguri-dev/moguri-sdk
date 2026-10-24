@@ -4,7 +4,7 @@ import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchem
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 
-export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
+export type SessionPanel = "Terminal" | "Global Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
 export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
 export type SlashResult =
@@ -36,10 +36,11 @@ export const slashCommands = [
   { name: "read-only", description: "Answer questions with edit and execution tools disabled" },
   { name: "agent", description: "Return to agent mode at the next safe steer boundary" },
   { name: "rename", description: "Rename this session", argument: "NAME" },
+  { name: "reorder-sessions", description: "Set the exact shared order of one complete sibling section", argument: "SESSION_ID..." },
   { name: "side", description: "Open parallel, question-only context" },
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
-  { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal", desktopOnly: true },
-  { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
+  { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal, or a Local data-root global console", argument: "[global]" },
+  { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open|global|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
@@ -87,8 +88,10 @@ export const slashCommands = [
   { name: "file", description: "Read one allowed file from the session's actual root", argument: "PATH" },
   { name: "help", description: "List slash commands" },
 ] as const;
-export const attachmentTriggers = { "^": "Local text file", ":": "Folder", "#": "GitHub issue or PR", "!": "Session", "@": "Project file" } as const;
+export const attachmentTriggers = { "^": "Local file or folder", ":": "Session", "#": "Issue or pull request", "!": "Session", "@": "Project file or folder, or GitHub file" } as const;
 export function parseAttachmentTrigger(text: string): { prefix: keyof typeof attachmentTriggers; query: string; start: number } | null {
+  const qualified = text.match(/(?:^|\s)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*)$/);
+  if (qualified) return { prefix: "#", query: qualified[1]!, start: text.length - qualified[1]!.length };
   const match = text.match(/(?:^|\s)([@^:#!])([^\s]*)$/);
   if (!match || !(match[1]! in attachmentTriggers)) return null;
   const prefix = match[1] as keyof typeof attachmentTriggers;
@@ -669,6 +672,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "rename":
       if (!command.argument) throw new ClientError("slash_arguments", "Use /rename NAME.");
       await sdk.sessions.rename(sessionId, command.argument); return { kind: "ok", message: "Renamed." };
+    case "reorder-sessions":
+      if (!command.argument.trim()) throw new ClientError("slash_arguments", "Use /reorder-sessions followed by every sibling session ID in the desired order.");
+      await sdk.sessions.reorder(command.argument.trim().split(/\s+/));
+      return { kind: "ok", message: "Shared sibling order saved. No session was reparented or resumed." };
     case "side":
     case "subsession": {
       const side = command.name === "side";
@@ -676,17 +683,25 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "session", sessionId: result.id!, side };
     }
     case "terminal":
+      if (command.argument === "global") {
+        if (client === "desktop") return { kind: "panel", panel: "Global Terminal" };
+        return { kind: "text", text: JSON.stringify(await sdk.terminal.openGlobal(), null, 2) };
+      }
       if (client !== "desktop") throw new ClientError("terminal_context", "This client is already a terminal. Use /terminals open/list/read for explicit Local or pinned SSH user consoles; /terminal opens Ghostty only in desktop.");
       return { kind: "panel", panel: "Terminal" };
     case "terminals": {
       const [action = "list", id, option, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (action === "global" && !id) {
+        const opened = await sdk.terminal.openGlobal();
+        return client === "desktop" ? { kind: "panel", panel: "Global Terminal" } : { kind: "text", text: JSON.stringify(opened, null, 2) };
+      }
       if (action === "open" && !id) {
         const opened = await sdk.terminal.open(session.id);
         return client === "desktop" ? { kind: "panel", panel: "Terminal" } : { kind: "text", text: JSON.stringify({ ...opened,
           terminal: sdk.getState().snapshot!.terminals.find((terminal) => terminal.id === opened.id), warning: "Explicit user console opened at its captured Local or SSH boundary. Input is not a composer command and never replays." }, null, 2) };
       }
       if (action === "list" && !id) {
-        const terminals = sdk.getState().snapshot!.terminals.filter((terminal) => terminal.sessionId === session.id);
+        const terminals = sdk.getState().snapshot!.terminals.filter((terminal) => terminal.sessionId === session.id || terminal.sessionId === null);
         return { kind: "text", text: JSON.stringify({ terminals, owners: sdk.getState().snapshot!.terminalOwners,
           warning: "Local and pinned SSH user consoles keep their actual env/peer/root. Bounded volatile output, no agent context, shell replacement or input replay. Service restart preserves; service stop closes known groups." }, null, 2) };
       }
@@ -697,7 +712,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "owner-acknowledge" && id && option === "confirm-inspected" && !extra) {
         await sdk.terminal.acknowledgeOwner(id, true); return { kind: "ok", message: "Your explicit shared-owner inspection was acknowledged. No cleanup proof, key removal or process replacement was inferred." };
       }
-      if (!id || extra || !sdk.getState().snapshot!.terminals.some((terminal) => terminal.id === id && terminal.sessionId === session.id)) throw new ClientError("terminal_scope", "Choose an existing terminal ID from /terminals in this session.");
+      if (!id || extra || !sdk.getState().snapshot!.terminals.some((terminal) => terminal.id === id && (terminal.sessionId === session.id || terminal.sessionId === null))) throw new ClientError("terminal_scope", "Choose an existing terminal in this session or a profile-owned global console.");
       if (action === "read" && (!option || /^\d+$/.test(option) && Number.isSafeInteger(Number(option)))) return { kind: "text", text: JSON.stringify(await sdk.terminal.read(id, Number(option ?? 0)), null, 2) };
       if (action === "reconcile" && !option) {
         await sdk.terminal.reconcile(id);

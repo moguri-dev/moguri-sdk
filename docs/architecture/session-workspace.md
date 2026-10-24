@@ -47,6 +47,12 @@ have a terminal. Browser/diff/plan use the appropriate client surface.
 
 Sessions have durable pin/unread/group/parent metadata. Reparenting is
 project-scoped, acyclic and bounded; it does not rewrite captured context.
+Protocol 44 adds stable sibling order through one complete, revision-checked
+`session.reorder` transaction. Desktop drop indicators do not mutate order on
+hover. Dragging into the composer copies reviewed transcript context instead
+of changing navigation ownership. Both clients sort with the shared comparator;
+keyboard/menu alternatives use the same SDK command. Confirmation preferences
+are independently saved profile settings, defaulting to asking.
 Explicit user subsessions are distinct from off-by-default model subagents.
 Writable siblings serialize through the project lease; read-only questions
 may run in parallel. PR/work-item bindings never implicitly check out a branch.

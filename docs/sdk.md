@@ -5,7 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **43** for
+Current source uses protocol **44** for
+[desktop interactions](setup.md#desktop-interactions), including profile-owned
+confirmation preferences, atomic session ordering, global Local consoles and
+typed GitHub file snapshots. It retains protocol-43
 [document attachments](architecture/document-attachments.md), including
 protocol-42 [task completion estimates](architecture/task-progress.md), extending the
 protocol-41 owner-requested
@@ -21,6 +24,49 @@ with optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
 every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
+
+## Shared interaction APIs
+
+`settings.values.interactions` contains `confirmSessionAttachments` and
+`confirmTerminalClose`, both defaulting to `true`. Use the existing optimistic
+`settings.update` or `settings.reset("interactions", revision)`; these settings
+are profile-scoped presentation preferences, never tool or environment grants.
+
+`sessions.reorder(sessionIds)` atomically saves one complete current sibling set.
+Project, group, parent, pin and archive scope must match, with every captured
+revision still current. `compareSessionOrder` gives the same stable order used
+by both clients. CLI `session reorder ID...` and shared `/reorder-sessions ID...`
+call this operation, without reparenting or resuming anything.
+
+`attachments.projectPath(sessionId, projectId, relativePath)` resolves an
+explicit Local project source and the current session's bound Local worktree
+when applicable. `attachments.localPath(sessionId, absolutePath)` distinguishes
+regular files from folders without granting model filesystem access. Capture a
+file with `attachments.file`; folders retain preview/digest/confirmation.
+Protected paths, stale managed roots and project denials are not bypassed.
+
+`githubPreview` / `github` additionally accept `#137`, `owner/repo#137` and
+`@owner/repo/path`. The first needs the current project's GitHub upstream.
+`access: "auto"` selects the Local controller's CLI or disclosed public-only
+access; the existing default remains `"public"` for SDK callers. Exact remote
+text bytes, base64, Git blob hash and GitHub provenance are checked before
+retention. Files are UTF-8 only, up to 128 KiB. The review digest binds actual
+access provenance as well as source content and destination. This is a disclosed
+client-attachment boundary, not a substitute for pinned-SSH metadata reads.
+
+`terminal.openGlobal(cols?, rows?)` explicitly opens a Local console in the
+runtime's canonical Moguri data directory. Its binding has null session,
+project and workspace IDs and the active profile's authenticated Local owner.
+It neither inherits a selected project's root nor depends on its retention.
+CLI `terminal global`, `/terminals global`, and `/terminal global` expose it.
+Existing `terminal.open(sessionId)` keeps its exact project/worktree/SSH root.
+Closing/hiding the desktop pane detaches; `terminal.close(id)` terminates.
+Reconnection/restoration never creates a replacement or replays input.
+
+The schema-44 marker is additive; legacy confirmations default to asking,
+legacy session order derives from creation, and historical data/grants retain
+their original encryption and identities. Local project names are safe unique
+identifiers; normalization never renames filesystem directories.
 
 ## Document attachments
 

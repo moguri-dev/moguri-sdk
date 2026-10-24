@@ -2,19 +2,19 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
-import { MoguriError } from "../../../packages/protocol/src/core.ts";
-import type { TerminalBinding, TerminalOwner, PreparedTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
+import { MoguriError, parse } from "../../../packages/protocol/src/core.ts";
+import { TerminalBindingSchema, type TerminalBinding, type TerminalOwner, type PreparedTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
 import type { RemoteIdentity } from "../../../packages/protocol/src/execution.ts";
 import { frameDigest } from "./worker-wire.ts";
 
-export function terminalBinding(scope: { profileId: string; sessionId: string; projectId: string; workspaceId: string | null; root: string } &
+export function terminalBinding(scope: { profileId: string; sessionId: string | null; projectId: string | null; workspaceId: string | null; root: string } &
   ({ env?: "Local" } | { env: "Remote"; peerDigest: string })): TerminalBinding {
   if (!isAbsolute(scope.root)) throw new MoguriError("terminal_root", "A terminal needs an explicit canonical root. No previous folder was reused.", 409);
   const state = lstatSync(scope.root, { bigint: true });
   if (!state.isDirectory() || state.isSymbolicLink() || realpathSync(scope.root) !== scope.root) throw new MoguriError("terminal_root", "The exact terminal root is no longer a canonical directory. Inspect it before input.", 409);
   const identity = { profileId: scope.profileId, sessionId: scope.sessionId, projectId: scope.projectId, workspaceId: scope.workspaceId, root: scope.root,
     ...(scope.env === "Remote" ? { env: "Remote" as const, peerDigest: scope.peerDigest } : { env: "Local" as const }), device: String(state.dev), inode: String(state.ino) };
-  return { ...identity, digest: frameDigest(identity) };
+  return parse(TerminalBindingSchema, { ...identity, digest: frameDigest(identity) });
 }
 export function assertTerminalBinding(binding: TerminalBinding): void {
   if (terminalBinding(binding).digest !== binding.digest) throw new MoguriError("terminal_root_changed", "The terminal root identity changed. No input or replacement shell was sent to another folder.", 409);

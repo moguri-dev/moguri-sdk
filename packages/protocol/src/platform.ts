@@ -90,6 +90,7 @@ Finish with the outcome and any real blocker. Do not claim access to hidden reas
 
 export const SettingsSchema = object({
   appearance: object({ theme: Type.Union([Type.Literal("dark"), Type.Literal("light"), Type.Literal("system")]) }),
+  interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean() }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   permissions: object({
@@ -118,7 +119,7 @@ export const SettingsSchema = object({
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
-  appearance: { theme: "dark" }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "",
+  appearance: { theme: "dark" }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "",
   permissions: { tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [],
@@ -136,7 +137,7 @@ export const defaultSettings = (): UserSettings => ({
 });
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
-  Type.Literal("all"), Type.Literal("appearance"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
+  Type.Literal("all"), Type.Literal("appearance"), Type.Literal("interactions"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),

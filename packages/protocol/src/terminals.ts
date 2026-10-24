@@ -11,6 +11,7 @@ const binding = {
 };
 export const TerminalBindingSchema = Type.Union([
   object({ ...binding, env: Type.Literal("Local") }),
+  object({ ...binding, sessionId: Type.Null(), projectId: Type.Null(), workspaceId: Type.Null(), env: Type.Literal("Local") }),
   object({ ...binding, env: Type.Literal("Remote"), peerDigest: hash }),
 ]);
 export type TerminalBinding = Static<typeof TerminalBindingSchema>;
@@ -44,7 +45,7 @@ export type RemoteTerminalOwner = Static<typeof RemoteTerminalOwnerSchema>;
 export const TerminalOwnerSchema = Type.Union([LocalTerminalOwnerSchema, RemoteTerminalOwnerSchema]);
 export type TerminalOwner = Static<typeof TerminalOwnerSchema>;
 export const TerminalStateSchema = object({
-  id, sessionId: id, projectId: id, workspaceId: Type.Optional(nullable(id)),
+  id, sessionId: nullable(id), projectId: nullable(id), workspaceId: Type.Optional(nullable(id)),
   title: Type.String({ maxLength: 160 }), pid: nullable(Type.Integer({ minimum: 2, maximum: Number.MAX_SAFE_INTEGER })),
   cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }),
   status: Type.Union([Type.Literal("starting"), Type.Literal("reattaching"), Type.Literal("running"), Type.Literal("stopping"), Type.Literal("closed"), Type.Literal("failed"), Type.Literal("unconfirmed"), Type.Literal("acknowledged")]),

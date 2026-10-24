@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { basename, isAbsolute } from "node:path";
 import {
-  MoguriError, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
+  MoguriError, sessionOrderScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
@@ -45,12 +46,12 @@ export class SessionWorkspace {
   readonly terminals: TerminalManager;
   private timer?: ReturnType<typeof setInterval>;
   private cleaning = false;
-  constructor(private readonly host: SessionWorkspaceHost, stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
+  constructor(private readonly host: SessionWorkspaceHost, private readonly stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
     this.projects = new ProjectService(() => host.snapshot(), stateDir);
     this.terminals = new TerminalManager({
       snapshot: () => this.snapshot(),
       changed: (terminal) => {
-        if (!this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) throw new MoguriError("terminal_session_removed", "Terminal state cannot resurrect a removed session.", 409);
+        if (terminal.sessionId !== null && !this.host.snapshot().sessions.some((session) => session.id === terminal.sessionId)) throw new MoguriError("terminal_session_removed", "Terminal state cannot resurrect a removed session.", 409);
         this.host.commit([{ event_type: "terminal.changed", profile_id: this.snapshot().profileId, project_id: terminal.projectId, session_id: terminal.sessionId, payload: { terminal } }]);
       },
       ownerChanged: (owner) => this.host.commit([{ event_type: "terminal.owner_changed", profile_id: this.snapshot().profileId, payload: { owner } }]),
@@ -98,7 +99,13 @@ export class SessionWorkspace {
   async input(request: TerminalInput): Promise<void> {
     const terminal = this.snapshot().terminals.find((terminal) => terminal.id === request.terminalId);
     if (!terminal) throw new MoguriError("terminal_missing", "Terminal is outside this profile.", 404);
-    this.session(terminal.sessionId); await this.terminals.input(request);
+    if (terminal.sessionId !== null) this.session(terminal.sessionId);
+    await this.terminals.input(request);
+  }
+  private globalTerminalContext() {
+    if (!this.snapshot().policy.allowedEnvs.includes("Local") || !this.snapshot().capabilities.some((capability) => capability.env === "Local" && capability.ready)) throw new MoguriError("terminal_env", "Global Terminal is a Local user console. Current policy does not allow it; no other environment was substituted.", 409);
+    const binding = terminalBinding({ profileId: this.snapshot().profileId, sessionId: null, projectId: null, workspaceId: null, root: realpathSync(this.stateDir) });
+    return { binding, signature: frameDigest([binding, this.snapshot().policy.revision]) };
   }
   private terminalContext(sessionId: string, scriptId?: string) {
     const session = this.session(sessionId), env = session.controls.env;
@@ -127,6 +134,10 @@ export class SessionWorkspace {
     if (current.signature !== signature || binding.env === "Local" && terminalBinding(current.scope).digest !== binding.digest) throw new MoguriError("terminal_scope_changed", "Terminal root/script/authority changed during admission. Original effects remain inspectable; no launch was replayed.", 409);
   }
   private terminalInputAllowed(terminal: TerminalState): void {
+    if (terminal.sessionId === null) {
+      if (terminal.env !== "Local" || terminal.projectId !== null || terminal.binding?.digest !== this.globalTerminalContext().binding.digest) throw new MoguriError("terminal_root_changed", "The global console no longer owns this profile's exact Local data root. No input or replacement shell was sent.", 409);
+      return;
+    }
     const session = this.session(terminal.sessionId), binding = terminal.binding;
     if (!binding || terminal.env !== session.controls.env || session.status === "archived" || !this.snapshot().policy.allowedEnvs.includes(binding.env)) throw new MoguriError("terminal_root_changed", "This retained terminal no longer has its original allowed execution environment/policy. No input/resize was sent.", 409);
     if (binding.env === "Local") {
@@ -180,6 +191,16 @@ export class SessionWorkspace {
   }
   async execute(command: SessionWorkspaceCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     switch (command.type) {
+      case "session.reorder": {
+        const snapshot = this.snapshot(), ordered = command.sessions.map((entry) => {
+          const session = this.session(entry.sessionId); this.revision(session.revision, entry.revision); return session;
+        });
+        const first = ordered[0]!;
+        const scope = sessionOrderScope(first), siblings = snapshot.sessions.filter((session) => sessionOrderScope(session) === scope);
+        const ids = new Set(ordered.map((session) => session.id));
+        if (ids.size !== ordered.length || ids.size !== siblings.length || siblings.some((session) => !ids.has(session.id))) throw new MoguriError("session_order", "Reorder the complete current sibling set within one project, group, parent, pin and archive scope. Reload before trying again.", 409);
+        return finish(ordered.flatMap((session, order) => session.order === order ? [] : [this.event(session, { event_type: "session.organized", profile_id: snapshot.profileId, payload: { changes: { order } } })]));
+      }
       case "session.organize": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
         if (command.changes.title !== undefined && !command.changes.title.trim()) throw new MoguriError("session_title", "A session name cannot be empty.");
@@ -329,6 +350,14 @@ export class SessionWorkspace {
         const terminal = await this.terminals.open(captured.binding, command.cols, command.rows, finish.intent, () => {
           this.terminalRecheck(command.sessionId, command.scriptId, captured.signature, captured.binding);
         }, captured.script, captured.remote);
+        return finish([], { id: terminal.id });
+      }
+      case "terminal.global.open": {
+        if (!finish.intent) throw new MoguriError("terminal_intent", "Global Terminal needs its canonical user command identity. No shell was started.", 409);
+        const captured = this.globalTerminalContext();
+        const terminal = await this.terminals.open(captured.binding, command.cols, command.rows, finish.intent, () => {
+          if (this.globalTerminalContext().signature !== captured.signature) throw new MoguriError("terminal_scope_changed", "The global console root or policy changed during admission. No shell was replayed.", 409);
+        });
         return finish([], { id: terminal.id });
       }
       case "terminal.reconcile": {
