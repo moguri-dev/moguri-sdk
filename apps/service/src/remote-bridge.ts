@@ -49,7 +49,9 @@ async function runtimeInfo(init: BridgeInit): Promise<BridgeInfo> {
       enforcedProxy: process.env.NODE_USE_ENV_PROXY === "1" && Boolean(process.env.HTTPS_PROXY && process.env.ALL_PROXY) };
   }
   return { protocol: PROTOCOL_VERSION, workerDigest, nodeVersion: process.versions.node, platform: process.platform, root, ...(native ? { native } : {}),
-    ...(init.action === "probe" ? await probeTerminalBuild() : {}) };
+    ...(init.action === "probe" ? native ? {
+      terminalDiagnostic: "Sandbox user consoles have no qualified transport. Native agent identity is separate; no account shell or Local terminal was selected.",
+    } : await probeTerminalBuild() : {}) };
 }
 function runCredentials(init: BridgeInit): { id: string; key: Buffer } {
   if (!init.runId || !init.key) throw new Error("A remote run needs its exact owned identity and transport key.");

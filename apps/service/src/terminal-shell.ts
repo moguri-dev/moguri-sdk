@@ -2,8 +2,15 @@ import { userInfo } from "node:os";
 import { isAbsolute } from "node:path";
 import { MoguriError } from "../../../packages/protocol/src/core.ts";
 
-export function terminalShell(environment: NodeJS.ProcessEnv = process.env, accountShell?: string | null): string {
-  const shell = environment.SHELL ?? (accountShell === undefined ? userInfo().shell : accountShell);
+export function terminalShell(environment: NodeJS.ProcessEnv = process.env, readAccountShell: () => string | null = () => userInfo().shell): string {
+  let shell: string | null | undefined = environment.SHELL;
+  if (shell === undefined) {
+    try { shell = readAccountShell(); }
+    catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ERR_SYSTEM_ERROR")) throw error;
+      throw new MoguriError("terminal_shell", `The execution host's account lookup could not resolve a console login shell: ${error.message}. Configure an explicit absolute SHELL; no fallback shell was selected.`, 409);
+    }
+  }
   if (!shell || !isAbsolute(shell) || /[\u0000-\u001f\u007f]/.test(shell)) {
     throw new MoguriError("terminal_shell", "The execution host has no valid absolute login shell. Configure its account shell or SHELL; no plain-shell fallback was selected.", 409);
   }

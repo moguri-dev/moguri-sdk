@@ -31,6 +31,53 @@ and retained rollback in **2,968.82 ms**, using existing image
 Its worker/bridge pins are unchanged. This is model-free host-launch evidence,
 not fresh provider-network qualification or qualification of a later protocol.
 
+## Protocol-51 bootstrap and private qualification
+
+The protocol-50 image above is not compatible with a protocol-51 service.
+Its configuration remains valid JSON and passes the settings schema; the old
+guest's initial bridge packet was the source of the generic protocol-schema
+error. Rebuilding requires new actual image and bridge/worker pins, not editing
+a protocol number or relabeling the historical image.
+
+Native bootstrap now validates only the initial packet's bounded structural
+shape before capturing the original host-signed guest ownership. The immutable
+image, exact managed stage, foreground command, captured time window, native
+session ID, plan digest and public signer must still agree. An exact protocol
+check then refuses an older or newer guest before initialization, transport keys,
+provider credentials or model access. Shared bridge init/info/envelope schemas
+remain exact-version schemas. A refusal retains both the version mismatch and
+any ownership-verification failure; no matching name or PID is adopted.
+
+New create-only private intents carry format/version, probe identity, original
+configuration digest, launch name and captured time bounds. A separate
+create-only bootstrap-owner receipt records the observed protocol and verified
+signed owner. These records precede initialization and support honest exact
+cleanup, not replay or fresh permission. Old private intents are not rewritten,
+inferred from current inventory, automatically reconciled or erased. Unconfirmed
+original cleanup remains unconfirmed even when a new independent probe succeeds.
+
+Sandbox user consoles still have no qualified transport. Their optional build
+metadata must not resolve a restricted guest UID's login shell or block core
+native-agent qualification. Local/SSH console discovery checks actual helper
+bytes first and uses the configured `SHELL` or actual account shell; an expected
+OS account-lookup failure produces an explicit console-unavailable diagnostic,
+never a guessed `/bin/sh` or Local fallback. Unexpected lookup errors propagate.
+
+Provider catalogue connection failures are distinct from bootstrap/build errors.
+Diagnostics identify the endpoint and a bounded proxy CONNECT status when
+available, without copying raw exceptions, credentials or headers. Actual
+provider HTTP responses remain responses, not proxy refusals. Caller-owned
+cancellation keeps its original reason. DNS aliases need exact user review;
+neither error handling nor qualification adds host grants.
+
+This repair reuses Node/Node-PTY and existing TypeBox/protocol helpers (MIT),
+and the existing SendBox adapter (Apache-2.0), without a new dependency, domain
+event, durable database schema or migration. The private intent format is
+additive for new operations only. CLI/TUI, desktop and SDK retain one shared
+readiness/error authority; no client-specific readiness or provider fallback
+was added. Generated bootstrap, shell, catalogue, actual-guest cleanup and
+restart/cancellation cases cover these boundaries.
+
 ## Protocol-41 detached-descendant source qualification
 
 The owner explicitly selected qualified SendBox for sessions requiring a

@@ -23,9 +23,9 @@ export async function probeTerminalDigests(): Promise<{ terminalBuild?: Pick<Rem
   catch (error) { return { terminalDiagnostic: unavailable(error) }; }
 }
 export async function remoteTerminalBuild(): Promise<RemoteTerminalBuild> {
-  const path = terminalBridgePath(), shell = terminalShell();
+  const digests = await terminalBuildDigests(), path = terminalBridgePath(), shell = terminalShell();
   return { command: [process.execPath, ...(path.endsWith(".ts") ? ["--import", createRequire(import.meta.url).resolve("tsx")] : []), path, "--moguri-terminal-bridge"],
-    ...await terminalBuildDigests(), shell };
+    ...digests, shell };
 }
 export async function probeTerminalBuild(): Promise<{ terminalBuild?: RemoteTerminalBuild; terminalDiagnostic: string }> {
   try { return { terminalBuild: await remoteTerminalBuild(), terminalDiagnostic: "Console helper bytes are installed. Exact peer/policy/lifecycle admission remains separate." }; }

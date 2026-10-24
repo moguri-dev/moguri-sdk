@@ -3,10 +3,18 @@ import { test } from "node:test";
 import { terminalEnvironment, terminalShell } from "../apps/service/src/terminal-shell.ts";
 
 test("Dock launches without SHELL select the actual host account shell, never a guessed sh fallback", () => {
-  assert.equal(terminalShell({}, "/generated/bin/zsh"), "/generated/bin/zsh");
-  assert.equal(terminalShell({ SHELL: "/generated/bin/fish" }, "/generated/bin/zsh"), "/generated/bin/fish");
-  assert.throws(() => terminalShell({}, null), /no valid absolute login shell/);
-  assert.throws(() => terminalShell({ SHELL: "zsh" }, "/generated/bin/zsh"), /no valid absolute login shell/);
+  assert.equal(terminalShell({}, () => "/generated/bin/zsh"), "/generated/bin/zsh");
+  assert.equal(terminalShell({ SHELL: "/generated/bin/fish" }, () => "/generated/bin/zsh"), "/generated/bin/fish");
+  assert.throws(() => terminalShell({}, () => null), /no valid absolute login shell/);
+  assert.throws(() => terminalShell({ SHELL: "zsh" }, () => "/generated/bin/zsh"), /no valid absolute login shell/);
+});
+test("an account-less execution host reports an unavailable console, never a core-agent crash or guessed shell", () => {
+  const lookup = () => { throw Object.assign(new Error("Generated uv_os_get_passwd returned ENOENT"), { code: "ERR_SYSTEM_ERROR" }); };
+  assert.throws(() => terminalShell({}, lookup), (error: unknown) => error instanceof Error && "code" in error &&
+    error.code === "terminal_shell" && error.message.includes("account lookup"));
+  assert.equal(terminalShell({ SHELL: "/generated/bin/zsh" }, lookup), "/generated/bin/zsh");
+  const unexpected = new Error("Generated unexpected account lookup failure.");
+  assert.throws(() => terminalShell({}, () => { throw unexpected; }), (error: unknown) => error === unexpected);
 });
 test("Ghostty PTYs preserve shell configuration locations without control-plane or runtime injection", () => {
   const environment = terminalEnvironment("/generated/root", "/generated/bin/zsh", {
