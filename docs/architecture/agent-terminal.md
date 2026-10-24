@@ -77,3 +77,7 @@ and unknown results, delayed-scope replies, restart/migration preservation,
 real read-only Ghostty rendering, shared CLI/TUI access and packed browser-safe
 SDK/React declarations. No personal shell, account, microphone or paid inference
 is used.
+
+The [protocol-46 source qualification](../setup.md#protocol-46-source-qualification)
+records the complete generated unit/native-TUI, hidden Electron and actual
+packed SDK/installed-worker results, with physical/release exclusions retained.
