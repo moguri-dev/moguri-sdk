@@ -24,11 +24,11 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
-import { CopilotAdapter, KeyringCredentials, type ProviderAdapter } from "./provider.ts";
+import { CopilotAdapter, KeyringCredentials, type ProviderAdapter, type PreparedModel } from "./provider.ts";
 import { validateTool } from "./tools.ts";
 import { effectiveTools } from "./tools.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
-import { authorizeTool } from "./permissions.ts";
+import { authorizeTool, validateSettings } from "./permissions.ts";
 import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -52,10 +52,14 @@ import { CandidateGenerations, candidateGenerationContext } from "./candidate-ge
 import { OwnedRoles, OwnedRoleInputSchema, OwnedRoleReviewSchema, type OwnedRoleDocument, type OwnedRoleInput, type OwnedRoleReview } from "./owned-roles.ts";
 import { SandboxRuntime, type NativeChange } from "./sandbox-runtime.ts";
 import { SandboxWorkspaces } from "./sandbox-workspaces.ts";
+import { SandboxSetup } from "./sandbox-setup.ts";
+import { isSandboxSetupCommand, isSandboxSetupQuery } from "../../../packages/protocol/src/sandbox-management.ts";
 import { captureSandboxResult, sandboxResult } from "./sandbox-results.ts";
-import { sandboxProviderDestination } from "./sandbox-policy.ts";
+import { sandboxProviderDestination, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
+import { assertSandboxNetwork, resolveSandboxNetwork } from "./sandbox-network.ts";
 import { readWorkspace } from "./workspace-reads.ts";
 import type { SandboxCommand, SandboxQuery, SandboxResponse, SandboxExecution } from "../../../packages/protocol/src/index.ts";
+import type { SandboxNetworkScope } from "../../../packages/protocol/src/sandbox-management.ts";
 import { CompoundWorkflows } from "./compound-workflows.ts";
 import { compoundPool } from "./compound-policy.ts";
 import { Winddowns } from "./winddown.ts";
@@ -73,6 +77,8 @@ interface Run {
   child: WorkerConnection;
   executionId?: string;
   sandboxExecutionId?: string;
+  nativePrepared?: Map<string, PreparedModel>;
+  nativeProviderEpoch?: number;
   nativeTerminal?: { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
   abort: AbortController;
   stepId?: string;
@@ -118,15 +124,21 @@ interface ExternalRun {
   remoteMcpId?: string;
   remoteRoot?: string;
 }
+interface NativeAdmission {
+  config: QualifiedSandboxConfiguration; scope?: SandboxNetworkScope; prepared: Map<string, PreparedModel>; providerEpoch?: number;
+}
 export class ControlPlane extends EventEmitter {
   get profileId(): string { return this.store.profileId; }
   private history: StoredEvent[];
   private projection;
   private readonly runs = new Map<string, Run>();
+  private readonly nativeAdmissions = new Map<string, { turnId: string; abort: AbortController; done: Promise<void> }>();
+  private readonly nativeDns;
   private readonly paused = new Set<string>();
   private readonly dispatching = new Map<string, { digest: string; result: Promise<CommandResult> }>();
   private shuttingDown = false;
   private providerMetadata = "";
+  private providerEpoch = 0;
   readonly platform: PlatformRuntime;
   readonly generations: CandidateGenerations;
   readonly ownedRoles: OwnedRoles;
@@ -142,6 +154,7 @@ export class ControlPlane extends EventEmitter {
   readonly remote: RemoteRuntime;
   readonly sandbox: SandboxRuntime;
   readonly sandboxWorkspaces: SandboxWorkspaces;
+  readonly sandboxSetup: SandboxSetup;
   private readonly nativeReconciliations = new Set<string>();
   private readonly remoteModels: ModelRegistry;
   private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
@@ -150,6 +163,7 @@ export class ControlPlane extends EventEmitter {
   constructor(readonly store: EventStore, provider: ProviderAdapter | undefined = undefined, private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string; profileHooks?: ProfileHooks } = {}) {
     super();
     this.profileHooks = platformOptions.profileHooks;
+    this.nativeDns = platformOptions.sandbox?.dns;
     this.history = store.events();
     this.projection = projectEvents(this.history, this.profileId);
     this.remote = new RemoteRuntime(platformOptions.stateDir ?? dirname(store.path), () => this.projection.settings.values.remote, workerPath, {
@@ -158,6 +172,7 @@ export class ControlPlane extends EventEmitter {
     });
     this.sandbox = new SandboxRuntime(platformOptions.stateDir ?? dirname(store.path), () => this.projection.settings.values.sandbox, {
       ...platformOptions.sandbox, vault: platformOptions.sandbox?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.sandbox-runs`),
+      automaticProviderNetwork: () => Boolean(this.projection.settings.values.sandboxManagement?.enabled && this.projection.settings.values.sandboxManagement.automaticProviderNetwork),
       changed: () => { this.provider?.synchronize(); platformOptions.sandbox?.changed?.(); this.emit("change", []); },
     });
     this.remoteModels = new ModelRegistry({
@@ -182,6 +197,12 @@ export class ControlPlane extends EventEmitter {
     this.provider = new ModelRegistry(provider ?? new CopilotAdapter(new KeyringCredentials(this.profileId)), () => this.projection.settings.values.localModels, {
       ...platformOptions.models, additional: this.remoteModels,
       vault: platformOptions.models?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.models`),
+      localEnvironments: (endpoint) => {
+        const environments: Controls["env"][] = ["Local"], management = this.projection.settings.values.sandboxManagement;
+        if (this.sandbox.readiness.ready && management?.enabled && management.automaticProviderNetwork &&
+          this.projection.settings.values.sandbox.qualification?.allowCopilot && localEndpointUrl(endpoint.baseUrl).protocol === "https:") environments.push("Sandbox");
+        return environments;
+      },
       copilotEnvironments: () => {
         const environments: Controls["env"][] = ["Local"];
         if (this.remote.readiness.ready && this.projection.settings.values.remote?.allowCopilot) environments.push("Remote");
@@ -297,6 +318,20 @@ export class ControlPlane extends EventEmitter {
       settings: (projectId) => ({ revision: projectId ? this.platform.sessions.projects.configuration(projectId).revision : 0, values: this.platform.sessions.projects.values(projectId) }),
       commit: (events) => this.commit(events), closing: (session) => this.deletingSessions.has(session.id) || this.deletingProjects.has(session.projectId ?? ""),
     });
+    this.sandboxSetup = new SandboxSetup(store, platformOptions.stateDir ?? dirname(store.path), platformOptions.sandbox?.distribution, this.sandbox, {
+      snapshot: () => this.snapshot(), commit: (events) => this.commit(events),
+      busy: () => this.sandbox.busy || this.sandboxWorkspaces.busy || this.nativeAdmissions.size > 0 ||
+        [...this.runs.values()].some((run) => Boolean(run.sandboxExecutionId)) ||
+        (this.projection.sandboxExecutions ?? []).some((execution) => !["owned-guest-stopped", "acknowledged"].includes(execution.cleanup)),
+      configure: (configuration, management, expectedRevision) => {
+        const current = this.projection.settings;
+        this.revision(current.revision, expectedRevision);
+        const values = { ...current.values, sandbox: configuration, sandboxManagement: management }; validateSettings(values);
+        this.commit([{ event_type: "settings.updated", profile_id: this.profileId,
+          payload: { settings: values, revision: current.revision + 1, permissionRevision: current.permissionRevision + 1 } }]);
+        this.invalidateApprovals();
+      },
+    }, platformOptions.sandbox?.setup);
     this.generations = new CandidateGenerations(store, {
       snapshot: () => this.snapshot(), events: () => this.events(0), candidates: this.platform.candidates,
       prompt: (session) => this.platform.prompt(session), idle: (session) => this.generationIdle(session),
@@ -361,6 +396,7 @@ export class ControlPlane extends EventEmitter {
     });
     this.on("change", () => this.decisions.invalidate());
     this.provider.onChange = () => {
+      this.providerEpoch++;
       const metadata = { status: this.provider.state.status, diagnostic: this.provider.state.diagnostic };
       const signature = JSON.stringify(metadata);
       if (signature !== this.providerMetadata) {
@@ -438,6 +474,7 @@ export class ControlPlane extends EventEmitter {
     const unfinishedMcp = this.projection.remoteMcpCalls.filter((call) => ["waiting_input", "running"].includes(call.status));
     if (unfinishedMcp.length) this.commit(unfinishedMcp.map((call) => this.recoveredMcp(call)));
     await this.provider.refresh();
+    await this.sandboxSetup.initialize();
   }
   snapshot(): Snapshot {
     const routing = this.routingAvailability();
@@ -666,6 +703,7 @@ export class ControlPlane extends EventEmitter {
     return { event_type: "sandbox.execution_recorded", profile_id: this.profileId, project_id: execution.projectId, payload: { execution } };
   }
   private async sandboxQuery(query: SandboxQuery): Promise<SandboxResponse> {
+    if (isSandboxSetupQuery(query)) return this.sandboxSetup.query(query);
     if (query.type === "sandbox.publication" || query.type === "sandbox.publication.preview") return this.platform.nativePublications.query(query);
     if (query.type === "sandbox.preview") return { type: query.type, preview: (await this.sandboxWorkspaces.preview(query.sessionId, query.paths)).preview };
     const execution = this.sandboxExecution(query.executionId);
@@ -683,6 +721,12 @@ export class ControlPlane extends EventEmitter {
     return result;
   }
   private async sandboxCommand(command: SandboxCommand, finish: WorkspaceFinish): Promise<CommandResult> {
+    if (isSandboxSetupCommand(command)) {
+      if (command.type === "sandbox.setup.apply" && !this.projection.policy.allowedEnvs.includes("Sandbox")) {
+        throw new MoguriError("env_denied", "Sandbox is excluded by user-only policy. No installation, image import or qualification was started.", 403);
+      }
+      return this.sandboxSetup.execute(command, finish);
+    }
     if (command.type === "sandbox.publish") return this.platform.nativePublications.execute(command, finish);
     if (command.type === "sandbox.probe") {
       if (!this.projection.policy.allowedEnvs.includes("Sandbox")) throw new MoguriError("env_denied", "Sandbox qualification is excluded by current allowed-env policy. No VM was launched.", 403);
@@ -746,8 +790,9 @@ export class ControlPlane extends EventEmitter {
     return events;
   }
   private async captureNativeExecution(execution: SandboxExecution) {
-    const source = this.sandboxWorkspaces.document(execution).source;
-    const captured = await captureSandboxResult(execution, await this.sandbox.key(execution.id), source?.files.map((file) => file.path) ?? []);
+    const document = this.sandboxWorkspaces.document(execution), source = document.source;
+    const captured = await captureSandboxResult(execution, await this.sandbox.key(execution.id), source?.files.map((file) => file.path) ?? [],
+      document.version === 2 ? new Map(source?.files.map((file) => [file.path, file.digest]) ?? []) : undefined);
     const current = this.sandboxExecution(execution.id);
     if (current.lastSequence !== execution.lastSequence) throw new MoguriError("sandbox_cursor", "The native durable cursor changed during retained snapshot inspection. No frame or effect was replayed.", 409);
     return { events: [...this.nativeReceiptEvents(current, captured.frames), ...(captured.result.rollback === "confirmed" ? this.sandboxWorkspaces.invalidate(current.workspaceId,
@@ -1555,7 +1600,7 @@ export class ControlPlane extends EventEmitter {
     if (controls.env === "Sandbox") {
       this.sandbox.assertReady();
       if (requireModel && session) {
-        this.sandboxWorkspaces.current(session);
+        if (!this.sandboxWorkspaces.automatic()) this.sandboxWorkspaces.current(session);
         if ((this.projection.sandboxExecutions ?? []).some((execution) => execution.sessionId === session.id && this.nativeReconciliations.has(execution.id))) throw new MoguriError("sandbox_busy", "Original native inspection/cleanup owns this stage. No replacement or Local fallback.", 409);
         if ((this.projection.sandboxExecutions ?? []).some((execution) => execution.sessionId === session.id && this.runs.get(session.id)?.sandboxExecutionId !== execution.id &&
           !["owned-guest-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("sandbox_cleanup", "The exact prior native guest cleanup is still unconfirmed. Reconcile it before new work; no replacement or Local fallback.", 409);
@@ -1870,7 +1915,7 @@ export class ControlPlane extends EventEmitter {
   private pumpAll(): void {
     if (this.shuttingDown) return;
     for (const session of this.projection.sessions) {
-      if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.deletingSessions.has(session.id) || session.turnId || this.runs.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
+      if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.deletingSessions.has(session.id) || session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
       if (session.kind === "subagent" && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
@@ -1905,7 +1950,69 @@ export class ControlPlane extends EventEmitter {
       this.launchRun(this.session(session.id), turnId);
     }
   }
-  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl"> = {}): void {
+  private prepareNativeRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl">): void {
+    if (this.nativeAdmissions.has(current.id)) return;
+    const abort = new AbortController(), controls = frameDigest(current.controls), permissionRevision = this.projection.settings.permissionRevision;
+    let preparedEpoch: number | undefined;
+    const actual = () => {
+      abort.signal.throwIfAborted();
+      const session = this.session(current.id);
+      if (this.shuttingDown || session.turnId !== turnId || session.controls.env !== "Sandbox" ||
+        frameDigest(session.controls) !== controls || this.projection.settings.permissionRevision !== permissionRevision ||
+        this.deletingSessions.has(session.id) || this.deletingProjects.has(session.projectId ?? "") ||
+        preparedEpoch !== undefined && preparedEpoch !== this.providerEpoch) {
+        throw new MoguriError("sandbox_stale", "The exact native turn, scope or policy changed before worker admission. No model or replacement guest was started.", 409);
+      }
+      return session;
+    };
+    const done = Promise.resolve().then(async () => {
+      if (Object.values(control).some(Boolean)) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No alternate worker or root was used.", 409);
+      const base = this.sandbox.assertReady(), prepared = new Map<string, PreparedModel>();
+      if (this.sandboxWorkspaces.automatic()) await this.sandboxWorkspaces.prepareAutomatic(current.id, turnId, abort.signal);
+      else await this.sandboxWorkspaces.assert(actual());
+      let admission: NativeAdmission = { config: base, prepared };
+      const management = this.projection.settings.values.sandboxManagement;
+      if (management?.enabled && management.automaticProviderNetwork) {
+        preparedEpoch = this.providerEpoch;
+        const pool = current.controls.modelId === KUPO_MODEL_ID ? kupoPool(this.projection.settings.values.kupo, this.provider.state.models, "Sandbox") : null;
+        const models = [...new Set(pool ? [pool.classifier.id, ...pool.candidates.map((model) => model.id)] : [current.controls.modelId!])];
+        if (models.length > 16) throw new MoguriError("sandbox_provider_scope", "This native turn exceeds sixteen already approved provider candidates. No extra provider was selected.", 409);
+        const urls: string[] = [];
+        for (const id of models) {
+          actual();
+          const model = await this.provider.prepare(id, abort.signal); actual();
+          prepared.set(id, model); urls.push(model.auth.baseUrl ?? model.model.baseUrl);
+        }
+        const resolved = await resolveSandboxNetwork(base, urls, abort.signal, this.nativeDns);
+        admission = { config: resolved.configuration, scope: resolved.scope, prepared, providerEpoch: preparedEpoch };
+      }
+      const session = actual();
+      this.nativeAdmissions.delete(current.id);
+      this.launchRun(session, turnId, control, admission);
+    }).catch((error: unknown) => {
+      const session = this.projection.sessions.find((session) => session.id === current.id);
+      if (!session || session.turnId !== turnId) return;
+      console.error("Native turn preparation failed:", error instanceof MoguriError ? error.code : abort.signal.aborted ? "native_preparation_cancelled" : "native_preparation");
+      this.paused.add(session.id);
+      this.commit([...(abort.signal.aborted ? [this.event(session, "turn.stop_acknowledged", {})] : []),
+        this.event(session, "turn.finished", { outcome: abort.signal.aborted ? "stopped" : "failed", workspaceEffects: "none",
+          diagnostic: abort.signal.aborted ? "Native preparation stopped before guest or model admission. Original prompt, source and private records were retained." :
+            error instanceof MoguriError ? error.message : "Native workspace/provider preparation failed. No guest, model request or Local fallback was started." })]);
+    }).finally(() => {
+      if (this.nativeAdmissions.get(current.id)?.turnId === turnId) this.nativeAdmissions.delete(current.id);
+      queueMicrotask(() => this.pumpAll());
+    });
+    this.nativeAdmissions.set(current.id, { turnId, abort, done });
+  }
+  private assertNativePolicy(execution: SandboxExecution): void {
+    const management = this.projection.settings.values.sandboxManagement;
+    if (execution.networkScope && !(management?.enabled && management.automaticProviderNetwork)) {
+      throw new MoguriError("sandbox_changed", "Automatic selected-provider access was revoked. No new model credential or host grant was sent.", 409);
+    }
+    assertSandboxNetwork(execution, this.sandbox.assertReady());
+  }
+  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl"> = {}, nativeAdmission?: NativeAdmission): void {
+      if (current.controls.env === "Sandbox" && !nativeAdmission) { this.prepareNativeRun(current, turnId, control); return; }
       const { compaction, generation, roleSequence, compound, planSave, mcpControl } = control;
       let owned: Run | undefined;
       try {
@@ -1915,7 +2022,7 @@ export class ControlPlane extends EventEmitter {
         let nativeExecution: SandboxExecution | undefined;
         if (current.controls.env === "Sandbox") {
           if (compaction || generation || roleSequence || compound || planSave || mcpControl) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No Local/SSH worker or alternate root was used.", 409);
-          const workspace = this.sandboxWorkspaces.current(current), config = this.sandbox.assertReady(), id = randomUUID();
+          const workspace = this.sandboxWorkspaces.current(current), config = nativeAdmission!.config, id = randomUUID();
           nativeExecution = { id, profileId: this.profileId, sessionId: current.id, projectId: current.projectId, turnId, workspaceId: workspace.id,
             sourceWorkspaceId: workspace.sourceWorkspaceId,
             stage: workspace.stage, sourceRoot: workspace.sourceRoot, inputDigest: workspace.inputDigest, config, configDigest: frameDigest(config),
@@ -1924,6 +2031,7 @@ export class ControlPlane extends EventEmitter {
             createdAfter: Math.floor(Date.now() / 1000) - 2, createdBefore: Math.ceil(Date.now() / 1000) + 120,
             nativeSessionId: null, planDigest: null, signerFingerprint: null, status: "launching", cancellation: "none", cleanup: "pending",
             diagnostic: null, lastSequence: 0, workerPid: null, cliExitCode: null, resultDigest: null, revision: 0 };
+          if (nativeAdmission!.scope) nativeExecution.networkScope = nativeAdmission!.scope;
           const artifact = this.platform.artifacts.nativeExecution(current, id, workspace.inputDigest);
           this.commit([{ event_type: "artifact.revised", profile_id: this.profileId, project_id: current.projectId, payload: { artifact } }, this.sandboxEvent(nativeExecution)]);
         }
@@ -1943,6 +2051,7 @@ export class ControlPlane extends EventEmitter {
         const run: Run = { sessionId: current.id, turnId, child, root: nativeExecution && current.projectId ? nativeExecution.stage.workspace :
           !generation && !roleSequence && !compound && current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, sandboxExecutionId: nativeExecution?.id,
           abort: new AbortController(), calls: new Map(), granted: new Set(), scopedReadPolicies: new Map(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, roleSequence, compound, planSave, mcpControl };
+        if (nativeAdmission) { run.nativePrepared = nativeAdmission.prepared; run.nativeProviderEpoch = nativeAdmission.providerEpoch; }
         if (hooks.length) run.hooks = { bindings: hooks, done: new Set(), calls: new Map() };
         const winddown = this.winddowns.forTurn(current.id, turnId);
         if (winddown) run.winddown = { id: winddown.id, active: false };
@@ -2031,6 +2140,10 @@ export class ControlPlane extends EventEmitter {
   }
   private otherWriter(session: Session): boolean {
     if (session.controls.env === "Sandbox") {
+      if (this.sandboxWorkspaces.automatic()) {
+        const root = (this.projection.sandboxWorkspaces ?? []).find((workspace) => workspace.id === session.sandboxWorkspaceId)?.stage?.workspace;
+        return root ? this.ownedWriteRoots(session.id).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false) : false;
+      }
       const root = this.sandboxWorkspaces.current(session).stage.workspace;
       return this.ownedWriteRoots(session.id).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false);
     }
@@ -2060,7 +2173,8 @@ export class ControlPlane extends EventEmitter {
     const nativeRun = this.runs.get(current.id)?.sandboxExecutionId;
     if (nativeRun) {
       const native = this.sandboxExecution(nativeRun);
-      if (native.configDigest !== frameDigest(this.sandbox.assertReady()) || native.workspaceId !== current.sandboxWorkspaceId) throw new MoguriError("sandbox_changed", "The exact native policy/stage changed after turn admission. No new tool was approved.", 409);
+      this.assertNativePolicy(native);
+      if (native.workspaceId !== current.sandboxWorkspaceId) throw new MoguriError("sandbox_changed", "The exact native stage changed after turn admission. No new tool was approved.", 409);
       await this.sandboxWorkspaces.assert(current);
     }
     const root = nativeRun ? this.sandboxExecution(nativeRun).root :
@@ -2508,7 +2622,8 @@ export class ControlPlane extends EventEmitter {
         if (run.winddown?.active) throw new MoguriError("winddown_finished", "This owner already entered its one finishing role. Remaining capacity cannot resume ordinary inference or tools.", 409);
         if (run.sandboxExecutionId) {
           const native = this.sandboxExecution(run.sandboxExecutionId);
-          if (native.configDigest !== frameDigest(this.sandbox.assertReady()) || native.workspaceId !== session.sandboxWorkspaceId) throw new MoguriError("sandbox_changed", "Native policy/stage changed during this exact turn. No new model access was sent.", 409);
+          this.assertNativePolicy(native);
+          if (native.workspaceId !== session.sandboxWorkspaceId) throw new MoguriError("sandbox_changed", "Native stage changed during this exact turn. No new model access was sent.", 409);
           await this.sandboxWorkspaces.assert(session);
         }
         if (run.executionId) {
@@ -2543,10 +2658,12 @@ export class ControlPlane extends EventEmitter {
         const phase = synthetic && !route?.plan ? "router" : "solver";
         const modelId = synthetic ? route?.plan?.modelId ?? kupoPool(this.projection.settings.values.kupo, this.provider.state.models, session.controls.env).classifier.id : session.controls.modelId!;
         if (run.executionId && !modelId.startsWith("remote.") && !this.projection.settings.values.remote?.allowCopilot) throw new MoguriError("remote_credential", "Explicitly allow scoped Copilot access on this verified host before dispatching it.", 403);
-        const prepared = await this.provider.prepare(modelId, run.abort.signal);
+        if (run.nativeProviderEpoch !== undefined && run.nativeProviderEpoch !== this.providerEpoch) run.nativePrepared?.clear();
+        const cached = run.nativePrepared?.get(modelId); run.nativePrepared?.delete(modelId);
+        const prepared = cached ?? await this.provider.prepare(modelId, run.abort.signal);
         if (run.sandboxExecutionId) {
           const native = this.sandboxExecution(run.sandboxExecutionId);
-          if (native.configDigest !== frameDigest(this.sandbox.assertReady())) throw new MoguriError("sandbox_changed", "Native request access was revoked or changed during model preparation. No credential was sent.", 409);
+          this.assertNativePolicy(native);
           await this.sandboxWorkspaces.assert(this.session(run.sessionId));
           if (run.done || run.abort.signal.aborted) return;
           sandboxProviderDestination(native.config, prepared.auth.baseUrl ?? prepared.model.baseUrl);
@@ -2949,6 +3066,12 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     const run = this.runs.get(sessionId);
+    const admission = this.nativeAdmissions.get(sessionId);
+    if (admission && admission.turnId === current.turnId) {
+      try { this.commit([this.event(current, "turn.stop_requested", queueHold)]); }
+      finally { admission.abort.abort(); }
+      return;
+    }
     if (!run) {
       const sequence = this.projection.roleSequences.find((sequence) => sequence.sessionId === sessionId && sequence.id === current.turnId && sequence.status === "running");
       if (sequence) this.commit([
@@ -2994,6 +3117,7 @@ export class ControlPlane extends EventEmitter {
     if (run.planSave) { this.finishPlanRun(run, outcome, diagnostic); return; }
     if (run.mcpControl) { this.finishMcpControl(run, outcome, diagnostic); return; }
     run.done = true;
+    run.nativePrepared?.clear();
     clearTimeout(run.stopTimer);
     clearTimeout(run.roleSequence?.deadline);
     clearTimeout(run.compound?.deadline);
@@ -3177,11 +3301,14 @@ export class ControlPlane extends EventEmitter {
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    const admissions = [...this.nativeAdmissions.values()];
+    for (const admission of admissions) admission.abort.abort();
     const preparations = this.sandboxWorkspaces.close();
+    const setup = this.sandboxSetup.close();
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
     const native = this.sandbox.close();
-    const local = await Promise.allSettled([preparations, this.provider.close(), this.platform.close(options)]);
+    const local = await Promise.allSettled([preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while ((this.runs.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);

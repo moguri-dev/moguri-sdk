@@ -20,11 +20,17 @@ import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { runProgram } from "./program.ts";
 import { sandboxConfiguration, sandboxRunConfiguration, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
 import { PrivateControl } from "./private-control.ts";
+import { assertSandboxNetwork, resolveSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
+import type { SandboxSetupOptions } from "./sandbox-setup.ts";
 
 export type NativeChange = Partial<Pick<SandboxExecution, "nativeSessionId" | "planDigest" | "signerFingerprint" | "workerPid" | "status" | "cancellation" | "cleanup" | "cliExitCode" | "diagnostic">>;
 export interface SandboxOptions {
   vault?: SecretVault; changed?: () => void;
   command?: string[];
+  dns?: SandboxDns;
+  automaticProviderNetwork?: () => boolean;
+  distribution?: string;
+  setup?: SandboxSetupOptions;
 }
 export interface NativeLaunch {
   id: string; stage: NativeStage; config: SandboxConfiguration; launchName: string; createdAfter: number; createdBefore: number;
@@ -122,38 +128,48 @@ export class SandboxRuntime {
     if (next !== this.signature) { this.signature = next; this.readiness = absent(); this.options.changed?.(); }
   }
   configured(): QualifiedSandboxConfiguration { return sandboxConfiguration(this.configuration()); }
+  get busy(): boolean { return this.probing || this.active.size > 0; }
   assertReady(): QualifiedSandboxConfiguration {
     const config = this.configured();
     if (!this.readiness.ready || this.readiness.configDigest !== frameDigest(config)) throw new MoguriError("sandbox_unready", this.readiness.diagnostic, 409);
     return config;
   }
   workerArgv(): string[] { return [...(this.options.command ?? ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"])]; }
-  async probe(profileId: string, id: string = randomUUID()): Promise<SandboxReadiness> {
+  async probe(profileId: string, id: string = randomUUID(), requested?: AbortSignal): Promise<SandboxReadiness> {
     if (this.closed) throw new MoguriError("sandbox_closed", "Native execution is closing. No VM was launched.", 409);
     if (this.active.size || this.probing) throw new MoguriError("sandbox_busy", "Stop/wait for owned native execution or qualification before a new probe. No guest was launched.", 409);
     this.probing = true;
     let resolveProbe!: () => void;
     this.probeDone = new Promise<void>((resolve) => { resolveProbe = resolve; });
     let worker: NativeWorker | undefined;
+    const abort = () => worker?.kill("SIGTERM");
+    requested?.addEventListener("abort", abort, { once: true });
     this.readiness = { ...absent(), configured: true, diagnostic: "Explicit native qualification is in progress. No new turn is admitted until its exact guest and cleanup are verified." };
     try {
+      requested?.throwIfAborted();
       this.options.changed?.();
-      const config = await verifySandboxArtifacts(this.configuration(), this.stateDir, AbortSignal.timeout(20_000)), signature = frameDigest(config);
+      const signal = requested ? AbortSignal.any([requested, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
+      const reviewed = await verifySandboxArtifacts(this.configuration(), this.stateDir, signal), signature = frameDigest(reviewed);
+      const config = this.options.automaticProviderNetwork?.() && reviewed.qualification.allowCopilot ?
+        (await resolveSandboxNetwork(reviewed, ["https://api.githubcopilot.com"], signal, this.options.dns)).configuration : reviewed;
       const inputs = join(this.stateDir, "native-inputs", id), parent = join(this.stateDir, "native-stage-root");
       await mkdir(inputs, { recursive: true, mode: 0o700 }); await mkdir(parent, { recursive: true, mode: 0o700 });
       const source = await captureNativeSource(await realpath(inputs), [], { denied: [], readOnly: [] }, AbortSignal.timeout(5000));
       const stage = await materializeNativeStage(await realpath(parent), { profileId, sessionId: id, turnId: id }, source, AbortSignal.timeout(5000));
+      requested?.throwIfAborted();
       worker = this.open({ id, stage, config, root: null, launchName: `mg-${id.replaceAll("-", "").slice(0, 20)}`,
         createdAfter: Math.floor(Date.now() / 1000) - 2, createdBefore: Math.ceil(Date.now() / 1000) + 120 }, () => {}, true);
       const info = await worker.verified, result = await worker.finished;
+      requested?.throwIfAborted();
       if (!result.clean || result.exitCode !== 0 || result.failure || this.closed || signature !== frameDigest(this.configuration())) throw new MoguriError("sandbox_probe", result.failure ?? "Native qualification did not finish under the exact current review with verified guest absence. No readiness was claimed.", 409);
       this.readiness = { ready: true, configured: true, configDigest: signature, release: config.qualification.release, workerDigest: info.workerDigest, image: config.image,
-        diagnostic: "Verified pinned SendBox 0.2.3 guest/worker and owned VM cleanup. New turns still need their exact reviewed staging root and provider scope." };
+        diagnostic: `Verified pinned SendBox ${config.qualification.release} guest/worker and owned VM cleanup. Private workspace and selected-provider admission remain policy-bound.` };
       return this.readiness;
     } catch (error) {
       this.readiness = { ...absent(), configured: true, diagnostic: error instanceof MoguriError ? error.message : "Native qualification failed; cleanup/readiness is unconfirmed. No Local fallback." };
       throw error;
     } finally {
+      requested?.removeEventListener("abort", abort);
       if (worker) {
         worker.kill("SIGTERM");
         const ended = await worker.finished;
@@ -164,7 +180,8 @@ export class SandboxRuntime {
   }
   launch(execution: SandboxExecution, changed: (changes: NativeChange) => void | Promise<void>): NativeConnection {
     const config = this.assertReady();
-    if (execution.configDigest !== frameDigest(config) || execution.workerDigest !== config.qualification.workerDigest || execution.image !== config.image ||
+    assertSandboxNetwork(execution, config);
+    if (execution.workerDigest !== config.qualification.workerDigest || execution.image !== config.image ||
       execution.stage.sessionId !== execution.sessionId || execution.stage.profileId !== execution.profileId ||
       JSON.stringify(execution.command) !== JSON.stringify(this.workerArgv())) stopped("Native execution differs from its original profile/root/release review.");
     return this.open(execution, changed, false);

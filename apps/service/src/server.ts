@@ -15,7 +15,8 @@ import { NEMOTRON_MODEL } from "./voice.ts";
 import { ApplicationRuntime } from "./application.ts";
 import { acknowledgeMovedDatabase, storedStorageOptions, type StorageOptions } from "./storage-relocation.ts";
 import { claimStoreIdentity, readDefaultStateLocation, readStateLocation } from "../../../packages/client/src/state-location.ts";
-import type { UpdateOptions } from "./updates.ts";
+import { runtimeBuildVersion, type UpdateOptions } from "./updates.ts";
+import { pinnedInstalledApplication } from "./bundle-tree.ts";
 
 const authenticateSchema = Type.Object({
   type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -87,6 +88,8 @@ export async function startService(options: ServiceOptions) {
     }
     store = new EventStore(dbPath, retention.key, retention.id);
     const resourceBase = stored.resourceBase ?? options.stateDir;
+    const packagedRoot = options.platform?.sandbox?.distribution ? undefined : await pinnedInstalledApplication(runtimeBuildVersion());
+    const nativeDistribution = options.platform?.sandbox?.distribution ?? (packagedRoot ? join(packagedRoot, "Contents", "Resources", "moguri-native") : undefined);
     if (stored.resourceBase) {
       const resources = await lstat(stored.resourceBase);
       if (!resources.isDirectory() || resources.isSymbolicLink() || resources.uid !== process.getuid?.() || resources.mode & 0o077) throw new Error("The retained original resource root changed. No cache, worktree, profile or terminal directory was rebound.");
@@ -113,6 +116,7 @@ export async function startService(options: ServiceOptions) {
           speech: { executable: options.platform?.speech?.executable },
         });
         const platform = { ...scopedPlatform, mcpWorkerPath: scopedPlatform?.mcpWorkerPath ?? options.platform?.mcpWorkerPath,
+          sandbox: { ...scopedPlatform?.sandbox, distribution: scopedPlatform?.sandbox?.distribution ?? nativeDistribution },
           speech: { ...scopedPlatform?.speech, executable: scopedPlatform?.speech?.executable ?? options.platform?.speech?.executable } };
         const provider = options.profiles?.provider?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.provider : undefined);
         const model = platform?.speech?.model;

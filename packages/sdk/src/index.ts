@@ -568,6 +568,26 @@ export class MoguriSdk extends TransportClient {
   };
   readonly subagents = { run: (sessionId: string, prompt: string) => this.command({ type: "subagent.run", sessionId, prompt }) };
   readonly sandbox = {
+    setup: {
+      status: () => this.query({ type: "sandbox.setup.status" }),
+      review: (version?: string) => this.query({ type: "sandbox.setup.review", ...(version ? { version } : {}) }),
+      check: (automatic = false) => this.command({ type: "sandbox.setup.check", automatic }),
+      prepare: (version: string) => this.command({ type: "sandbox.setup.prepare", version, confirm: true }),
+      apply: (review: { version: string; digest: string; settingsRevision: number }) => this.command({ type: "sandbox.setup.apply",
+        version: review.version, expectedDigest: review.digest, expectedRevision: review.settingsRevision, confirm: true }),
+      operation: (operationId: string) => this.query({ type: "sandbox.setup.operation", operationId }),
+      cancel: (operationId: string) => this.command({ type: "sandbox.setup.cancel", operationId }),
+      wait: async (operationId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Extract<PlatformResponse, { type: "sandbox.setup.operation" }>> => {
+        const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
+        while (true) {
+          options.signal?.throwIfAborted();
+          const result = await this.sandbox.setup.operation(operationId);
+          if (["completed", "available", "review", "failed", "partial", "cancelled"].includes(result.operation.status)) return result;
+          if (Date.now() >= deadline) throw new ClientError("sandbox_setup_timeout", "The exact native setup is still active. Inspect its original operation; no installation or model was retried.");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      },
+    },
     status: () => this.query({ type: "sandbox.status" }),
     probe: () => this.command({ type: "sandbox.probe", confirm: true }),
     preview: (sessionId: string, paths: string[]) => this.query({ type: "sandbox.preview", sessionId, paths }),

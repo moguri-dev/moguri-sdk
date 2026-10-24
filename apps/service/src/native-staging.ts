@@ -1,17 +1,25 @@
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { MAX_TEXT, MoguriError, isRecord } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, readRegularFile, scopedPath, isProtectedProjectPath } from "./files.ts";
 import { assertFolderAccess, type FolderPolicy } from "./project-policy.ts";
 import { digest } from "./store.ts";
 import { MAX_CONTEXT_FOLDER_FILES, MAX_CONTEXT_TEXT_BYTES } from "./input-limits.ts";
+import { repositoryFiles } from "./repository-source.ts";
 
 interface DirectoryIdentity { device: string; inode: string }
-export interface NativeSourceFile { readonly path: string; readonly text: string; readonly digest: string; readonly bytes: number; readonly mode: number }
+export const NATIVE_TREE_MAX_FILES = 20_000, NATIVE_TREE_MAX_BYTES = 256 * 1024 * 1024, NATIVE_TREE_FILE_BYTES = 32 * 1024 * 1024;
+export interface NativeSourceFile { readonly path: string; readonly text: string | null; readonly digest: string; readonly bytes: number; readonly mode: number }
 export interface NativeSource {
   readonly root: string; readonly identity: DirectoryIdentity; readonly files: readonly NativeSourceFile[];
   readonly policy: FolderPolicy; readonly digest: string;
+  readonly capture?: "tree-v1";
+}
+export interface NativeTextSource extends NativeSource {
+  readonly files: readonly (NativeSourceFile & { text: string })[];
+  readonly capture?: undefined;
 }
 export interface NativeStageOwner { profileId: string; sessionId: string; turnId: string }
 export interface NativeStage extends NativeStageOwner {
@@ -27,17 +35,22 @@ const equalIdentity = (left: DirectoryIdentity, right: DirectoryIdentity) => lef
 const sourceDigest = (source: Omit<NativeSource, "digest">) => digest(JSON.stringify({
   root: source.root, identity: source.identity, policy: source.policy,
   files: source.files.map(({ path, digest, bytes, mode }) => ({ path, digest, bytes, mode })),
+  ...(source.capture ? { capture: source.capture } : {}),
 }));
 function validateSource(source: NativeSource): void {
-  if (!isAbsolute(source.root) || source.files.length > MAX_CONTEXT_FOLDER_FILES || sourceDigest(source) !== source.digest) invalid("Native source identity or digest changed.");
+  const tree = source.capture === "tree-v1";
+  if (!isAbsolute(source.root) || source.files.length > (tree ? NATIVE_TREE_MAX_FILES : MAX_CONTEXT_FOLDER_FILES) || sourceDigest(source) !== source.digest) invalid("Native source identity or digest changed.");
   const names = new Set<string>(); let bytes = 0;
   for (const file of source.files) {
     const path = fileName(file.path), key = path.normalize("NFC").toLowerCase();
-    if (names.has(key) || file.digest !== digest(file.text) || file.bytes !== Buffer.byteLength(file.text) || file.bytes > MAX_TEXT ||
+    if (names.has(key) || !/^[a-f0-9]{64}$/.test(file.digest) || !Number.isSafeInteger(file.bytes) || file.bytes < 0 ||
+      (tree ? file.text !== null || file.bytes > NATIVE_TREE_FILE_BYTES : file.text === null || file.digest !== digest(file.text) || file.bytes !== Buffer.byteLength(file.text) || file.bytes > MAX_TEXT) ||
       !Number.isSafeInteger(file.mode) || file.mode < 0 || file.mode > 0o777) invalid("Native source contains duplicate, changed or unsupported files.");
     names.add(key); bytes += file.bytes;
   }
-  if (bytes > MAX_CONTEXT_TEXT_BYTES) invalid("Native source exceeds the exact 200-file/2-MiB text boundary.");
+  if (bytes > (tree ? NATIVE_TREE_MAX_BYTES : MAX_CONTEXT_TEXT_BYTES)) invalid(tree ?
+    "Automatic native source exceeds its complete 20,000-file/256-MiB regular-file boundary. No subset was silently selected." :
+    "Native source exceeds the exact 200-file/2-MiB text boundary.");
 }
 async function directory(path: string, owned = false): Promise<DirectoryIdentity> {
   const metadata = await lstat(path, { bigint: true });
@@ -45,28 +58,53 @@ async function directory(path: string, owned = false): Promise<DirectoryIdentity
     owned && (metadata.uid !== BigInt(process.getuid?.() ?? -1) || metadata.mode & 0o077n)) invalid("The native directory is not canonical or has invalid ownership.");
   return identity(metadata);
 }
-async function sourceFile(root: string, path: string, policy: FolderPolicy, signal: AbortSignal): Promise<NativeSourceFile> {
+async function sourceFile(root: string, path: string, policy: FolderPolicy, signal: AbortSignal, tree = false): Promise<NativeSourceFile> {
   signal.throwIfAborted(); fileName(path);
   await assertFolderAccess(root, path, false, policy);
   const canonical = await scopedPath(root, path), before = await lstat(canonical, { bigint: true });
-  const file = await readProjectFile(root, path), after = await lstat(canonical, { bigint: true });
+  if (!before.isFile() || before.size > BigInt(tree ? NATIVE_TREE_FILE_BYTES : MAX_TEXT)) invalid("Native source contains an unsupported or oversized regular file; no content was truncated.");
+  const file = tree ? await (async () => {
+    const content = await readRegularFile(canonical, Number(before.size));
+    return { path, text: null, digest: createHash("sha256").update(content).digest("hex"), bytes: content.length };
+  })() : await readProjectFile(root, path);
+  const after = await lstat(canonical, { bigint: true });
   signal.throwIfAborted();
   if (before.dev !== after.dev || before.ino !== after.ino || before.mtimeNs !== after.mtimeNs || before.size !== after.size ||
     before.mode !== after.mode || before.isSymbolicLink() || after.isSymbolicLink() || BigInt(file.bytes) !== after.size) invalid("The native source file changed during capture.");
   return { path: file.path, text: file.text, digest: file.digest, bytes: file.bytes, mode: Number(after.mode & 0o777n) };
 }
-export async function captureNativeSource(root: string, paths: readonly string[], policy: FolderPolicy, signal: AbortSignal): Promise<NativeSource> {
+export async function captureNativeSource(root: string, paths: readonly string[], policy: FolderPolicy, signal: AbortSignal): Promise<NativeTextSource> {
   signal.throwIfAborted();
   if (paths.length > MAX_CONTEXT_FOLDER_FILES) invalid("Native source exceeds the exact 200-file text boundary.");
   const approvedPaths = [...paths].sort(), approvedPolicy = structuredClone(policy);
-  const capturedIdentity = await directory(root), files: NativeSourceFile[] = [];
+  const capturedIdentity = await directory(root), files: Array<NativeSourceFile & { text: string }> = [];
   let bytes = 0;
   for (const path of approvedPaths) {
     const file = await sourceFile(root, path, approvedPolicy, signal); bytes += file.bytes;
+    if (file.text === null) invalid("Reviewed text capture unexpectedly contained a metadata-only file.");
     if (bytes > MAX_CONTEXT_TEXT_BYTES) invalid("Native source exceeds the exact 200-file/2-MiB text boundary.");
-    files.push(file);
+    files.push({ ...file, text: file.text });
   }
   const source = { root, identity: capturedIdentity, files, policy: approvedPolicy }, captured = { ...source, digest: sourceDigest(source) };
+  validateSource(captured); await assertNativeSource(captured, signal);
+  return captured;
+}
+export async function captureNativeTree(root: string, requestedPolicy: FolderPolicy, signal: AbortSignal): Promise<NativeSource> {
+  signal.throwIfAborted();
+  const policy = structuredClone(requestedPolicy), capturedIdentity = await directory(root);
+  const candidates = await repositoryFiles(root, NATIVE_TREE_MAX_FILES + 1, signal, policy.denied);
+  if (candidates.length > NATIVE_TREE_MAX_FILES) invalid("Automatic native source exceeds 20,000 regular files. No partial project was selected.");
+  const paths = candidates.filter((path) => !isProtectedProjectPath(path)).sort();
+  const files: NativeSourceFile[] = [];
+  let bytes = 0;
+  for (const path of paths) {
+    const file = await sourceFile(root, path, policy, signal, true);
+    bytes += file.bytes;
+    if (bytes > NATIVE_TREE_MAX_BYTES) invalid("Automatic native source exceeds 256 MiB. No partial project was selected.");
+    files.push(file);
+  }
+  const source = { root, identity: capturedIdentity, files, policy, capture: "tree-v1" as const };
+  const captured = { ...source, digest: sourceDigest(source) };
   validateSource(captured); await assertNativeSource(captured, signal);
   return captured;
 }
@@ -74,8 +112,12 @@ export async function assertNativeSource(requested: NativeSource, signal: AbortS
   signal.throwIfAborted(); const source = structuredClone(requested); validateSource(source);
   if (!equalIdentity(await directory(source.root), source.identity)) invalid("The source checkout directory was replaced.");
   for (const file of source.files) {
-    const current = await sourceFile(source.root, file.path, source.policy, signal);
+    const current = await sourceFile(source.root, file.path, source.policy, signal, source.capture === "tree-v1");
     if (current.digest !== file.digest || current.mode !== file.mode || current.bytes !== file.bytes) invalid("The reviewed source changed. Preserve the stage and review a new base.");
+  }
+  if (source.capture === "tree-v1") {
+    const paths = (await repositoryFiles(source.root, NATIVE_TREE_MAX_FILES + 1, signal, source.policy.denied)).filter((path) => !isProtectedProjectPath(path)).sort();
+    if (JSON.stringify(paths) !== JSON.stringify(source.files.map((file) => file.path))) invalid("The automatic source file set changed during capture. No mixed or partial tree was admitted.");
   }
 }
 function marker(owner: NativeStageOwner, sourceDigest: string) {
@@ -83,9 +125,9 @@ function marker(owner: NativeStageOwner, sourceDigest: string) {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(owner.profileId) || !uuid.test(owner.sessionId) || !uuid.test(owner.turnId) || !/^[a-f0-9]{64}$/.test(sourceDigest)) invalid("Native stage ownership is invalid.");
   return { format: "moguri-native-stage", version: 1, profileId: owner.profileId, sessionId: owner.sessionId, turnId: owner.turnId, sourceDigest };
 }
-async function write(path: string, text: string, mode: number) {
+async function write(path: string, text: string | Uint8Array, mode: number) {
   const file = await open(path, "wx", mode);
-  try { await file.writeFile(text, "utf8"); await file.sync(); } finally { await file.close(); }
+  try { await file.writeFile(text, typeof text === "string" ? "utf8" : undefined); await file.sync(); } finally { await file.close(); }
 }
 const overlaps = (parent: string, child: string) => { const path = relative(parent, child); return !isAbsolute(path) && path !== ".." && !path.startsWith("../"); };
 export async function materializeNativeStage(parent: string, requestedOwner: NativeStageOwner, requestedSource: NativeSource, signal: AbortSignal, progress?: (copied: number, total: number) => void): Promise<NativeStage> {
@@ -111,7 +153,10 @@ export async function materializeNativeStage(parent: string, requestedOwner: Nat
       const target = join(workspace, file.path);
       await mkdir(dirname(target), { recursive: true, mode: 0o700 });
       await scopedPath(workspace, file.path, true);
-      await write(target, file.text, 0o600 | (file.mode & 0o100));
+      const content = file.text ?? await readRegularFile(await scopedPath(source.root, file.path), file.bytes);
+      const bytes = typeof content === "string" ? Buffer.from(content) : content;
+      if (bytes.length !== file.bytes || createHash("sha256").update(bytes).digest("hex") !== file.digest) invalid("The native source changed during copying.");
+      await write(target, content, 0o600 | (file.mode & 0o100));
       progress?.(++copied, source.files.length);
     }
     await assertNativeSource(source, signal);

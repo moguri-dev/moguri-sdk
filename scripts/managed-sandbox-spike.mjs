@@ -8,13 +8,15 @@ import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 import { performance } from "node:perf_hooks";
 import { resolveCname } from "node:dns/promises";
+import { build } from "esbuild";
 import { readNativeCompletion } from "../apps/service/src/native-evidence.ts";
 import { sandboxHostEnvironment } from "../apps/service/src/sandbox-runtime.ts";
 import { sandboxRunConfiguration, sandboxProviderDestination } from "../apps/service/src/sandbox-policy.ts";
 import { captureNativeSource } from "../apps/service/src/native-staging.ts";
 import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
+import { resolveSandboxNetwork } from "../apps/service/src/sandbox-network.ts";
 
-const { values } = parseArgs({ options: { workload: { type: "string" }, archive: { type: "string" }, installation: { type: "string" } } });
+const { values } = parseArgs({ options: { workload: { type: "string" }, archive: { type: "string" }, installation: { type: "string" }, network: { type: "boolean" } } });
 if (process.platform !== "darwin" || process.arch !== "arm64" || !values.workload || !values.archive || !values.installation) {
   throw new Error("Use Node --import tsx with explicit current workload, pinned SendBox archive and reviewed root-owned guest installation receipts.");
 }
@@ -73,12 +75,22 @@ try {
     ms: performance.now() - exportStarted, qualification: "Verified archive import, not a fresh host or inference claim; no shared image was removed." };
 
   const workspace = join(directory, "workspace"); await mkdir(workspace, { mode: 0o700 });
-  const config = { executable, configPath: null, image: workload.image, bundlePath: installation.bundle, trustRootPath: installation.key, qualification };
+  let config = { executable, configPath: null, image: workload.image, bundlePath: installation.bundle, trustRootPath: installation.key, qualification };
+  let networkCode = "";
+  if (values.network) {
+    const resolved = await resolveSandboxNetwork({ ...config, qualification: { ...qualification, allowCopilot: true,
+      allowedDomains: ["github.com", "api.github.com"] } }, ["https://api.individual.githubcopilot.com"], AbortSignal.timeout(20_000));
+    config = resolved.configuration; report.providerScope = resolved.scope;
+    const helpers = await build({ stdin: { contents: `export {fetchNativePage} from ${JSON.stringify(resolve("apps/service/src/web-page.ts"))};export {probeSocksDomain} from ${JSON.stringify(resolve("apps/service/src/proxy-probe.ts"))};`,
+      resolveDir: process.cwd(), sourcefile: "generated-managed-native-network.ts" }, bundle: true, write: false, format: "cjs", platform: "node", target: "node26", packages: "external" });
+    await writeFile(join(workspace, "generated-native-network.cjs"), `module.paths.unshift("/opt/moguri/node_modules");\n${helpers.outputFiles[0].text}`, { mode: 0o600 });
+    networkCode = `(async()=>{const{fetchNativePage,probeSocksDomain}=require("/workspace/generated-native-network.cjs");const page=await fetchNativePage("https://github.com",AbortSignal.timeout(20000));if(page.source!=="untrusted-web"||!page.text.length)throw Error("Approved GitHub page was unavailable");const denied=await probeSocksDomain(process.env.ALL_PROXY,"google.com",443,AbortSignal.timeout(12000));if(denied.classification!=="policy-denied")throw Error("Unapproved Google destination was not denied by policy");const metadata=await fetch("https://api.individual.githubcopilot.com/models",{redirect:"error",signal:AbortSignal.timeout(10000)});const status=metadata.status;await metadata.body?.cancel();if(![400,401,403].includes(status))throw Error("Unexpected credential-free provider status");const proof={githubReadable:true,googlePolicyDenied:true,googleSocksReply:denied.reply,preparedProviderHttp:status,credentials:false,modelCalls:0};fs.writeFileSync("/workspace/generated-network-proof.json",JSON.stringify(proof));console.log(JSON.stringify(proof));})().catch(error=>{console.error(error.code??"GENERATED_NATIVE_NETWORK_FAILED");process.exitCode=1;});`;
+  }
   const name = `mg-dist-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
   const policy = sandboxRunConfiguration(config, name, workspace, ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"]);
   policy.policy.commands.allowlist = ["/usr/local/bin/node -e *"];
   const policyPath = join(directory, "sendbox.json"); await writeFile(policyPath, JSON.stringify(policy), { mode: 0o600 });
-  const program = `const fs=require("node:fs");const s=fs.readFileSync("/proc/self/status","utf8");if(process.getuid()===0||!/^NoNewPrivs:\\s*1$/m.test(s)||!/^Seccomp:\\s*2$/m.test(s)||!/^CapEff:\\s*0+$/m.test(s)||process.versions.node!=="26.12.0")throw Error("Generated guest controls differ");fs.writeFileSync("/workspace/generated-distribution-witness.txt",${JSON.stringify(randomUUID())});const pty=require("/opt/moguri/node_modules/node-pty");const child=pty.spawn("/bin/sh",["-c","printf GENERATED_BUNDLED_PTY_READY"],{cwd:"/workspace",env:{PATH:"/usr/bin:/bin"}});let output="";child.onData(value=>output+=value);child.onExit(value=>{if(value.exitCode!==0||output!=="GENERATED_BUNDLED_PTY_READY")throw Error("Generated native dependency failed");console.log("GENERATED_BUNDLED_RUNTIME_READY");});`;
+  const program = `const fs=require("node:fs");const s=fs.readFileSync("/proc/self/status","utf8");if(process.getuid()===0||!/^NoNewPrivs:\\s*1$/m.test(s)||!/^Seccomp:\\s*2$/m.test(s)||!/^CapEff:\\s*0+$/m.test(s)||process.versions.node!=="26.12.0")throw Error("Generated guest controls differ");fs.writeFileSync("/workspace/generated-distribution-witness.txt",${JSON.stringify(randomUUID())});const pty=require("/opt/moguri/node_modules/node-pty");const child=pty.spawn("/bin/sh",["-c","printf GENERATED_BUNDLED_PTY_READY"],{cwd:"/workspace",env:{PATH:"/usr/bin:/bin"}});let output="";child.onData(value=>output+=value);child.onExit(value=>{if(value.exitCode!==0||output!=="GENERATED_BUNDLED_PTY_READY")throw Error("Generated native dependency failed");console.log("GENERATED_BUNDLED_RUNTIME_READY");});${networkCode}`;
   const command = { program: "/usr/local/bin/node", arguments: ["-e", program] }, launched = Date.now();
   report.nativeLaunch = { name, workspace, image: workload.image, command, createdAfter: Math.floor(launched / 1000) - 2 };
   await writeFile(join(directory, "intent.json"), JSON.stringify(report.nativeLaunch), { flag: "wx", mode: 0o600 });
@@ -96,6 +108,11 @@ try {
   assert.equal(inventory.some((entry) => entry.configuration.id === `${name}-${result.session_id}`), false);
   report.gates.bundledActualGuest = { status: "PASS", node: "26.12.0", nativePty: true, bundledHostExecutable: true, rootOwnedGuest: true,
     nativeSessionId: result.session_id, signedPlan: evidence.planDigest, ownedGuestAbsent: true, ms: Date.now() - launched };
+  if (values.network) {
+    const proof = JSON.parse((await evidence.read("generated-network-proof.json")).content.toString("utf8"));
+    assert.equal(proof.githubReadable, true); assert.equal(proof.googlePolicyDenied, true); assert.equal(proof.credentials, false);
+    report.gates.nativePublicNetwork = { status: "PASS", ...proof };
+  }
   const component = join(directory, "sendbox-0.2.3.pkg"), expanded = join(directory, "expanded");
   run("/usr/bin/pkgbuild", ["--root", root, "--ownership", "recommended", "--install-location", "/opt/moguri/sendbox/0.2.3",
     "--identifier", "dev.moguri.sendbox.runtime.0.2.3", "--version", "0.2.3", component]);

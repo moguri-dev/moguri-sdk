@@ -281,6 +281,9 @@ export class EventStore {
       if (version < 51) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('session_interactions_schema','1');
         PRAGMA user_version=51; COMMIT;`);
+      if (version < 52) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('managed_sandbox_schema','1');
+        PRAGMA user_version=52; COMMIT;`);
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

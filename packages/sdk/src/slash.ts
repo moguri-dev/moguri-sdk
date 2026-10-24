@@ -84,7 +84,7 @@ export const slashCommands = [
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
-  { name: "sandbox", description: "Review native source staging, exact owned runs and separate user publication", argument: "[status|probe confirm-native|preview PATHS_JSON|prepare REVIEW_JSON confirm-stage|execution ID|result ID|stop ID confirm-stop|reconcile ID confirm-inspect|publish-preview ID PATHS_JSON|publish REVIEW_JSON confirm-publish|publication ID|stop-publication ID confirm-stop]" },
+  { name: "sandbox", description: "Review bundled setup, automatic workspaces, public runtime updates and exact retained native work", argument: "[setup [VERSION]|enable VERSION DIGEST REV confirm-setup|updates|prepare-version VERSION confirm-download|status|result ID|publication ID]" },
   { name: "mcp-remote", description: "Review exact Remote MCP grants and retained calls; never authenticate or approve a tool", argument: "[servers|preview SERVER|grant SERVER SHA256 REV confirm-reviewed [forward-access]|revoke SERVER REV confirm-revoke|calls|inspect OPERATION_ID]" },
   { name: "workspace", description: "Manage an explicit isolated Local checkout", argument: "[list|discover|create BRANCH [BASE]|new ID|bind ID|inspect ID|remove ID|reconcile ID]" },
   { name: "files", description: "Read the session's actual bound directory", argument: "[PATH]" },
@@ -574,6 +574,27 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "sandbox": {
       const [action = "", ...parts] = command.argument.split(/\s+/).filter(Boolean), [id, confirmation, extra] = parts;
       const text = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+      if (action === "setup") {
+        const status = await sdk.sandbox.setup.status();
+        if (!status.setup.supported) return text(status);
+        const value = await sdk.sandbox.setup.review(id);
+        return text({ ...value, confirmCommand: `/sandbox enable ${value.review.version} ${value.review.digest} ${value.review.settingsRevision} confirm-setup` });
+      }
+      if (action === "enable") {
+        const [version, digest, revision, confirm, ...remaining] = parts;
+        if (!version || !digest || !revision || !/^[0-9]+$/.test(revision) || confirm !== "confirm-setup" || remaining.length) {
+          throw new ClientError("sandbox_setup_review", "Use the exact /sandbox enable command from /sandbox setup after reviewing its version, package, worker, network and automatic-workspace policy.");
+        }
+        const admitted = await sdk.sandbox.setup.apply({ version, digest, settingsRevision: Number(revision) });
+        return text(await sdk.sandbox.setup.wait(admitted.id!));
+      }
+      if (action === "updates" && !id) { const admitted = await sdk.sandbox.setup.check(); return text(await sdk.sandbox.setup.wait(admitted.id!)); }
+      if (action === "prepare-version" && id && confirmation === "confirm-download" && !extra) {
+        const admitted = await sdk.sandbox.setup.prepare(id); return text(await sdk.sandbox.setup.wait(admitted.id!));
+      }
+      if (action === "cancel-setup" && id && confirmation === "confirm-stop" && !extra) {
+        await sdk.sandbox.setup.cancel(id); return text(await sdk.sandbox.setup.operation(id));
+      }
       if (!action && client === "desktop") return { kind: "panel", panel: "Sandbox" };
       if (!action || action === "status" && !id) {
         const snapshot = sdk.getState().snapshot!;

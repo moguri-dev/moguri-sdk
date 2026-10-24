@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **51** for
+Current source uses protocol **52** for [managed Sandbox](architecture/managed-sandbox.md),
+following protocol **51** for
 [session interactions](architecture/session-interactions.md), following the
 protocol-44 through 50 settings/native lifecycle slices and protocol-43
 [document attachments](architecture/document-attachments.md), including
@@ -194,21 +195,50 @@ See [the owned decision contract](architecture/owned-decisions.md).
 
 ## Native SDK development surface
 
+The primary managed flow uses `sandbox.setup.status()` and
+`sandbox.setup.review(version?)` to inspect the actual supplied runtime/image,
+network/workspace policy and exact installer location. After actual user review,
+call `sandbox.setup.apply(review)` and observe its original ID with
+`sandbox.setup.operation(id)` or `sandbox.setup.wait(id)`. Administrator approval
+is requested only when the exact root-owned release is not already installed.
+`sandbox.setup.cancel(id)` targets only that owned operation. No setup call
+starts a model or silently selects a provider, Env or new runtime version.
+
+`sandbox.setup.check()` observes the fixed public SendBox release feed;
+`sandbox.setup.prepare(version)` downloads and verifies that exact eligible
+archive and prepares a no-script package for a separate review. The app bundles
+0.2.3 and a current-protocol worker OCI archive with Linux Node/native dependencies.
+Source/Node embeddings may pass `platform.sandbox.distribution` explicitly.
+An accepted retained distribution is reused only with its original digest;
+there is no app-directory scan or mutable image pull.
+
+After managed setup approval and explicit Env selection, ordinary Send prepares
+the bound project/worktree privately and automatically. Root-less chats require
+no empty preview. Complete regular-file snapshots support 20,000 files, 256 MiB
+total and 32 MiB per file, including binary/large sources, without expanding
+model context or silently choosing a subset. Protected, ignored and denied paths
+stay out. Successful private changes persist; verified after-state restoration
+creates a new owned stage after rollback. Source publication remains separate.
+Selected-provider HTTPS endpoints and bounded public CNAME chains are captured
+per original execution; `fetch_page` reads only approved public pages inside the
+guest without controller credentials or a Local fetch.
+
 `sandbox.status()` reports actual configuration-bound readiness.
-Explicit `sandbox.probe()` verifies the root-owned SendBox 0.2.3 release,
+Explicit advanced `sandbox.probe()` verifies the configured root-owned release,
 immutable workload and real guest controls/cleanup. Configure `settings.sandbox`
 only with independently reviewed executable/bundle/key paths, SHA-256 pins,
 release/trust-root/sequence, workload/worker/bridge digests, resource caps and
 exact DNS hosts. `configPath` must be null to select the managed deny-first
 policy; legacy policies are never silently replaced. Copilot access is opt-in,
 with a separate actual cold guest networking check. An observed alias is not
-a grant and is never added automatically.
+a grant. Automatic aliases require the separately approved managed policy.
 
-After explicitly selecting Sandbox in a session, use
+For optional advanced exact-file staging after selecting Sandbox, use
 `sandbox.preview(sessionId, paths)` to inspect an exact source set, then
 `sandbox.prepare(sessionId, paths, preview.digest, session.revision)` only after
 user review. A project-free chat uses `[]` and retains a null model root. The
-physical stage is private and independent of the source checkout. Ordinary
+physical stage is private and independent of the source checkout; this review
+is not required by managed automatic staging. Ordinary
 SDK send/queue/stop/approval APIs retain their shared authority. Qualified native
 `read_file` calls can page scoped pasted files through the controller broker.
 

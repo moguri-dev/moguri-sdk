@@ -2,6 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
 import { McpServerSchema, SandboxSchema } from "./config.ts";
+import { SandboxManagementSchema, defaultSandboxManagement } from "./sandbox-management.ts";
 import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot, type ProjectCloneIntent } from "./sessions.ts";
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
@@ -125,6 +126,7 @@ export const SettingsSchema = object({
   lifecycle: Type.Optional(object({ keepAwake: Type.Boolean(), tailMinutes: Type.Integer({ minimum: 0, maximum: 1440 }) })),
   integrations: Type.Optional(object({ sql: object({ enabled: Type.Boolean(), endpoint: Type.String({ minLength: 1, maxLength: 2048 }) }) })),
   sandbox: SandboxSchema,
+  sandboxManagement: Type.Optional(SandboxManagementSchema),
   retention: object({
     deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }),
     archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
@@ -154,6 +156,7 @@ export const defaultSettings = (): UserSettings => ({
   lifecycle: { keepAwake: false, tailMinutes: 5 },
   integrations: { sql: { enabled: false, endpoint: "http://127.0.0.1:9147" } },
   sandbox: { executable: "sendbox", configPath: null, image: null, bundlePath: null, trustRootPath: null },
+  sandboxManagement: defaultSandboxManagement(),
   retention: { deleteArchived: false, afterDays: 7, archiveCompleted: false, archiveAfterDays: 7, confirmArchive: true, confirmDelete: true },
   artifacts: { retainAnswers: true },
   budgets: { rates: [], maxPriceAgeDays: 30 },
@@ -173,13 +176,14 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
     voice: { ...defaults.voice, ...settings.voice },
     retention: { ...defaults.retention, ...settings.retention },
     notifications: { ...defaults.notifications, ...settings.notifications },
+    sandboxManagement: { ...defaultSandboxManagement(), ...(settings.sandbox?.qualification ? { version: settings.sandbox.qualification.release } : {}), ...settings.sandboxManagement },
   };
 }
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
-  Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("retention"),
+  Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("startup"),
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),

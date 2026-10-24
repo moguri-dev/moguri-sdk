@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
-import { isIP } from "node:net";
 import { MoguriError, parse, SandboxConfigurationSchema, type SandboxConfiguration, type SandboxQualification } from "../../../packages/protocol/src/index.ts";
+import { canonicalNetworkHostname } from "./public-network.ts";
 
 export type QualifiedSandboxConfiguration = SandboxConfiguration & {
   image: string; bundlePath: string; trustRootPath: string; qualification: SandboxQualification;
@@ -13,9 +13,7 @@ export function sandboxConfiguration(value: SandboxConfiguration): QualifiedSand
     if (!isAbsolute(path) || /[\0\r\n]/.test(path)) throw new MoguriError("sandbox_path", "Select canonical absolute installed release artifacts explicitly; no PATH or previous-installation fallback.", 409);
   }
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:-]*@sha256:[a-f0-9]{64}$/.test(config.image)) throw new MoguriError("sandbox_image", "Native execution requires one exact digest-pinned workload image, not a mutable tag.", 409);
-  const label = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
-  const domain = new RegExp(`^(?:${label}\\.)+${label}$`);
-  if (config.qualification.allowedDomains.some((host) => !domain.test(host) || isIP(host) !== 0 || /^[\d.]+$/.test(host))) throw new MoguriError("sandbox_domains", "Review exact canonical DNS hosts only. Wildcards, IP/private-address grants, ports, URLs and inferred aliases are not allowed.", 409);
+  if (config.qualification.allowedDomains.some((host) => !canonicalNetworkHostname(host))) throw new MoguriError("sandbox_domains", "Review exact canonical DNS hosts only. Wildcards, IP/private-address grants, ports, URLs and unapproved aliases are not allowed.", 409);
   return { ...config, image: config.image, bundlePath: config.bundlePath, trustRootPath: config.trustRootPath, qualification: config.qualification };
 }
 export function sandboxProviderDestination(value: SandboxConfiguration, baseUrl: string): URL {

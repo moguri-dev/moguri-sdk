@@ -62,7 +62,7 @@ export class SandboxPublications {
       execution.inspectionIntent?.status === "running") throw new MoguriError("sandbox_publication", "Select an independently retained, project-bound native result with verified original VM absence. No source or previous root was inferred.", 409);
     if (this.host.closing(execution.projectId)) throw new MoguriError("project_removing", "This source project is being removed. No publication was admitted.", 409);
     const input = nativeWorkspaceDocument(this.store.blob(execution.inputDigest)), result = sandboxResult(this.store.blob(execution.resultDigest));
-    if (!input.source || input.source.root !== execution.sourceRoot || input.source.digest !== execution.stage.sourceDigest ||
+    if (!input.source || input.source.root !== execution.sourceRoot || (input.version === 2 ? input.workingSource.digest : input.source.digest) !== execution.stage.sourceDigest ||
       result.executionId !== execution.id || result.inputDigest !== execution.inputDigest || result.planDigest !== execution.planDigest ||
       result.nativeSessionId !== execution.nativeSessionId || result.signerFingerprint !== execution.signerFingerprint) throw new MoguriError("sandbox_publication", "Native original source and retained after-state disagree. No output was substituted.", 409);
     const projectId = execution.projectId, workspaceId = execution.sourceWorkspaceId, project = this.host.root(projectId, workspaceId);
