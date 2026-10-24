@@ -78,6 +78,45 @@ paid inference, native administrator install or personal application/browser
 was used; Electron ran only hidden generated fixtures. Existing FFI, optional `.icon`, large-chunk and documented
 external-host deprecation notices remain; the app is ad-hoc signed, not notarized.
 
+## Native DMG presentation
+
+The installer reuses the existing Moguri icon, Resvg (MIT), Sharp (Apache-2.0)
+and native macOS image tools. `dmgbuild` 1.6.7, `ds_store` 1.3.3 and `mac_alias`
+2.2.3 (MIT) write Finder metadata offline; no Finder, AppleScript, personal UI
+or authorization is automated. Python 3.10+ is a packaging-only prerequisite.
+Exactly hashed wheels install into a private environment bound to the Python
+minor and requirement-manifest digest, never system packages or the shipped app.
+
+The supplied reference uses a 540-by-380-point native window, 80-point icons and
+12-point labels. The image preserves those proportions, app/Applications centers
+at (130,220)/(410,220), a light-gray dashed-arrow background at 1x/2x density,
+native icon view with bottom labels, zero scroll and no tool/status/path/sidebar.
+The actual Moguri app/volume icon replaces the reference's branding; the title
+is `Moguri <version>-arm64`. Background aliases bind the image's own volume and
+file identity rather than a build-host path. Only Moguri and Applications are
+visible. A source SVG is retained; no label or clickable icon is painted into it.
+
+The app remains separately ad-hoc signed and byte-identical across the ZIP,
+DMG and update manifest. New image construction publishes by rename only after
+successful completion; failure preserves the previous image and explicit owned
+staging. The mounted verification owns its exact mount, uses read-only/no-browse/
+no-autoopen flags, and refuses recursive cleanup until detach is confirmed.
+No client, control-plane schema, durable event, permission, default or update
+application behavior changes. Artifact integrity does not imply notarization.
+
+Generated tests assert exact geometry/pixels, build a real tiny image, inspect
+its retained native view, and reject altered window bounds. The actual release
+verifier checks native metadata, both Retina resources and background identity,
+Applications target, icon and the unchanged signed app through the production
+ZIP/manifest consumer. It does not open Finder to make a screenshot.
+
+Before implementation, the six available prerequisite groups passed:
+provider cancellation 31.02 ms; SQLite append p95 0.045 ms/rebuild 0.536 ms;
+owned PTY cancellation 152.09 ms with zero survivors; TUI updates 16.87 ms;
+hidden Electron cold start 173.56 ms / 439.69 MiB / 7.78 ms per frame;
+2,000-file search/Git 1.022/6.201 ms. The baseline's unavailable live/native/
+notarized/Linux/quality gates remain FAIL/unqualified, not enabled by packaging.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
