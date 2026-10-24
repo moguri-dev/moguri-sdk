@@ -106,6 +106,14 @@ distinct glyphs supplement color; selected, hover and normal colors meet 3:1
 non-text contrast in light/dark/custom palettes. Reduced-motion preference
 disables both new animations without hiding the work indicator.
 
+Row-state styling uses scoped data attributes, never bare `approval` or other
+component-state classes. Otherwise the approval card's padding/background can
+inflate the point and pause glyph and squeeze out the title. The point remains
+6-by-6 pixels and the trailing glyph 15-by-15. The secondary attention caption
+stays one line with ellipsis at narrow widths, while the full session title and
+actual input/approval descriptions remain accessible. The main approval card
+keeps its own layout and permission controls.
+
 `session.pr_observed` retains version-1 metadata in the owning session, bound to
 the actual profile, session, canonical PR URL, project, managed workspace/root/revision,
 configured access mode and configuration revision. Its projection does not
