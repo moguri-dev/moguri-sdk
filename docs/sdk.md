@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **53**, combining
+Current source uses protocol **54**, adding exact-scoped session PR observations
+and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
 [the separate Agent terminal](architecture/agent-terminal.md),
 [chat activity and compact usage](architecture/chat-activity.md),
 [desktop interactions](setup.md#desktop-interactions),
@@ -28,6 +29,23 @@ optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
 every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
+
+`sessionIndicator(session, snapshot)` is a browser-safe selector for actual
+work/input/completion and separately verified linked-PR state. It includes
+labels, `prState` and `prLabel`; optional heuristic questions are explicitly
+not structured answer requests. `sessionPullRequestUrl`, `sessionPrScope` and
+`sessionPullRequest` resolve the same direct, work-item or exact managed-change
+source in SDK/desktop/TUI commands. Reading these selectors performs no network,
+filesystem, model or Git action.
+
+`Session.prObservation` is optional for older history. A new
+`session.pr_observed` event retains profile/session/URL/project/workspace/root/revision,
+access mode and configuration revision with actual GitHub state/draft/checked
+time or diagnostic. It does not increment the session revision, activity time,
+unread state or lifecycle. Metadata is not a user answer, PR-write permission
+or evidence that the session's work succeeded. Legacy missing draft remains
+unknown; project-free scope cannot inherit a root or authenticated account.
+The schema-54 marker upgrades transactionally without rewriting ciphertext.
 
 ## Agent command output
 
@@ -139,6 +157,12 @@ their original encryption and identities. Local project names are safe unique
 identifiers; normalization never renames filesystem directories.
 
 ### Retained-state upgrades
+
+Protocol/database 54 adds the versioned session PR observation marker after
+the converged 53 history. Marker insertion/version advance are transactional;
+insertion failure rolls back and current missing/corrupt markers refuse reopen.
+Legacy links keep missing draft state unknown. No ciphertext, keys, grants,
+drafts, command receipts or historical lifecycle outcomes are rewritten.
 
 Protocol/database 53 converges main-line versions 44-52 and the independently
 numbered desktop versions 44-46. It identifies desktop provenance by the retained

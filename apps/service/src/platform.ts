@@ -5,7 +5,6 @@ import { parseDocument } from "yaml";
 import { Value } from "typebox/value";
 import {
   defaultSettings, guidanceText, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
-  defaultBoard,
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
@@ -40,6 +39,7 @@ import { WorkspaceRuntime, type WorkspaceOptions } from "./workspace.ts";
 import { SessionWorkspace, type SessionWorkspaceHost, type SessionWorkspaceOptions, type WorkspaceFinish } from "./session-workspace.ts";
 import { assertSessionTool, matchesFolder } from "./project-policy.ts";
 import { pullRequestLink } from "./project-integrations.ts";
+import { SessionPrObserver } from "./session-prs.ts";
 import type { OAuthOptions } from "./mcp-oauth.ts";
 import { Engagement, isEngagementCommand, isEngagementQuery } from "./engagement.ts";
 import type { ModelRegistryOptions } from "./model-registry.ts";
@@ -166,6 +166,7 @@ export class PlatformRuntime {
   readonly gateway: McpGateway;
   readonly voice: LocalDictation;
   readonly workspace: WorkspaceRuntime;
+  readonly sessionPrs: SessionPrObserver;
   readonly sessions: SessionWorkspace;
   readonly managed: ManagedWorkspaces;
   readonly artifacts: ArtifactRuntime;
@@ -242,9 +243,22 @@ export class PlatformRuntime {
       rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
       localRootBusy: host.localRootBusy,
       wake: host.wake,
-      verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
+      verifyPr: async (scope) => {
+        if (scope.projectId && scope.access === "gh-cli") await this.managed.assert({ projectId: scope.projectId, workspaceId: scope.workspaceId });
+        const observed = await this.workspace.integrations.pullRequest(pullRequestLink(scope.url), { githubAccess: scope.access }, scope.root, AbortSignal.timeout(20_000));
+        if (scope.projectId && scope.access === "gh-cli") await this.managed.assert({ projectId: scope.projectId, workspaceId: scope.workspaceId });
+        return observed;
+      },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
     }, stateDir, { ...options, terminal: { ...options.terminal, vault: options.terminal?.vault ?? options.vault } });
+    this.sessionPrs = new SessionPrObserver({
+      snapshot: () => this.snapshot(), commit: (events) => this.host.commit(events),
+      assertRoot: async (session, signal) => {
+        signal.throwIfAborted();
+        if (session.projectId) await this.managed.assert({ projectId: session.projectId, workspaceId: session.workspaceId });
+        signal.throwIfAborted();
+      },
+    }, this.workspace.integrations, options.integrations?.prRefreshMs);
     this.candidates = new CandidateRuntime(store, {
       snapshot: () => this.snapshot(), managed: this.managed, projects: () => this.sessions.projects,
       commit: (events) => this.host.commit(events),       artifact: (session, text, summary, patch, sources) => this.artifacts.candidate(session, text, summary, patch, sources),
@@ -521,6 +535,7 @@ export class PlatformRuntime {
           ...(job.sandboxPublicationId ? { sandboxPublicationId: job.sandboxPublicationId } : {}) } };
     })]);
     this.workspace.start();
+    this.sessionPrs.start();
     await this.sessions.recover();
   }
   prompt(session?: Session): string {
@@ -1208,6 +1223,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     this.github.close();
     this.linear.close();
     this.workspace.close();
+    this.sessionPrs.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
     const settled = await Promise.allSettled([this.inputs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);

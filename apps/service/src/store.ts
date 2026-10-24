@@ -259,6 +259,12 @@ export class EventStore {
         INSERT INTO retention_metadata(id,value) VALUES ('document_attachment_schema','1');
         PRAGMA user_version=43; COMMIT;`);
       if (version < 53) this.migrateDesktopMerge(version);
+      if (version < 54) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('session_indicators_schema','1');
+        PRAGMA user_version=54; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_indicators_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid retained session indicator schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateDesktopMerge(version: number): void {

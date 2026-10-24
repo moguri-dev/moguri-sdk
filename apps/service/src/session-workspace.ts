@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import {
-  MoguriError, sessionOrderScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
+  MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
@@ -32,7 +32,7 @@ export interface SessionWorkspaceHost {
   job(kind: string, projectId: string, execute: (signal: AbortSignal) => Promise<unknown>): string;
   validateAdmission(session: Session, attachments?: Session["draft"]["attachments"]): void;
   wake(): void;
-  verifyPr(projectId: string, url: string): Promise<void>;
+  verifyPr(scope: SessionPrScope): Promise<PullRequestLink>;
   contextPreview(session: Session): Promise<ModelContextPreview>;
   startup(projectId: string | null): ResolvedControls;
   project(session: Pick<Session, "projectId" | "workspaceId">): Project;
@@ -306,16 +306,23 @@ export class SessionWorkspace {
         if (!issue && !command.prUrl) throw new MoguriError("work_item", "Choose an existing work item or explicit PR URL.");
         const { pullRequestLink } = await import("./project-integrations.ts");
         const prUrl = command.prUrl ? pullRequestLink(command.prUrl).url : issue?.pullRequest?.url ?? null;
-        if (command.prUrl) await this.host.verifyPr(project.id, prUrl!);
-        const startup = this.host.startup(project.id);
         if (command.workspaceId) {
           this.host.project({ projectId: project.id, workspaceId: command.workspaceId });
-          if (startup.controls.env !== "Local") throw new MoguriError("workspace_env", "This worktree has a Local location only. No default remote root was inferred.", 409);
         }
+        const owner = { projectId: project.id, workspaceId: command.workspaceId ?? null, prUrl, workItemId: issue?.id ?? null };
+        const scope = sessionPrScope(owner, this.snapshot());
+        const verified = command.prUrl && scope ? await this.host.verifyPr(scope) : null;
+        const latestScope = sessionPrScope(owner, this.snapshot());
+        if (verified && (!scope || !latestScope || !sameSessionPrScope(scope, latestScope))) throw new MoguriError("session_pr_stale", "The exact project/root or GitHub access changed during PR verification. No session or stale observation was created.", 409);
+        const startup = this.host.startup(project.id);
+        if (command.workspaceId && startup.controls.env !== "Local") throw new MoguriError("workspace_env", "This worktree has a Local location only. No default remote root was inferred.", 409);
         const id = randomUUID();
-        return finish([{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
+        const events: EventInput[] = [{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
           payload: { title: issue?.title ?? `PR ${prUrl}`, ...startup, workspaceId: command.workspaceId ?? null, prUrl, workItemId: issue?.id ?? null } },
-          { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text: issue ? `${issue.title}\n\n${issue.body}` : `Work on ${prUrl}. The folder checkout has not been changed.`, attachments: [] } }], { id });
+          { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text: issue ? `${issue.title}\n\n${issue.body}` : `Work on ${prUrl}. The folder checkout has not been changed.`, attachments: [] } }];
+        if (verified && scope) events.push({ event_type: "session.pr_observed", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
+          payload: { observation: { version: 1, profileId: this.snapshot().profileId, sessionId: id, scope, pullRequest: verified } } });
+        return finish(events, { id });
       }
       case "queue.release": {
         const session = this.session(command.sessionId); this.revision(session.queueRevision, command.expectedRevision);

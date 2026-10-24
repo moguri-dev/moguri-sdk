@@ -42,12 +42,14 @@ import { projectGithubOperation, type GithubEventPayloads, type GithubOperation 
 import { projectLinearOperation, type LinearEventPayloads, type LinearOperation } from "./linear-workflows.ts";
 import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts";
 import type { TaskPlan, TaskProgressReport } from "./progress.ts";
+import { SessionPrObservationSchema, sameSessionPrScope, sessionPrScope, type SessionPrObservation } from "./session-status.ts";
+export * from "./session-status.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 53;
+export const PROTOCOL_VERSION = 54;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -185,6 +187,7 @@ export interface Session {
   completedAt?: string;
   finishedAt?: string;
   prUrl: string | null;
+  prObservation?: SessionPrObservation | null;
   workItemId: string | null;
   browserUrl: string | null;
   suggestionSources?: SuggestionSource[];
@@ -230,6 +233,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "project.added": { project: Project };
   "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "session.workspace_bound": { workspaceId: string | null };
+  "session.pr_observed": { observation: SessionPrObservation };
   "session.sandbox_bound": { workspaceId: string };
   "sandbox.workspace_recorded": { workspace: SandboxWorkspace };
   "sandbox.execution_recorded": { execution: SandboxExecution };
@@ -366,7 +370,7 @@ export type StoredEvent = EventInput & {
   artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
-  "project.added", "session.created", "session.configured", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "project.added", "session.created", "session.configured", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
@@ -898,7 +902,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
         kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, order: nextSessionOrder++, unread: false, groupId: null, archivedAt: null,
-        prUrl: event.payload.prUrl ?? null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
+        prUrl: event.payload.prUrl ?? null, prObservation: null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
         suggestionSources: event.payload.suggestionSources,
         inheritedImages: event.payload.inheritedImages,
         activeCompactionId: null,
@@ -906,6 +910,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     const session = event.session_id ? sessions.get(event.session_id) : undefined;
     if (!session) continue;
+    if (event.event_type === "session.pr_observed") {
+      const observation = event.payload.observation;
+      const scope = sessionPrScope(session, { issues: [...issues.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()],
+        projects: [...projects.values()], projectConfigurations: [...projectConfigurations.values()] });
+      if (!Value.Check(SessionPrObservationSchema, observation) || observation.profileId !== profileId || observation.sessionId !== session.id ||
+        event.project_id !== session.projectId || !scope || !sameSessionPrScope(scope, observation.scope) || observation.pullRequest.url !== scope.url) {
+        throw new MoguriError("session_pr_scope", "A PR observation lost its exact session/profile/root/access binding. State was preserved.", 409);
+      }
+      session.prObservation = structuredClone(observation);
+      continue;
+    }
     session.updatedAt = event.timestamp;
     const addUser = (item: QueueItem) => session.messages.push({
       id: item.id, turnId: event.turn_id ?? "", role: "user", text: item.text +
@@ -932,7 +947,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         if (changes.unread !== undefined) session.unread = changes.unread;
         if (changes.groupId !== undefined) session.groupId = changes.groupId;
         if (changes.parentSessionId !== undefined) session.parentSessionId = changes.parentSessionId ?? undefined;
-        if (changes.prUrl !== undefined) session.prUrl = changes.prUrl;
+        if (changes.prUrl !== undefined) { if (changes.prUrl !== session.prUrl) session.prObservation = null; session.prUrl = changes.prUrl; }
         session.revision++; break;
       }
       case "task.plan_updated": {

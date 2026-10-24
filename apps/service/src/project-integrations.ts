@@ -34,7 +34,7 @@ export function pullRequestLink(input: string): PullRequestLink {
   const match = url.pathname.match(/^\/([A-Za-z0-9][A-Za-z0-9_.-]*)\/([A-Za-z0-9][A-Za-z0-9_.-]*)\/pull\/([1-9]\d*)\/?$/);
   if (url.protocol !== "https:" || url.host !== "github.com" || url.username || url.password || url.search || url.hash || !match || !Number.isSafeInteger(Number(match[3]))) throw new MoguriError("issue_pr", "Use a canonical github.com pull request URL, without credentials, query or fragment.");
   const repo = `${match[1]}/${match[2]}`;
-  return { url: `https://github.com/${repo}/pull/${match[3]}`, repo, number: Number(match[3]), state: "unknown", checkedAt: null, diagnostic: null };
+  return { url: `https://github.com/${repo}/pull/${match[3]}`, repo, number: Number(match[3]), state: "unknown", draft: null, checkedAt: null, diagnostic: null };
 }
 export class ProjectIntegrations {
   private linearGeneration = randomUUID();
@@ -171,8 +171,9 @@ export class ProjectIntegrations {
     if (result.repository.visibility !== "public") throw new MoguriError("repository_access", "A private/internal repository needs explicitly selected authenticated GitHub access. No credential fallback was used.", 403);
     return result;
   }
-  private async githubRequest(endpoint: string, access: "public" | "gh-cli", root: string, signal: AbortSignal): Promise<unknown> {
+  private async githubRequest(endpoint: string, access: "public" | "gh-cli", root: string | null, signal: AbortSignal): Promise<unknown> {
     if (access === "gh-cli") {
+      if (root === null) throw new MoguriError("github_root", "Authenticated PR inspection requires an explicit bound Local project root. No previous project or account was substituted.", 409);
       if (this.options.githubCliRead) return this.options.githubCliRead(endpoint, root, signal);
       let text: string;
       try {
@@ -188,14 +189,14 @@ export class ProjectIntegrations {
     }
     return fetchJson(this.options.fetch ?? fetch, `https://api.github.com/${endpoint}`, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }, AbortSignal.any([signal, AbortSignal.timeout(15_000)]));
   }
-  async pullRequest(link: PullRequestLink, board: IssueBoard, root: string, signal: AbortSignal): Promise<PullRequestLink> {
+  async pullRequest(link: PullRequestLink, board: Pick<IssueBoard, "githubAccess">, root: string | null, signal: AbortSignal): Promise<PullRequestLink> {
     const current = pullRequestLink(link.url);
-    const result = await this.githubRead(`repos/${current.repo}/pulls/${current.number}`, board.githubAccess, root, signal);
+    const result = await this.githubRequest(`repos/${current.repo}/pulls/${current.number}`, board.githubAccess, root, signal);
     if (!isRecord(result) || result.number !== current.number || result.html_url !== current.url || !["open", "closed"].includes(String(result.state)) ||
-      typeof result.merged !== "boolean" || result.merged && (result.state !== "closed" || typeof result.merged_at !== "string" || !Number.isFinite(Date.parse(result.merged_at)))) {
+      typeof result.draft !== "boolean" || typeof result.merged !== "boolean" || result.merged && (result.state !== "closed" || typeof result.merged_at !== "string" || !Number.isFinite(Date.parse(result.merged_at)))) {
       throw new MoguriError("issue_pr_response", "The response did not verify this exact PR's state. No phase was changed.");
     }
-    return { ...current, state: result.merged ? "merged" : result.state === "closed" ? "closed" : "open", checkedAt: new Date().toISOString(), diagnostic: null };
+    return { ...current, state: result.merged ? "merged" : result.state === "closed" ? "closed" : "open", draft: result.draft, checkedAt: new Date().toISOString(), diagnostic: null };
   }
   async importLinear(board: IssueBoard, cursor: string | undefined, signal: AbortSignal): Promise<{
     items: { title: string; body: string; linear: NonNullable<LocalIssue["linear"]> }[]; nextCursor: string | null;

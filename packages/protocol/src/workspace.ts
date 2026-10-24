@@ -42,8 +42,17 @@ export const defaultBoard = (projectId: string): IssueBoard => ({
 });
 export interface PullRequestLink {
   url: string; repo: string; number: number; state: "unknown" | "open" | "closed" | "merged";
+  draft?: boolean | null;
   checkedAt: string | null; diagnostic: string | null;
 }
+export const PullRequestLinkSchema = object({
+  url: Type.String({ minLength: 1, maxLength: 2048 }), repo: Type.String({ minLength: 3, maxLength: 200 }),
+  number: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  state: Type.Union([Type.Literal("unknown"), Type.Literal("open"), Type.Literal("closed"), Type.Literal("merged")]),
+  draft: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
+  checkedAt: Type.Union([Type.String({ maxLength: 40 }), Type.Null()]),
+  diagnostic: Type.Union([Type.String({ maxLength: 4000 }), Type.Null()]),
+});
 export interface LocalIssue {
   id: string; projectId: string; number: number; title: string; body: string; kind: IssueKind;
   phaseId: string; revision: number; archived: boolean; createdAt: string; updatedAt: string;

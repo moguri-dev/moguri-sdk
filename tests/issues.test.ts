@@ -39,7 +39,7 @@ test("only a verified merged PR advances a customizable phase and stale observat
   const fixture = await setupFixture({ platform: { integrations: { fetch: async (url) => {
     assert.equal(url, "https://api.github.com/repos/generated/project/pulls/7");
     if (hold) { started = true; await new Promise<void>((resolve) => { hold = resolve; }); }
-    return Response.json({ number: 7, html_url: "https://github.com/generated/project/pull/7", state, merged, merged_at: merged ? "2026-01-01T00:00:00Z" : null });
+    return Response.json({ number: 7, html_url: "https://github.com/generated/project/pull/7", state, draft: false, merged, merged_at: merged ? "2026-01-01T00:00:00Z" : null });
   } } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -76,7 +76,7 @@ test("linking a PR authorizes automatic read-only merge observation, not merge a
   let reads = 0;
   const fixture = await setupFixture({ platform: { integrations: { fetch: async (_, init) => {
     assert.equal(init?.method ?? "GET", "GET"); reads++;
-    return Response.json({ number: 3, html_url: "https://github.com/generated/project/pull/3", state: "closed", merged: true, merged_at: "2026-01-01T00:00:00Z" });
+    return Response.json({ number: 3, html_url: "https://github.com/generated/project/pull/3", state: "closed", draft: false, merged: true, merged_at: "2026-01-01T00:00:00Z" });
   } } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

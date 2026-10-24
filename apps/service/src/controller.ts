@@ -564,6 +564,7 @@ export class ControlPlane extends EventEmitter {
     this.remote.synchronize();
     this.sandbox.synchronize();
     this.provider.synchronize();
+    this.platform?.sessionPrs.changed(appended);
   }
   private commandFinish(id: string, commandDigest: string): WorkspaceFinish {
     return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {

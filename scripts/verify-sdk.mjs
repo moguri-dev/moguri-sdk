@@ -58,6 +58,7 @@ try {
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
+    ${installedProtocol >= 54 ? 'import {sessionIndicator,sessionIndicatorColors,sessionPrScope,sessionPullRequest,sessionPullRequestUrl,type SessionPrObservation} from "moguri";' : ""}
     async function typedConsumer() {
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
@@ -69,6 +70,13 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 54 ? `
+      const statusView=(session:Session,state:Snapshot)=>{
+        const observed:SessionPrObservation|null|undefined=session.prObservation;void observed?.scope.root;void observed?.pullRequest.draft;
+        void sessionIndicator(session,state).prState;void sessionIndicatorColors("#151921").merged;
+        void sessionPrScope(session,state)?.access;void sessionPullRequest(session,state)?.checkedAt;void sessionPullRequestUrl(session,state);
+      };void statusView;
+      ` : ""}
       ${installedProtocol >= 44 ? `
       await sdk.projects.add("/generated/folder");
       const cloned=await sdk.projects.clone("https://example.invalid/generated.git","/generated/new-folder",true);void cloned.id;
@@ -329,7 +337,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
@@ -341,9 +349,12 @@ try {
     const provider=makeProvider(),providers=new Map([["default",provider]]),vaults=new Map();
     const remoteSecrets=new Map();
     const remoteVault={read:async id=>remoteSecrets.get(id)??null,write:async(id,value)=>{remoteSecrets.set(id,value);},remove:async id=>{remoteSecrets.delete(id);}};
-    let repositoryLookups=0;
+    let repositoryLookups=0,sessionPrLookups=0;
     const repositoryMetadata={id:42,name:"example",full_name:"generated/example",html_url:"https://github.com/generated/example",owner:{login:"generated",type:"Organization"},private:false,visibility:"public",license:{spdx_id:"MIT"},description:"GENERATED_UNRETAINED_REPOSITORY_BODY"};
-    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{assert.equal(String(url),"https://api.github.com/repos/generated/example");repositoryLookups++;return Response.json(repositoryMetadata);}}};
+    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{
+      if(String(url)==="https://api.github.com/repos/generated/example/pulls/7"){sessionPrLookups++;return Response.json({number:7,html_url:"https://github.com/generated/example/pull/7",state:"open",draft:true,merged:false,merged_at:null});}
+      assert.equal(String(url),"https://api.github.com/repos/generated/example");repositoryLookups++;return Response.json(repositoryMetadata);
+    }}};
     const runtime=await createRuntime({stateDir:join(root,"state"),retentionKey:Buffer.alloc(32,0x67),platform,profiles:{
       provider:id=>{if(!providers.has(id))providers.set(id,makeProvider());return providers.get(id);},
       platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
@@ -494,6 +505,24 @@ try {
       await assert.rejects(()=>sdk.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
       await sdk.projects.remove(activityProject.id,true,(await sdk.projects.configuration(activityProject.id)).configuration.revision);
       console.log("Installed protocol-53 SDK/React/CLI/TUI activity preserves exact session-granted source bytes, profile/deletion isolation and actual user provenance without inference or private-ledger content.");
+      }
+      ` : ""}
+      ${installedProtocol >= 54 ? `
+      {
+      const linkedPr="https://github.com/generated/example/pull/7",pr=await sdk.sessions.fromWork(p.id,{prUrl:linkedPr});
+      const state=sdk.getState().snapshot,owner=state.sessions.find(value=>value.id===pr.id);
+      assert.equal(owner.prObservation.pullRequest.draft,true);assert.equal(sessionIndicator(owner,state).prState,"draft");
+      assert.equal(sessionPrScope(owner,state).root,await realpath(project));assert.equal(sessionPullRequestUrl(owner,state),linkedPr);
+      assert.equal(sessionPullRequest(owner,beta.getState().snapshot),null);
+      assert.equal((await sdk.slash(pr.id,"/pr","tui")).url,linkedPr);assert.equal(sessionPrLookups,1);
+      const publicPr=await sdk.sessions.create(null,"Generated installed root-null PR");
+      await sdk.sessions.organize(publicPr.id,{prUrl:linkedPr});
+      for(let attempt=0;attempt<200&&!sdk.getState().snapshot.sessions.find(value=>value.id===publicPr.id).prObservation;attempt++)await new Promise(resolve=>setTimeout(resolve,10));
+      const publicOwner=sdk.getState().snapshot.sessions.find(value=>value.id===publicPr.id);
+      assert.equal(publicOwner.prObservation.scope.root,null);assert.equal(publicOwner.prObservation.scope.access,"public");
+      assert.equal(publicOwner.status,"idle");assert.equal(sessionPrLookups,2);
+      await sdk.sessions.delete(publicPr.id,true);await sdk.sessions.delete(pr.id,true);
+      console.log("Installed protocol-54 browser-safe session/PR selectors, retained draft metadata and shared TUI PR commands preserve exact project/profile and public root-null scope without a model, Git write or duplicate verification.");
       }
       ` : ""}
       const betaSession=await beta.sessions.create(null,"Generated installed Beta chat");

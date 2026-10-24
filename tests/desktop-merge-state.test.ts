@@ -21,6 +21,7 @@ test("both retained schema lineages converge and reopen without rewriting grants
     { name: "desktop 45", version: 45, lineage: "desktop" },
     { name: "desktop 46", version: 46, lineage: "desktop" },
     { name: "main 52", version: 52, lineage: "main" },
+    { name: "converged 53", version: 53, lineage: "main" },
     { name: "desktop 46 previously opened by main 52", version: 46, lineage: "desktop", partialMain: true },
   ] as const;
   for (const source of sources) await t.test(source.name, async () => {
@@ -53,7 +54,7 @@ test("both retained schema lineages converge and reopen without rewriting grants
       store = new EventStore(path, fixture.retentionKey);
       assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
       assert.deepEqual(retainedCiphertextRows(store.db), before);
-      for (const id of [...mainMarkers, "desktop_interaction_schema"]) assert.equal(store.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value, "1");
+      for (const id of [...mainMarkers, "desktop_interaction_schema", "session_indicators_schema"]) assert.equal(store.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value, "1");
       store.close(); store = undefined;
       restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
       peer = await new MoguriSdk(restarted.connection).ready();
@@ -71,6 +72,50 @@ test("both retained schema lineages converge and reopen without rewriting grants
       assert.ok(restarted.store.events().slice(originalEvents).every((event) => event.event_type === "provider.changed"));
       assert.equal(fixture.requests.length, 0);
     } finally { sdk.disconnect(); store?.close(); peer?.disconnect(); await restarted?.close(); await fixture.close(); }
+  });
+});
+
+test("schema 53 indicator migration rolls back on interruption and reopens without rewriting encrypted state", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  let store: EventStore | undefined;
+  try {
+    const file = join(fixture.directory, "generated-indicator-retained.txt");
+    await writeFile(file, "Generated retained indicator migration context.");
+    await sdk.attachments.file(fixture.sessionId, file);
+    await sdk.sessions.organize(fixture.sessionId, { pinned: true, order: 12 });
+    const before = retainedCiphertextRows(fixture.service.store.db), path = fixture.service.store.path;
+    sdk.disconnect(); await writeLegacyState(fixture.service, 53);
+    const original = new DatabaseSync(path);
+    try { original.exec("CREATE TRIGGER generated_indicator_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='session_indicators_schema' BEGIN SELECT RAISE(ABORT,'Generated indicator migration interruption'); END"); } finally { original.close(); }
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated indicator migration interruption/);
+    const failed = new DatabaseSync(path);
+    try {
+      assert.equal(failed.prepare("PRAGMA user_version").get()?.user_version, 53);
+      assert.equal(failed.prepare("SELECT value FROM retention_metadata WHERE id='session_indicators_schema'").get(), undefined);
+      assert.deepEqual(retainedCiphertextRows(failed), before);
+      failed.exec("DROP TRIGGER generated_indicator_failure");
+    } finally { failed.close(); }
+    store = new EventStore(path, fixture.retentionKey);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+    assert.deepEqual(retainedCiphertextRows(store.db), before);
+    const expected = store.events(); store.close(); store = new EventStore(path, fixture.retentionKey);
+    assert.deepEqual(store.events(), expected); assert.deepEqual(retainedCiphertextRows(store.db), before);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); store?.close(); await fixture.close(); }
+});
+
+test("current indicator schemas reject missing or corrupt markers rather than silently resetting metadata", async (t) => {
+  for (const sql of ["DELETE FROM retention_metadata WHERE id='session_indicators_schema'", "UPDATE retention_metadata SET value='0' WHERE id='session_indicators_schema'"]) await t.test(sql, async () => {
+    const fixture = await setupFixture(), path = fixture.service.store.path;
+    try {
+      await fixture.service.close();
+      const original = new DatabaseSync(path);
+      let before: ReturnType<typeof retainedCiphertextRows>;
+      try { original.exec(sql); before = retainedCiphertextRows(original); } finally { original.close(); }
+      assert.throws(() => new EventStore(path, fixture.retentionKey), /Missing or invalid retained session indicator schema marker/);
+      const failed = new DatabaseSync(path);
+      try { assert.deepEqual(retainedCiphertextRows(failed), before); } finally { failed.close(); }
+    } finally { await fixture.close(); }
   });
 });
 
