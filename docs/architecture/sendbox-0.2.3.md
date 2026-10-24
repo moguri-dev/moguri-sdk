@@ -78,6 +78,44 @@ readiness/error authority; no client-specific readiness or provider fallback
 was added. Generated bootstrap, shell, catalogue, actual-guest cleanup and
 restart/cancellation cases cover these boundaries.
 
+### Protocol-51 current payload and reviewed network scope
+
+The fresh no-cache arm64 image builds in **32,867.98 ms** with Node 26.12.0
+and protocol 51. Installation, signed bundle, public key, release sequence and
+trust-root pins remain the 0.2.3 values recorded below.
+
+| Workload field | Actual immutable value |
+| --- | --- |
+| Image | `docker.io/library/moguri-worker@sha256:078095a44e5e1ffc2bedb93b89774eb49d519cae9f140e49655a2beabdeb4f52` |
+| Worker SHA-256 | `35540ae6a293cb99786b16280dd5770ee955b410e3f0100699d2cac74cc18065` |
+| Bridge SHA-256 | `dda52fb76a14fd5c8514c9f376edbb137179261ecf0004c3d2257a415668d048` |
+| MCP worker SHA-256 | `3964c359c92a081c8cc9a99b1ae5813cd4c17b9238c6ca0915503636186dc9ae` |
+
+| Gate against the stated image | Outcome |
+| --- | --- |
+| Historical protocol-50 image refusal | PASS negative regression, **8,444.59 ms**; original signed owner captured, precise version error, exact guest absent |
+| Actual guest/worker/process controls and cleanup with Finder's minimal PATH | PASS, **1,505.91 ms**; no model call |
+| Encrypted IPC, denied model admission and retained failed after-state despite rollback | PASS, **3,079.87 ms** |
+| Fresh API-only cold provider scope | **FAIL**, **1,569.23 ms**; explicit network diagnostic and proxy CONNECT 403, not a passing gate |
+| Fresh API plus separately user-reviewed exact CNAME | PASS, **2,038.55 ms**; credential-free metadata reachability and verified owned VM absence |
+
+The controller's single approved-host CNAME observation returned
+`glb-db52c2cf8be544.github.com`. The user explicitly approved adding only that
+hostname to the proposed configuration alongside `api.githubcopilot.com`.
+The passing generated probe preserves the original 2 CPU, 4,096 MiB memory,
+8,192 MiB disk and Copilot-enabled scope. Its configuration digest is
+`73de94b9e849a5286f6517495b13376a5770306beefd9638dad8b1bf8b11680c`.
+This is not a built-in alias grant, a wildcard, permission to allow a future
+different alias, or evidence of authenticated inference/model availability.
+There were no personal credentials, paid calls or saved Default-profile changes.
+The original failed private probe remains intact.
+
+The native SDK fixture also verifies the exact currently offered six-tool
+inventory, including the existing `task_progress` advice tool, rather than
+using the stale five-tool assertion from before explicit model plans. This
+does not enable native MCP/subagents, broaden workspace permissions or treat
+a plan as acceptance.
+
 ## Protocol-41 detached-descendant source qualification
 
 The owner explicitly selected qualified SendBox for sessions requiring a
