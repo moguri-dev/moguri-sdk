@@ -93,6 +93,38 @@ does not grant tool permission, a new wildcard, provider credentials or Local
 fallback. Artifact/package verification does not claim an actual 0.2.4 guest
 or dynamic effective-scope qualification.
 
+#### Default-update qualification
+
+Source `10f7708` passes the release-specific SDK, state, review, archive-safety
+and generated network gates, including explicit old-version preservation and
+the version-bound Meta warning. The source and compiled inputs remain unchanged
+during its complete desktop and package checks.
+
+| Check | Observed result |
+| --- | --- |
+| Generated native setup/default/cache/recovery gate | 24 passed, 7 physical-native skips; zero failures |
+| Shared settings/reopen/regression gate | 32 passed; zero failures |
+| Meta-review/default/scope follow-up | 29 passed; zero failures |
+| Complete hidden Electron suite | 121 passed, 2 physical-native skips; zero failures / 4.4 min |
+| Actual rebuilt packaged Meta review and consent | 1 hidden case passed / 2.4 s |
+| Packed external SDK and installed workers | All entrypoints/client paths and all 12 worker probes pass |
+| Old packaged 0.2.3 under the new exact-pin gate | Correctly refused before execution |
+| Actual 0.2.4 producer cache hit and retained old 0.2.3 | PASS / 565.39 ms; same exact new directory reused, old artifacts preserved |
+| No-cache Linux arm64 worker payload/synthetic PTY | PASS / 42.09 s |
+| Actual package/native-distribution/update ZIP/DMG | PASS; exact 0.2.4 vendor/default/BOM checked; 740,556,177-byte ZIP verified in 102.15 s |
+| Type checks, production build and dependency audits | PASS; zero vulnerabilities |
+
+The final image is
+`docker.io/library/moguri-worker@sha256:98168acab62b1b3891671add0c224cdccf4a8dae843b0acc35c64fe19cf55377`.
+The GitHub attestation check binds the hosted
+`mbianchidev/sendbox/.github/workflows/release.yaml` workflow, exact tag and
+source commit, rejecting self-hosted runners. The actual packaged Node/service
+discovers bundled 0.2.4 without credentials, keychain use, an administrator
+dialog or model request. Artifact/package verification is not physical 0.2.4
+guest/network qualification or Linux release readiness; those gates remain
+explicit. The app is ad-hoc signed, not notarized. Previously documented
+non-blocking chunk/icon and external-host npm override notices remain unchanged.
+
 The primary Settings flow shows these actual defaults and requires review and
 approval, not JSON authoring, a developer build or a SHA command. A matching
 explicitly configured root-owned installation can be reused after verification.
