@@ -399,6 +399,7 @@ try {
       assert.equal(beta.getState().snapshot.projects.length,0);assert.equal(beta.getState().snapshot.sessions.length,0);
       assert.equal(beta.getState().snapshot.provider.status,"disconnected");
       ${installedProtocol >= 44 ? `
+      {
       assert.deepEqual(sdk.settings.get().values.interactions,{confirmSessionAttachments:true,confirmTerminalClose:true});
       const interactionRoot=join(root,"generated-interaction-project");await mkdir(interactionRoot);
       await writeFile(join(interactionRoot,"generated.txt"),"Generated installed interaction snapshot.");
@@ -415,6 +416,7 @@ try {
       assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===first.id).order,0);
       await sdk.sessions.delete(first.id,true);await sdk.sessions.delete(second.id,true);await sdk.projects.remove(interactionProject.id,true,0);
       console.log("Installed protocol-44 browser-safe SDK and TUI commands preserve safe identifiers, exact Local context resolution, profile-private snapshots and atomic shared sibling order without inference.");
+      }
       ` : ""}
       const betaSession=await beta.sessions.create(null,"Generated installed Beta chat");
       assert.equal(beta.getState().snapshot.sessions[0].controls.modelId,null);

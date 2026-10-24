@@ -617,7 +617,7 @@ test("restart terminalizes dispatched and undispatched original jobs without rep
 test("schema40 upgrades to the current schema without deleting existing generated project state", async () => {
   const f = await generated({ persistent: true });
   try {
-    f.store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('task_progress_schema','document_attachment_schema'); PRAGMA user_version=40; COMMIT;");
+    f.store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('task_progress_schema','document_attachment_schema','desktop_interaction_schema'); PRAGMA user_version=40; COMMIT;");
     const reopened = new EventStore(f.storePath, f.key);
     try {
       assert.equal(Number(reopened.db.prepare("PRAGMA user_version").get()?.user_version), PROTOCOL_VERSION);

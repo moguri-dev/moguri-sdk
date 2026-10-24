@@ -149,3 +149,19 @@ start 184.54 ms / 445.14 MiB / scroll 8.28 ms, and filesystem/Git status
 0.98/6.26 ms. The unavailable baseline groups retained their explicit FAIL
 results. Root `npm ci` emitted neither reported deprecation warning, and the
 moderate-or-higher dependency audit reported zero vulnerabilities.
+
+Legacy recovery fixtures remove the schema-44 marker when constructing genuine
+pre-44 databases. Eleven older hand-built fixtures initially retained that
+future marker while lowering `user_version`; correcting their setup preserves
+the original strict migration, rollback, ciphertext/key/receipt and missing
+telemetry assertions. All 13 targeted schema/recovery cases pass. Production
+migrations still reject inconsistent markers rather than silently ignoring
+them or requiring a state reset.
+
+The actual packed external SDK passes safe project identifiers, exact Local
+source resolution, same-profile attachment grants, complete atomic sibling
+order and shared TUI commands. Its generated Local broker also proves a
+null-session/project global console at the canonical data root remains usable
+after source-session deletion through SDK, CLI and TUI, without a model call.
+Root-install warning fixes are separately scoped from npm's non-inheritance of
+dependency overrides; external-host configuration is documented in the SDK guide.

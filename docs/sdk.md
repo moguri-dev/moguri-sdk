@@ -68,6 +68,23 @@ legacy session order derives from creation, and historical data/grants retain
 their original encryption and identities. Local project names are safe unique
 identifiers; normalization never renames filesystem directories.
 
+The repository's warning-free `npm ci` uses root-level compatibility overrides.
+npm does not inherit a dependency's overrides, so a minimal external SDK host
+can still report the upstream whatwg-encoding/node-domexception deprecations.
+To apply the same verified Node 26 policy without changing unrelated host
+dependencies, the embedding application's root manifest can use:
+
+```json
+{
+  "overrides": {
+    "moguri": {
+      "encoding-sniffer": "1.0.2",
+      "node-fetch": "npm:node-fetch-native@1.6.7"
+    }
+  }
+}
+```
+
 ## Document attachments
 
 `attachments.file(sessionId, path)` automatically extends existing source/text
