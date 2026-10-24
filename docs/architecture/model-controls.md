@@ -66,6 +66,30 @@ high reasoning without exceeding them, an approved existing README edit with
 truncated tool request that cannot write or replay. Provider output usage remains
 separate from visible response length and unknown/billed costs.
 
+### Output-capacity source qualification
+
+Committed source `6df9e8a` passes the complete generated qualification. Source
+and compiled Node/renderer inputs remain unchanged throughout the final suites:
+
+| Check | Observed result |
+| --- | --- |
+| Full unit/worker/recovery/CLI/native-TUI suite | 1,266 passed, 14 physical-native skips, zero failures; 1,280 total / 1,391.05 s |
+| Full hidden Electron suite | 121 passed, 2 physical-native skips, zero failures; 123 total / 4.6 min |
+| Packed external SDK and actual installed-worker probes | All entrypoints/client paths pass; 12 worker probes pass |
+| Actual rebuilt packaged limit/rename/browser-audio UI | 3 hidden cases pass in 4.2 s |
+| Type checks, production build and dependency audits | PASS; zero vulnerabilities |
+| No-cache Linux arm64 worker payload and synthetic PTY | PASS in 45.16 s; exact new worker digest retained |
+| Actual macOS bundle/native-distribution/update ZIP and DMG | PASS; 740,345,780-byte archive verified through the production update consumer in 112.87 s |
+
+The immutable local workload identity is
+`docker.io/library/moguri-worker@sha256:83d2f7f4dc2bdc092854792cd52be8284470abdc28fb33c9ffa4eead26a13724`.
+It qualifies producer bytes and packaging, not physical SendBox containment,
+Linux release readiness or live provider behavior. The 14 unit and 2 desktop
+physical skips remain explicitly gated. No personal session/account, microphone,
+speech model weights or paid inference was used. The app is ad-hoc signed, not
+notarized; known external-host npm override and non-blocking chunk/icon notices
+remain documented in the setup qualification.
+
 ## Domain and persistence
 
 Issue #17 replaces arbitrary numeric windows with one browser-safe SDK contract:
