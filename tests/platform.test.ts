@@ -31,12 +31,44 @@ test("shared settings default dark, prompt edits need acknowledgement and restor
     assert.ok(Array.isArray(messages));
     assert.match(JSON.stringify(messages[0]), /Generated custom instructions/);
     assert.match(JSON.stringify(messages[0]), /moguri-execution-contract/);
+    assert.match(JSON.stringify(messages[0]), /moguri-product-context/);
+    assert.match(JSON.stringify(messages[0]), /https:\/\/github\.com\/mbianchidev\/moguri/);
+    assert.match(JSON.stringify(messages[0]), /npm ci/);
+    assert.match(JSON.stringify(messages[0]), /npm run build/);
+    assert.match(JSON.stringify(messages[0]), /npm start -- --project/);
+    assert.equal(sdk.settings.get()!.values.systemPrompt, "Generated custom instructions. Do not invent results.");
     const revision = sdk.settings.get()!.revision;
     await sdk.prompt.reset(revision);
     assert.equal(sdk.settings.get()?.values.systemPrompt, DEFAULT_SYSTEM_PROMPT);
     assert.equal(sdk.getState().snapshot?.sessions.length, 1);
     await assert.rejects(() => sdk.settings.reset("all", 0), /Another client/);
   } finally { sdk.disconnect(); second.disconnect(); await fixture.close(); }
+});
+
+test("a project-free Moguri installation question receives first-party TUI facts without repository context or another account", mac, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const created = await sdk.sessions.create(null, "Generated Moguri setup question");
+    const session = sdk.getState().snapshot!.sessions.find((session) => session.id === created.id)!;
+    await sdk.sessions.configure(session.id, { ...session.controls, modelId: fixture.modelId });
+    await sdk.command({ type: "draft.save", sessionId: session.id, expectedRevision: 0, text: "How do I install the Moguri TUI?", attachments: [] });
+    await sdk.command({ type: "message.send", sessionId: session.id, expectedRevision: 1, delivery: "queue" });
+    await waitFor(() => sdk.getState().snapshot!.sessions.find((value) => value.id === session.id)?.status === "completed");
+    const messages = fixture.requests[0]?.messages;
+    assert.ok(Array.isArray(messages));
+    const system = JSON.stringify(messages[0]);
+    assert.match(system, /moguri-product-context/);
+    assert.match(system, /docs\/setup\.md/);
+    assert.match(system, /macOS.*alpha/);
+    assert.match(system, /Node\.js.*26/);
+    assert.match(system, /private/);
+    assert.match(system, /npm start -- --project/);
+    assert.match(system, /no active project/);
+    assert.equal(system.includes(fixture.project), false);
+    assert.equal(sdk.settings.get()!.values.memory.enabled, false);
+    assert.equal(fixture.requests.length, 1);
+    assert.equal(sdk.getState().snapshot!.questions.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
 });
 
 test("repository vectors and graph retain digests, reuse unchanged data and mark changed snapshots stale", async () => {

@@ -5,6 +5,50 @@ capability access, shared defaults, settings, cancellation and protocol
 negotiation; the service remains the sole durable authority. A new SDK operation
 must work without Electron and must be exposable by either client.
 
+## TUI input and first-party product context
+
+This maintenance slice reuses OpenTUI/React (MIT), its native key bindings and
+the existing shared SDK/draft/worker path. It adds no dependency, API, event,
+setting, schema or migration.
+
+The chat textarea explicitly binds Enter/keypad Enter to submit and Shift+Enter
+to newline instead of inheriting OpenTUI's default Return-to-newline action.
+Cmd/Ctrl+Enter still holds the exact draft without inference, and
+Shift+Cmd/Ctrl+Enter retains send-now. Settings/JSON editors, choices, approvals,
+masked credentials, bracketed paste, focus and SDK optimistic-revision guards
+keep their existing behavior. OpenTUI's existing enhanced-keyboard negotiation
+reports modifiers; unmodified Enter also works with legacy input, whose Ctrl+J
+newline fallback remains available. No terminal parser or escape decoder is
+implemented by Moguri.
+
+The service appends a bounded `moguri-product-context` block to the effective
+prompt before snapshotting/sizing/admission. It identifies the host application,
+canonical source/setup guide, executable source-install/entrypoint commands,
+input controls and current macOS arm64 alpha limits. It does not infer that a
+session has only one UI, confuse execution Env with a client, inspect installed
+versions/accounts, invent a public registry/formula/release or grant permission
+to install. Known first-party setup does not depend on workspace access,
+optional repository memory or an external lookup.
+
+Custom saved system prompts remain byte-for-byte unchanged. New normal turns
+share these facts across SDK/TUI/desktop and existing execution transports;
+running turns retain their captured prompt. The existing input estimator and
+all-role budget reservation count the added context before dispatch. Unknown
+accounting, cancellation, permissions and no-fallback rules are unchanged.
+Generated native-input tests reproduce the old failure and prove plain Return
+send, Shift newline, exact multiline hold and no unintended model call.
+Generated provider-wire tests cover custom prompts and project-free questions,
+not a claim about paid/live-model answer quality.
+
+Fresh prerequisite probes passed all six available groups: cancellation
+33.01 ms; SQLite append p95 0.053 ms/rebuild 0.519 ms; owned PTY cancellation
+152.84 ms with zero survivors; TUI updates 17.70 ms; hidden Electron cold start
+183.85 ms / 442.89 MiB / 8.23 ms per frame; 2,000-file search/Git
+0.810/6.372 ms. The baseline's separate live-provider, Rust/Linux, notarization,
+physical SendBox, routing-quality, live decision and personal SSH gates remain
+FAIL/unqualified. No personal terminal, microphone, account or paid inference
+was used.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned

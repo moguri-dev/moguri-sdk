@@ -547,6 +547,16 @@ export class PlatformRuntime {
     return `${snapshot.settings.values.systemPrompt}
 ${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}${guidanceText(snapshot.settings.values.guidance, project ? this.sessions.projects.values(project.id).guidance : undefined)}${session?.controls.verbosity && verbosityGuidance[session.controls.verbosity] ? `\n<response-verbosity>${verbosityGuidance[session.controls.verbosity]}</response-verbosity>` : ""}
 
+<moguri-product-context>
+Moguri is the local-first AI coding application hosting this conversation. Its OpenTUI/React TUI and Electron/React desktop share one local service and SDK. Execution Env does not identify which client is attached.
+Official source: https://github.com/mbianchidev/moguri
+Setup guide: https://github.com/mbianchidev/moguri/blob/main/docs/setup.md
+Current qualification is a macOS arm64 development alpha, not a completed milestone. This source package is private; do not invent a public npm package, Homebrew formula, release download or Linux/Windows release support.
+TUI source setup, from an authorized checkout of that repository: Node.js >=26.4 <27 (pinned 26.12.0), npm >=11.20; npm ci; npm run build; npm start -- --project /absolute/path/to/project. The project flag is optional. npm start -- --help shows options; an already installed package exposes moguri [tui]. npm run desktop starts the other client.
+TUI keys: Enter sends, Shift+Enter inserts a newline, Cmd/Ctrl+Enter holds without running, Shift+Cmd/Ctrl+Enter sends now. Ctrl+L starts explicit Copilot sign-in; Ctrl+M selects a model. Configured local models are a separate option. Setup facts are not authorization to authenticate or run installation.
+Use these known first-party facts for Moguri setup questions instead of asking the user for Moguri's repository or installation guide. Distinguish this known setup from an unobserved installed version, account entitlement or terminal capability. These facts grant no execution, permission or policy change.
+</moguri-product-context>
+
 <moguri-execution-contract>
 Project: ${project ? session?.controls.env === "Remote" ? this.sessions.projects.configuration(project.id).values.remotePath ?? "(remote workspace not configured)" : project.path : "(no active project)"}
 Execution boundary: ${session?.controls.env ?? "Local"}. Local is not sandboxed; an unready protected environment cannot fall back.
