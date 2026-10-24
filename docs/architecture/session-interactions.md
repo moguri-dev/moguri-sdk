@@ -140,6 +140,33 @@ passed: provider cancellation 31.47 ms; SQLite append p95 0.175 ms/rebuild
 2,000-file search/Git 2.658/25.924 ms. The baseline's separate live/native/
 notarized/Linux/quality gates remain FAIL/unqualified.
 
+### Unread typography qualification
+
+Source `0591c38` adds no dependency, durable schema, setting or API. Before the
+fix both actual manual/background unread cases fail at unchanged 400-weight
+text. Fixed titles use weight 550 without extra unread-only row dots, retain the
+same family/size, and return to 400 on an actual read acknowledgement.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/fresh audit | PASS; zero vulnerabilities |
+| Focused unread, exact-read-race, attention, lifecycle and native interaction cases | 17 passed / 28.8 seconds |
+| Final direct unread cases | 3 passed / 6.7 seconds |
+| Complete hidden Electron suite | 129 passed, 2 physical-native skips, zero failures; 131 total / 5.1 minutes |
+| Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
+| Actual newly packaged hidden app | Unread/read/race, compact attention and navigation: 7 passed / 9.3 seconds |
+| Actual bundle/native distribution/production update/DMG | PASS; protocol 54 / SendBox 0.2.4; 740,545,039-byte ZIP/manifest / 100,762.14 ms; exact native layout and unchanged signed app verified |
+
+The newest DMG is 754,147,235 bytes, SHA-256
+`7433b9681143a274186cc35d532f37fdb5d4ce3b3352c41abcdcfbaa564019bf`.
+Previous installer identities remain historical measurements. The held read
+test admits a later real question before releasing the earlier action and
+verifies that the newer attention stays unread/pending. Read state never
+answers it or removes its actual yellow status. No service/SDK/CLI/TUI/protocol
+source changed from the preserved complete 1,294-pass Node baseline; that
+earlier full run is not relabeled. All fixtures/windows are generated/hidden;
+no personal UI, account, microphone or paid inference was used.
+
 `session.pr_observed` retains version-1 metadata in the owning session, bound to
 the actual profile, session, canonical PR URL, project, managed workspace/root/revision,
 configured access mode and configuration revision. Its projection does not
