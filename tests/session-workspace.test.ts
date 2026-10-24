@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
+import { DraftEditor, MoguriSdk, isRecord } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
@@ -37,9 +37,14 @@ test("read-only mode disables edit/shell/MCP tools and rejects an undeclared wri
     assert.equal(fixture.service.controller.events(0).some((event) => event.event_type === "tool.started"), false);
     const declared = fixture.requests[0]?.tools;
     assert.ok(Array.isArray(declared));
-    assert.equal(JSON.stringify(declared).includes("write_file"), false);
-    assert.equal(JSON.stringify(declared).includes("run_command"), false);
-    assert.equal(JSON.stringify(declared).includes("mcp_gateway"), false);
+    const names = declared.map((tool: unknown) => {
+      assert.ok(isRecord(tool) && isRecord(tool.function) && typeof tool.function.name === "string");
+      return tool.function.name;
+    });
+    assert.equal(names.includes("write_file"), false);
+    assert.equal(names.includes("run_command"), false);
+    assert.equal(names.includes("mcp_gateway"), false);
+    assert.equal(names.includes("read_agent_terminal"), true);
     await sdk.slash(fixture.sessionId, "/agent", "tui");
     assert.equal(fixture.session().mode, "agent");
     await sdk.slash(fixture.sessionId, "/rename Generated renamed session", "desktop");
