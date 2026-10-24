@@ -71,6 +71,8 @@ import { isLinearCommand, isLinearQuery } from "../../../packages/protocol/src/l
 import type { WorkflowHost } from "./workflow-host.ts";
 import { TaskProgressRuntime } from "./task-progress.ts";
 import type { DocumentParserOptions } from "./documents.ts";
+import { ChatActivity } from "./chat-activity.ts";
+import { isActivityQuery } from "../../../packages/protocol/src/activity.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -153,6 +155,7 @@ export class PlatformRuntime {
   readonly engagement: Engagement;
   readonly inputs: ContextInputs;
   readonly progress: TaskProgressRuntime;
+  readonly activity: ChatActivity;
   readonly memory: RepositoryMemory;
   readonly gateway: McpGateway;
   readonly voice: LocalDictation;
@@ -275,6 +278,24 @@ export class PlatformRuntime {
     };
     this.github = new GitHubWorkflows(store, workflowHost, options.github);
     this.linear = new LinearWorkflows(store, workflowHost, this.workspace.integrations, options.linear);
+    this.activity = new ChatActivity({
+      snapshot: () => this.snapshot(), events: host.events,
+      turnBudget: (sessionId, turnId) => {
+        const result = this.budgets.query({ type: "budget.dashboard", sessionId, turnId, bucket: "all" });
+        if (result.type !== "budget.dashboard") throw new MoguriError("activity_budget", "The original turn accounting response changed type. No estimate was substituted.", 409);
+        return result;
+      },
+      workflow: async (source, operationId) => {
+        if (source === "github") {
+          const result = await this.github.query({ type: "github.read", operationId });
+          if (result.type !== "github.read") throw new MoguriError("activity_source", "The retained GitHub source response changed type.", 409);
+          return result.document.action;
+        }
+        const result = await this.linear.query({ type: "linear.workflow.read", operationId });
+        if (result.type !== "linear.workflow.read") throw new MoguriError("activity_source", "The retained Linear source response changed type.", 409);
+        return result.document.input;
+      },
+    }, store);
     this.repositories = new RepositoryTelemetry({
       snapshot: () => this.snapshot(), scope: host.repositoryScope, git: host.repositoryGit,
       remoteRead: host.remoteRepository,
@@ -558,6 +579,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isActivityQuery(query)) return this.activity.query(query);
     if (isGithubQuery(query)) return this.github.query(query);
     if (isLinearQuery(query)) return this.linear.query(query);
     if (isExtensionQuery(query)) return this.extensions.query(query);

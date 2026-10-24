@@ -53,6 +53,7 @@ try {
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
+    ${installedProtocol >= 45 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     async function typedConsumer() {
       const sdk = await connectMoguri({autoStart:false});
       ${installedProtocol >= 43 ? `
@@ -66,6 +67,12 @@ try {
       void (await sdk.attachments.searchDocument("generated-id",capture.id!,literal)).result.nextCursor;
       await sdk.attachments.cancelDocument("generated-id","generated-typed-capture");
       const progress:TaskProgress=(await sdk.sessions.progress("generated-id")).progress;void progress.checklist.percent;void useTaskProgress;
+      ` : ""}
+      ${installedProtocol >= 45 ? `
+      const activity:SessionActivity=(await sdk.activity.list("generated-id",{limit:10})).activity;void activity.entries[0]?.updatedSequence;
+      const detail:ActivityContent|null=(await sdk.activity.read("generated-id","generated-activity","output",{offset:0,limit:4096})).content;void detail?.nextOffset;
+      const turn:TurnInfo=(await sdk.activity.turn("generated-id","generated-turn")).info;void turn.context?.window;
+      const response:string=sdk.activity.response("generated-id","generated-turn");void response;void useSessionActivity;
       ` : ""}
       ${installedProtocol >= 34 ? 'const evidence:ModelEvidenceReport=(await sdk.models.evidence("generated-model")).evidence;void evidence.claimed.family;void evidence.source.familyField;' : ""}
       const snapshot = sdk.settings.get();
@@ -416,6 +423,33 @@ try {
       assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===first.id).order,0);
       await sdk.sessions.delete(first.id,true);await sdk.sessions.delete(second.id,true);await sdk.projects.remove(interactionProject.id,true,0);
       console.log("Installed protocol-44 browser-safe SDK and TUI commands preserve safe identifiers, exact Local context resolution, profile-private snapshots and atomic shared sibling order without inference.");
+      }
+      ` : ""}
+      ${installedProtocol >= 45 ? `
+      {
+      const activityRoot=join(root,"generated-activity-project");await mkdir(activityRoot);
+      const activityText="---\\nname: generated-installed-activity\\ndescription: Generated installed skill\\n---\\nGenerated exact retained skill bytes.\\n";
+      const activityPath=join(activityRoot,"SKILL.md");await writeFile(activityPath,activityText);
+      const activityProject=await sdk.projects.add(activityRoot,"generated_activity");
+      const activitySession=await sdk.sessions.create(activityProject.id,"Generated installed activity");
+      assert.deepEqual((await sdk.activity.list(activitySession.id)).activity.entries,[]);
+      const imported=await sdk.capabilities.importSkill(activityProject.id,activityPath);await sdk.capabilities.toggle(imported.id,true,0);
+      const skill=sdk.getState().snapshot.registry.find(value=>value.id===imported.id);
+      await sdk.capabilities.useSkill(activitySession.id,skill.id,skill.contentDigest);
+      const loaded=(await sdk.activity.list(activitySession.id)).activity.entries[0];
+      assert.equal(loaded.kind,"load-skill");assert.equal(loaded.actor,"user");assert.equal(loaded.turnId,null);
+      assert.equal(loaded.outputBytes,Buffer.byteLength(activityText));
+      assert.equal((await sdk.activity.read(activitySession.id,loaded.id,"output")).content.text,activityText);
+      assert.equal(JSON.parse((await sdk.activity.read(activitySession.id,loaded.id,"arguments")).content.text).contentDigest,skill.contentDigest);
+      await assert.rejects(()=>beta.activity.list(activitySession.id),{code:"activity_scope"});
+      await assert.rejects(()=>beta.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
+      assert.equal((await sdk.slash(activitySession.id,"/activity","tui")).kind,"text");
+      const activityCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"activity","list","--session",activitySession.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+      assert.equal(JSON.parse(activityCli.stdout).activity.entries[0].id,loaded.id);
+      await sdk.sessions.delete(activitySession.id,true);
+      await assert.rejects(()=>sdk.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
+      await sdk.projects.remove(activityProject.id,true,(await sdk.projects.configuration(activityProject.id)).configuration.revision);
+      console.log("Installed protocol-45 SDK/React/CLI/TUI activity preserves exact session-granted source bytes, profile/deletion isolation and actual user provenance without inference or private-ledger content.");
       }
       ` : ""}
       const betaSession=await beta.sessions.create(null,"Generated installed Beta chat");

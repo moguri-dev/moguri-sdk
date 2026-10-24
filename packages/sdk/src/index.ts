@@ -4,6 +4,7 @@ import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
+import { responseText, type ActivityCursor } from "../../protocol/src/activity.ts";
 import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../protocol/src/knowledge.ts";
 import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../protocol/src/extensions.ts";
 import { createCacheApi } from "./cache.ts";
@@ -142,6 +143,17 @@ export class MoguriSdk extends TransportClient {
   readonly telemetry = {
     operations: (filters: Omit<Extract<TelemetryQuery, { type: "telemetry.operations" }>, "type"> = {}) => this.query({ type: "telemetry.operations", ...filters }),
     storage: () => this.query({ type: "telemetry.storage" }),
+  };
+  readonly activity = {
+    list: (sessionId: string, options: { before?: ActivityCursor; limit?: number } = {}) => this.query({ type: "activity.list", sessionId, ...options }),
+    read: (sessionId: string, activityId: string, part: "arguments" | "output", options: { offset?: number; limit?: number } = {}) =>
+      this.query({ type: "activity.read", sessionId, activityId, part, ...options }),
+    turn: (sessionId: string, turnId: string) => this.query({ type: "activity.turn", sessionId, turnId }),
+    response: (sessionId: string, turnId: string): string => {
+      const session = this.getState().snapshot?.sessions.find((value) => value.id === sessionId);
+      if (!session || !session.messages.some((message) => message.turnId === turnId)) throw new ClientError("activity_scope", "Choose an original turn in this profile's retained session.");
+      return responseText(session.messages, turnId);
+    },
   };
   readonly budgets = {
     status: (sessionId: string) => this.query({ type: "budget.status", sessionId }),

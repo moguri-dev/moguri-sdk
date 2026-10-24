@@ -67,6 +67,7 @@ function references(input: EventInput): string[] {
     case "mcp.remote_recorded": return [input.payload.call.intentDigest, input.payload.call.resultDigest].filter((hash): hash is string => hash !== null);
     case "compaction.saved": return [input.payload.compaction.inputDigest, input.payload.compaction.resultDigest, input.payload.compaction.replacementDigest].filter((hash): hash is string => hash !== null);
     case "draft.saved": return input.payload.attachments.flatMap(attachmentDigests);
+    case "skill.used": return [input.payload.contentDigest];
     case "steer.applied": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "model.completed": return [input.payload.contextDigest];
     case "capability.saved": return [input.payload.entry.contentDigest];
@@ -258,6 +259,7 @@ export class EventStore {
       if (version < 44) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('desktop_interaction_schema','1');
         PRAGMA user_version=44; COMMIT;`);
+      if (version < 45) this.db.exec("BEGIN IMMEDIATE; PRAGMA user_version=45; COMMIT;");
     } catch (error) { this.db.close(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {

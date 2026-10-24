@@ -5,8 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **44** for
-[desktop interactions](setup.md#desktop-interactions), including profile-owned
+Current source uses protocol **45** for
+[chat activity and compact usage](architecture/chat-activity.md), retaining
+protocol-44 [desktop interactions](setup.md#desktop-interactions), including profile-owned
 confirmation preferences, atomic session ordering, global Local consoles and
 typed GitHub file snapshots. It retains protocol-43
 [document attachments](architecture/document-attachments.md), including
@@ -24,6 +25,40 @@ with optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
 every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
+
+## Retained chat activity
+
+`activity.list(sessionId, { before?, limit? })` returns up to 100 exact source
+entries and public-message positions. `sequence` places an operation in the
+conversation; `updatedSequence` follows its latest observed event. Pagination
+uses the returned `nextBefore` sequence/ID cursor, so a late result for an old operation
+returns in the recent page without moving its original transcript position.
+The ID disambiguates operations updated by the same cancellation event.
+`current` separately returns up to 100 running/waiting entries with an exact
+`currentCount`, so history pagination cannot hide an old still-running call.
+
+`activity.read(sessionId, activityId, "arguments" | "output", { offset?, limit? })`
+reads the original session-scoped source, up to 16,384 UTF-8 bytes per page.
+Follow `content.nextOffset`; null content means unavailable, not empty success.
+Output size is retained response bytes, not total process/network I/O.
+Before a final result, `outputBasis: "retained-tail"` explicitly labels bounded
+captured output; it cannot become complete process output or a success receipt.
+`activity.turn(sessionId, turnId)` returns original timing, outcome, models,
+context evidence and all-role owning-turn budget totals. `activity.response`
+copies public assistant text only from the authenticated snapshot.
+
+`useSessionActivity` in `moguri/react` provides scoped, non-overlapping refresh,
+earlier-page loading and stale-response isolation. No refresh runs a model,
+tool, provider metadata lookup or terminal. Thought sources are already-public
+provider reasoning only; request time is not separate thinking time.
+
+CLI `activity list [SEQUENCE ID]`, `activity turn TURN_ID`, and
+`activity read ACTIVITY_ID arguments|output [UTF8_OFFSET]` require `--session ID`.
+Shared desktop/TUI `/activity`, `/activity before SEQUENCE ID`,
+`/activity turn TURN_ID` and `/activity read ACTIVITY_ID output [UTF8_OFFSET]`
+use the same API. Schema 45 adds only the atomic, actual-user `skill.used`
+event/source grant and a transactional version upgrade; existing SQL layouts,
+ciphertext, receipts and sanitized independent telemetry remain unchanged.
 
 ## Shared interaction APIs
 
@@ -469,6 +504,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
+| `activity` | Exact session-scoped operation metadata and lazy original arguments/results; public response copy and original owning-turn information. No private reasoning, terminal buffers or recovery from a deleted source. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single or declared Compound policy/configure with an observed settings revision. Ordinary Single history remains separate from retained public compound reports. Finite Local turns need explicit qualified reserved wind-down; images and synthetic-model tuning remain blocked. |

@@ -19,6 +19,7 @@ export type SlashResult =
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
   { name: "progress", description: "Compare the bound plan checklist with optional long-task model estimates" },
+  { name: "activity", description: "Inspect exact retained chat operations or original turn metadata", argument: "[before SEQUENCE ID|read ID arguments|output [OFFSET]|turn ID]" },
   { name: "attach-file", description: "Capture a local source/text file, image, PDF, DOCX or XLSX snapshot", argument: "ABSOLUTE_PATH" },
   { name: "attach-document", description: "Extract a PDF/DOCX/XLSX locally without whole-document model injection", argument: "ABSOLUTE_PATH" },
   { name: "document-read", description: "Bounded retained page/section/spreadsheet-range inspection", argument: "ID [OPTIONS_JSON]" },
@@ -113,6 +114,16 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   switch (command.name) {
     case "documents": return { kind: "text", text: JSON.stringify(await sdk.attachments.listDocuments(session.id, parse(DocumentListOptionsSchema, JSON.parse(command.argument || "{}"))), null, 2) };
     case "progress": return { kind: "text", text: JSON.stringify(await sdk.sessions.progress(session.id), null, 2) };
+    case "activity": {
+      const [action, id, part, offset, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!action) return { kind: "text", text: JSON.stringify(await sdk.activity.list(session.id), null, 2) };
+      if (action === "before" && id && /^\d+$/.test(id) && Number.isSafeInteger(Number(id)) && part && !offset) return { kind: "text", text: JSON.stringify(await sdk.activity.list(session.id, { before: { sequence: Number(id), id: part } }), null, 2) };
+      if (action === "turn" && id && !part) return { kind: "text", text: JSON.stringify(await sdk.activity.turn(session.id, id), null, 2) };
+      if (action === "read" && id && (part === "arguments" || part === "output") && !extra && (!offset || /^\d+$/.test(offset) && Number.isSafeInteger(Number(offset)))) return {
+        kind: "text", text: JSON.stringify(await sdk.activity.read(session.id, id, part, { offset: Number(offset ?? 0) }), null, 2),
+      };
+      throw new ClientError("activity_input", "Use /activity, /activity before SEQUENCE ID, /activity turn ID or /activity read ID arguments|output [UTF8_OFFSET]. No source is inferred.");
+    }
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument);
     case "knowledge":

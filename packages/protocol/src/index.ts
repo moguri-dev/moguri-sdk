@@ -44,7 +44,7 @@ import type { TaskProgressReport } from "./progress.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 
-export const PROTOCOL_VERSION = 44;
+export const PROTOCOL_VERSION = 45;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -240,6 +240,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "session.resumed": Record<string, never>;
   "session.blocked": { diagnostic: string };
   "draft.saved": { text: string; attachments: Attachment[] };
+  "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
   "queue.enqueued": { item: QueueItem };
   "queue.edited": { messageId: string; text: string; attachments?: Attachment[] };
   "queue.removed": { messageId: string };
@@ -353,7 +354,7 @@ export type StoredEvent = EventInput & {
 };
 export const eventTypes: readonly EventType[] = [
   "project.added", "session.created", "session.configured", "session.archived", "session.restored", "session.resumed", "session.blocked",
-  "draft.saved", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
+  "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "policy.updated", "provider.changed", "mcp.oauth_changed",
