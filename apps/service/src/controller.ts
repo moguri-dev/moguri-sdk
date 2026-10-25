@@ -24,11 +24,13 @@ import {
   type MemoryTarget, type BudgetEntry,
   type RoleSequenceRecord, projectRoleSequence, successfulRoleEntry, decisionEvidence,
 } from "../../../packages/protocol/src/index.ts";
-import { readProjectFile } from "./files.ts";
+import { readProjectFile, textFilePage } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
 import { CopilotAdapter, KeyringCredentials, type ProviderAdapter, type PreparedModel } from "./provider.ts";
-import { validateTool } from "./tools.ts";
+import { validateTool, executeTool } from "./tools.ts";
 import { effectiveTools } from "./tools.ts";
+import { catalogForModel, discoverTools, toolSchemaDigest } from "./tool-catalog.ts";
+import type { ToolingQuery, ToolingResponse } from "../../../packages/protocol/src/tooling.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
 import { authorizeTool, validateSettings } from "./permissions.ts";
 import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
@@ -264,6 +266,7 @@ export class ControlPlane extends EventEmitter {
       compactionQuery: (query) => this.compactionQuery(query),
       compactionCommand: (command, finish) => this.compactionCommand(command, finish),
       generationQuery: (query) => this.generations.query(query),
+      toolingQuery: (query) => this.toolingQuery(query),
       generationCommand: (command, finish) => this.generations.execute(command, finish),
       roleProposal: (id) => this.ownedRoles.proposal(id),
       compoundProposal: (id, stepId) => this.compound.proposal(id, stepId),
@@ -1157,8 +1160,10 @@ export class ControlPlane extends EventEmitter {
     }
     this.externalRuns.set(session.id, external);
     try { this.commit([
-      { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}`, attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: this.projection.policy.revision, repositoryCapture } },
-      { ...scope, event_type: "job.started", payload: { job: { id: jobId, kind: "mcp.call", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: turnId, status: "waiting_input", progress: "Exact external-tool approval required", resultDigest: null, error: null } } },
+      { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: call.name === "mcp_gateway" ? `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}` : `External tool request: ${call.name}`, attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: this.projection.policy.revision, repositoryCapture } },
+      { ...scope, event_type: "job.started", payload: { job: { id: jobId, kind: call.name === "mcp_gateway" ? "mcp.call" : "tool.call",
+        ...(call.name !== "mcp_gateway" && identity ? { toolingIntent: identity } : {}),
+        sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: turnId, status: "waiting_input", progress: "Exact external-tool approval required", resultDigest: null, error: null } } },
       { ...scope, event_type: "tool.requested", payload: { approval: { id: approvalId, stepId, call, policyRevision: external.policyRevision, permissionRevision: external.permissionRevision } } },
       ...(remoteIntent ? [this.mcpEvent(remoteIntent)] : []),
     ]); } catch (error) { this.externalRuns.delete(session.id); throw error; }
@@ -1182,7 +1187,8 @@ export class ControlPlane extends EventEmitter {
       if (external.abort.signal.aborted || !this.externalRuns.has(external.sessionId)) return;
       const failed = result !== null && typeof result === "object" && "isError" in result && result.isError === true;
       const browser = external.call.arguments.serverId === "builtin" && isBrowserTool(String(external.call.arguments.tool)) && isRecord(result);
-      const outcome = browser && result.outcome === "partial" ? "partial" : browser && result.outcome === "cancelled" ? "stopped" : failed ? "failed" : "completed";
+      const observed = isRecord(result) && (browser || external.call.name !== "mcp_gateway") ? result.outcome : undefined;
+      const outcome = observed === "partial" ? "partial" : observed === "stopped" || observed === "cancelled" ? "stopped" : failed ? "failed" : "completed";
       this.finishExternal(external, outcome, failed ? "The MCP tool did not complete. Inspect its original outcome; no automatic retry." : null, result);
     }).catch((error: unknown) => {
       if (!this.externalRuns.has(external.sessionId)) return;
@@ -1197,12 +1203,14 @@ export class ControlPlane extends EventEmitter {
   private finishExternal(external: ExternalRun, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null, result?: unknown, decision?: "denied"): void {
     if (!this.externalRuns.has(external.sessionId)) return;
     const session = this.session(external.sessionId);
-    const text = result === undefined ? diagnostic ?? "Tool was not executed." : JSON.stringify(result);
+    const nativeResult = external.call.name !== "mcp_gateway" && isRecord(result) ? result : null;
+    const text = result === undefined ? diagnostic ?? "Tool was not executed." : nativeResult && typeof nativeResult.text === "string" ? nativeResult.text : JSON.stringify(result);
     const call = external.remoteMcpId ? this.mcpCall(external.remoteMcpId, external.sessionId) : null;
     const mcpEvents = call && call.phase !== "settled" ? [this.mcpEvent({ ...call, revision: call.revision + 1, phase: "settled", status: decision ?? outcome, diagnostic, updatedAt: new Date().toISOString() })] : [];
     this.commit([
       ...mcpEvents,
-      this.event(session, "tool.completed", { call: external.call, text: text.slice(0, MAX_TEXT), isError: outcome !== "completed", outcome: decision ?? outcome }, external.stepId),
+      this.event(session, "tool.completed", { call: external.call, text: text.slice(0, MAX_TEXT), isError: outcome !== "completed", outcome: decision ?? outcome,
+        ...(nativeResult && typeof nativeResult.rawText === "string" ? { rawDigest: this.store.putBlob(nativeResult.rawText), rawComplete: nativeResult.rawComplete === true } : {}) }, external.stepId),
       this.event(session, "job.finished", { jobId: external.jobId, status: outcome === "stopped" ? "cancelled" : outcome, resultDigest: result === undefined ? null : this.store.putBlob(JSON.stringify(result)), error: diagnostic }, external.stepId),
       this.event(session, "turn.finished", { outcome, diagnostic }, external.stepId),
     ]);
@@ -1223,7 +1231,27 @@ export class ControlPlane extends EventEmitter {
     const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: draft.attachments.some((item) => item.kind === "paste_file") || this.hasPasteFiles(session), documents: draft.attachments.some((item) => item.kind === "document") || this.hasDocuments(session) });
     const systemPrompt = await this.platform.effectivePrompt(session);
     const windows = model && !model.synthetic ? modelContextWindows(model) : null;
-    return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools }), contextWindow: model ? session.controls.modelOptions?.contextWindow ?? windows?.values[0] ?? null : null, modelMaximum: model?.contextWindow ?? null, source: "estimated" as const, windows };
+    return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools: tools.length ? catalogForModel(tools, []) : [] }), contextWindow: model ? session.controls.modelOptions?.contextWindow ?? windows?.values[0] ?? null : null, modelMaximum: model?.contextWindow ?? null, source: "estimated" as const, windows };
+  }
+  private nativeCatalog(session: Session) {
+    const configuration = this.platform.sessions.projects.values(session.projectId);
+    return effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode,
+      folderPolicy(configuration), { project: session.projectId !== null, metachat: session.kind === "metachat", env: session.controls.env,
+        pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session) });
+  }
+  private toolingQuery(query: ToolingQuery): ToolingResponse {
+    const session = this.session(query.sessionId);
+    if (query.type === "tooling.catalog") return { type: query.type, ...discoverTools(this.nativeCatalog(session), query.query, query.offset) };
+    const source = this.history.findLast((event) => event.session_id === session.id && event.step_id === query.input.stepId &&
+      event.event_type === "tool.completed" && event.payload.call.id === query.input.callId);
+    if (source?.event_type !== "tool.completed" || source.payload.call.hook ||
+      this.history.some((event) => event.event_type === "turn.control_started" && event.turn_id === source.turn_id)) {
+      throw new MoguriError("tool_result_scope", "Choose an original public tool result in this exact retained session. Hooks, private roles and other sessions are excluded.", 403);
+    }
+    const text = source.payload.rawDigest ? this.store.blob(source.payload.rawDigest) : source.payload.text;
+    const page = textFilePage(text, { offset: query.input.offset ?? 0, limit: 12000 });
+    return { type: query.type, text: page.text, offset: page.offset, nextOffset: page.nextOffset, bytes: page.bytes,
+      digest: source.payload.rawDigest ?? digest(text), rawComplete: source.payload.rawComplete === true, outcome: source.payload.outcome };
   }
   private compactionEvent(session: Session, compaction: ContextCompaction): EventInput {
     return { ...this.event(session, "compaction.saved", { compaction }), turn_id: compaction.turnId, step_id: compaction.stepId };
@@ -1689,6 +1717,30 @@ export class ControlPlane extends EventEmitter {
     if (!browserCleanup && (projectId && this.deletingProjects.has(projectId) || "sessionId" in command && typeof command.sessionId === "string" && this.deletingSessions.has(command.sessionId))) throw new MoguriError("workspace_removing", "Owned work is settling for removal. No new mutation was admitted.", 409);
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
     const finish = this.commandFinish(envelope.id, commandDigest);
+    if (command.type === "tooling.execute") {
+      const session = this.session(command.sessionId);
+      if (session.controls.env !== "Local") throw new MoguriError("tool_env", "Standalone tool jobs are qualified only for Local. Remote/Sandbox use their owned model worker; no controller fallback was used.", 409);
+      if (["ask_user", "task_progress", "run_subagent", "debug", "discover_tools"].includes(command.name) || command.name.startsWith("propose_")) {
+        throw new MoguriError("tool_owner", "This tool needs its owning model turn, not a standalone user job.", 403);
+      }
+      const declared = this.nativeCatalog(session).find((tool) => tool.name === command.name);
+      if (!declared || toolSchemaDigest(declared) !== command.schemaDigest) throw new MoguriError("tool_schema", "The exact enabled tool/schema changed. Rediscover and review it before execution.", 409);
+      const previous = this.projection.jobs.find((job) => job.toolingIntent?.id === envelope.id);
+      if (previous) throw new MoguriError("tool_no_replay", "The original tool job already has retained intent. A missing receipt cannot authorize a second effect.", 409);
+      const call = { id: randomUUID(), name: command.name, arguments: command.arguments };
+      validateTool(call);
+      await this.assertCurrentTool(session, call);
+      const id = await this.externalCall(session, call, async (signal) => {
+        const current = this.session(session.id);
+        await this.assertCurrentTool(current, call);
+        if (toolSchemaDigest(this.nativeCatalog(current).find((tool) => tool.name === call.name) ?? declared) !== command.schemaDigest ||
+          !this.nativeCatalog(current).some((tool) => tool.name === call.name)) throw new MoguriError("tool_schema", "Tool authority changed after approval. No effect was executed.", 409);
+        const root = current.projectId ? this.platform.managed.project(current).path : null;
+        return executeTool(root, call, signal, () => {}, () => {}, (input) => this.platform.delegate(current, input, signal),
+          { mode: current.mode, folders: folderPolicy(this.platform.sessions.projects.values(current.projectId)), env: current.controls.env }, this.nativeCatalog(current));
+      }, { id: envelope.id, digest: commandDigest });
+      return finish([], { id });
+    }
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
@@ -2709,11 +2761,13 @@ export class ControlPlane extends EventEmitter {
         if (phase !== "router" && this.hasDocuments(current) && this.snapshot().provider.models.find((model) => model.id === modelId)?.toolInput === false) throw new MoguriError("model_documents", "The selected actual solver has document tools disabled. Original attachments remain retained; no other model or complete-document expansion was substituted.", 409);
         const projectSettings = this.platform.sessions.projects.values(project?.id);
         const solverTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", current.mode, folderPolicy(projectSettings), { project: Boolean(project), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current) });
-        const tools = phase === "router" ? [] : solverTools;
-        run.declaredTools = new Set(tools.map((tool) => tool.name));
+        const selectedTools = (request.loadedTools ?? []).filter((name) => solverTools.some((tool) => tool.name === name));
+        const solverInterface = solverTools.length ? catalogForModel(solverTools, selectedTools) : [];
+        const tools = phase === "router" ? [] : solverInterface;
+        run.declaredTools = new Set(phase === "router" ? [] : solverTools.map((tool) => tool.name));
         const started = this.history.find((event) => event.event_type === "turn.started" && event.turn_id === run.turnId);
         const prompt = started?.event_type === "turn.started" && started.payload.promptDigest ? this.store.blob(started.payload.promptDigest) : this.platform.prompt(current);
-        run.repositoryContext ??= await this.repositoryContext(current);
+        run.repositoryContext = await this.repositoryContext(current);
         const solverPrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext, run.abort.signal) + this.platform.progress.reminder(current.id);
         const effectivePrompt = phase === "router" ? ROUTER_PROMPT : solverPrompt;
         if (run.done || run.abort.signal.aborted) return;
@@ -2726,7 +2780,7 @@ export class ControlPlane extends EventEmitter {
           const singlePolicy = this.projection.settings.values.kupo;
           if (singlePolicy.workflow !== "single") throw new MoguriError("compound_review_required", "The current public workflow requires its exact independent source/test review. No ordinary Single dispatch.", 409);
           const pool = kupoPool(this.projection.settings.values.kupo, this.provider.state.models, current.controls.env,
-            estimateModelContext({ systemPrompt: solverPrompt, messages: canonicalContext, tools: solverTools }));
+            estimateModelContext({ systemPrompt: solverPrompt, messages: canonicalContext, tools: solverInterface }));
           if (route) {
             this.checkRoutingSnapshot(current, route);
             if (route.plan && !pool.candidates.some((model) => model.id === route.plan!.modelId)) throw new MoguriError("routing_model", "The chosen solver is no longer eligible for the current context. No fallback or truncation.", 409);
@@ -2765,7 +2819,7 @@ export class ControlPlane extends EventEmitter {
         ]);
         const decisionSteers = this.history.flatMap((event) => event.event_type === "steering.applied" && event.session_id === current.id && event.turn_id === run.turnId &&
           event.step_id === request.stepId ? [this.steeringContext(event)] : []);
-        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: { ...configured.model, maxTokens: reservation.maxTokens }, maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, phase, ...(routedContext ? { context: routedContext } : {}), steers: [...decisionSteers, ...steers.map((item) => this.contextItem(item))], systemPrompt: effectivePrompt, tools, mode: current.mode, folders: folderPolicy(projectSettings) } });
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: { ...configured.model, maxTokens: reservation.maxTokens }, maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, phase, ...(routedContext ? { context: routedContext } : {}), steers: [...decisionSteers, ...steers.map((item) => this.contextItem(item))], systemPrompt: effectivePrompt, tools, toolCatalog: phase === "router" ? [] : solverTools, mode: current.mode, folders: folderPolicy(projectSettings) } });
       } catch (error) {
         const budget = error instanceof MoguriError && error.code.startsWith("budget_");
         if (budget) {
@@ -3020,9 +3074,9 @@ export class ControlPlane extends EventEmitter {
           });
           return;
         }
-        if (authorization.decision === "allow" && !hookRequiresHuman || request.call.name === "ask_user" || request.call.name === "task_progress" || session.kind === "metachat" && request.call.name === "moguri_config") {
+        if (authorization.decision === "allow" && !hookRequiresHuman || ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config") {
           this.grantTool(run, request.call.id);
-          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: request.call.name === "ask_user" || request.call.name === "task_progress" || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
+          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(this.platform.sessions.projects.values(session.projectId)) } });
           return;
         }
@@ -3035,7 +3089,8 @@ export class ControlPlane extends EventEmitter {
       const hook = run.hooks?.calls.get(request.call.id);
       run.calls.delete(request.call.id);
       run.granted.delete(request.call.id);
-      const completed = this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome }, request.stepId);
+      const completed = this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
+        ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) }, request.stepId);
       const mcp = run.mcpDispatches?.get(request.call.id);
       if (mcp) {
         const entry = this.mcpCall(mcp.id, session.id), status = request.outcome === "completed" || request.outcome === "failed" ||

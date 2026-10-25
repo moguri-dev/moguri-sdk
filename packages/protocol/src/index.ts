@@ -50,7 +50,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 56;
+export const PROTOCOL_VERSION = 57;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -286,7 +286,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
-  "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string };
+  "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; rawDigest?: string; rawComplete?: boolean };
   "task.progress_reported": { report: TaskProgressReport };
   "task.plan_updated": { plan: TaskPlan };
   "turn.stop_requested": { holdQueue?: true };

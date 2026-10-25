@@ -13,6 +13,8 @@ import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inpu
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
+import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "./tooling.ts";
+export * from "./tooling.ts";
 import { BrowserCommandSchema, BrowserQuerySchema, type BrowserResponse } from "./browser.ts";
 export * from "./browser.ts";
 export * from "./activity.ts";
@@ -199,6 +201,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  ToolingCommandSchema,
   BrowserCommandSchema,
   ApplicationCommandSchema,
   NotificationSoundCommandSchema,
@@ -255,6 +258,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  ToolingQuerySchema,
   BrowserQuerySchema,
   ActivityQuerySchema,
   UpdateQuerySchema,
@@ -335,6 +339,7 @@ export interface CapabilityJob {
   compoundWorkflowId?: string;
   winddownId?: string;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
+  toolingIntent?: { id: string; digest: string };
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
@@ -379,6 +384,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse
+  | ToolingResponse
   | BrowserResponse
   | UpdateResponse
   | StorageResponse

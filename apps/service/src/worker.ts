@@ -4,13 +4,14 @@ import { createModels, type Message } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { executeTool } from "./tools.ts";
 import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
-import type { ToolCall } from "../../../packages/protocol/src/index.ts";
+import { isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
 import { localProvider, localModelFetch } from "./local-provider.ts";
 import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 import { streamMetrics } from "./stream-metrics.ts";
 import { executeUserPlan } from "./user-plan.ts";
 import { executeRemoteMcp } from "./remote-mcp-runtime.ts";
 import { executeCompoundValidation } from "./compound-validation.ts";
+import { discoverTools } from "./tool-catalog.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -30,6 +31,8 @@ async function finish(outcome: "completed" | "stopped" | "failed" | "partial", d
 }
 async function run(start: WorkerStart): Promise<void> {
   const context: Message[] = start.context;
+  const loadedTools = new Set<string>();
+  const instructionSources = new Set<string>();
   let incompleteCleanup = false, mcpDispatched = false;
   const lifecycle = async (trigger: "turn.start" | "turn.end") => {
     for (const hook of start.hooks?.filter((hook) => hook.definition.trigger === trigger) ?? []) {
@@ -105,7 +108,7 @@ async function run(start: WorkerStart): Promise<void> {
     for (let index = 0; index < 32; index++) {
       abort.signal.throwIfAborted();
       const stepId = randomUUID();
-      const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId });
+      const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId, loadedTools: [...loadedTools] });
       if (reply.halt && reply.error) { await finish(abort.signal.aborted ? "stopped" : "partial", reply.error); return; }
       if (reply.error || !reply.value || !("model" in reply.value)) throw new Error(reply.error ?? "Missing model authorization.");
       const boundary: BoundaryReply = reply.value;
@@ -200,20 +203,39 @@ async function run(start: WorkerStart): Promise<void> {
         for (const call of calls) {
           abort.signal.throwIfAborted();
           const approval = await request({ kind: "approval", requestId: randomUUID(), stepId, call });
-          let result: { text: string; isError: boolean; outcome: string };
+          let result: DelegatedResult;
           if (approval.error || !approval.value || !("allow" in approval.value) || !approval.value.allow) {
             result = { text: approval.error ?? "The user denied this tool request. No operation was executed.", isError: true, outcome: "denied" };
           } else {
             try {
               result = await executeTool(start.root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
                 (pid) => send({ kind: "process", stepId, callId: call.id, pid }),
-                (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders });
+                (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders, env: start.env }, boundary.toolCatalog ?? boundary.tools);
             } catch (error) {
               result = { text: error instanceof Error ? error.message : "Tool execution failed.", isError: true, outcome: incompleteCleanup ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
             }
           }
+          if (call.name === "discover_tools" && !result.isError) {
+            for (const tool of discoverTools(boundary.toolCatalog ?? boundary.tools, String(call.arguments.query), Number(call.arguments.offset ?? 0)).tools) loadedTools.add(tool.name);
+          }
+          if (call.name === "read_file" && !result.isError) {
+            const view: unknown = JSON.parse(result.text);
+            if (isRecord(view) && Array.isArray(view.instructions)) {
+              const refs = view.instructions.filter(isRecord).map((source) => `${String(source.path)}:${String(source.digest)}`);
+              view.instructions = view.instructions.filter((source) => isRecord(source) && !instructionSources.has(`${String(source.path)}:${String(source.digest)}`));
+              for (const ref of refs) instructionSources.add(ref);
+              result.text = JSON.stringify(view);
+            }
+          }
+          if (result.rawText !== undefined) {
+            if (result.rawText.length > 512 * 1024) throw new Error("The original result exceeds its retained-output bound. No complete source or next step was inferred.");
+            const view: unknown = JSON.parse(result.text);
+            if (!isRecord(view)) throw new Error("A retained result needs an explicit structured view.");
+            result.text = JSON.stringify({ ...view, retainedSource: { stepId, callId: call.id, rawComplete: result.rawComplete === true } });
+          }
           incompleteCleanup ||= result.outcome === "partial";
-          await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call, ...result });
+          const retained = await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call, ...result });
+          if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The original tool result was not durably acknowledged; no continuation was authorized.");
           context.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: result.text }], isError: result.isError, timestamp: Date.now() });
           if (incompleteCleanup) throw new Error("Tool side effects are partial or cleanup is unconfirmed. Inspect the partial tool result before continuing.");
         }

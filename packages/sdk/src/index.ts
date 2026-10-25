@@ -36,6 +36,11 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly github = createGithubApi(this);
+  readonly tools = {
+    catalog: (sessionId: string, query = "", offset = 0) => this.query({ type: "tooling.catalog", sessionId, query, offset }),
+    execute: (sessionId: string, name: string, args: Record<string, unknown>, schemaDigest: string) => this.command({ type: "tooling.execute", sessionId, name, arguments: args, schemaDigest }),
+    result: (sessionId: string, stepId: string, callId: string, offset = 0) => this.query({ type: "tooling.result", sessionId, input: { stepId, callId, offset } }),
+  };
   private sessionRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");

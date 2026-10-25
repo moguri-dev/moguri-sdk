@@ -51,6 +51,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "tool.completed": return input.payload.rawDigest ? [input.payload.rawDigest] : [];
     case "notification.sound_saved": return [input.payload.sound.contentDigest];
     case "github.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.reviewDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "linear.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
@@ -276,6 +277,12 @@ export class EventStore {
         PRAGMA user_version=56; COMMIT;`);
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='browser_control_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid browser control schema marker. State was preserved.");
+      }
+      if (version < 57) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('lean_tooling_schema','1');
+        PRAGMA user_version=57; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid lean tooling schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }
