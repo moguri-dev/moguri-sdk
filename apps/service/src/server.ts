@@ -227,7 +227,16 @@ export async function startService(options: ServiceOptions) {
             if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "This profile is missing/unready. No registry fallback was used.", 404);
             response.end(JSON.stringify({ type: query.type, catalog: rootProfiles.catalog() })); return;
           }
-          response.end(JSON.stringify(await (await rootProfiles.control(profileId)).platform.query(query))); return;
+          const abort = new AbortController();
+          const disconnected = () => { if (!response.writableEnded) abort.abort(new MoguriError("query_cancelled", "The client cancelled this query. No result was published.", 409)); };
+          response.once("close", disconnected);
+          try {
+            const scoped = await rootProfiles.control(profileId);
+            abort.signal.throwIfAborted();
+            const result = await scoped.platform.query(query, abort.signal);
+            if (!response.destroyed) response.end(JSON.stringify(result));
+          } finally { response.off("close", disconnected); }
+          return;
         }
         const command = parse(CommandSchema, body);
         if (command.profileId !== profileId) throw new MoguriError("profile_scope", "Request scope and command profile differ. No foreign receipt or effect was used.", 403);
@@ -240,6 +249,7 @@ export async function startService(options: ServiceOptions) {
       void handle().catch((error: unknown) => {
         const known = error instanceof MoguriError;
         if (!known) console.error("Moguri command failed:", error instanceof Error && "code" in error ? error.code : "internal_error");
+        if (response.destroyed) return;
         response.statusCode = known ? error.status : 500;
         response.end(JSON.stringify({ error: { code: known ? error.code : "internal_error", message: known ? error.message : "The operation failed. Check local paths, permissions and service diagnostics; no success was recorded." } }));
       });

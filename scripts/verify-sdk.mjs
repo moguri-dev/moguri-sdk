@@ -74,6 +74,14 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 59 ? `
+      const overview=await sdk.dashboard.overview({range:{kind:"days",days:7}});
+      void overview.dashboard.projects[0]?.work.inProgress;void overview.dashboard.velocity.productivityIncrease;
+      const freshSkills=await sdk.skills.find("generated",{sessionId:"generated-id",offset:0});
+      void freshSkills.catalogDigest;void freshSkills.skills[0]?.sourceId;
+      await sdk.skills.read("generated-id","a".repeat(64),"generated-session");
+      await sdk.suggestions.preview(null,true);
+      ` : ""}
       ${installedProtocol >= 58 ? `
       const nativeCatalogue=await sdk.tools.catalog("generated-id","file");
       void nativeCatalogue.tools[0]?.parameters;void nativeCatalogue.tools[0]?.schemaDigest;
@@ -420,6 +428,22 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
+      ${installedProtocol >= 59 ? `{
+      const skillDirectory=join(root,"generated-skills");await mkdir(skillDirectory);
+      const skillPath=join(skillDirectory,"SKILL.md");
+      await writeFile(skillPath,"---\\nname: generated-installed-skill\\ndescription: Generated installed skill lookup\\n---\\nUse generated fixture evidence.\\n");
+      const beforeSettings=sdk.settings.get();
+      await sdk.settings.update({...beforeSettings.values,skillSources:[{id:"generated-installed-source",name:"Generated installed skills",kind:"local",path:skillDirectory,enabled:true}]},beforeSettings.revision);
+      const discovered=await sdk.skills.find("installed",{sessionId:s.id});assert.equal(discovered.skills.length,1);
+      assert.match((await sdk.skills.read(discovered.skills[0].id,discovered.skills[0].digest,s.id)).body,/generated fixture evidence/);
+      await writeFile(skillPath,"---\\nname: generated-installed-skill\\ndescription: Generated installed skill lookup\\n---\\nChanged generated fixture.\\n");
+      await assert.rejects(()=>sdk.skills.read(discovered.skills[0].id,discovered.skills[0].digest,s.id),error=>error.code==="skill_source_changed");
+      const overview=(await sdk.dashboard.overview()).dashboard;
+      assert.equal(overview.days.length,7);assert.equal(overview.work.total,1);assert.equal(overview.velocity.productivityIncrease,null);
+      const globalSuggestions=await sdk.suggestions.preview(null,true);assert.equal(globalSuggestions.preview.scope,"all-projects");
+      const freshSettings=sdk.settings.get();await sdk.settings.update({...freshSettings.values,skillSources:[]},freshSettings.revision);
+      console.log("Installed protocol-59 skill freshness, global suggestions and authoritative dashboard work without a model call or new permission.");
+      }` : ""}
       ${installedProtocol >= 58 ? `{
       const child=await sdk.sessions.spawn(s.id,"side","Generated installed coordinated side");
       const review=await sdk.coordination.preview(s.id,child.id);

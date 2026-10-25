@@ -11,7 +11,7 @@ or a reason to enable deferred autonomous features. CI remains main-push-only.
 
 ## Unified Start and independent consoles, protocol 44
 
-The desktop has one **Start** entry point for a **New chat** without a project,
+The desktop has one **New** entry point (named Start before protocol 59) for a **New chat** without a project,
 an existing project, importing an explicitly chosen local folder, or cloning an
 explicit repository into a new chosen destination. There is no separate
 project-free dropdown or project-import plus. The general conversation group is
@@ -34,8 +34,10 @@ Protocol/migration 44 extends Local terminal bindings/states with actual null
 session/project identities for one independently owned **Global terminal** per
 profile, not a synthetic chat or inherited project. A profile-default query
 discloses the canonical home directory; the user explicitly opens that root.
-Project-free session consoles also require an explicit Local root, separate from
-model workspace authority. Existing project consoles keep their exact bound
+Protocol 59 defaults new project-free session consoles to configured HOME,
+separate from model workspace authority; callers may still explicitly choose
+a different Local root. HOME is never Moguri's state-directory fallback.
+Existing project consoles keep their exact bound
 worktree. Remote bindings still require real session/project/peer identities.
 The existing profile-owned broker authenticates all consoles; no PID guessing,
 input replay, new VT implementation or output persistence is introduced.

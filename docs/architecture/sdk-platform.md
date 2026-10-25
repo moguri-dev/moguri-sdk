@@ -146,17 +146,20 @@ development-signing limitations remain.
 
 ## Global and session sidebar placement
 
-The owner clarified that the six global items belong on the **left**, ordered
-Dashboard, Artifacts, Candidates, Sandbox, Suggestions, Global Terminal. The
+Protocol 59 updates the **left** resources to Dashboard, Suggestions, Automations,
+Code change, Work item and Global Terminal. Artifacts/Candidates/Sandbox move
+to Settings. The automation and external-link destinations are placeholders,
+not new scheduled work or provider-write authority. The
 **right** rail contains only Terminal, Browser, Insights, Changes, Files, Plan,
 Side chat, in that order. The left resource group is a named native navigation
 landmark; repeated selection still returns to chat after existing dirty/terminal
 checks. Existing styles, model controls and session hierarchy are unchanged.
 
 This reuses React/native navigation (MIT) and existing SDK/resource routing.
-No dependency, setting, API, durable event, schema or migration is added.
-Legacy saved global-panel names still restore their independent full-page
-resource rather than becoming invalid preferences or another right-rail tab;
+The placement change itself adds no durable event or dependency; the associated
+[skill/dashboard contract](workspace-experience.md) describes protocol/schema 59.
+Legacy saved Artifacts/Candidates/Sandbox panel names restore their Settings
+destination rather than becoming invalid preferences or another right-rail tab;
 widths remain intact. PR and attention actions remain auxiliary, not new primary
 rail items. Hiding an auxiliary panel returns keyboard focus to Insights.
 Globals still create no hidden session/inference, terminal opening remains
@@ -268,7 +271,7 @@ only desktop entry routing and its local pending-state presentation change.
 Explicitly navigating to another session/project or starting a chat while
 Terminal is open creates one entry intent for that actual selected session.
 An existing console is reused; otherwise an eligible transport opens its exact
-root. Project-free Local requests disclose/use the data root, never the previous
+root. Protocol 59 project-free Local requests disclose/use configured HOME, never the previous
 project. Passive initial selection, profile restoration, Settings/tab remounts,
 hidden project selection and reselecting the same visible X-closed chat cannot
 manufacture launch intent.

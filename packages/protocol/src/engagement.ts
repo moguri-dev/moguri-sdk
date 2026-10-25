@@ -22,6 +22,8 @@ export interface SuggestionSource { sessionId: string; messageId: string; title:
 export interface SuggestionPreview {
   scope: "project" | "project-free" | "all-projects"; digest: string; sources: SuggestionSource[];
   repeated: { text: string; count: number; messageIds: string[] }[];
+  gaps: { id: string; title: string; detail: string }[];
+  modelId: string | null;
   diagnostic: string;
 }
 export interface Attention {
@@ -31,14 +33,14 @@ export interface Attention {
 }
 export const EngagementCommandSchema = Type.Union([
   object({ type: Type.Literal("metachat.create"), projectId: nullableId, parentSessionId: Type.Optional(id), prompt: Type.Optional(Type.String({ maxLength: 32768 })) }),
-  object({ type: Type.Literal("suggestions.generate"), sessionId: id, allProjects: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), confirmScope: Type.Literal(true) }),
+  object({ type: Type.Literal("suggestions.generate"), sessionId: nullableId, allProjects: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), confirmScope: Type.Literal(true) }),
   object({ type: Type.Literal("configuration.propose"), sessionId: id, proposal: ConfigurationSpecSchema }),
   object({ type: Type.Literal("configuration.decide"), proposalId: id, approve: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), acknowledgeRisk: Type.Boolean() }),
   object({ type: Type.Literal("attention.acknowledge"), attentionIds: Type.Array(id, { minItems: 1, maxItems: 100 }) }),
 ]);
 export type EngagementCommand = Static<typeof EngagementCommandSchema>;
 export const EngagementQuerySchema = Type.Union([
-  object({ type: Type.Literal("suggestions.preview"), sessionId: id, allProjects: Type.Boolean() }),
+  object({ type: Type.Literal("suggestions.preview"), sessionId: nullableId, allProjects: Type.Boolean() }),
   object({ type: Type.Literal("configuration.review"), proposalId: id }),
 ]);
 export type EngagementQuery = Static<typeof EngagementQuerySchema>;

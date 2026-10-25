@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **58**, including
+Current source uses protocol **59**, including the
+[skill gateway and graphic workspace dashboards](architecture/workspace-experience.md),
 [lean tools and coordinated sessions](architecture/lean-tooling.md),
 [session-owned candidate cleanup](architecture/candidate-cleanup.md),
 shared-global/last-selected model defaults and
@@ -15,6 +16,9 @@ accounting; the earlier schema-55 model-default upgrade is metadata-only.
 Schema 58 strictly converges the candidate-retention and earlier development
 lean-tooling lineages using their actual markers, preserving both guarantees.
 Older running services require reviewed restart.
+Schema 59 adds an independent transactional metadata marker. Older source
+settings normalize to no configured skill sources; ciphertext, receipts,
+identities and existing accounting are unchanged.
 It retains protocol-54 exact-scoped session PR observations
 and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
 [the separate Agent terminal](architecture/agent-terminal.md),
@@ -77,6 +81,40 @@ unknown; project-free scope cannot inherit a root or authenticated account.
 The schema-54 marker upgrades transactionally without rewriting ciphertext.
 
 ## Lean tools and session coordination
+
+`skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
+refreshes enabled registered skills and explicit `settings.skillSources` folders
+or HTTPS archives. It returns eight bounded metadata entries, source/path,
+SHA-256, `catalogDigest` and `nextOffset`. Supply the catalog digest for later
+pages. `skills.read(id, expectedDigest, sessionId?, signal?)` refreshes again and returns
+the whole checked body only when it still matches. Configuration changes,
+removal, source failure and changed bytes never return a cached substitute.
+The optional session binds actual profile/project/Local scope; omitting it is
+an explicit user control-plane preview, not an inherited project. Configured
+source discovery on Remote/Sandbox agents remains unqualified.
+
+The `moguri/mcp` entrypoint adds `moguri_find_skills` and `moguri_read_skill` to
+the existing single stdio gateway. It binds its own session, rejects foreign
+authority fields and exposes no source-configuration or self-approval tools.
+SDK/MCP cancellation propagates through the authenticated request into the
+source download and discards the pending reply. Downloads also have a
+15-second deadline and abort on shutdown. No source lookup creates durable
+capabilities or model calls.
+
+`dashboard.overview({ range?, projectId? })` returns all four pages' shared
+projection: `work`, `days`, `projects`, `models`, `totals` and `velocity`. The
+default is seven UTC calendar days. Use the existing `BudgetRange` presets or
+inclusive custom dates; all-time remains in detailed budget accounting.
+Unknown dated reports and cost estimates preserve existing provenance.
+`velocity.productivityIncrease` remains null: only retained normal agent-turn
+outcomes, valid timing and actual user approval/answer events are measured.
+Control/role turns and stopped/partial work cannot become successful tasks.
+
+`suggestions.preview(null, true)` is a global local-only preview, including
+deterministic `gaps` and the actual generation `modelId`, without session
+creation. `suggestions.generate(null, digest, true, true)` creates a settings
+chat only after exact source/model review and ordinary model admission.
+Non-null session IDs retain explicit scoped behavior.
 
 `tools.catalog(sessionId, query, offset)` returns scoped native schemas and
 digests. Normal model solver turns use the same catalogue through

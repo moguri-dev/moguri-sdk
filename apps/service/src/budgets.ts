@@ -449,7 +449,18 @@ export class BudgetRuntime {
     }
     if (prices.size > 2000) throw new MoguriError("telemetry_prices", "More than 2,000 distinct captured rates match. Choose a model or date filter; no price history was silently truncated.", 409);
     const groups = [...grouped.values()], bucket = query.bucket ?? "month";
+    const breakdown = <K>(key: (value: BudgetEntry | BudgetPlan) => K) => {
+      const values = new Map<K, { entries: BudgetEntry[]; plans: BudgetPlan[] }>();
+      for (const value of [...entries, ...plans]) {
+        const id = key(value), group = values.get(id) ?? { entries: [], plans: [] };
+        if ("purpose" in value) group.plans.push(value); else group.entries.push(value);
+        values.set(id, group);
+      }
+      return [...values].map(([id, group]) => ({ id, totals: budgetTotals(group.entries, group.plans) }));
+    };
     return { type: query.type, totals: budgetTotals(entries, plans), groups: groups.slice(offset, end).map(({ role, modelId, providerId, entries, plans }) => ({ role, modelId, providerId, totals: budgetTotals(entries, plans) })), policy: snapshot.budgetPolicy, nextOffset: end < groups.length ? end : null,
+      projects: breakdown((entry) => entry.projectId).map(({ id, totals }) => ({ projectId: id, totals })),
+      models: breakdown((entry) => entry.modelId).map(({ id, totals }) => ({ modelId: id, totals })),
       window, bucket, periods: periods(entries, bucket, bounds, plans), pricing: [...prices.values()].map(({ rate, entries }) => ({ rate: structuredClone(rate), calls: entries.length, estimatedUsd: budgetTotals(entries).estimatedUsd })), currency: "USD", repositoryCoverage: repositoryAccounting };
   }
 }

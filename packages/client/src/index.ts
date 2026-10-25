@@ -34,10 +34,10 @@ export class MoguriClient {
     if (!this.state.snapshot && this.refreshError instanceof ClientError) throw this.refreshError;
     this.openSocket();
   }
-  protected async request(path: string, body?: unknown): Promise<unknown> {
+  protected async request(path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
     const response = await fetch(`${this.connection.baseUrl}${path}`, {
       method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${this.connection.token}`, "X-Moguri-Profile": this.profileId, ...(body ? { "Content-Type": "application/json" } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20_000),
+      ...(body ? { body: JSON.stringify(body) } : {}), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
     });
     const result: unknown = await response.json();
     if (!response.ok) {

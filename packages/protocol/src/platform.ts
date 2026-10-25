@@ -11,6 +11,10 @@ import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
+import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
+import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
+export * from "./skill-gateway.ts";
+export * from "./dashboard.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
 import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "./tooling.ts";
@@ -126,6 +130,7 @@ export const SettingsSchema = object({
   subagents: object({ enabled: Type.Boolean(), maxParallel: Type.Integer({ minimum: 1, maximum: 2 }) }),
   evolution: object({ enabled: Type.Boolean() }),
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }),
+  skillSources: Type.Optional(Type.Array(SkillSourceSchema, { maxItems: 16 })),
   voice: object({
     language: Type.String({ minLength: 1, maxLength: 16 }),
     backend: Type.Union([Type.Literal("auto"), Type.Literal("cpu"), Type.Literal("metal")]),
@@ -164,7 +169,7 @@ export const defaultSettings = (): UserSettings => ({
   appearance: { theme: "dark", palette: "moguri", custom: {} }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
   permissions: { defaultDecision: "ask", tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
-  subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [],
+  subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [], skillSources: [],
   voice: { language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
   shortcuts: { commands: "Primary+KeyK", terminalCopy: "Primary+Shift+KeyC" },
   lifecycle: { keepAwake: false, tailMinutes: 5 },
@@ -196,7 +201,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("interactions"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
-  Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
+  Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("skillSources"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("startup"),
@@ -266,6 +271,8 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  SkillGatewayQuerySchema,
+  DashboardQuerySchema,
   CoordinationQuerySchema,
   ToolingQuerySchema,
   BrowserQuerySchema,
@@ -398,6 +405,8 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse
+  | SkillGatewayResponse
+  | DashboardResponse
   | CoordinationResponse
   | ToolingResponse
   | BrowserResponse
