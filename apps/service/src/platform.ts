@@ -58,7 +58,9 @@ import type { RepositoryApiMetadata } from "./repository-metadata.ts";
 import { sourceRootSync, validateRepositorySource, type RepositorySourceCapture, type SourceRoot, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
 import { frameDigest } from "./worker-wire.ts";
 import { MemoryPreparedSchema, type MemoryPrepared } from "./memory-mcp.ts";
-import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
+import { INTERNAL_MCP_TOOLS, builtinToolDigest } from "./gateway-tools.ts";
+import { BrowserBroker } from "./browser.ts";
+import { BROWSER_MCP_TOOLS, isBrowserCommand, isBrowserQuery, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { SandboxPublications } from "./sandbox-publications.ts";
@@ -86,8 +88,8 @@ interface MemoryContext {
 function memoryArguments(tool: string, args: Record<string, unknown>) {
   const schema = INTERNAL_MCP_TOOLS.find((candidate) => candidate.name === tool)?.inputSchema;
   if (!schema || !["search_memory", "memory_graph"].includes(tool) || !Value.Check(schema, args)) throw new MoguriError("memory_input", "Choose exact valid memory tool arguments before repository retrieval. No source was read.", 403);
-  if (tool === "search_memory" && "query" in args) return { tool: "search_memory" as const, query: args.query };
-  if (tool === "memory_graph" && "path" in args) return { tool: "memory_graph" as const, path: args.path };
+  if (tool === "search_memory" && "query" in args && typeof args.query === "string") return { tool: "search_memory" as const, query: args.query };
+  if (tool === "memory_graph" && "path" in args && typeof args.path === "string") return { tool: "memory_graph" as const, path: args.path };
   throw new MoguriError("memory_input", "The selected memory tool has no valid query or graph path.", 403);
 }
 
@@ -154,6 +156,7 @@ export interface PlatformHost {
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions }
 export class PlatformRuntime {
+  readonly browser: BrowserBroker;
   readonly knowledge: TieredKnowledge;
   readonly extensions: Extensions;
   readonly github: GitHubWorkflows;
@@ -182,6 +185,7 @@ export class PlatformRuntime {
   private voiceCaptures = new Map<string, { sessionId: string; token: string; consumed: boolean; input: ReturnType<typeof Promise.withResolvers<Uint8Array>> }>();
   private readonly memoryIndexes = new Map<string, string>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, private readonly options: PlatformOptions = {}) {
+    this.browser = new BrowserBroker(() => this.snapshot());
     this.knowledge = new TieredKnowledge(store, { snapshot: () => this.snapshot(), events: host.events, sandbox: host.sandboxStatus });
     this.extensions = new Extensions(store, { snapshot: () => this.snapshot(), events: host.events,
       project: (id) => this.project(id), projects: () => this.sessions.projects,
@@ -621,6 +625,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isBrowserQuery(query)) return this.browser.query(query);
     if (isActivityQuery(query)) return this.activity.query(query);
     if (isApplicationQuery(query)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (isGithubQuery(query)) return this.github.query(query);
@@ -685,14 +690,15 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         const session = query.sessionId ? this.session(query.sessionId) : undefined;
         const server = this.server(query.serverId, session?.projectId);
         if (session?.controls.env === "Remote") {
-          const tools = (await this.host.remoteMcpTools(session, server)).filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
+          const tools = (await this.host.remoteMcpTools(session, server)).filter((tool) => server !== null || !isBrowserTool(tool.name))
+            .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
           return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
         }
         if (!this.snapshot().policy.allowedEnvs.includes("Local") || session && (session.controls.env !== "Local" || server && (session.mode !== "agent" || session.kind !== "agent"))) throw new MoguriError("mcp_env", "MCP discovery has no qualified transport under this environment/read-only policy. No Local fallback.", 403);
         const root = session?.projectId ? this.managed.project(session).path : join(this.stateDir, "gateway-workspace");
         await mkdir(root, { recursive: true, mode: 0o700 });
         const tools = (await this.gateway.tools(server, root, AbortSignal.timeout(20_000), await this.scripts(session?.projectId), session?.id))
-          .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page")
+          .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page" || Boolean(session) && isBrowserTool(tool.name))
           .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
         return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
       }
@@ -876,6 +882,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return { id: request.id, token: lease.token };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isBrowserCommand(command)) { this.browser.command(command); return finish([]); }
     if (isApplicationCommand(command)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (command.type === "project.clone") {
       if (!finish.intent) throw new MoguriError("clone_intent", "Repository cloning requires its original user command identity. No process was started.", 409);
@@ -1143,6 +1150,12 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     await assertSessionTool(this.session(session.id), project?.path ?? null, this.sessions.projects.values(session.projectId), { id: "gateway-policy", name: "mcp_gateway", arguments: args });
     let prepared: unknown;
     const input = isRecord(args.arguments) ? args.arguments : {};
+    if (serverId === "builtin" && isBrowserTool(String(args.tool))) {
+      const tool = BROWSER_MCP_TOOLS.find((tool) => tool.name === args.tool)!;
+      if (args.schemaDigest !== builtinToolDigest(tool)) throw new MoguriError("browser_schema", "The browser schema changed. Rediscover it and review the exact call.", 409);
+      const result = await this.browser.call(session.id, tool.name, input, signal);
+      return { content: [{ type: "text", text: result.text }], isError: result.outcome !== "completed", outcome: result.outcome };
+    }
     if (!project && serverId === "builtin" && args.tool !== "fetch_page") throw new MoguriError("project_required", "This internal workspace tool requires a selected project.");
     if (project && serverId === "builtin" && ["search_memory", "memory_graph"].includes(String(args.tool))) {
       const query = memoryArguments(String(args.tool), input);
@@ -1197,16 +1210,20 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       if (action === "call") {
         const result = await this.callMcp(session, call.arguments, signal);
         const id = randomUUID();
-        const job: CapabilityJob = { id, kind: "mcp.result", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: session.turnId, status: "completed", progress: "Result retained", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null };
+        const browser = call.arguments.serverId === "builtin" && isBrowserTool(String(call.arguments.tool)) && isRecord(result);
+        const partial = browser && (result.outcome === "partial" || result.outcome === "cancelled");
+        const failed = browser && result.isError === true;
+        const job: CapabilityJob = { id, kind: "mcp.result", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: session.turnId, status: partial ? "partial" : failed ? "failed" : "completed", progress: "Result retained", resultDigest: this.store.putBlob(JSON.stringify(result)), error: failed ? "Browser action did not complete; inspect its original retained outcome." : null };
         this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { job } }]);
         const text = JSON.stringify(result);
-        return { text: JSON.stringify({ resultId: id, content: text.slice(0, 12000), truncated: text.length > 12000, readWith: "mcp_gateway read_result" }), isError: isRecord(result) && result.isError === true, outcome: isRecord(result) && result.isError === true ? "failed" : "completed" };
+        return { text: JSON.stringify({ resultId: id, content: text.slice(0, 12000), truncated: text.length > 12000, readWith: "mcp_gateway read_result" }), isError: isRecord(result) && result.isError === true, outcome: partial ? "partial" : isRecord(result) && result.isError === true ? "failed" : "completed" };
       }
       throw new MoguriError("gateway_action", "Use discover, tools, auth, call or read_result. Authentication/settings changes are user-only.");
     }
     throw new MoguriError("capability_unavailable", "This delegated capability is not available.");
   }
   stopSession(id: string): void {
+    this.browser.cancelSession(id);
     this.inputs.stopSession(id);
     const jobs = [...this.active.entries()].filter(([, job]) => job.sessionId === id);
     const events = jobs.flatMap(([id]) => {
@@ -1216,9 +1233,10 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     try { if (events.length) this.host.commit(events); }
     finally { for (const [, job] of jobs) job.abort.abort(); }
   }
-  async settleSession(id: string): Promise<void> { this.stopSession(id); await Promise.all([this.inputs.settleSession(id), ...[...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)]); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
+  async settleSession(id: string): Promise<void> { this.browser.revokeSession(id); this.stopSession(id); await Promise.all([this.inputs.settleSession(id), ...[...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)]); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
   async cancelProject(id: string): Promise<void> {
     const sessions = this.snapshot().sessions.filter((session) => session.projectId === id);
+    for (const session of sessions) this.browser.revokeSession(session.id);
     for (const session of sessions) this.inputs.stopSession(session.id);
     const jobs = [...this.active.entries()].filter(([, job]) => job.projectId === id);
     try { const events = jobs.flatMap(([id]) => this.operationStopEvents(id)); if (events.length) this.host.commit(events); }
@@ -1230,6 +1248,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    this.browser.close();
     this.github.close();
     this.linear.close();
     this.workspace.close();

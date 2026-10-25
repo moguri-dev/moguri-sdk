@@ -271,6 +271,12 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_defaults_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid retained model default schema marker. State was preserved.");
       }
+      if (version < 56) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('browser_control_schema','1');
+        PRAGMA user_version=56; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='browser_control_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid browser control schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateDesktopMerge(version: number): void {

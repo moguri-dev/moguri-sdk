@@ -13,6 +13,8 @@ import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inpu
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
+import { BrowserCommandSchema, BrowserQuerySchema, type BrowserResponse } from "./browser.ts";
+export * from "./browser.ts";
 export * from "./activity.ts";
 import { AppearanceSchema, GuidanceSchema, type PowerStatus, type SqlConnection } from "./preferences.ts";
 export * from "./preferences.ts";
@@ -197,6 +199,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  BrowserCommandSchema,
   ApplicationCommandSchema,
   NotificationSoundCommandSchema,
   object({ type: Type.Literal("runtime.power.retry") }),
@@ -252,6 +255,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  BrowserQuerySchema,
   ActivityQuerySchema,
   UpdateQuerySchema,
   StorageQuerySchema,
@@ -375,6 +379,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse
+  | BrowserResponse
   | UpdateResponse
   | StorageResponse
   | ApplicationResponse

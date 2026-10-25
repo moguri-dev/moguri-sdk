@@ -13,7 +13,7 @@ import { Readable } from "node:stream";
 import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
 import { readProjectFile } from "./files.ts";
 import { fetchPage } from "./web-page.ts";
-import { McpServerSchema, parse, type McpServerConfig } from "../../../packages/protocol/src/index.ts";
+import { isBrowserTool, McpServerSchema, parse, type McpServerConfig } from "../../../packages/protocol/src/index.ts";
 
 export interface McpOperation {
   action: "tools" | "call";
@@ -48,6 +48,7 @@ async function run(operation: McpOperation): Promise<unknown> {
     builtin.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...INTERNAL_MCP_TOOLS, ...scripts] }));
     builtin.setRequestHandler(CallToolRequestSchema, async (request) => {
       const args = request.params.arguments ?? {};
+      if (isBrowserTool(request.params.name)) throw new Error("Native browser tools require the owning Local desktop session broker. This worker cannot launch or substitute a browser.");
       if (request.params.name === "grep_logs") {
         const file = await readProjectFile(operation.root, String(args.path));
         const lines = file.text.split("\n").map((text, index) => ({ line: index + 1, text })).filter((line) => line.text.includes(String(args.query))).slice(0, 100);

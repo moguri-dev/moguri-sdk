@@ -534,9 +534,14 @@ checkout/index. Failed or interrupted publication is partial, not successful.
 Repo MCP imports bind the exact reviewed digest and start disabled. Porto is
 read-only inventory access, not daemon/process control.
 
-The isolated browser is a basic native preview, not the deferred Stainless
-automation integration. Sandbox, Remote, managed worktrees and the wider release
-gates remain unqualified. CI remains main-push-only.
+The isolated browser uses Electron's existing `WebContentsView`, with optional
+user-enabled [Local agent control](agent-browser.md) through maintained Chromium
+accessibility/input APIs and the existing exact-approval MCP gateway. No
+personal browser, debug port, new browser runtime or Stainless release is
+required. The top switch defaults off and revokes pending control immediately.
+Stainless diagnostics/Playwright integration remains deferred; this does not
+qualify Sandbox or Remote browser transports or the wider release gates.
+CI remains main-push-only.
 
 ## D17. Compact composer and model settings
 

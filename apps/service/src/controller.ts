@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { projectIdentifier } from "../../../packages/protocol/src/sessions.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
@@ -565,6 +566,7 @@ export class ControlPlane extends EventEmitter {
     this.sandbox.synchronize();
     this.provider.synchronize();
     this.platform?.sessionPrs.changed(appended);
+    this.platform?.browser.synchronize();
   }
   private commandFinish(id: string, commandDigest: string): WorkspaceFinish {
     return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {
@@ -577,6 +579,7 @@ export class ControlPlane extends EventEmitter {
     this.history = this.store.events(); this.projection = projectEvents(this.history, this.profileId);
     if (policyChanged) this.invalidateApprovals();
     this.remote.synchronize(); this.sandbox.synchronize(); this.provider.synchronize(); this.emit("change", []);
+    this.platform.browser.synchronize();
     queueMicrotask(() => this.pumpAll());
   }
   wake(): void { queueMicrotask(() => this.pumpAll()); }
@@ -1178,7 +1181,9 @@ export class ControlPlane extends EventEmitter {
     void external.execute(external.abort.signal).then((result) => {
       if (external.abort.signal.aborted || !this.externalRuns.has(external.sessionId)) return;
       const failed = result !== null && typeof result === "object" && "isError" in result && result.isError === true;
-      this.finishExternal(external, failed ? "failed" : "completed", failed ? "The MCP tool returned an error result." : null, result);
+      const browser = external.call.arguments.serverId === "builtin" && isBrowserTool(String(external.call.arguments.tool)) && isRecord(result);
+      const outcome = browser && result.outcome === "partial" ? "partial" : browser && result.outcome === "cancelled" ? "stopped" : failed ? "failed" : "completed";
+      this.finishExternal(external, outcome, failed ? "The MCP tool did not complete. Inspect its original outcome; no automatic retry." : null, result);
     }).catch((error: unknown) => {
       if (!this.externalRuns.has(external.sessionId)) return;
       const outcome = error instanceof MoguriError && error.code === "remote_mcp_stopped" ? "stopped" : error instanceof MoguriError && error.code === "remote_mcp_failed" ? "failed" : "partial";
@@ -1680,7 +1685,8 @@ export class ControlPlane extends EventEmitter {
     if (existing) return existing;
     const command = envelope.command;
     const projectId = "projectId" in command ? command.projectId : "sessionId" in command ? this.projection.sessions.find((session) => session.id === command.sessionId)?.projectId : undefined;
-    if (projectId && this.deletingProjects.has(projectId) || "sessionId" in command && typeof command.sessionId === "string" && this.deletingSessions.has(command.sessionId)) throw new MoguriError("workspace_removing", "Owned work is settling for removal. No new mutation was admitted.", 409);
+    const browserCleanup = command.type === "browser.host.detach" || command.type === "browser.host.reply" || command.type === "browser.host.control" && !command.enabled;
+    if (!browserCleanup && (projectId && this.deletingProjects.has(projectId) || "sessionId" in command && typeof command.sessionId === "string" && this.deletingSessions.has(command.sessionId))) throw new MoguriError("workspace_removing", "Owned work is settling for removal. No new mutation was admitted.", 409);
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
     const finish = this.commandFinish(envelope.id, commandDigest);
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);

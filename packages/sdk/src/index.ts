@@ -11,6 +11,7 @@ import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../
 import { createCacheApi } from "./cache.ts";
 import { createGithubApi } from "./github.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
+import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
@@ -24,6 +25,16 @@ export const attachmentStatus = (attachment: Attachment): string => attachment.k
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
+  readonly browser = {
+    state: (sessionId: string) => this.query({ type: "browser.state", sessionId }),
+    host: {
+      attach: (owner: BrowserHostOwner) => this.command({ type: "browser.host.attach", ...owner }),
+      control: (owner: BrowserHostOwner, sequence: number, enabled: boolean) => this.command({ type: "browser.host.control", ...owner, sequence, enabled }),
+      poll: (owner: BrowserHostOwner, url: string, title: string) => this.query({ type: "browser.host.poll", ...owner, url, title }),
+      reply: (owner: BrowserHostOwner, requestId: string, result: BrowserResult) => this.command({ type: "browser.host.reply", ...owner, requestId, result }),
+      detach: (owner: BrowserHostOwner) => this.command({ type: "browser.host.detach", ...owner }),
+    },
+  };
   readonly github = createGithubApi(this);
   private sessionRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);

@@ -5,7 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **54**, adding exact-scoped session PR observations
+Current source uses protocol **56**, including shared-global/last-selected model
+defaults and [ephemeral browser control](architecture/agent-browser.md), with a
+metadata-only schema-55 upgrade and reviewed restart of older running services.
+It retains protocol-54 exact-scoped session PR observations
 and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
 [the separate Agent terminal](architecture/agent-terminal.md),
 [chat activity and compact usage](architecture/chat-activity.md),
@@ -22,6 +25,25 @@ paste, native execution, reviewed Local compound workflows, finite Local
 wind-down and owned bounded decisions. It does not replace the immutable qualified archives listed below.
 See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
 for the actual generated VM evidence and remaining client/environment gates.
+
+`sdk.browser.state(sessionId)` reports the actual desktop-owned pane and its
+current control identity. The user enables/disables access with the pane's
+**Agent control** switch. `mcp.tools` with `serverId: "builtin"` and query
+`"navigate"` discovers `browser_navigate`; query `"browser"` discovers all six
+tools, including `browser_status` and `browser_snapshot`. Invoke through the
+existing `mcp.call`/`mcp_gateway` exact-approval flow, supplying its discovered
+schema digest and fresh control/element identities. Results keep the normal
+encrypted session/job retention and bounded `result.read` paging. Native input
+acknowledgement is not verification of a website's business action.
+
+The browser-safe `sdk.browser.host` methods attach, poll, reply, detach and
+monotonically change control for an explicitly authenticated native host.
+Its private lease belongs only to that original profile/session/view; never put
+it in model context or configuration. Browser availability and control are
+ephemeral and are not restored by command-receipt replay or service restart.
+CLI/TUI agents use the same builtin tools when the actual desktop pane is
+open and enabled; without it they report unavailable rather than launch a
+browser. Only Local is qualified for this capability.
 
 `sessions.progress(sessionId)` reads the explicit current model plan when present,
 otherwise the separately bound workspace-file checklist, and compares it with

@@ -21,7 +21,9 @@ try {
   execFileSync("npm", ["install-scripts", "approve", manifest.name, "--no-allow-scripts-pin"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["rebuild", manifest.name, "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["audit", "--audit-level=moderate"], { cwd: consumer, stdio: "inherit" });
-  const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
+  const installedSdk = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
+  const { PROTOCOL_VERSION: installedProtocol } = installedSdk;
+  const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
@@ -71,6 +73,15 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${browserControl ? `
+      const browserState=await sdk.browser.state("generated-session");void browserState.browser.controlId;
+      const browserOwner={sessionId:"generated-session",hostId:"generated-host",lease:"ab".repeat(32)};
+      await sdk.browser.host.attach(browserOwner);
+      await sdk.browser.host.control(browserOwner,1,false);
+      const browserPoll=await sdk.browser.host.poll(browserOwner,"","");void browserPoll.request?.arguments;
+      await sdk.browser.host.reply(browserOwner,"generated-request",{text:"generated data",outcome:"partial"});
+      await sdk.browser.host.detach(browserOwner);
+      ` : ""}
       ${installedProtocol >= 55 ? `
       const remembered:ModelSelection|null=sdk.getState().snapshot?.lastModelSelection??null;void remembered?.thinkingEffort;
       await sdk.sessions.selectModel("generated-id",null);
@@ -1176,6 +1187,10 @@ try {
   if (installedProtocol >= 55 && process.platform === "darwin") {
     const { qualifyModelDefaults } = await import("./qualify-model-defaults.mjs");
     console.log(await qualifyModelDefaults({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-model-defaults") }));
+  }
+  if (browserControl) {
+    const { qualifyBrowser } = await import("./qualify-browser.mjs");
+    console.log(await qualifyBrowser({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-browser") }));
   }
   if (installedProtocol >= 40 && process.platform === "darwin") {
     const { qualifyDecisions } = await import("./qualify-decisions.mjs");
