@@ -8,13 +8,15 @@ import { candidateGenerationFixture } from "./fixtures/candidate-generation-api.
 import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { roleSequenceFixture } from "./fixtures/role-sequence-api.ts";
 
-test("schema-31 role marker preserves actual generation ciphertext, raw results, keys and receipts through marker failure/reopen", { skip: process.platform !== "darwin" }, async () => {
-  const f = await candidateGenerationFixture(); let opened: EventStore | undefined;
+test("schema-31 role-marker rollback preserves generation bytes; the current upgrade rekeys only its exact recorded result", { skip: process.platform !== "darwin" }, async () => {
+  const f = await candidateGenerationFixture(undefined, { legacyCandidateJournal: true }); let opened: EventStore | undefined;
   try {
     const generated = await f.generate(), result = await f.settled(generated.id);
     assert.equal(result.generation.status, "proposed");
     const path = f.service.store.path, before = retainedCiphertextRows(f.service.store.db), identities = f.service.store.events().map(({ id, seq }) => ({ id, seq }));
     const rawResult = f.service.store.blob(result.generation.resultDigest!);
+    const completion = f.service.store.events().find((event) => event.event_type === "model.completed" && event.step_id === result.generation.stepId)!;
+    const sourceScope = `profile/default/project/${f.session().projectId}/session/${f.sessionId}`;
     await writeLegacyState(f.service, 31);
     const raw = new DatabaseSync(path);
     try { raw.exec(`CREATE TRIGGER generated_role_marker BEFORE INSERT ON retention_metadata WHEN NEW.id='role_sequence_schema'
@@ -28,11 +30,19 @@ test("schema-31 role marker preserves actual generation ciphertext, raw results,
     } finally { failed.close(); }
     const started = performance.now(); opened = new EventStore(path, f.retentionKey);
     assert.equal(opened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
-    assert.deepEqual(retainedCiphertextRows(opened.db), before); assert.deepEqual(opened.events().map(({ id, seq }) => ({ id, seq })), identities);
+    const stableRows = (tables: ReturnType<typeof retainedCiphertextRows>) => tables.map(([table, rows]) => [table,
+      table === "events" ? rows.filter((row) => row.id !== completion.id) :
+        table === "blob_payloads" ? rows.filter((row) => row.digest !== result.generation.resultDigest || row.scope !== sourceScope) : rows]);
+    assert.deepEqual(stableRows(retainedCiphertextRows(opened.db)), stableRows(before));
+    assert.deepEqual(opened.events().map(({ id, seq }) => ({ id, seq })), identities);
+    const rekeyed = opened.events().find((event) => event.id === completion.id)!;
+    assert.equal(rekeyed.artifact_id, generated.id);
+    assert.ok(rekeyed.event_type === "model.completed"); assert.equal(rekeyed.payload.candidateGenerationId, generated.id);
+    assert.equal(rekeyed.timestamp, completion.timestamp);
     const projection = projectEvents(opened.events()); assert.deepEqual(projection.roleSequences, []);
     assert.equal(projection.candidateGenerations[0]?.id, generated.id);
     assert.equal(opened.blob(result.generation.resultDigest!), rawResult);
-    console.log(JSON.stringify({ primitive: "role-sequence-schema-31-to-32", ms: performance.now() - started, ciphertextUnchanged: true, fabricatedSequences: false }));
+    console.log(JSON.stringify({ primitive: "role-sequence-schema-31-to-32", ms: performance.now() - started, unrelatedCiphertextUnchanged: true, candidateResultRekeyed: true, fabricatedSequences: false }));
   } finally { opened?.close(); await f.close(); }
 });
 

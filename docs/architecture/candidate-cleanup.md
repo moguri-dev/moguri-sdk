@@ -74,6 +74,11 @@ closed state and valid merge timestamp can establish cleanup intent. Unknown,
 open, closed-unmerged, malformed, wrong repository/number, stale scope and
 failed authentication cannot. A relink does not retarget old owners; candidates
 created during a read are not silently added to its captured target set.
+Fresh session/board merge observations and completed Moguri merge operations
+prompt an immediate, policy-eligible exact verification rather than waiting for
+the poll interval. They are triggers, not deletion evidence. A confirmation
+arriving during an older in-flight read queues another fresh pass, so the older
+response cannot swallow it or become authority for newer work.
 
 ## Durable cleanup and accounting
 
@@ -193,3 +198,21 @@ rollback. Their focused regressions pass without weakening storage, scope,
 accounting or filesystem policy. Source type checks, build and audit pass;
 the build retains its existing large-chunk warning. No personal credentials,
 model weights, microphone, visible user browser or paid inference is used.
+
+The first complete Node run retained **1,367 passes, five failures and 14
+physical-native skips across 1,386 cases in 1,126.56 s**. The failures exposed
+four migration fixtures journaling new retention fields before claiming older
+schemas and one fixture retaining the new marker while downgrading. They now
+choose the pre-57 journal encoder before generating actual worker/model evidence;
+the encoder cannot retrofit existing history or admit current cleanup events.
+Older marker rollback still compares every ciphertext row. The current success
+path permits only the separately tested exact generation-result rekey, preserving
+all unrelated ciphertext/keys/receipts and event identity. The strict production
+and legacy-fixture provenance guards were not relaxed.
+
+The targeted compatibility/merge-trigger rerun passes **24/24 in 14.06 s**.
+The packed external SDK also passes installation, all four entrypoints,
+real installed worker/CLI workflows and twelve private role/receipt probes,
+with zero audit findings. Its installation reports existing transitive
+`whatwg-encoding` / `node-domexception` deprecations and an explicitly approved
+Moguri postinstall notice. These are not newly introduced dependencies.

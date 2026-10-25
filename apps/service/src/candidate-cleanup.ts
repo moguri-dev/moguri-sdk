@@ -35,6 +35,8 @@ export class CandidateCleanupRuntime {
   private readonly attempted = new Map<string, number>();
   private refreshing?: Promise<void>;
   private queued = false;
+  private queuedForce = false;
+  private refreshAgain = false;
   private started = false;
   constructor(private readonly host: Host, private readonly interval = 60_000) {}
   start(): void {
@@ -44,12 +46,24 @@ export class CandidateCleanupRuntime {
     this.changed();
   }
   changed(events?: StoredEvent[]): void {
-    if (!this.started || this.abort.signal.aborted || this.queued || events && !events.some((event) =>
-      ["candidate.owner_bound", "project.configured", "project.relocated", "board.saved"].includes(event.event_type))) return;
+    if (!this.started || this.abort.signal.aborted) return;
+    const fresh = (at: string | null | undefined) => {
+      const age = at ? Date.now() - Date.parse(at) : NaN;
+      return Number.isFinite(age) && age >= 0 && age <= 20_000;
+    };
+    const merged = events?.some((event) => event.event_type === "session.pr_observed" ?
+      event.payload.observation.pullRequest.state === "merged" && !event.payload.observation.pullRequest.diagnostic && fresh(event.payload.observation.pullRequest.checkedAt) :
+      event.event_type === "issue.saved" ? event.payload.issue.pullRequest?.state === "merged" && !event.payload.issue.pullRequest.diagnostic && fresh(event.payload.issue.pullRequest.checkedAt) :
+      event.event_type === "github.operation_recorded" && event.payload.operation.kind === "github.pr.merge" &&
+        event.payload.operation.status === "completed" && fresh(event.payload.operation.updatedAt));
+    if (events && !merged && !events.some((event) => ["candidate.owner_bound", "project.configured", "project.relocated", "board.saved"].includes(event.event_type))) return;
+    this.queuedForce ||= Boolean(merged);
+    if (this.queued) return;
     this.queued = true;
     queueMicrotask(() => {
       this.queued = false;
-      if (!this.abort.signal.aborted) void this.refresh(false).catch((error: unknown) => {
+      const force = this.queuedForce; this.queuedForce = false;
+      if (!this.abort.signal.aborted) void this.refresh(force).catch((error: unknown) => {
         console.error("Candidate cleanup refresh failed:", error instanceof MoguriError ? error.code : "candidate_cleanup_refresh");
       });
     });
@@ -202,8 +216,15 @@ export class CandidateCleanupRuntime {
   }
   refresh(force = true): Promise<void> {
     if (this.abort.signal.aborted) return Promise.resolve();
-    if (this.refreshing) return this.refreshing;
-    const pending = this.scan(force).finally(() => { if (this.refreshing === pending) this.refreshing = undefined; });
+    if (this.refreshing) { this.refreshAgain ||= force; return this.refreshing; }
+    const pending = (async () => {
+      let currentForce = force;
+      do {
+        this.refreshAgain = false;
+        await this.scan(currentForce);
+        currentForce = true;
+      } while (this.refreshAgain && !this.abort.signal.aborted);
+    })().finally(() => { if (this.refreshing === pending) this.refreshing = undefined; });
     this.refreshing = pending; return pending;
   }
   private async scan(force: boolean): Promise<void> {

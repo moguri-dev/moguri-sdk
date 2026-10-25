@@ -13,6 +13,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { ControlPlane } from "../apps/service/src/controller.ts";
 import { fixtureProvider } from "./fixture.ts";
 import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { legacyCandidateJournal } from "./fixtures/legacy-candidate-journal.ts";
 
 const at = "2026-01-01T00:00:00.000Z", projectId = "generated-project", sessionId = "generated-origin";
 const source = { env: "Local" as const, projectId, workspaceId: null, root: "/generated/source", device: "1", inode: "2",
@@ -182,4 +183,14 @@ test("cleanup projection rejects changed targets, fabricated failure/success and
     { ...pending, revision: 1, reason: { kind: "pr-merged", pullRequest: { url: "https://github.com/generated/other/pull/7", repo: "generated/project", number: 7 }, checkedAt: at } },
   ]) assert.throws(() => projectCandidateCleanup(pending, value), { code: "candidate_retention_corrupt" });
   assert.throws(() => projectCandidateCleanup(completed, { ...completed, revision: 2 }), { code: "candidate_retention_corrupt" });
+});
+
+test("pre-57 fixture encoding cannot be installed after candidate history already exists", () => {
+  const store = new EventStore(":memory:");
+  try {
+    seedSession(store); seedCandidate(store, "generated-current-journal");
+    const before = retainedCiphertextRows(store.db);
+    assert.throws(() => legacyCandidateJournal(store), /before generating candidate history/);
+    assert.deepEqual(retainedCiphertextRows(store.db), before);
+  } finally { store.close(); }
 });

@@ -56,6 +56,16 @@ export async function qualifyCandidateGeneration({ sdk, node, cli, directory, st
         assert.equal((await current.command(command, generated.generation.commandId)).id, generated.generation.id);
         assert.equal(await readFile(path, "utf8"), newer); assert.equal(requests.length, before + 1);
         assert.equal((await current.budgets.calls({ sessionId: source.id, role: "draft" })).calls[0].reportedTokens, 42);
+        if (Array.isArray(current.getState().snapshot.candidateOwners)) {
+          await current.sessions.delete(source.id, true);
+          await assert.rejects(() => current.candidates.generation(generated.generation.id), { code: "candidate_generation_missing" });
+          await assert.rejects(() => current.candidates.read(staged.candidate.id), { code: "candidate_missing" });
+          const deleted = new DatabaseSync(join(stateDir, "state.sqlite"));
+          try { deleted.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run("default", generated.generation.commandId); } finally { deleted.close(); }
+          await assert.rejects(() => current.command(command, generated.generation.commandId), { code: "candidate_generation_deleted" });
+          assert.equal((await current.budgets.calls({ sessionId: source.id, role: "draft" })).calls[0].reportedTokens, 42);
+          assert.equal(await readFile(path, "utf8"), newer); assert.equal(requests.length, before + 1);
+        }
       },
     };
   } finally { setReply(null); }

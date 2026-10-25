@@ -29,6 +29,33 @@ test("automatic observation detects external merges for archived-session candida
   } finally { await f.close(); }
 });
 
+test("fresh authoritative board merge observations schedule exact cleanup even while an older candidate read is in flight", { timeout: 30_000 }, async () => {
+  let merged = false, holdNext = false, held = false, mergedReads = 0;
+  const gate = Promise.withResolvers<Response>();
+  const f = await candidateApiFixture({ platform: { integrations: { fetch: async () => {
+    if (holdNext) { holdNext = false; held = true; return gate.promise; }
+    if (merged) mergedReads++;
+    return Response.json(response(7, merged));
+  } } } });
+  try {
+    await f.sdk.sessions.organize(f.sessionId, { prUrl: url(7) });
+    const candidate = await f.stage();
+    await f.service.controller.candidateCleanup.refresh();
+    holdNext = true;
+    const oldRead = f.service.controller.candidateCleanup.refresh();
+    await waitFor(() => held);
+    merged = true;
+    await f.sdk.issues.create(f.session().projectId, { title: "Generated authoritative PR observation", body: "", kind: "misc", phaseId: "backlog", pullRequestUrl: url(7) });
+    const job = await f.sdk.issues.refresh(f.session().projectId);
+    await f.sdk.jobs.wait(job.id!);
+    gate.resolve(Response.json(response(7)));
+    await oldRead;
+    await waitFor(() => !f.service.controller.snapshot().candidates.some((record) => record.id === candidate.candidate.id), 3000);
+    assert.ok(mergedReads >= 2, "cleanup must obtain its own fresh exact identity verification after the board observation");
+    assert.equal(f.requests.length, 0);
+  } finally { gate.resolve(Response.json(response(7))); await f.close(); }
+});
+
 test("public exact PR cleanup still works after an archived origin explicitly detached and removed its old source worktree", { timeout: 30_000 }, async () => {
   let merged = false, authenticated = 0;
   const f = await candidateApiFixture({ platform: { integrations: {
