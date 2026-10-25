@@ -197,6 +197,38 @@ relabeled as a new one. Only generated fixtures/hidden windows and explicitly
 owned read-only verification mounts were used. Personal Finder windows,
 accounts, terminals and ongoing owners were not closed or adopted.
 
+## Right-pane icon toggles
+
+Each of the seven right-rail buttons opens its session view when inactive and
+uses the existing guarded header-hide path when clicked again while visible.
+The icon rail remains, including after maximized-pane collapse; existing open/
+size preferences and keyboard focus are retained. Expanded/pressed state and
+the controlled pane are exposed on the native buttons. Programmatic/slash
+show requests remain idempotent, not accidental toggles.
+
+This reuses React/native buttons (MIT), existing UI preference state and
+terminal/draft controls. No dependency, SDK operation, durable event, setting,
+schema or migration is added. Dirty owned editors still block hiding without
+writing/discarding text. A live Terminal still uses the existing hide
+confirmation/opt-out, preserves its same authenticated owner and never replays
+input or creates a replacement just because the pane was reopened. X remains
+a separate explicit termination action with no hide confirmation.
+Native terminal-review dialogs close before applying a confirmed navigation/
+focus action, and their close event cannot also report cancellation. Cancel
+returns focus without hiding or terminating the owner.
+
+Generated native tests cover all nonterminal buttons by pointer/keyboard,
+maximized collapse/reload, Terminal cancel/hide/opt-out/same-owner reattach/X,
+and a dirty workspace-plan editor that cannot be collapsed or written by
+another click.
+
+Fresh prerequisites passed all six available groups: provider cancellation
+31.33 ms; SQLite append p95 0.058 ms/rebuild 0.684 ms; owned PTY cancellation
+151.87 ms with zero survivors; TUI updates 17.26 ms; hidden Electron cold start
+197.95 ms / 444.78 MiB / 8.26 ms per frame; 2,000-file search/Git
+0.926/6.423 ms. Separate baseline live/native/notarized/Linux/quality gates
+remain FAIL/unqualified, not enabled by a pane toggle.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
