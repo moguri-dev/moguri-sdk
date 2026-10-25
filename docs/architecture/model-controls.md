@@ -75,6 +75,53 @@ Fresh prerequisite probes pass all six generated groups: cancellation
 0.882/5.860 ms. Separate live/native/notarized/Linux/quality gates remain
 FAIL/unqualified, not enabled by these preferences.
 
+### Model-default qualification
+
+Source `d23432a` and `7d5fb04` provide the shared-global picker and independently
+retained explicit-selection fallback. The before-fix generated resolver/service
+cases return no model after a real selection; three fail and the explicit
+no-model override already passes. The final cases cover fixed/last-selected/
+none, effort versus window-only changes, same-value selection, source-session/
+project deletion, actual restart, profile isolation, work-item/worktree/settings
+creation, explicit parent inheritance, unavailable models and atomic failures.
+Resetting tuning without a selected model cannot erase a remembered choice;
+only an explicit model clear does so.
+
+Migration 54-to-55 interruption retains the old version and exact ciphertext,
+keys, receipts and controls. Current missing/corrupt markers and forged
+user/source/turn/artifact owners fail explicitly. Programmatic old routing
+fixture setup opts out of remembered selection rather than relabel future
+preference events as legacy history. Refused-settings UI cleanup returns through
+the real saved navigation guard, not a sleep or forced unload.
+
+| Exact check | Observed result |
+| --- | --- |
+| Type checks/build/root, external-install and worker-image audits | PASS; zero vulnerabilities |
+| Fresh maintained model-transport/context probe | PASS; Responses/Anthropic low effort and provider-controlled Completions / 115.58 ms |
+| Final selection/retention/migration/older-workflow checks | 21 passed / 1,586.82 ms |
+| Default-model UI paths | 4 passed / 7.7 seconds; refused-save case repeated ten times: 10 passed / 18.4 seconds |
+| Complete final Node/worker/recovery/CLI/native-TUI suite | 1,315 passed, 14 physical-native skips, zero failures; 1,329 total / 1,109,292.21 ms |
+| Complete final hidden Electron suite | 157 passed, 2 physical-native skips, zero failures; 159 total / 5.1 minutes |
+| Actual packed external SDK/install | All entrypoints/flows and 12 installed-worker probes pass |
+| Actual installed protocol-55 model-default probe | SDK/CLI/shared-TUI selection, fixed-global precedence, no-model reset, source deletion/restart: PASS / 525.40 ms / zero model calls |
+| No-cache Linux arm64 payload/native PTY | PASS; exact protocol-55 input digests and locked install / 37,018.02 ms |
+| Actual newly packaged hidden app | Defaults/composer/settings/profiles/Start cases: 17 passed / 28.7 seconds |
+| Actual bundle/native distribution | PASS; protocol 55 / SendBox 0.2.4 |
+| Production ZIP/manifest consumer | PASS; 740,582,167-byte archive / 107,679.96 ms |
+| Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
+
+The final bundled workload is
+`docker.io/library/moguri-worker@sha256:7f4d9f522b6b8ebea0c54e3b21232e0a6505747e3baa7b6e6ae175408db14589`.
+The rebuilt DMG is 754,196,028 bytes, SHA-256
+`4b792e2ac20fe01b150cd1a1cbf0addfc58b0ccb03331ae71737230609c03cd2`.
+Older image/installer identities remain historical. This is fresh protocol-55
+evidence, not a relabeled earlier Node run. No personal account, model weights,
+microphone, conversation, administrator installation or paid inference was used;
+Electron and loopback fixtures are hidden/generated. Only owned verification
+mounts were detached, never an earlier user-opened image. Ad-hoc signing,
+FFI/chunk/optional-icon notices, downstream SDK-host compatibility overrides and
+physical-native/notarization/Linux release limits remain unchanged.
+
 ## Per-response output and reasoning
 
 Ordinary requests use the prepared model's declared output maximum, bounded by
