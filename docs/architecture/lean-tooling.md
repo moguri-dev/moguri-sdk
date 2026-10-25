@@ -282,7 +282,9 @@ parent dispatch/writer handoff/budgets, restart migration/source retention,
 framed DAP disconnect and hidden Electron controls. The live public keyless
 probe returned three HTTPS results for `TypeScript official documentation`;
 this one observed page is not a provider-availability SLO.
-Packed external-consumer and full-suite results belong in setup qualification
-only after they run. Live representative task/cache/quality evaluation,
+The [protocol-57 setup qualification](../setup.md#protocol-57-lean-tooling-qualification)
+records the complete full-suite, hidden-client and audited external-consumer
+results, including the actual installed data worker and all worker probes.
+Live representative task/cache/quality evaluation,
 additional memory backends, arbitrary document preservation and independent
 language-adapter/native/remote transport qualifications remain separate.
