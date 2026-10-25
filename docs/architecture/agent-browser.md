@@ -82,3 +82,48 @@ navigation/read/fill/click/key input, blank-pane initialization, rapid off/on,
 mid-navigation revocation, old-control/document rejection, denied approval,
 password refusal, private cleanup/reopening and denied page dialogs.
 All pages, host metadata, model responses and credentials were generated.
+
+The final complete Node run passed **1,330 cases, 14 skipped, zero failed**
+(1,344 total) in **1,162,247.15 ms**. It includes the actual CLI/TUI/worker
+paths and the genuine legacy fixture corrections, not relabelled future
+markers or relaxed project-free workspace authority.
+Its log is `.moguri/artifacts/agent-browser-full-node-final.log`.
+The complete hidden Electron run then passed **166 cases, two skipped, zero
+failed** (168 total) in **5.3 minutes**, including the actual sliding-button
+shape, thumb movement, 44-pixel hit area, Space/Enter and focus regression.
+Its log is `.moguri/artifacts/agent-browser-full-e2e.log`.
+
+## Distribution qualification
+
+The packed external SDK passed its public imports/declarations, approved fresh
+install/audit, shared CLI/TUI/API probes and all 12 actual installed-worker
+cases. The additional installed browser probe passed in 274.51 ms with zero
+model calls. The visual sliding-switch correction did not change any shared
+service/runtime/worker/SDK bundle: all eight recorded SHA-256 checks matched.
+The minimal embedding host retains the already documented upstream deprecation
+warnings when it does not opt into the SDK's scoped Node 26 override policy;
+its audit found zero vulnerabilities.
+
+The actual final macOS development package contains protocol 56 and SendBox
+0.2.4. **28 actual packaged-app cases passed in 58.0 seconds**: browser
+primitives/control/revocation/privacy, model defaults, all Resume root scopes,
+native settings, profile switching and terminal startup/+ behavior.
+Its exact native-distribution/no-script installer check passed in
+4,589.43 ms without a model, personal credentials, administrator dialog or app
+launch. The no-cache Linux arm64 producer passed in 35,178.55 ms, with locked
+dependencies, actual native PTY verification and zero audit vulnerabilities:
+
+`docker.io/library/moguri-worker@sha256:dbb6f984b28f06fbda8a9b87e7a1a06df03c3011ce1417a7563b760ad3a015c4`
+
+The rebuilt ZIP is 740,606,909 bytes and passed the production update consumer
+in 113,922.38 ms. The DMG is 754,272,911 bytes, SHA-256
+`0f787eab598744518c2e1bde6223158b4fd619f52c09d1dd227bfd09cdeacc6d`.
+Its mounted Finder metadata, 540x380-point geometry, 80-point icons, 1x/2x
+background and unchanged signed app match the actual ZIP/manifest.
+The packager's optional modern `.icon`-format warning does not replace the
+verified native `.icns` assets. This is ad-hoc development signing, not
+notarization or physical SendBox/Linux release readiness. No user-opened DMG
+was detached.
+
+Browser screenshots combine actual hidden main-renderer and native-child
+captures at measured bounds. They never capture a personal screen or browser.

@@ -180,6 +180,13 @@ identifiers; normalization never renames filesystem directories.
 
 ### Retained-state upgrades
 
+Protocol/database 56 adds the strict transactional `browser_control_schema`
+marker and reviewed upgrade from an older running service. Native browser
+leases/control never persist or replay. The genuine schema-55 migration,
+interrupted insertion and corrupt-marker cases preserve exact encrypted
+events, keys, receipts and remembered model selections. Protocol 55's
+profile-root preference ownership remains unchanged.
+
 Protocol/database 54 adds the versioned session PR observation marker after
 the converged 53 history. Marker insertion/version advance are transactional;
 insertion failure rolls back and current missing/corrupt markers refuse reopen.
