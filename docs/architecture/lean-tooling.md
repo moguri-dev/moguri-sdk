@@ -294,6 +294,9 @@ records the original complete full-suite, hidden-client and audited
 external-consumer results before main's candidate-cleanup merge. Final
 integration additionally qualifies both schema-57 lineages and preserves
 candidate cleanup, coordination and stricter descendant accounting together.
+The [protocol-58 integrated sweep](../setup.md#protocol-58-integrated-source-qualification)
+passes the complete Node/native-TUI, hidden Electron and audited packed SDK/
+installed-worker gates against that combined implementation.
 An integrated deletion blocked by a partial watch still permits only the exact
 actual-user watch inspection/acknowledgement and existing Resume/retry paths;
 candidate deletion cannot trap that recovery action or admit new model work.
