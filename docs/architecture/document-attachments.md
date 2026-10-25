@@ -131,7 +131,8 @@ Configured local models may explicitly declare `toolInput: false`; document
 admission then blocks without weakening existing text/image behavior. Tool-less
 subagents and settings chats likewise cannot consume document context. This
 flag describes configured transport capability, not model quality or permission.
-Native execution needs a newly qualified protocol-43 workload; old images are
+Native execution needs a newly qualified matching-protocol workload (currently
+44 after the desktop interaction update); old protocol-43 images are
 not silently accepted or relabeled. Local/SSH source checks do not qualify a
 new native image, OCR or a signed desktop release.
 

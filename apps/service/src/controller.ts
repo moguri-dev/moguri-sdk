@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
+import { projectIdentifier } from "../../../packages/protocol/src/sessions.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
@@ -8,9 +10,9 @@ import { lstatSync, realpathSync } from "node:fs";
 import { localRootsOverlap } from "./project-clone.ts";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  TaskProgressToolSchema,
+  TaskProgressToolSchema, AgentTerminalReadSchema,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
-  CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
+  CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
@@ -563,6 +565,8 @@ export class ControlPlane extends EventEmitter {
     this.remote.synchronize();
     this.sandbox.synchronize();
     this.provider.synchronize();
+    this.platform?.sessionPrs.changed(appended);
+    this.platform?.browser.synchronize();
   }
   private commandFinish(id: string, commandDigest: string): WorkspaceFinish {
     return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {
@@ -575,6 +579,7 @@ export class ControlPlane extends EventEmitter {
     this.history = this.store.events(); this.projection = projectEvents(this.history, this.profileId);
     if (policyChanged) this.invalidateApprovals();
     this.remote.synchronize(); this.sandbox.synchronize(); this.provider.synchronize(); this.emit("change", []);
+    this.platform.browser.synchronize();
     queueMicrotask(() => this.pumpAll());
   }
   wake(): void { queueMicrotask(() => this.pumpAll()); }
@@ -946,7 +951,7 @@ export class ControlPlane extends EventEmitter {
       { source: "profile", values: settings.values.startup.profile },
       { source: "project", values: configuration?.values.defaults ?? {} },
       { source: "session", values: overrides },
-    ], { settingsRevision: settings.revision, projectRevision: configuration?.revision ?? null });
+    ], { settingsRevision: settings.revision, projectRevision: configuration?.revision ?? null }, this.projection.lastModelSelection);
   }
   private session(id: string): Session {
     const session = this.projection.sessions.find((session) => session.id === id);
@@ -1176,7 +1181,9 @@ export class ControlPlane extends EventEmitter {
     void external.execute(external.abort.signal).then((result) => {
       if (external.abort.signal.aborted || !this.externalRuns.has(external.sessionId)) return;
       const failed = result !== null && typeof result === "object" && "isError" in result && result.isError === true;
-      this.finishExternal(external, failed ? "failed" : "completed", failed ? "The MCP tool returned an error result." : null, result);
+      const browser = external.call.arguments.serverId === "builtin" && isBrowserTool(String(external.call.arguments.tool)) && isRecord(result);
+      const outcome = browser && result.outcome === "partial" ? "partial" : browser && result.outcome === "cancelled" ? "stopped" : failed ? "failed" : "completed";
+      this.finishExternal(external, outcome, failed ? "The MCP tool did not complete. Inspect its original outcome; no automatic retry." : null, result);
     }).catch((error: unknown) => {
       if (!this.externalRuns.has(external.sessionId)) return;
       const outcome = error instanceof MoguriError && error.code === "remote_mcp_stopped" ? "stopped" : error instanceof MoguriError && error.code === "remote_mcp_failed" ? "failed" : "partial";
@@ -1678,7 +1685,8 @@ export class ControlPlane extends EventEmitter {
     if (existing) return existing;
     const command = envelope.command;
     const projectId = "projectId" in command ? command.projectId : "sessionId" in command ? this.projection.sessions.find((session) => session.id === command.sessionId)?.projectId : undefined;
-    if (projectId && this.deletingProjects.has(projectId) || "sessionId" in command && typeof command.sessionId === "string" && this.deletingSessions.has(command.sessionId)) throw new MoguriError("workspace_removing", "Owned work is settling for removal. No new mutation was admitted.", 409);
+    const browserCleanup = command.type === "browser.host.detach" || command.type === "browser.host.reply" || command.type === "browser.host.control" && !command.enabled;
+    if (!browserCleanup && (projectId && this.deletingProjects.has(projectId) || "sessionId" in command && typeof command.sessionId === "string" && this.deletingSessions.has(command.sessionId))) throw new MoguriError("workspace_removing", "Owned work is settling for removal. No new mutation was admitted.", 409);
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
     const finish = this.commandFinish(envelope.id, commandDigest);
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
@@ -1692,7 +1700,8 @@ export class ControlPlane extends EventEmitter {
         if (this.projection.jobs.some((job) => job.projectClone?.path === path && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("clone_pending", "This destination still belongs to its original clone job. Finish or cancel it before explicitly importing its files.", 409);
         const existing = this.projection.projects.find((project) => project.path === path);
         if (existing) return finish([], { id: existing.id });
-        const project = { id: randomUUID(), name: basename(path), path };
+        if (command.name && this.projection.projects.some((project) => project.name.toLowerCase() === command.name!.toLowerCase())) throw new MoguriError("project_name", "Choose a unique local project name containing only letters, numbers, hyphens or underscores.", 409);
+        const project = { id: randomUUID(), name: command.name ?? projectIdentifier(basename(path), this.projection.projects.map((project) => project.name)), path };
         return finish([{ event_type: "project.added", profile_id: this.profileId, project_id: project.id, payload: { project } }], { id: project.id });
       }
       case "session.create": {
@@ -1730,11 +1739,15 @@ export class ControlPlane extends EventEmitter {
     const session = this.session(command.sessionId);
     if (session.status === "archived" && command.type !== "session.restore") throw new MoguriError("archived", "Restore this session before editing or resuming it.", 409);
     switch (command.type) {
-      case "session.configure":
+      case "session.configure": {
         if (session.turnId) throw new MoguriError("turn_active", "Stop the current turn before changing its controls.", 409);
         this.revision(session.revision, command.expectedRevision);
         this.available(command.controls, false, session);
-        return finish([this.event(session, "session.configured", { controls: command.controls })], { revision: session.revision + 1 });
+        return finish([this.event(session, "session.configured", { controls: command.controls }),
+          ...(command.rememberModelSelection ? [{ event_type: "model.selection_remembered" as const, profile_id: this.profileId,
+            payload: { selection: modelSelection(command.controls), sourceSessionId: session.id, sourceProjectId: session.projectId, actor: "user" as const } }] : [])],
+        { revision: session.revision + 1 });
+      }
       case "session.archive": {
         await this.settleOwned(session.id);
         const current = this.session(session.id);
@@ -2923,21 +2936,24 @@ export class ControlPlane extends EventEmitter {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
-      if (isDocumentTool(request.call.name) || request.call.name === "read_file" && typeof request.call.arguments.path === "string" && isPasteFilePath(request.call.arguments.path)) {
+      if (request.call.name === "read_agent_terminal" || isDocumentTool(request.call.name) || request.call.name === "read_file" && typeof request.call.arguments.path === "string" && isPasteFilePath(request.call.arguments.path)) {
         try {
           run.abort.signal.throwIfAborted();
           const policy = run.scopedReadPolicies.get(request.call.id);
-          if (!policy || policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed after this exact scoped-file approval. No source text was read; request fresh approval.", 409);
+          if (!policy || policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed after this exact scoped-read approval. No source text was read; request fresh approval.", 409);
           await this.assertCurrentTool(session, request.call);
           const authorization = authorizeTool(this.projection.settings.values, request.call, null);
           if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
           run.abort.signal.throwIfAborted();
-          if (policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed during the scoped-file read. No source text was returned.", 409);
-          const result = isDocumentTool(request.call.name) ? this.platform.inputs.documentTool(session.id, request.call) :
+          if (policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed during the scoped read. No source text was returned.", 409);
+          const result = request.call.name === "read_agent_terminal" ? await this.platform.activity.agentTerminal(session.id, parse(AgentTerminalReadSchema, request.call.arguments)) :
+            isDocumentTool(request.call.name) ? this.platform.inputs.documentTool(session.id, request.call) :
             this.platform.inputs.readFile(session.id, String(request.call.arguments.path), request.call.arguments);
+          run.abort.signal.throwIfAborted();
+          if (policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed during this scoped read. No source text was returned.", 409);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: JSON.stringify(result), isError: false, outcome: "completed" } });
         } catch (error) {
-          this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Scoped file read stopped or failed. No workspace fallback was attempted.", isError: true, outcome: run.abort.signal.aborted ? "stopped" : "failed" } });
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Scoped read stopped or failed. No alternate source was accessed.", isError: true, outcome: run.abort.signal.aborted ? "stopped" : "failed" } });
         }
         return;
       }

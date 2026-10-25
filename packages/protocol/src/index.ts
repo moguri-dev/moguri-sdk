@@ -6,8 +6,9 @@ import { PlatformCommandSchema, defaultSettings, normalizeSettings, type Applica
 export * from "./platform.ts";
 export * from "./model.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
+import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
-import { defaultProjectSettings, ProjectCloneIntentSchema } from "./sessions.ts";
+import { defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
 import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
@@ -42,12 +43,14 @@ import { projectGithubOperation, type GithubEventPayloads, type GithubOperation 
 import { projectLinearOperation, type LinearEventPayloads, type LinearOperation } from "./linear-workflows.ts";
 import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts";
 import type { TaskPlan, TaskProgressReport } from "./progress.ts";
+import { SessionPrObservationSchema, sameSessionPrScope, sessionPrScope, type SessionPrObservation } from "./session-status.ts";
+export * from "./session-status.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 52;
+export const PROTOCOL_VERSION = 56;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -61,9 +64,9 @@ export const CommandSchema = object({
   id,
   profileId: id,
   command: Type.Union([
-    object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }) }),
+    object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }), name: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Za-z0-9_-]+$" })) }),
     object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
-    object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema }),
+    object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
     object({ type: Type.Literal("session.archive"), ...sessionId }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
     object({ type: Type.Literal("session.resume"), ...sessionId }),
@@ -185,6 +188,7 @@ export interface Session {
   completedAt?: string;
   finishedAt?: string;
   prUrl: string | null;
+  prObservation?: SessionPrObservation | null;
   workItemId: string | null;
   browserUrl: string | null;
   suggestionSources?: SuggestionSource[];
@@ -230,6 +234,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "project.added": { project: Project };
   "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "session.workspace_bound": { workspaceId: string | null };
+  "session.pr_observed": { observation: SessionPrObservation };
   "session.sandbox_bound": { workspaceId: string };
   "sandbox.workspace_recorded": { workspace: SandboxWorkspace };
   "sandbox.execution_recorded": { execution: SandboxExecution };
@@ -242,11 +247,13 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
   "session.configured": { controls: Controls };
+  "model.selection_remembered": { selection: ModelSelection | null; sourceSessionId: string; sourceProjectId: string | null; actor: "user" };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
   "session.resumed": Record<string, never>;
   "session.blocked": { diagnostic: string };
   "draft.saved": { text: string; attachments: Attachment[] };
+  "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
   "queue.enqueued": { item: QueueItem };
   "queue.edited": { messageId: string; text: string; attachments?: Attachment[] };
   "queue.removed": { messageId: string };
@@ -308,7 +315,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
-  "session.organized": { changes: SessionChanges };
+  "session.organized": { changes: SessionChanges & { order?: number } };
   "session.mode_requested": { mode: SessionMode };
   "session.mode_changed": { mode: SessionMode };
   "session.browser_changed": { url: string };
@@ -365,8 +372,8 @@ export type StoredEvent = EventInput & {
   artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
-  "project.added", "session.created", "session.configured", "session.archived", "session.restored", "session.resumed", "session.blocked",
-  "draft.saved", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
+  "project.added", "session.created", "session.configured", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
@@ -391,6 +398,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const projects = new Map<string, Project>();
   const sessions = new Map<string, Session>();
   let nextSessionOrder = 0;
+  let lastModelSelection: ModelSelection | null = null;
   let policy: Policy = { revision: 0, allowedEnvs: ["Local", "Sandbox", "Remote"] };
   const blockedProjects = new Set<string>();
   const blockedSessions = new Set<string>();
@@ -445,8 +453,29 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const sandboxPublications = new Map<string, SandboxPublication>();
   const managedWorkspaces = new Map<string, ManagedWorkspace>();
   const changeSets = new Map<string, ChangeSet>();
+  const removedModelSources = new Set<string>(), removedModelProjects = new Set<string>();
+  for (const event of events) if (event.profile_id === profileId) {
+    if (event.event_type === "session.deleted") removedModelSources.add(event.payload.deletedSessionId);
+    if (event.event_type === "project.removed") removedModelProjects.add(event.payload.deletedProjectId);
+  }
   for (const event of events) {
     if (event.profile_id !== profileId) continue;
+    if (event.event_type === "model.selection_remembered") {
+      const selection = event.payload.selection, source = sessions.get(event.payload.sourceSessionId);
+      const actual = source ? modelSelection(source.controls) : undefined;
+      const retainedSource = removedModelSources.has(event.payload.sourceSessionId) ||
+        event.payload.sourceProjectId !== null && removedModelProjects.has(event.payload.sourceProjectId);
+      if (event.project_id !== null || event.session_id !== null || event.turn_id !== null || event.artifact_id != null || event.payload.actor !== "user" ||
+        typeof event.payload.sourceSessionId !== "string" || !event.payload.sourceSessionId || event.payload.sourceSessionId.length > 128 ||
+        event.payload.sourceProjectId !== null && typeof event.payload.sourceProjectId !== "string" ||
+        !source && !retainedSource || source && source.projectId !== event.payload.sourceProjectId ||
+        selection !== null && !Value.Check(ModelSelectionSchema, selection) ||
+        source && (selection?.modelId !== actual?.modelId || selection?.thinkingEffort !== actual?.thinkingEffort)) {
+        throw new MoguriError("model_preference_corrupt", "Remembered model selection lost its exact profile/user/source controls. No inferred choice or model fallback was used.", 409);
+      }
+      lastModelSelection = selection ? structuredClone(selection) : null;
+      continue;
+    }
     if (event.event_type === "knowledge.saved") {
       const record = event.payload.record;
       if (record.profileId !== profileId || event.artifact_id !== `knowledge/${record.id}` || record.projectId !== (event.project_id ?? null) || record.sessionId !== (event.session_id ?? null)) throw new MoguriError("knowledge_corrupt", "Knowledge event scope disagrees with its original owner.", 409);
@@ -687,10 +716,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (!Value.Check(TerminalStateSchema, terminal)) throw new MoguriError("terminal_corrupt", "Terminal state is invalid. Retained history was preserved.", 409);
       if (terminal.binding && terminal.env !== terminal.binding.env) throw new MoguriError("terminal_corrupt", "Terminal execution env differs from its captured binding. No boundary was relabeled.", 409);
       if (terminal.sessionId === null || terminal.projectId === null) {
+        const owner = terminal.ownerId ? terminalOwners.get(terminal.ownerId) : undefined;
         if (terminal.env !== "Local" || terminal.binding?.env !== "Local" || terminal.binding.profileId !== profileId ||
           terminal.binding.sessionId !== terminal.sessionId || terminal.binding.projectId !== terminal.projectId ||
           terminal.sessionId === null && terminal.projectId !== null || terminal.workspaceId != null || terminal.binding.workspaceId !== null ||
-          terminal.sessionId !== event.session_id || terminal.projectId !== event.project_id) throw new MoguriError("terminal_corrupt", "Independent Local console lost its exact null scope, profile or captured root. No session/project was inferred.", 409);
+          !owner || owner.remote || terminal.sessionId !== event.session_id || terminal.projectId !== event.project_id) throw new MoguriError("terminal_corrupt", "Independent Local console lost its exact owner, null scope, profile or captured root. No session/project was inferred.", 409);
       }
       if (terminal.env === "Remote") {
         const owner = terminal.ownerId ? terminalOwners.get(terminal.ownerId) : undefined;
@@ -874,10 +904,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (workspaceId) blockedWorkspaces.delete(workspaceId); else blockedProjects.delete(event.project_id);
     }
     if (event.event_type === "session.resumed" && event.session_id) blockedSessions.delete(event.session_id);
-    if (event.event_type === "project.added") projects.set(event.payload.project.id, event.payload.project);
+    if (event.event_type === "project.added") {
+      const project = event.payload.project;
+      projects.set(project.id, { ...project, name: projectIdentifier(project.name, [...projects.values()].filter((entry) => entry.id !== project.id).map((entry) => entry.name)) });
+    }
     if (event.event_type === "project.relocated" && event.project_id) {
       const project = projects.get(event.project_id);
-      if (project) projects.set(project.id, { ...project, ...event.payload });
+      if (project) projects.set(project.id, { ...project, ...event.payload, name: projectIdentifier(event.payload.name, [...projects.values()].filter((entry) => entry.id !== project.id).map((entry) => entry.name)) });
     }
     if (event.event_type === "policy.updated") {
       policy = event.payload.policy;
@@ -893,7 +926,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
         kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, order: nextSessionOrder++, unread: false, groupId: null, archivedAt: null,
-        prUrl: event.payload.prUrl ?? null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
+        prUrl: event.payload.prUrl ?? null, prObservation: null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
         suggestionSources: event.payload.suggestionSources,
         inheritedImages: event.payload.inheritedImages,
         activeCompactionId: null,
@@ -901,6 +934,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     const session = event.session_id ? sessions.get(event.session_id) : undefined;
     if (!session) continue;
+    if (event.event_type === "session.pr_observed") {
+      const observation = event.payload.observation;
+      const scope = sessionPrScope(session, { issues: [...issues.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()],
+        projects: [...projects.values()], projectConfigurations: [...projectConfigurations.values()] });
+      if (!Value.Check(SessionPrObservationSchema, observation) || observation.profileId !== profileId || observation.sessionId !== session.id ||
+        event.project_id !== session.projectId || !scope || !sameSessionPrScope(scope, observation.scope) || observation.pullRequest.url !== scope.url) {
+        throw new MoguriError("session_pr_scope", "A PR observation lost its exact session/profile/root/access binding. State was preserved.", 409);
+      }
+      session.prObservation = structuredClone(observation);
+      continue;
+    }
     session.updatedAt = event.timestamp;
     const addUser = (item: QueueItem) => session.messages.push({
       id: item.id, turnId: event.turn_id ?? "", role: "user", text: item.text +
@@ -927,7 +971,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         if (changes.unread !== undefined) session.unread = changes.unread;
         if (changes.groupId !== undefined) session.groupId = changes.groupId;
         if (changes.parentSessionId !== undefined) session.parentSessionId = changes.parentSessionId ?? undefined;
-        if (changes.prUrl !== undefined) session.prUrl = changes.prUrl;
+        if (changes.prUrl !== undefined) { if (changes.prUrl !== session.prUrl) session.prObservation = null; session.prUrl = changes.prUrl; }
         session.revision++; break;
       }
       case "task.plan_updated": {
@@ -1110,7 +1154,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       control.payload.promptDigest !== sequence.inputDigest || control.payload.controls.env !== sequence.env) throw new MoguriError("role_sequence_corrupt", "Role metadata lost its exact original owning control turn. No model or root authority was adopted.", 409);
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
-    settings, notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
+    settings, lastModelSelection, notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],

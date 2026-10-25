@@ -167,7 +167,7 @@ test("optional Porto reads only generated inventory, and plan saves retain diges
 
 test("work-item and verified merged-PR sessions never change the checkout and can be unarchived", async () => {
   let reads = 0;
-  const fixture = await setupFixture({ platform: { integrations: { fetch: async () => { reads++; return Response.json({ number: 9, html_url: "https://github.com/generated/project/pull/9", state: "closed", merged: true, merged_at: "2026-01-01T00:00:00Z" }); } } } });
+  const fixture = await setupFixture({ platform: { integrations: { fetch: async () => { reads++; return Response.json({ number: 9, html_url: "https://github.com/generated/project/pull/9", state: "closed", draft: false, merged: true, merged_at: "2026-01-01T00:00:00Z" }); } } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await repository(fixture.project, join(fixture.directory, "generated-remote.git"));
@@ -179,6 +179,8 @@ test("work-item and verified merged-PR sessions never change the checkout and ca
     const fromPr = await sdk.sessions.fromWork(id, { prUrl: "https://github.com/generated/project/pull/9" });
     assert.equal(reads, 1);
     assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === fromPr.id)?.prUrl, "https://github.com/generated/project/pull/9");
+    assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === fromPr.id)?.prObservation?.pullRequest.state, "merged");
+    assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === fromPr.id)?.prObservation?.pullRequest.draft, false);
     await sdk.command({ type: "session.archive", sessionId: fromPr.id! });
     await sdk.command({ type: "session.restore", sessionId: fromPr.id! });
     assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === fromPr.id)?.status, "idle");

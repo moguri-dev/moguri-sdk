@@ -5,7 +5,6 @@ import { parseDocument } from "yaml";
 import { Value } from "typebox/value";
 import {
   defaultSettings, guidanceText, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
-  defaultBoard,
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
@@ -40,6 +39,7 @@ import { WorkspaceRuntime, type WorkspaceOptions } from "./workspace.ts";
 import { SessionWorkspace, type SessionWorkspaceHost, type SessionWorkspaceOptions, type WorkspaceFinish } from "./session-workspace.ts";
 import { assertSessionTool, matchesFolder } from "./project-policy.ts";
 import { pullRequestLink } from "./project-integrations.ts";
+import { SessionPrObserver } from "./session-prs.ts";
 import type { OAuthOptions } from "./mcp-oauth.ts";
 import { Engagement, isEngagementCommand, isEngagementQuery } from "./engagement.ts";
 import type { ModelRegistryOptions } from "./model-registry.ts";
@@ -58,7 +58,9 @@ import type { RepositoryApiMetadata } from "./repository-metadata.ts";
 import { sourceRootSync, validateRepositorySource, type RepositorySourceCapture, type SourceRoot, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
 import { frameDigest } from "./worker-wire.ts";
 import { MemoryPreparedSchema, type MemoryPrepared } from "./memory-mcp.ts";
-import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
+import { INTERNAL_MCP_TOOLS, builtinToolDigest } from "./gateway-tools.ts";
+import { BrowserBroker } from "./browser.ts";
+import { BROWSER_MCP_TOOLS, isBrowserCommand, isBrowserQuery, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { SandboxPublications } from "./sandbox-publications.ts";
@@ -75,6 +77,8 @@ import { isLinearCommand, isLinearQuery } from "../../../packages/protocol/src/l
 import type { WorkflowHost } from "./workflow-host.ts";
 import { TaskProgressRuntime } from "./task-progress.ts";
 import type { DocumentParserOptions } from "./documents.ts";
+import { ChatActivity } from "./chat-activity.ts";
+import { isActivityQuery } from "../../../packages/protocol/src/activity.ts";
 import { cloneProject, prepareProjectClone } from "./project-clone.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
@@ -84,8 +88,8 @@ interface MemoryContext {
 function memoryArguments(tool: string, args: Record<string, unknown>) {
   const schema = INTERNAL_MCP_TOOLS.find((candidate) => candidate.name === tool)?.inputSchema;
   if (!schema || !["search_memory", "memory_graph"].includes(tool) || !Value.Check(schema, args)) throw new MoguriError("memory_input", "Choose exact valid memory tool arguments before repository retrieval. No source was read.", 403);
-  if (tool === "search_memory" && "query" in args) return { tool: "search_memory" as const, query: args.query };
-  if (tool === "memory_graph" && "path" in args) return { tool: "memory_graph" as const, path: args.path };
+  if (tool === "search_memory" && "query" in args && typeof args.query === "string") return { tool: "search_memory" as const, query: args.query };
+  if (tool === "memory_graph" && "path" in args && typeof args.path === "string") return { tool: "memory_graph" as const, path: args.path };
   throw new MoguriError("memory_input", "The selected memory tool has no valid query or graph path.", 403);
 }
 
@@ -152,6 +156,7 @@ export interface PlatformHost {
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions }
 export class PlatformRuntime {
+  readonly browser: BrowserBroker;
   readonly knowledge: TieredKnowledge;
   readonly extensions: Extensions;
   readonly github: GitHubWorkflows;
@@ -159,10 +164,12 @@ export class PlatformRuntime {
   readonly engagement: Engagement;
   readonly inputs: ContextInputs;
   readonly progress: TaskProgressRuntime;
+  readonly activity: ChatActivity;
   readonly memory: RepositoryMemory;
   readonly gateway: McpGateway;
   readonly voice: LocalDictation;
   readonly workspace: WorkspaceRuntime;
+  readonly sessionPrs: SessionPrObserver;
   readonly sessions: SessionWorkspace;
   readonly managed: ManagedWorkspaces;
   readonly artifacts: ArtifactRuntime;
@@ -178,6 +185,7 @@ export class PlatformRuntime {
   private voiceCaptures = new Map<string, { sessionId: string; token: string; consumed: boolean; input: ReturnType<typeof Promise.withResolvers<Uint8Array>> }>();
   private readonly memoryIndexes = new Map<string, string>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, private readonly options: PlatformOptions = {}) {
+    this.browser = new BrowserBroker(() => this.snapshot());
     this.knowledge = new TieredKnowledge(store, { snapshot: () => this.snapshot(), events: host.events, sandbox: host.sandboxStatus });
     this.extensions = new Extensions(store, { snapshot: () => this.snapshot(), events: host.events,
       project: (id) => this.project(id), projects: () => this.sessions.projects,
@@ -239,9 +247,22 @@ export class PlatformRuntime {
       rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
       localRootBusy: host.localRootBusy,
       wake: host.wake,
-      verifyPr: async (id, url) => { await this.workspace.integrations.pullRequest(pullRequestLink(url), { ...defaultBoard(id), githubAccess: this.sessions.projects.configuration(id).values.repo.githubAccess }, this.project(id).path, AbortSignal.timeout(20_000)); },
+      verifyPr: async (scope) => {
+        if (scope.projectId && scope.access === "gh-cli") await this.managed.assert({ projectId: scope.projectId, workspaceId: scope.workspaceId });
+        const observed = await this.workspace.integrations.pullRequest(pullRequestLink(scope.url), { githubAccess: scope.access }, scope.root, AbortSignal.timeout(20_000));
+        if (scope.projectId && scope.access === "gh-cli") await this.managed.assert({ projectId: scope.projectId, workspaceId: scope.workspaceId });
+        return observed;
+      },
       job: (kind, projectId, execute) => this.job(kind, projectId, null, execute),
     }, stateDir, { ...options, terminal: { ...options.terminal, vault: options.terminal?.vault ?? options.vault } });
+    this.sessionPrs = new SessionPrObserver({
+      snapshot: () => this.snapshot(), commit: (events) => this.host.commit(events),
+      assertRoot: async (session, signal) => {
+        signal.throwIfAborted();
+        if (session.projectId) await this.managed.assert({ projectId: session.projectId, workspaceId: session.workspaceId });
+        signal.throwIfAborted();
+      },
+    }, this.workspace.integrations, options.integrations?.prRefreshMs);
     this.candidates = new CandidateRuntime(store, {
       snapshot: () => this.snapshot(), managed: this.managed, projects: () => this.sessions.projects,
       commit: (events) => this.host.commit(events),       artifact: (session, text, summary, patch, sources) => this.artifacts.candidate(session, text, summary, patch, sources),
@@ -259,7 +280,7 @@ export class PlatformRuntime {
       artifact: (publication) => this.artifacts.nativePublication(publication),
       job: (projectId, workspaceId, execute, start, settled, lifecycle) => this.job("sandbox.publish", projectId, null, execute, settled, start, workspaceId ?? undefined, lifecycle),
     });
-    this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path) }, stateDir, options.documents);
+    this.inputs = new ContextInputs(store, this.sessions.projects, this.workspace.integrations, { snapshot: () => this.snapshot(), events: host.events, ownedRoot: (path) => this.managed.ownedRoot(path), project: (session) => this.managed.project(session) }, stateDir, options.documents);
     this.progress = new TaskProgressRuntime({
       profileId: store.profileId, session: (id) => this.session(id), events: host.events, commit: host.commit,
       binding: (session) => JSON.stringify([session.id, session.turnId, session.controls.env, session.workspaceId, session.sandboxWorkspaceId,
@@ -287,6 +308,24 @@ export class PlatformRuntime {
     };
     this.github = new GitHubWorkflows(store, workflowHost, options.github);
     this.linear = new LinearWorkflows(store, workflowHost, this.workspace.integrations, options.linear);
+    this.activity = new ChatActivity({
+      snapshot: () => this.snapshot(), events: host.events,
+      turnBudget: (sessionId, turnId) => {
+        const result = this.budgets.query({ type: "budget.dashboard", sessionId, turnId, bucket: "all" });
+        if (result.type !== "budget.dashboard") throw new MoguriError("activity_budget", "The original turn accounting response changed type. No estimate was substituted.", 409);
+        return result;
+      },
+      workflow: async (source, operationId) => {
+        if (source === "github") {
+          const result = await this.github.query({ type: "github.read", operationId });
+          if (result.type !== "github.read") throw new MoguriError("activity_source", "The retained GitHub source response changed type.", 409);
+          return result.document.action;
+        }
+        const result = await this.linear.query({ type: "linear.workflow.read", operationId });
+        if (result.type !== "linear.workflow.read") throw new MoguriError("activity_source", "The retained Linear source response changed type.", 409);
+        return result.document.input;
+      },
+    }, store);
     this.repositories = new RepositoryTelemetry({
       snapshot: () => this.snapshot(), scope: host.repositoryScope, git: host.repositoryGit,
       remoteRead: host.remoteRepository,
@@ -500,6 +539,7 @@ export class PlatformRuntime {
           ...(job.sandboxPublicationId ? { sandboxPublicationId: job.sandboxPublicationId } : {}) } };
     })]);
     this.workspace.start();
+    this.sessionPrs.start();
     await this.sessions.recover();
   }
   prompt(session?: Session): string {
@@ -510,6 +550,16 @@ export class PlatformRuntime {
     const knowledge = entries.map((entry) => `[${entry.kind}: ${entry.name}; source=${entry.source}; sha256=${entry.contentDigest}]\n${this.store.blob(entry.contentDigest)}`).join("\n\n").slice(0, 16_384);
     return `${snapshot.settings.values.systemPrompt}
 ${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}${guidanceText(snapshot.settings.values.guidance, project ? this.sessions.projects.values(project.id).guidance : undefined)}${session?.controls.verbosity && verbosityGuidance[session.controls.verbosity] ? `\n<response-verbosity>${verbosityGuidance[session.controls.verbosity]}</response-verbosity>` : ""}
+
+<moguri-product-context>
+Moguri is the local-first AI coding application hosting this conversation. Its OpenTUI/React TUI and Electron/React desktop share one local service and SDK. Execution Env does not identify which client is attached.
+Official source: https://github.com/mbianchidev/moguri
+Setup guide: https://github.com/mbianchidev/moguri/blob/main/docs/setup.md
+Current qualification is a macOS arm64 development alpha, not a completed milestone. This source package is private; do not invent a public npm package, Homebrew formula, release download or Linux/Windows release support.
+TUI source setup, from an authorized checkout of that repository: Node.js >=26.4 <27 (pinned 26.12.0), npm >=11.20; npm ci; npm run build; npm start -- --project /absolute/path/to/project. The project flag is optional. npm start -- --help shows options; an already installed package exposes moguri [tui]. npm run desktop starts the other client.
+TUI keys: Enter sends, Shift+Enter inserts a newline, Cmd/Ctrl+Enter holds without running, Shift+Cmd/Ctrl+Enter sends now. Ctrl+L starts explicit Copilot sign-in; Ctrl+M selects a model. Configured local models are a separate option. Setup facts are not authorization to authenticate or run installation.
+Use these known first-party facts for Moguri setup questions instead of asking the user for Moguri's repository or installation guide. Distinguish this known setup from an unobserved installed version, account entitlement or terminal capability. These facts grant no execution, permission or policy change.
+</moguri-product-context>
 
 <moguri-execution-contract>
 Project: ${project ? session?.controls.env === "Remote" ? this.sessions.projects.configuration(project.id).values.remotePath ?? "(remote workspace not configured)" : project.path : "(no active project)"}
@@ -575,6 +625,8 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
+    if (isBrowserQuery(query)) return this.browser.query(query);
+    if (isActivityQuery(query)) return this.activity.query(query);
     if (isApplicationQuery(query)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (isGithubQuery(query)) return this.github.query(query);
     if (isLinearQuery(query)) return this.linear.query(query);
@@ -638,14 +690,15 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
         const session = query.sessionId ? this.session(query.sessionId) : undefined;
         const server = this.server(query.serverId, session?.projectId);
         if (session?.controls.env === "Remote") {
-          const tools = (await this.host.remoteMcpTools(session, server)).filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
+          const tools = (await this.host.remoteMcpTools(session, server)).filter((tool) => server !== null || !isBrowserTool(tool.name))
+            .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
           return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
         }
         if (!this.snapshot().policy.allowedEnvs.includes("Local") || session && (session.controls.env !== "Local" || server && (session.mode !== "agent" || session.kind !== "agent"))) throw new MoguriError("mcp_env", "MCP discovery has no qualified transport under this environment/read-only policy. No Local fallback.", 403);
         const root = session?.projectId ? this.managed.project(session).path : join(this.stateDir, "gateway-workspace");
         await mkdir(root, { recursive: true, mode: 0o700 });
         const tools = (await this.gateway.tools(server, root, AbortSignal.timeout(20_000), await this.scripts(session?.projectId), session?.id))
-          .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page")
+          .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page" || Boolean(session) && isBrowserTool(tool.name))
           .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
         return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
       }
@@ -829,6 +882,7 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     return { id: request.id, token: lease.token };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isBrowserCommand(command)) { this.browser.command(command); return finish([]); }
     if (isApplicationCommand(command)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (command.type === "project.clone") {
       if (!finish.intent) throw new MoguriError("clone_intent", "Repository cloning requires its original user command identity. No process was started.", 409);
@@ -1096,6 +1150,12 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     await assertSessionTool(this.session(session.id), project?.path ?? null, this.sessions.projects.values(session.projectId), { id: "gateway-policy", name: "mcp_gateway", arguments: args });
     let prepared: unknown;
     const input = isRecord(args.arguments) ? args.arguments : {};
+    if (serverId === "builtin" && isBrowserTool(String(args.tool))) {
+      const tool = BROWSER_MCP_TOOLS.find((tool) => tool.name === args.tool)!;
+      if (args.schemaDigest !== builtinToolDigest(tool)) throw new MoguriError("browser_schema", "The browser schema changed. Rediscover it and review the exact call.", 409);
+      const result = await this.browser.call(session.id, tool.name, input, signal);
+      return { content: [{ type: "text", text: result.text }], isError: result.outcome !== "completed", outcome: result.outcome };
+    }
     if (!project && serverId === "builtin" && args.tool !== "fetch_page") throw new MoguriError("project_required", "This internal workspace tool requires a selected project.");
     if (project && serverId === "builtin" && ["search_memory", "memory_graph"].includes(String(args.tool))) {
       const query = memoryArguments(String(args.tool), input);
@@ -1150,16 +1210,20 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       if (action === "call") {
         const result = await this.callMcp(session, call.arguments, signal);
         const id = randomUUID();
-        const job: CapabilityJob = { id, kind: "mcp.result", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: session.turnId, status: "completed", progress: "Result retained", resultDigest: this.store.putBlob(JSON.stringify(result)), error: null };
+        const browser = call.arguments.serverId === "builtin" && isBrowserTool(String(call.arguments.tool)) && isRecord(result);
+        const partial = browser && (result.outcome === "partial" || result.outcome === "cancelled");
+        const failed = browser && result.isError === true;
+        const job: CapabilityJob = { id, kind: "mcp.result", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: session.turnId, status: partial ? "partial" : failed ? "failed" : "completed", progress: "Result retained", resultDigest: this.store.putBlob(JSON.stringify(result)), error: failed ? "Browser action did not complete; inspect its original retained outcome." : null };
         this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { job } }]);
         const text = JSON.stringify(result);
-        return { text: JSON.stringify({ resultId: id, content: text.slice(0, 12000), truncated: text.length > 12000, readWith: "mcp_gateway read_result" }), isError: isRecord(result) && result.isError === true, outcome: isRecord(result) && result.isError === true ? "failed" : "completed" };
+        return { text: JSON.stringify({ resultId: id, content: text.slice(0, 12000), truncated: text.length > 12000, readWith: "mcp_gateway read_result" }), isError: isRecord(result) && result.isError === true, outcome: partial ? "partial" : isRecord(result) && result.isError === true ? "failed" : "completed" };
       }
       throw new MoguriError("gateway_action", "Use discover, tools, auth, call or read_result. Authentication/settings changes are user-only.");
     }
     throw new MoguriError("capability_unavailable", "This delegated capability is not available.");
   }
   stopSession(id: string): void {
+    this.browser.cancelSession(id);
     this.inputs.stopSession(id);
     const jobs = [...this.active.entries()].filter(([, job]) => job.sessionId === id);
     const events = jobs.flatMap(([id]) => {
@@ -1169,9 +1233,10 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
     try { if (events.length) this.host.commit(events); }
     finally { for (const [, job] of jobs) job.abort.abort(); }
   }
-  async settleSession(id: string): Promise<void> { this.stopSession(id); await Promise.all([this.inputs.settleSession(id), ...[...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)]); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
+  async settleSession(id: string): Promise<void> { this.browser.revokeSession(id); this.stopSession(id); await Promise.all([this.inputs.settleSession(id), ...[...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)]); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
   async cancelProject(id: string): Promise<void> {
     const sessions = this.snapshot().sessions.filter((session) => session.projectId === id);
+    for (const session of sessions) this.browser.revokeSession(session.id);
     for (const session of sessions) this.inputs.stopSession(session.id);
     const jobs = [...this.active.entries()].filter(([, job]) => job.projectId === id);
     try { const events = jobs.flatMap(([id]) => this.operationStopEvents(id)); if (events.length) this.host.commit(events); }
@@ -1183,9 +1248,11 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    this.browser.close();
     this.github.close();
     this.linear.close();
     this.workspace.close();
+    this.sessionPrs.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
     const settled = await Promise.allSettled([this.inputs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);

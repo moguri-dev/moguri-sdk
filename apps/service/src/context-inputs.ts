@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { isUtf8 } from "node:buffer";
 import { lstat, realpath, readdir } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import sharp from "sharp";
@@ -6,9 +7,9 @@ import { Value } from "typebox/value";
 import {
   attachmentBytes, documentDescriptor, DocumentDataSchema, DOCUMENT_LIMITS, DocumentListToolSchema, DocumentReadToolSchema, DocumentSearchToolSchema, parse,
   InputCommandSchema, InputQuerySchema, isRecord, MoguriError, pasteFilePath, pasteLineCount, type Attachment, type ContextPreview, type InputCommand, type InputQuery, type InputResponse, type Session, type Snapshot, type StoredEvent,
-  type CommandResult, type DocumentAttachment, type DocumentReadOptions, type DocumentSearchOptions, type DocumentListOptions, type DocumentList, type ToolCall,
+  type CommandResult, type DocumentAttachment, type DocumentReadOptions, type DocumentSearchOptions, type DocumentListOptions, type DocumentList, type ToolCall, type AttachmentAccess, type Project,
 } from "../../../packages/protocol/src/index.ts";
-import { isProtectedProjectPath, readProjectFile, readRegularFile, textFilePage } from "./files.ts";
+import { isProtectedProjectPath, readProjectFile, readRegularFile, scopedPath, textFilePage } from "./files.ts";
 import { digest, type EventStore } from "./store.ts";
 import { ignoredPath, readIgnoreScope, type IgnoreScope } from "./ignore-rules.ts";
 import { matchesFolder } from "./project-policy.ts";
@@ -18,11 +19,15 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 import { MAX_CONTEXT_TEXT_BYTES, MAX_CONTEXT_FOLDER_FILES } from "./input-limits.ts";
 import { DocumentParsers, type DocumentParserOptions } from "./documents.ts";
 import { documentPage, documentSearch } from "./document-reads.ts";
+import { assertFolderAccess, folderPolicy } from "./project-policy.ts";
 
 export const isInputCommand = (value: unknown): value is InputCommand => Value.Check(InputCommandSchema, value);
 export const isInputQuery = (value: unknown): value is InputQuery => Value.Check(InputQuerySchema, value);
 const MAX_TEXT_BYTES = MAX_CONTEXT_TEXT_BYTES, MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-interface Host { snapshot(): Snapshot; events(): StoredEvent[]; ownedRoot(path: string): { path: string; projectId: string } | undefined }
+interface Host {
+  snapshot(): Snapshot; events(): StoredEvent[]; ownedRoot(path: string): { path: string; projectId: string } | undefined;
+  project(session: Pick<Session, "projectId" | "workspaceId">): Project;
+}
 interface Capture { preview: Omit<ContextPreview, "destination">; text: string }
 export class ContextInputs {
   private stateRoot?: string;
@@ -194,19 +199,65 @@ export class ContextInputs {
     if (source.messages.some((message) => message.role === "tool" || message.attachments?.length)) excluded.push({ path: "Tool/attachment payloads", reason: "This is a public user/assistant text snapshot. Binary attachments, tool payloads and private continuation state are not copied." });
     return { text, preview: { kind: "session", label: source.title, bytes, digest: value, files: [], excluded, text, source: { kind: "session", location: source.id, revision: value } } };
   }
-  private async github(session: Session, input: string, access: "public" | "gh-cli"): Promise<Capture> {
+  private async github(session: Session, input: string, access: AttachmentAccess): Promise<Capture> {
+    if (access === "auto") {
+      try { return await this.github(session, input, "gh-cli"); }
+      catch (error) {
+        if (!(error instanceof MoguriError) || error.code !== "github_cli_unavailable") throw error;
+        const capture = await this.github(session, input, "public");
+        capture.preview.excluded.push({ path: "GitHub CLI access", reason: "The CLI account could not read this reference. This snapshot uses only the public GitHub API." });
+        return capture;
+      }
+    }
+    const root = session.projectId ? this.host.project({ projectId: session.projectId, workspaceId: session.controls.env === "Local" ? session.workspaceId : null }) : undefined;
+    const short = input.match(/^#?(?:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#)?([1-9]\d*)$/);
+    if (short) {
+      let repository = short[1];
+      if (!repository) {
+        if (!root) throw new MoguriError("attachment_github", "Without a project, use OWNER/REPO#NUMBER.");
+        const metadata = await this.projects.gitView(root, false, AbortSignal.timeout(10_000));
+        repository = metadata.repository?.match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/)?.[1];
+        if (!repository) throw new MoguriError("attachment_github", "This project has no configured GitHub repository. Use OWNER/REPO#NUMBER explicitly.");
+      }
+      input = `https://github.com/${repository}/issues/${short[2]}`;
+    }
+    const remoteFile = input.match(/^@?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(.+)$/);
+    if (remoteFile) return this.githubFile(remoteFile[1]!, remoteFile[2]!, access, root?.path ?? this.stateDir);
     let url: URL;
     try { url = new URL(input); } catch { throw new MoguriError("attachment_github", "Use an exact https://github.com/OWNER/REPO/issues/NUMBER or /pull/NUMBER URL."); }
     const match = url.pathname.match(/^\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(issues|pull)\/([1-9]\d*)\/?$/);
     if (url.protocol !== "https:" || url.host !== "github.com" || url.username || url.password || url.search || url.hash || !match || !Number.isSafeInteger(Number(match[3]))) throw new MoguriError("attachment_github", "Choose a canonical GitHub issue/PR URL without query, fragment or credentials.");
     const canonical = `https://github.com/${match[1]}/${match[2]}/${match[3]}`;
-    const result = await this.integrations.githubRead(`repos/${match[1]}/${match[2] === "pull" ? "pulls" : "issues"}/${match[3]}`, access, this.host.snapshot().projects.find((project) => project.id === session.projectId)?.path ?? this.stateDir, AbortSignal.timeout(20_000));
+    const result = await this.integrations.githubRead(`repos/${match[1]}/${match[2] === "pull" ? "pulls" : "issues"}/${match[3]}`, access, root?.path ?? this.stateDir, AbortSignal.timeout(20_000));
+    if (short && match[2] === "issues" && isRecord(result) && result.number === Number(match[3]) && result.pull_request !== undefined && result.html_url === `https://github.com/${match[1]}/pull/${match[3]}`) return this.github(session, result.html_url, access);
     if (!isRecord(result) || result.number !== Number(match[3]) || result.html_url !== canonical || typeof result.title !== "string" || typeof result.updated_at !== "string" || !Number.isFinite(Date.parse(result.updated_at)) || result.body !== null && typeof result.body !== "string") throw new MoguriError("attachment_github", "GitHub did not verify this exact reference and revision. Nothing was attached.");
-    if (match[2] === "issues" && result.pull_request !== undefined) throw new MoguriError("attachment_github", "This reference is a pull request. Select its /pull/ URL so its type is explicit.");
+    if (match[2] === "issues" && result.pull_request !== undefined) {
+      if (short) return this.github(session, `https://github.com/${match[1]}/pull/${match[3]}`, access);
+      throw new MoguriError("attachment_github", "This reference is a pull request. Select its /pull/ URL so its type is explicit.");
+    }
     const text = JSON.stringify({ url: canonical, repository: match[1], number: result.number, type: match[2] === "pull" ? "pull-request" : "issue", title: result.title, body: result.body ?? "", state: result.state, updatedAt: result.updated_at }, null, 2);
     const bytes = Buffer.byteLength(text);
     if (bytes > MAX_TEXT_BYTES) throw new MoguriError("attachment_reference_limit", "This reference exceeds 2 MiB; no content was silently truncated.");
     return { text, preview: { kind: match[2] === "pull" ? "github_pr" : "github_issue", label: `${match[1]}#${result.number} (${match[2] === "pull" ? "PR" : "issue"})`, bytes, digest: digest(text), files: [], excluded: [], text, source: { kind: access === "gh-cli" ? "github-cli" : "github-public", location: canonical, revision: result.updated_at } } };
+  }
+  private async githubFile(repository: string, path: string, access: "public" | "gh-cli", root: string): Promise<Capture> {
+    if (!path.isWellFormed() || path.startsWith("/") || path.split("/").some((part) => !part || part === "." || part === "..") ||
+      /[\\\0\r\n?#]/.test(path) || isProtectedProjectPath(path)) throw new MoguriError("attachment_github", "Choose an unprotected exact GitHub file path without traversal, query or fragment.");
+    const encoded = path.split("/").map((part) => encodeURIComponent(part).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)).join("/");
+    const result = await this.integrations.githubRead(`repos/${repository}/contents/${encoded}`, access, root, AbortSignal.timeout(20_000));
+    if (!isRecord(result) || result.type !== "file" || result.path !== path || result.encoding !== "base64" || typeof result.content !== "string" ||
+      typeof result.sha !== "string" || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(result.sha) || typeof result.size !== "number" || result.size > 128 * 1024 ||
+      typeof result.html_url !== "string") throw new MoguriError("attachment_github", "GitHub did not return this exact regular file within the 128-KiB text limit. No directory, binary conversion or truncated file was attached.");
+    const encodedContent = result.content.replace(/[\r\n]/g, ""), data = Buffer.from(encodedContent, "base64");
+    let location: URL;
+    try { location = new URL(result.html_url); } catch { throw new MoguriError("attachment_github", "GitHub file provenance is invalid."); }
+    if (data.toString("base64") !== encodedContent || data.length !== result.size || data.includes(0) || !isUtf8(data) ||
+      createHash(result.sha.length === 40 ? "sha1" : "sha256").update(`blob ${data.length}\0`).update(data).digest("hex") !== result.sha ||
+      location.origin !== "https://github.com" || location.username || location.password || location.search || location.hash ||
+      !location.pathname.startsWith(`/${repository}/blob/`) || !location.pathname.endsWith(`/${encoded}`)) throw new MoguriError("attachment_github", "GitHub file bytes, encoding, revision or provenance did not match. Nothing was attached.");
+    const text = data.toString("utf8");
+    return { text, preview: { kind: "github_file", label: `${repository}/${path}`, bytes: data.length, digest: digest(text), files: [{ path, bytes: data.length, digest: digest(text) }], excluded: [], text,
+      source: { kind: access === "gh-cli" ? "github-cli" : "github-public", location: location.href, revision: result.sha } } };
   }
   private reviewed(sessionId: string, captured: Capture): ContextPreview {
     const session = this.session(sessionId, false), snapshot = this.host.snapshot(), remote = snapshot.settings.values.remote;
@@ -214,10 +265,23 @@ export class ContextInputs {
       sessionId, env: session.controls.env, modelId: session.controls.modelId,
       target: session.controls.env === "Remote" ? remote ? `${remote.name} (${remote.host}:${remote.port}), not SendBox-isolated` : "Unconfigured SSH host" : session.controls.env === "Local" ? "Local host and explicitly selected provider" : "Configured SendBox workload",
     };
-    return { ...captured.preview, destination, digest: digest(JSON.stringify({ source: captured.preview.digest, destination, revision: session.revision, remote: session.controls.env === "Remote" ? remote : null, localModels: snapshot.settings.values.localModels })) };
+    const { text: _, ...source } = captured.preview;
+    return { ...captured.preview, destination, digest: digest(JSON.stringify({ source, destination, revision: session.revision, remote: session.controls.env === "Remote" ? remote : null, localModels: snapshot.settings.values.localModels })) };
   }
   async query(query: InputQuery): Promise<InputResponse> {
-    this.session(query.sessionId, false);
+    const session = this.session(query.sessionId, false);
+    if (query.type === "attachment.local.path") {
+      if (!isAbsolute(query.path) || this.protectedClientPath(query.path)) throw new MoguriError("attachment_path", "Choose an absolute, unprotected Local file or folder.");
+      const info = await lstat(query.path), folder = info.isDirectory();
+      return { type: query.type, path: await this.clientPath(query.path, folder), kind: folder ? "folder" : "file" };
+    }
+    if (query.type === "attachment.project.path") {
+      const root = this.host.project({ projectId: query.projectId, workspaceId: session.projectId === query.projectId && session.controls.env === "Local" ? session.workspaceId : null });
+      const path = query.path.replace(/\/+$/, "") || ".";
+      await assertFolderAccess(root.path, path, false, folderPolicy(this.projects.configuration(root.id).values));
+      const selected = path === "." ? await realpath(root.path) : await scopedPath(root.path, path), folder = (await lstat(selected)).isDirectory();
+      return { type: query.type, path: await this.clientPath(selected, folder), kind: folder ? "folder" : "file" };
+    }
     if (query.type === "attachment.document.list") {
       const { sessionId, type, ...options } = query;
       return { type, result: this.listDocuments(sessionId, options) };

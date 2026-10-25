@@ -154,9 +154,16 @@ export class Extensions {
       if (!session || entry.projectId !== session.projectId || entry.kind !== "skill" || !entry.enabled || entry.retired || entry.contentDigest !== command.expectedDigest ||
         entry.ownerPluginId && !this.current(entry.ownerPluginId).enabled) throw new MoguriError("skill_scope", "Choose an enabled current skill in this exact session/project. No task, grant or model call was inferred.", 403);
       if (session.draft.revision !== command.expectedDraftRevision) throw new MoguriError("revision_conflict", "The draft changed. Your current draft and selected skill were preserved.", 409);
-      const text = `${session.draft.text}${session.draft.text ? "\n\n" : ""}<user-selected-skill name=${JSON.stringify(entry.name)}>\n${this.store.blob(entry.contentDigest)}\n</user-selected-skill>`;
+      const startedAt = new Date().toISOString(), start = performance.now(), content = this.store.blob(entry.contentDigest);
+      const text = `${session.draft.text}${session.draft.text ? "\n\n" : ""}<user-selected-skill name=${JSON.stringify(entry.name)}>\n${content}\n</user-selected-skill>`;
       if (Buffer.byteLength(text) > MAX_TEXT) throw new MoguriError("draft_limit", "The complete selected skill does not fit this draft. No content was truncated or sent.", 409);
-      return finish([{ event_type: "draft.saved", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { text, attachments: session.draft.attachments } }], { revision: session.draft.revision + 1 });
+      return finish([
+        { event_type: "draft.saved", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { text, attachments: session.draft.attachments } },
+        { event_type: "skill.used", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: {
+          capabilityId: entry.id, name: entry.name, contentDigest: this.store.putBlob(content), bytes: Buffer.byteLength(content),
+          startedAt, loadMs: Math.max(0, Math.round(performance.now() - start)), actor: "user",
+        } },
+      ], { revision: session.draft.revision + 1 });
     }
     if (entry.revision !== command.expectedRevision) throw new MoguriError("capability_conflict", "Another client changed this capability. Review its current version before rollback.", 409);
     this.assertIdle(entry.projectId);

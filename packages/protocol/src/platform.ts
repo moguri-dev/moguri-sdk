@@ -7,10 +7,15 @@ import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type Sessio
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
+import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 export * from "./progress.ts";
+import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
+import { BrowserCommandSchema, BrowserQuerySchema, type BrowserResponse } from "./browser.ts";
+export * from "./browser.ts";
+export * from "./activity.ts";
 import { AppearanceSchema, GuidanceSchema, type PowerStatus, type SqlConnection } from "./preferences.ts";
 export * from "./preferences.ts";
 import { NotificationSoundCommandSchema, NotificationSoundQuerySchema, type NotificationSound, type NotificationSoundResponse } from "./notification-sounds.ts";
@@ -100,6 +105,7 @@ Finish with the outcome and any real blocker. Do not claim access to hidden reas
 
 export const SettingsSchema = object({
   appearance: AppearanceSchema,
+  interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean() }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),
@@ -147,7 +153,7 @@ export const SettingsSchema = object({
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
-  appearance: { theme: "dark", palette: "moguri", custom: {} }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
+  appearance: { theme: "dark", palette: "moguri", custom: {} }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
   permissions: { defaultDecision: "ask", tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [],
@@ -181,7 +187,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
 }
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
-  Type.Literal("all"), Type.Literal("appearance"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
+  Type.Literal("all"), Type.Literal("appearance"), Type.Literal("interactions"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
@@ -193,6 +199,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  BrowserCommandSchema,
   ApplicationCommandSchema,
   NotificationSoundCommandSchema,
   object({ type: Type.Literal("runtime.power.retry") }),
@@ -248,6 +255,8 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  BrowserQuerySchema,
+  ActivityQuerySchema,
   UpdateQuerySchema,
   StorageQuerySchema,
   ApplicationQuerySchema,
@@ -330,6 +339,7 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot {
+  lastModelSelection: ModelSelection | null;
   candidates: CandidateRecord[];
   remoteMcpCalls: RemoteMcpCall[];
   terminalOwners: TerminalOwner[];
@@ -368,7 +378,8 @@ export interface VoiceStatus {
   bytes: number; license: string; languageLocales: { code: string; tier: "ready" | "broad" | "adaptation" }[];
 }
 export type SandboxStatus = SandboxReadiness;
-export type PlatformResponse = ProgressResponse
+export type PlatformResponse = ProgressResponse | ActivityResponse
+  | BrowserResponse
   | UpdateResponse
   | StorageResponse
   | ApplicationResponse

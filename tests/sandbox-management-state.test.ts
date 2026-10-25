@@ -6,10 +6,23 @@ import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { Header, type HeaderData } from "tar";
 import { test } from "node:test";
-import { defaultSettings, PROTOCOL_VERSION, projectEvents } from "../packages/protocol/src/index.ts";
+import { defaultSandboxManagement, defaultSettings, PROTOCOL_VERSION, projectEvents } from "../packages/protocol/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
-import { extractSandboxRelease } from "../apps/service/src/sandbox-distribution.ts";
+import { extractSandboxRelease, sandboxDistributionCacheKey, SENDBOX_023, SENDBOX_024 } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxRunConfiguration } from "../apps/service/src/sandbox-policy.ts";
+
+test("the producer cache binds the complete pinned release as well as worker inputs", () => {
+  const payload = "1".repeat(64), current = sandboxDistributionCacheKey(payload, SENDBOX_024);
+  assert.equal(defaultSandboxManagement().version, SENDBOX_024.version);
+  assert.equal(current, sandboxDistributionCacheKey(payload, { ...SENDBOX_024 }));
+  assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_023));
+  assert.notEqual(current, sandboxDistributionCacheKey("2".repeat(64), SENDBOX_024));
+  for (const vendor of [
+    { ...SENDBOX_024, archiveSha256: "3".repeat(64) }, { ...SENDBOX_024, hostSha256: "4".repeat(64) },
+    { ...SENDBOX_024, keySha256: "5".repeat(64) }, { ...SENDBOX_024, manifestSha256: "6".repeat(64) },
+    { ...SENDBOX_024, minimumReleaseSequence: SENDBOX_024.minimumReleaseSequence + 1 },
+  ]) assert.notEqual(current, sandboxDistributionCacheKey(payload, vendor));
+});
 
 test("protocol-51 migration preserves encrypted settings and manual grants without enabling managed permissions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-managed-sandbox-migration-")), path = join(directory, "state.sqlite"), key = Buffer.alloc(32, 51);
@@ -19,7 +32,7 @@ test("protocol-51 migration preserves encrypted settings and manual grants witho
     legacy.instructions = "Generated retained original instructions.";
     original.commit([{ event_type: "settings.updated", profile_id: "default", payload: { settings: legacy, revision: 4, permissionRevision: 3 } }]);
     const rows = original.db.prepare("SELECT seq,data FROM events ORDER BY seq").all();
-    original.db.exec("DELETE FROM retention_metadata WHERE id='managed_sandbox_schema'; PRAGMA user_version=51;");
+    original.db.exec("DELETE FROM retention_metadata WHERE id IN ('browser_control_schema','model_defaults_schema','managed_sandbox_schema','session_indicators_schema'); PRAGMA user_version=51;");
     original.close();
     const reopened = new EventStore(path, key);
     try {
@@ -28,7 +41,7 @@ test("protocol-51 migration preserves encrypted settings and manual grants witho
       const state = projectEvents(reopened.events());
       assert.equal(state.settings.values.instructions, legacy.instructions);
       assert.equal(state.settings.values.sandboxManagement?.enabled, false);
-      assert.equal(state.settings.values.sandboxManagement?.version, "0.2.3");
+      assert.equal(state.settings.values.sandboxManagement?.version, "0.2.4");
       assert.equal(state.settings.revision, 4); assert.equal(state.settings.permissionRevision, 3);
     } finally { reopened.close(); }
   } finally { await rm(directory, { recursive: true, force: true }); }
@@ -37,6 +50,7 @@ test("protocol-51 migration preserves encrypted settings and manual grants witho
 test("explicit tool rules survive encrypted reopen without granting model access or relabeling retained settings", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-wildcard-reopen-")), path = join(directory, "state.sqlite"), key = Buffer.alloc(32, 52);
   const settings = defaultSettings(), hash = "1".repeat(64), domains = ["api.generated.test", "*.tools.generated.test"];
+  settings.sandboxManagement = { ...defaultSandboxManagement(), version: "0.2.3" };
   settings.sandbox = { executable: "/generated/sendbox", configPath: null, image: `generated/worker@sha256:${hash}`,
     bundlePath: "/generated/bundle", trustRootPath: "/generated/key", qualification: { release: "0.2.3",
       hostSha256: hash, keySha256: hash, manifestSha256: hash, workerDigest: hash, bridgeDigest: hash,
@@ -53,6 +67,7 @@ test("explicit tool rules survive encrypted reopen without granting model access
       assert.deepEqual(state.settings.values.sandbox.qualification!.allowedDomains, domains);
       assert.equal(state.settings.values.sandbox.qualification!.allowCopilot, false);
       assert.equal(state.settings.values.sandboxManagement?.enabled, false);
+      assert.equal(state.settings.values.sandboxManagement?.version, "0.2.3");
       assert.equal(state.settings.revision, 6); assert.equal(state.settings.permissionRevision, 7);
       const policy = sandboxRunConfiguration(state.settings.values.sandbox, "generated-reopen", "/generated/private-stage",
         ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"]);

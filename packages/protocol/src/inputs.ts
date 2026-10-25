@@ -18,7 +18,7 @@ export const AttachmentSchema = Type.Union([
   Type.Object({ ...base, kind: Type.Literal("local_file"), source }, { additionalProperties: false }),
   Type.Object({ ...base, kind: Type.Literal("paste_file"), bytes: Type.Integer({ minimum: 0, maximum: 128 * 1024 }), lines: Type.Integer({ minimum: 51, maximum: 131073 }), source }, { additionalProperties: false }),
   Type.Object({ ...base, kind: Type.Literal("image"), mimeType: Type.Literal("image/png"), width: Type.Integer({ minimum: 1, maximum: 16000 }), height: Type.Integer({ minimum: 1, maximum: 16000 }), source }, { additionalProperties: false }),
-  Type.Object({ ...base, kind: Type.Union([Type.Literal("folder"), Type.Literal("github_issue"), Type.Literal("github_pr"), Type.Literal("session")]), source }, { additionalProperties: false }),
+  Type.Object({ ...base, kind: Type.Union([Type.Literal("folder"), Type.Literal("github_issue"), Type.Literal("github_pr"), Type.Literal("github_file"), Type.Literal("session")]), source }, { additionalProperties: false }),
 ]);
 export type Attachment = Static<typeof AttachmentSchema>;
 export type DocumentAttachment = Extract<Attachment, { kind: "document" }>;
@@ -36,7 +36,8 @@ export const DocumentListToolSchema = DocumentListOptionsSchema;
 export const DocumentReadToolSchema = Type.Object({ attachmentId: id, ...DocumentReadOptionsSchema.properties }, { additionalProperties: false });
 export const DocumentSearchToolSchema = Type.Object({ attachmentId: id, ...DocumentSearchOptionsSchema.properties }, { additionalProperties: false });
 const scope = { sessionId: id, expectedRevision: revision };
-const access = Type.Union([Type.Literal("public"), Type.Literal("gh-cli")]);
+const access = Type.Union([Type.Literal("public"), Type.Literal("gh-cli"), Type.Literal("auto")]);
+export type AttachmentAccess = Static<typeof access>;
 export const InputCommandSchema = Type.Union([
   Type.Object({ type: Type.Literal("attachment.file.add"), ...scope, path, mode: Type.Union([Type.Literal("text"), Type.Literal("image"), Type.Literal("document"), Type.Literal("auto")]), captureId: Type.Optional(id) }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("attachment.document.cancel"), sessionId: id, captureId: id }, { additionalProperties: false }),
@@ -47,6 +48,8 @@ export const InputCommandSchema = Type.Union([
 ]);
 export type InputCommand = Static<typeof InputCommandSchema>;
 export const InputQuerySchema = Type.Union([
+  Type.Object({ type: Type.Literal("attachment.project.path"), sessionId: id, projectId: id, path }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("attachment.local.path"), sessionId: id, path }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("attachment.document.list"), sessionId: id, ...DocumentListOptionsSchema.properties }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("attachment.document.read"), sessionId: id, attachmentId: id, ...DocumentReadOptionsSchema.properties }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("attachment.document.search"), sessionId: id, attachmentId: id, ...DocumentSearchOptionsSchema.properties }, { additionalProperties: false }),
@@ -58,7 +61,7 @@ export const InputQuerySchema = Type.Union([
 ]);
 export type InputQuery = Static<typeof InputQuerySchema>;
 export interface ContextPreview {
-  kind: "folder" | "github_issue" | "github_pr" | "session"; label: string; bytes: number; digest: string;
+  kind: "folder" | "github_issue" | "github_pr" | "github_file" | "session"; label: string; bytes: number; digest: string;
   source: { kind: string; location: string; revision: string };
   files: { path: string; bytes: number; digest: string }[];
   excluded: { path: string; reason: string }[];
@@ -66,6 +69,8 @@ export interface ContextPreview {
   destination: { sessionId: string; env: "Local" | "Sandbox" | "Remote"; target: string; modelId: string | null };
 }
 export type InputResponse =
+  | { type: "attachment.project.path"; path: string; kind: "file" | "folder" }
+  | { type: "attachment.local.path"; path: string; kind: "file" | "folder" }
   | { type: "attachment.document.list"; result: DocumentList }
   | { type: "attachment.document.read"; page: DocumentPage }
   | { type: "attachment.document.search"; result: DocumentSearch }

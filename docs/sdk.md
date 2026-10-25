@@ -5,10 +5,17 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **52** for [managed Sandbox](architecture/managed-sandbox.md),
-following protocol **51** for
-[session interactions](architecture/session-interactions.md), following the
-protocol-44 through 50 settings/native lifecycle slices and protocol-43
+Current source uses protocol **56**, including shared-global/last-selected model
+defaults and [ephemeral browser control](architecture/agent-browser.md), with a
+metadata-only schema-55 upgrade and reviewed restart of older running services.
+It retains protocol-54 exact-scoped session PR observations
+and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
+[the separate Agent terminal](architecture/agent-terminal.md),
+[chat activity and compact usage](architecture/chat-activity.md),
+[desktop interactions](setup.md#desktop-interactions),
+protocol-52 [managed Sandbox](architecture/managed-sandbox.md), protocol-51
+[session interactions](architecture/session-interactions.md), and the
+protocol-44 through 50 settings/native lifecycle slices. It retains protocol-43
 [document attachments](architecture/document-attachments.md), including
 protocol-42 [task completion estimates](architecture/task-progress.md), extending the
 protocol-41 owner-requested
@@ -19,12 +26,205 @@ wind-down and owned bounded decisions. It does not replace the immutable qualifi
 See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
 for the actual generated VM evidence and remaining client/environment gates.
 
+`sdk.browser.state(sessionId)` reports the actual desktop-owned pane and its
+current control identity. The user enables/disables access with the pane's
+**Agent control** switch. `mcp.tools` with `serverId: "builtin"` and query
+`"navigate"` discovers `browser_navigate`; query `"browser"` discovers all six
+tools, including `browser_status` and `browser_snapshot`. Invoke through the
+existing `mcp.call`/`mcp_gateway` exact-approval flow, supplying its discovered
+schema digest and fresh control/element identities. Results keep the normal
+encrypted session/job retention and bounded `result.read` paging. Native input
+acknowledgement is not verification of a website's business action.
+
+The browser-safe `sdk.browser.host` methods attach, poll, reply, detach and
+monotonically change control for an explicitly authenticated native host.
+Its private lease belongs only to that original profile/session/view; never put
+it in model context or configuration. Browser availability and control are
+ephemeral and are not restored by command-receipt replay or service restart.
+CLI/TUI agents use the same builtin tools when the actual desktop pane is
+open and enabled; without it they report unavailable rather than launch a
+browser. Only Local is qualified for this capability.
+
 `sessions.progress(sessionId)` reads the explicit current model plan when present,
 otherwise the separately bound workspace-file checklist, and compares it with
 optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
 every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
+
+`sessionIndicator(session, snapshot)` is a browser-safe selector for actual
+work/input/completion and separately verified linked-PR state. It includes
+labels, `prState` and `prLabel`; optional heuristic questions are explicitly
+not structured answer requests. `sessionPullRequestUrl`, `sessionPrScope` and
+`sessionPullRequest` resolve the same direct, work-item or exact managed-change
+source in SDK/desktop/TUI commands. Reading these selectors performs no network,
+filesystem, model or Git action.
+
+`Session.prObservation` is optional for older history. A new
+`session.pr_observed` event retains profile/session/URL/project/workspace/root/revision,
+access mode and configuration revision with actual GitHub state/draft/checked
+time or diagnostic. It does not increment the session revision, activity time,
+unread state or lifecycle. Metadata is not a user answer, PR-write permission
+or evidence that the session's work succeeded. Legacy missing draft remains
+unknown; project-free scope cannot inherit a root or authenticated account.
+The schema-54 marker upgrades transactionally without rewriting ciphertext.
+
+## Agent command output
+
+`agentTerminals.list(sessionId, { before?, limit? })` returns original
+`run_command` requests/results for that exact profile/session, not User or
+Global consoles, other tools, workflow jobs or private model context.
+`agentTerminals.read(sessionId, commandId, { offset?, limit?, tail? })` returns
+up to 16,384 retained UTF-8 bytes. Follow `nextOffset`, or request `tail: true`
+without an offset. The tail starts on a complete code point; null output is
+unavailable, never empty successful execution. Original environment and outcome
+stay attached to the command, regardless of current settings.
+
+The model executes through `run_command` and can request the separately
+approved read-only `read_agent_terminal` list/read capability. It has no access
+to private console input/output and no interactive stdin route. Each command
+owns its existing bounded PTY; this is not a persistent shell or new executor.
+Policy changes and cancellation invalidate held reads before source return.
+
+CLI `agent-terminal list [SEQUENCE ID] --session ID` and
+`agent-terminal read COMMAND_ID [UTF8_OFFSET|tail] --session ID` share
+`/agent-terminal list/read` in desktop/TUI. Opening or reading the Agent view
+never starts a process/model or adopts a saved PID. Schema 46 changes no SQL
+layout and preserves original retained bytes/receipts on upgrade.
+
+## Retained chat activity
+
+`activity.list(sessionId, { before?, limit?, toolName? })` returns up to 100 exact source
+entries and public-message positions. `sequence` places an operation in the
+conversation; `updatedSequence` follows its latest observed event. Pagination
+uses the returned `nextBefore` sequence/ID cursor, so a late result for an old operation
+returns in the recent page without moving its original transcript position.
+The ID disambiguates operations updated by the same cancellation event.
+`current` separately returns up to 100 running/waiting entries with an exact
+`currentCount`, so history pagination cannot hide an old still-running call.
+
+`activity.read(sessionId, activityId, "arguments" | "output", { offset?, limit?, toolName?, tail? })`
+reads the original session-scoped source, up to 16,384 UTF-8 bytes per page.
+Follow `content.nextOffset`; null content means unavailable, not empty success.
+Output size is retained response bytes, not total process/network I/O.
+Before a final result, `outputBasis: "retained-tail"` explicitly labels bounded
+captured output; it cannot become complete process output or a success receipt.
+`activity.turn(sessionId, turnId)` returns original timing, outcome, models,
+context evidence and all-role owning-turn budget totals. `activity.response`
+copies public assistant text only from the authenticated snapshot.
+
+`useSessionActivity` in `moguri/react` provides scoped, non-overlapping refresh,
+earlier-page loading and stale-response isolation. No refresh runs a model,
+tool, provider metadata lookup or terminal. Thought sources are already-public
+provider reasoning only; request time is not separate thinking time.
+Its optional fourth `toolName` argument narrows the service-owned view and its
+scope key; it is not an execution grant.
+
+CLI `activity list [SEQUENCE ID]`, `activity turn TURN_ID`, and
+`activity read ACTIVITY_ID arguments|output [UTF8_OFFSET]` require `--session ID`.
+Shared desktop/TUI `/activity`, `/activity before SEQUENCE ID`,
+`/activity turn TURN_ID` and `/activity read ACTIVITY_ID output [UTF8_OFFSET]`
+use the same API. Schema 45 adds only the atomic, actual-user `skill.used`
+event/source grant and a transactional version upgrade; existing SQL layouts,
+ciphertext, receipts and sanitized independent telemetry remain unchanged.
+
+## Shared interaction APIs
+
+`settings.values.interactions` contains `confirmSessionAttachments` and
+`confirmTerminalClose`, both defaulting to `true`. Use the existing optimistic
+`settings.update` or `settings.reset("interactions", revision)`; these settings
+are profile-scoped presentation preferences, never tool or environment grants.
+
+`sessions.reorder(sessionIds)` atomically saves one complete current sibling set.
+Project, group, parent, pin and archive scope must match, with every captured
+revision still current. `compareSessionOrder` gives the same stable order used
+by both clients. CLI `session reorder ID...` and shared `/reorder-sessions ID...`
+call this operation, without reparenting or resuming anything.
+The explicit main-line form
+`sessions.reorder(projectId, parentSessionId, groupId, archived, entries)` also
+remains supported, with exact caller-captured revisions for its complete sibling
+set. Direct valid `sessions.organize(id, { order })` updates remain available.
+
+`attachments.projectPath(sessionId, projectId, relativePath)` resolves an
+explicit Local project source and the current session's bound Local worktree
+when applicable. `attachments.localPath(sessionId, absolutePath)` distinguishes
+regular files from folders without granting model filesystem access. Capture a
+file with `attachments.file`; folders retain preview/digest/confirmation.
+Protected paths, stale managed roots and project denials are not bypassed.
+
+`githubPreview` / `github` additionally accept `#137`, `owner/repo#137` and
+`@owner/repo/path`. The first needs the current project's GitHub upstream.
+`access: "auto"` selects the Local controller's CLI or disclosed public-only
+access; the existing default remains `"public"` for SDK callers. Exact remote
+text bytes, base64, Git blob hash and GitHub provenance are checked before
+retention. Files are UTF-8 only, up to 128 KiB. The review digest binds actual
+access provenance as well as source content and destination. This is a disclosed
+client-attachment boundary, not a substitute for pinned-SSH metadata reads.
+
+`terminal.openGlobal(cols?, rows?)` explicitly opens a Local console in the
+runtime's canonical Moguri data directory. Its binding has null session,
+project and workspace IDs and the active profile's authenticated Local owner.
+It neither inherits a selected project's root nor depends on its retention.
+CLI `terminal global`, `/terminals global`, and `/terminal global` expose it.
+`terminal.openGlobal(root, cols?, rows?)` and CLI `terminal open-global ROOT`
+retain main's explicit independent-root form. The console displays that actual
+captured root; it does not substitute a project, session or configured SSH root.
+Existing `terminal.open(sessionId)` keeps its exact project/worktree/SSH root.
+Closing/hiding the desktop pane detaches; `terminal.close(id)` terminates.
+Reconnection/restoration never creates a replacement or replays input.
+
+The original desktop schema-44 marker is additive; legacy confirmations default to asking,
+legacy session order derives from creation, and historical data/grants retain
+their original encryption and identities. Local project names are safe unique
+identifiers; normalization never renames filesystem directories.
+
+### Retained-state upgrades
+
+Protocol/database 56 adds the strict transactional `browser_control_schema`
+marker and reviewed upgrade from an older running service. Native browser
+leases/control never persist or replay. The genuine schema-55 migration,
+interrupted insertion and corrupt-marker cases preserve exact encrypted
+events, keys, receipts and remembered model selections. Protocol 55's
+profile-root preference ownership remains unchanged.
+
+Protocol/database 54 adds the versioned session PR observation marker after
+the converged 53 history. Marker insertion/version advance are transactional;
+insertion failure rolls back and current missing/corrupt markers refuse reopen.
+Legacy links keep missing draft state unknown. No ciphertext, keys, grants,
+drafts, command receipts or historical lifecycle outcomes are rewritten.
+
+Protocol/database 53 converges main-line versions 44-52 and the independently
+numbered desktop versions 44-46. It identifies desktop provenance by the retained
+`desktop_interaction_schema` marker, not by guessing from the version. Its one
+transaction validates or adds the required entry, preferences, browser capture,
+sounds, application, storage, updates, session interaction and managed Sandbox
+markers and advances the version only after all succeed. A known desktop store
+previously opened by main also retains that original provenance.
+
+Migration never rewrites encrypted history, keys, source grants or receipts,
+replays commands, starts a model or changes retained approval/accounting actors.
+Missing markers in a main-line store and invalid provenance/marker values fail
+without partial writes. Generated coverage includes both lineages, the known
+partial crossing, insertion failure, corruption and an actual service reopen.
+Restart matching clients and service while retaining the original state root
+and encryption backend; never delete state to make an upgrade succeed.
+
+The repository's warning-free `npm ci` uses root-level compatibility overrides.
+npm does not inherit a dependency's overrides, so a minimal external SDK host
+can still report the upstream whatwg-encoding/node-domexception deprecations.
+To apply the same verified Node 26 policy without changing unrelated host
+dependencies, the embedding application's root manifest can use:
+
+```json
+{
+  "overrides": {
+    "moguri": {
+      "encoding-sniffer": "1.0.2",
+      "node-fetch": "npm:node-fetch-native@1.6.7"
+    }
+  }
+}
+```
 
 ## Session interaction contract
 
@@ -207,10 +407,13 @@ starts a model or silently selects a provider, Env or new runtime version.
 `sandbox.setup.check()` observes the fixed public SendBox release feed;
 `sandbox.setup.prepare(version)` downloads and verifies that exact eligible
 archive and prepares a no-script package for a separate review. The app bundles
-0.2.3 and a current-protocol worker OCI archive with Linux Node/native dependencies.
+0.2.4 and a current-protocol worker OCI archive with Linux Node/native dependencies.
 Source/Node embeddings may pass `platform.sandbox.distribution` explicitly.
 An accepted retained distribution is reused only with its original digest;
 there is no app-directory scan or mutable image pull.
+Factory defaults do not rewrite an explicitly retained older version. A changed
+bundled vendor or any of its exact pins invalidates the producer cache even when
+the worker payload is identical; actual artifact hashes are still reverified.
 
 After managed setup approval and explicit Env selection, ordinary Send prepares
 the bound project/worktree privately and automatically. Engine-only qualification
@@ -232,9 +435,14 @@ only with independently reviewed executable/bundle/key paths, SHA-256 pins,
 release/trust-root/sequence, workload/worker/bridge digests, resource caps and
 canonical DNS hosts or explicit `*.domain.com` tool rules. Wildcards match
 subdomains at any depth, not the apex or suffix lookalikes; exact entries remain
-exact. They never substitute for actual provider URL/CNAME admission or grant
+exact except `github.com` in SendBox 0.2.4+, which delegates GitHub Meta domains
+and IPv4/IPv6 ranges including shared-cloud addresses, refreshed before readiness
+and hourly. The service binds that broader delegation into setup review's
+diagnostic/digest, and activation requires the existing explicit user/network
+acknowledgement. These rules never substitute for actual provider URL/CNAME admission or grant
 provider credentials. The captured scope retains literal reviewed rules alongside
-exact provider/alias hosts, with a complete 32-entry limit.
+exact provider/alias hosts, with a 32-entry limit on Moguri's logical rules.
+That limit is not a claim about the size of the upstream Meta expansion.
 `configPath` must be null to select the managed deny-first
 policy; legacy policies are never silently replaced. Copilot access is opt-in,
 with a separate actual cold guest networking check. An observed alias is not
@@ -508,6 +716,8 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
+| `activity` | Exact session-scoped operation metadata and lazy original arguments/results; public response copy and original owning-turn information. No private reasoning, terminal buffers or recovery from a deleted source. |
+| `agentTerminals` | Original agent `run_command` requests/results and bounded UTF-8 output/tails. No private User/Global console access, stdin, new execution or implicit persistent shell. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
 | `routing` | Opt-in scoped Single or declared Compound policy/configure with an observed settings revision. Ordinary Single history remains separate from retained public compound reports. Finite Local turns need explicit qualified reserved wind-down; images and synthetic-model tuning remain blocked. |
@@ -688,6 +898,32 @@ over `project.values.defaults`, `settings.startup.profile`,
 and observed revisions. Existing sessions do not inherit later changes. These
 preferences do not weaken policy. Global preferences are intentionally shared;
 profile/project/session values remain isolated.
+
+Protocol/database 55 adds a last-selected fallback when no model default is
+explicitly set. In **Settings / Startup defaults**, **Global default model**
+chooses a fixed model/effort shared across profiles, the last explicitly selected
+model/effort within each profile, or no selected model. Omitted `modelId` permits
+the remembered fallback; `modelId: null` explicitly prevents it. Higher-priority
+profile/project/session model settings still win, and existing chats are not
+rewritten.
+
+`sessions.selectModel(sessionId, modelId, revision?)` records an explicit choice
+and clears old model-specific options. `sessions.modelOptions` records actual
+effort changes; its optional fourth `true` also marks an explicit same-value
+effort selection. `sessions.configure` normally remembers model/effort deltas;
+its fourth `false` performs configuration without recording a new selection.
+Raw `session.configure` commands opt in with `rememberModelSelection: true`.
+Window-only/autonomy/env changes, session creation and model/role calls do not
+become selections.
+Resetting tuning on a session with no selected model also preserves the
+remembered choice; `sessions.selectModel(sessionId, null)` explicitly clears it.
+
+`snapshot.lastModelSelection` contains only the profile's model/effort pair.
+The independent profile event survives source-session/project deletion and
+restart. Startup provenance labels the fallback `last-used`. Working-window
+settings are not copied from the source session; explicit model-option defaults
+remain authoritative. An unavailable saved model/effort stays visible and
+fails normal admission rather than substituting a provider or dropping context.
 
 ### Immutable profiles
 

@@ -2,14 +2,16 @@ import { MoguriClient as TransportClient, ClientError } from "../../client/src/i
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
-import type { Attachment, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
+import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
+import { responseText, type ActivityCursor } from "../../protocol/src/activity.ts";
 import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../protocol/src/knowledge.ts";
 import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../protocol/src/extensions.ts";
 import { createCacheApi } from "./cache.ts";
 import { createGithubApi } from "./github.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
+import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
@@ -23,6 +25,16 @@ export const attachmentStatus = (attachment: Attachment): string => attachment.k
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
+  readonly browser = {
+    state: (sessionId: string) => this.query({ type: "browser.state", sessionId }),
+    host: {
+      attach: (owner: BrowserHostOwner) => this.command({ type: "browser.host.attach", ...owner }),
+      control: (owner: BrowserHostOwner, sequence: number, enabled: boolean) => this.command({ type: "browser.host.control", ...owner, sequence, enabled }),
+      poll: (owner: BrowserHostOwner, url: string, title: string) => this.query({ type: "browser.host.poll", ...owner, url, title }),
+      reply: (owner: BrowserHostOwner, requestId: string, result: BrowserResult) => this.command({ type: "browser.host.reply", ...owner, requestId, result }),
+      detach: (owner: BrowserHostOwner) => this.command({ type: "browser.host.detach", ...owner }),
+    },
+  };
   readonly github = createGithubApi(this);
   private sessionRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
@@ -35,6 +47,8 @@ export class MoguriSdk extends TransportClient {
     return session.draft.revision;
   }
   readonly attachments = {
+    localPath: (sessionId: string, path: string) => this.query({ type: "attachment.local.path", sessionId, path }),
+    projectPath: (sessionId: string, projectId: string, path: string) => this.query({ type: "attachment.project.path", sessionId, projectId, path }),
     paste: (sessionId: string, pastedText: string, selection?: { start: number; end: number }, expectedRevision = this.draftRevision(sessionId)) => {
       const draft = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.draft;
       if (!draft) throw new ClientError("session_missing", "Choose an existing destination session.");
@@ -51,8 +65,8 @@ export class MoguriSdk extends TransportClient {
     image: (sessionId: string, data: string, name = "Clipboard image", expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.image.add", sessionId, data, name, expectedRevision }),
     folderPreview: (sessionId: string, path: string) => this.query({ type: "attachment.folder.preview", sessionId, path }),
     folder: (sessionId: string, path: string, expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.folder.add", sessionId, path, expectedDigest, confirm, expectedRevision }),
-    githubPreview: (sessionId: string, url: string, access: "public" | "gh-cli" = "public") => this.query({ type: "attachment.github.preview", sessionId, url, access }),
-    github: (sessionId: string, url: string, access: "public" | "gh-cli", expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.github.add", sessionId, url, access, expectedDigest, confirm, expectedRevision }),
+    githubPreview: (sessionId: string, url: string, access: AttachmentAccess = "public") => this.query({ type: "attachment.github.preview", sessionId, url, access }),
+    github: (sessionId: string, url: string, access: AttachmentAccess, expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.github.add", sessionId, url, access, expectedDigest, confirm, expectedRevision }),
     sessionPreview: (sessionId: string, sourceSessionId: string) => this.query({ type: "attachment.session.preview", sessionId, sourceSessionId }),
     session: (sessionId: string, sourceSessionId: string, expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.session.add", sessionId, sourceSessionId, expectedDigest, confirm, expectedRevision }),
     read: (sessionId: string, attachmentId: string) => this.query({ type: "attachment.read", sessionId, attachmentId }),
@@ -60,7 +74,19 @@ export class MoguriSdk extends TransportClient {
   readonly sessions = {
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
-    configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.configure", sessionId, controls, expectedRevision }),
+    configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
+      const current = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.controls;
+      const changed = controls.modelId !== null && Boolean(current && (controls.modelId !== current.modelId ||
+        controls.modelOptions?.thinkingEffort !== current.modelOptions?.thinkingEffort));
+      return this.command({ type: "session.configure", sessionId, controls, expectedRevision,
+        ...((rememberModelSelection ?? changed) ? { rememberModelSelection: true } : {}) });
+    },
+    selectModel: (sessionId: string, modelId: string | null, expectedRevision = this.sessionRevision(sessionId)) => {
+      const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
+      if (!session) throw new ClientError("session_missing", "Choose an existing model-selection session.");
+      const { modelOptions: _, ...controls } = session.controls;
+      return this.sessions.configure(sessionId, { ...controls, modelId }, expectedRevision, true);
+    },
     env: (sessionId: string, env: Controls["env"], expectedRevision = this.sessionRevision(sessionId)) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((value) => value.id === sessionId);
       if (!snapshot || !session) throw new ClientError("session_missing", "Choose an existing session.");
@@ -69,15 +95,19 @@ export class MoguriSdk extends TransportClient {
       const { modelOptions: _, ...controls } = session.controls;
       return this.command({ type: "session.configure", sessionId, expectedRevision, controls: { ...(keep ? session.controls : controls), env, modelId: keep ? session.controls.modelId : null } });
     },
-    modelOptions: (sessionId: string, modelOptions: ModelOptions, expectedRevision = this.sessionRevision(sessionId)) => {
+    modelOptions: (sessionId: string, modelOptions: ModelOptions, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
       if (!session) throw new ClientError("session_missing", "Choose an existing session.");
-      return this.command({ type: "session.configure", sessionId, controls: { ...session.controls, modelOptions }, expectedRevision });
+      return this.sessions.configure(sessionId, { ...session.controls, modelOptions }, expectedRevision,
+        session.controls.modelId === null ? false : rememberModelSelection);
     },
     context: (sessionId: string) => this.query({ type: "session.context", sessionId }),
     organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes, expectedRevision }),
-    reorder: (projectId: string | null, parentSessionId: string | null, groupId: string | null, archived: boolean, sessions: { sessionId: string; revision: number }[]) =>
-      this.command({ type: "session.reorder", projectId, parentSessionId, groupId, archived, sessions }),
+    reorder: (...args: [sessionIds: string[]] | [projectId: string | null, parentSessionId: string | null, groupId: string | null, archived: boolean, sessions: { sessionId: string; revision: number }[]]) => {
+      if (args.length === 1) return this.command({ type: "session.reorder", sessions: args[0].map((sessionId) => ({ sessionId, revision: this.sessionRevision(sessionId) })) });
+      const [projectId, parentSessionId, groupId, archived, sessions] = args;
+      return this.command({ type: "session.reorder", projectId, parentSessionId, groupId, archived, sessions });
+    },
     rename: (sessionId: string, title: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes: { title }, expectedRevision }),
     mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
     spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
@@ -142,6 +172,22 @@ export class MoguriSdk extends TransportClient {
   readonly telemetry = {
     operations: (filters: Omit<Extract<TelemetryQuery, { type: "telemetry.operations" }>, "type"> = {}) => this.query({ type: "telemetry.operations", ...filters }),
     storage: () => this.query({ type: "telemetry.storage" }),
+  };
+  readonly activity = {
+    list: (sessionId: string, options: { before?: ActivityCursor; limit?: number; toolName?: string } = {}) => this.query({ type: "activity.list", sessionId, ...options }),
+    read: (sessionId: string, activityId: string, part: "arguments" | "output", options: { offset?: number; limit?: number; tail?: boolean; toolName?: string } = {}) =>
+      this.query({ type: "activity.read", sessionId, activityId, part, ...options }),
+    turn: (sessionId: string, turnId: string) => this.query({ type: "activity.turn", sessionId, turnId }),
+    response: (sessionId: string, turnId: string): string => {
+      const session = this.getState().snapshot?.sessions.find((value) => value.id === sessionId);
+      if (!session || !session.messages.some((message) => message.turnId === turnId)) throw new ClientError("activity_scope", "Choose an original turn in this profile's retained session.");
+      return responseText(session.messages, turnId);
+    },
+  };
+  readonly agentTerminals = {
+    list: (sessionId: string, options: { before?: ActivityCursor; limit?: number } = {}) => this.activity.list(sessionId, { ...options, toolName: "run_command" }),
+    read: (sessionId: string, commandId: string, options: { offset?: number; limit?: number; tail?: boolean } = {}) =>
+      this.activity.read(sessionId, commandId, "output", { ...options, toolName: "run_command" }),
   };
   readonly budgets = {
     status: (sessionId: string) => this.query({ type: "budget.status", sessionId }),
@@ -332,7 +378,7 @@ export class MoguriSdk extends TransportClient {
     acknowledge: (attentionIds: string[]) => this.command({ type: "attention.acknowledge", attentionIds }),
   };
   readonly projects = {
-    add: (path: string) => this.command({ type: "project.add", path }),
+    add: (path: string, name?: string) => this.command({ type: "project.add", path, ...(name !== undefined ? { name } : {}) }),
     clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),
     configuration: (projectId: string) => this.query({ type: "project.configuration", projectId }),
     repositories: (projectId: string) => this.query({ type: "project.repositories", projectId }),
@@ -375,7 +421,11 @@ export class MoguriSdk extends TransportClient {
   }
   readonly terminal = {
     open: (sessionId: string, cols = 80, rows = 24, scriptId?: string, root?: string) => this.command({ type: "terminal.open", sessionId, cols, rows, ...(scriptId ? { scriptId } : {}), ...(root ? { root } : {}) }),
-    openGlobal: (root: string, cols = 80, rows = 24) => this.command({ type: "terminal.open-global", root, cols, rows }),
+    openGlobal: (...args: [cols?: number, rows?: number] | [root: string, cols?: number, rows?: number]) => {
+      const [rootOrCols, colsOrRows, rows] = args;
+      return typeof rootOrCols === "string" ? this.command({ type: "terminal.open-global", root: rootOrCols, cols: colsOrRows ?? 80, rows: rows ?? 24 }) :
+        this.command({ type: "terminal.global.open", cols: rootOrCols ?? 80, rows: colsOrRows ?? 24 });
+    },
     defaultRoot: () => this.query({ type: "terminal.default-root" }),
     input: async (terminalId: string, data: string, signal?: AbortSignal) => {
       if (!data.length) throw new ClientError("terminal_input", "Terminal input must contain at least one character.");

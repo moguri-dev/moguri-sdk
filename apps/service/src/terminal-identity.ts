@@ -2,8 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
-import { MoguriError } from "../../../packages/protocol/src/core.ts";
-import type { TerminalBinding, TerminalOwner, PreparedTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
+import { MoguriError, parse } from "../../../packages/protocol/src/core.ts";
+import { TerminalBindingSchema, type TerminalBinding, type TerminalOwner, type PreparedTerminalOwner } from "../../../packages/protocol/src/terminals.ts";
 import type { RemoteIdentity } from "../../../packages/protocol/src/execution.ts";
 import { frameDigest } from "./worker-wire.ts";
 
@@ -15,9 +15,7 @@ export function terminalBinding(scope: { profileId: string; workspaceId: string 
   // Version-1 bindings retain this exact property order across service upgrades.
   const identity = { profileId: scope.profileId, sessionId: scope.sessionId, projectId: scope.projectId, workspaceId: scope.workspaceId, root: scope.root,
     ...(scope.env === "Remote" ? { env: "Remote" as const, peerDigest: scope.peerDigest } : { env: "Local" as const }), device: String(state.dev), inode: String(state.ino) };
-  const digest = frameDigest(identity);
-  return scope.env === "Remote" ? { ...identity, sessionId: scope.sessionId, projectId: scope.projectId, env: "Remote", peerDigest: scope.peerDigest, digest } :
-    { ...identity, env: "Local", digest };
+  return parse(TerminalBindingSchema, { ...identity, digest: frameDigest(identity) });
 }
 export function assertTerminalBinding(binding: TerminalBinding): void {
   if (terminalBinding(binding).digest !== binding.digest) throw new MoguriError("terminal_root_changed", "The terminal root identity changed. No input or replacement shell was sent to another folder.", 409);

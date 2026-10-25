@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createModels, hasApi, normalizeContext, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
 import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { estimateModelContext, modelRequest, supportedThinking } from "../apps/service/src/model-controls.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { MoguriSdk } from "../packages/sdk/src/index.ts";
-import { setupFixture } from "./fixture.ts";
+import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
+import { setupFixture, waitFor } from "./fixture.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("transport capability lists reject silently ignored or unsupported thinking effort", () => {
@@ -56,6 +58,75 @@ test("reasoning cannot expand the output ceiling beyond the configured context r
   assert.ok(payload && typeof payload === "object" && "max_tokens" in payload && typeof payload.max_tokens === "number");
   assert.ok(payload.max_tokens <= request.maxTokens);
   assert.ok(payload.max_tokens + request.estimatedTokens + 4096 <= 8192);
+});
+
+test("large reasoning responses use the declared model ceiling on each actual transport, not an unrelated 8192-token cap", async (t) => {
+  const catalog = githubCopilotProvider().getModels();
+  const context: Context = { systemPrompt: "Generated repository policy.", messages: [{ role: "user", content: "Add a generated README users section.", timestamp: 0 }] };
+  for (const api of ["openai-responses", "anthropic-messages", "openai-completions"] as const) await t.test(api, async () => {
+    const base = catalog.find((model) => model.api === api && model.reasoning)!;
+    const model = { ...base, contextWindow: 262144, maxTokens: 32768 };
+    const thinkingEffort = supportedThinking(model).includes("high") ? "high" : undefined;
+    const request = modelRequest(model, thinkingEffort ? { thinkingEffort } : undefined, context);
+    assert.equal(request.maxTokens, 32768); assert.equal(request.model.maxTokens, 32768);
+    assert.ok(request.maxTokens + request.estimatedTokens + 4096 <= request.model.contextWindow);
+    const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
+    models.setProvider(githubCopilotProvider());
+    let payload: unknown;
+    const result = await models.streamSimple(request.model, context, {
+      apiKey: "generated-only", maxTokens: request.maxTokens, maxRetries: 0,
+      ...(thinkingEffort ? { reasoning: thinkingEffort } : {}),
+      onPayload: (value) => { payload = value; },
+      fetch: async () => Response.json({ error: { type: "generated", message: "Generated wire-only output probe." } }, { status: 400 }),
+    }).result();
+    assert.equal(result.stopReason, "error"); assert.ok(isRecord(payload));
+    assert.equal(payload.max_output_tokens ?? payload.max_completion_tokens ?? payload.max_tokens, request.maxTokens);
+    assert.equal(modelRequest({ ...model, maxTokens: 128 }, undefined, context).maxTokens, 128);
+  });
+});
+
+test("an approved README edit can finish with reported reasoning output above 8192 without fallback or retry", { skip: process.platform !== "darwin" }, async () => {
+  const original = "# Generated repository\n", text = `${original}\n## Users\n\nMoguri is an AI harness for local development.\n`;
+  const fixture = await setupFixture({
+    reasoning: true, maxOutputTokens: 32768, contextWindow: 262144,
+    usage: { prompt_tokens: 30, completion_tokens: 9500, total_tokens: 9530 },
+    toolCall: { name: "write_file", args: { path: "README.md", text, expectedDigest: createHash("sha256").update(original).digest("hex") } },
+  });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await writeFile(join(fixture.project, "README.md"), original);
+    await fixture.configure();
+    await fixture.send("Add to readme file a mention to users of this repo, the first user is an app called Moguri which is an AI harness for local development.");
+    const request = await waitFor(() => fixture.requests[0]);
+    assert.equal(request.max_tokens ?? request.max_completion_tokens, 32768);
+    await fixture.approve(); assert.equal((await fixture.terminal()).status, "completed");
+    assert.equal(await readFile(join(fixture.project, "README.md"), "utf8"), text);
+    assert.equal(fixture.requests.length, 2);
+    const entries = fixture.service.controller.snapshot().budgetEntries;
+    assert.equal(entries.length, 2);
+    assert.ok(entries.every((entry) => entry.status === "settled" && entry.outputLimit === 32768 && !entry.outputLimitViolation));
+    assert.deepEqual(fixture.session().usage.map((usage) => usage.outputTokens), [9500, 9500]);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("genuinely incomplete tool output stays partial with its actual limit and cannot execute or replay a file write", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({
+    reasoning: true, maxOutputTokens: 4096, finishReason: "length",
+    toolCall: { name: "write_file", args: { path: "README.md", text: "Generated forbidden partial write.", expectedDigest: "absent" } },
+  });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await fixture.send("Generated incomplete README request.");
+    assert.equal((await fixture.terminal()).status, "partial");
+    assert.match(fixture.session().lastError!, /4096-token output limit/);
+    assert.match(fixture.session().lastError!, /reasoning/i);
+    assert.equal(fixture.session().pendingApproval, null);
+    assert.equal(fixture.service.controller.events(0).some((event) => event.event_type === "tool.started"), false);
+    await assert.rejects(() => readFile(join(fixture.project, "README.md")), { code: "ENOENT" });
+    await sdk.command({ type: "session.resume", sessionId: fixture.sessionId });
+    assert.equal(fixture.requests.length, 1);
+    await assert.rejects(() => readFile(join(fixture.project, "README.md")), { code: "ENOENT" });
+  } finally { sdk.disconnect(); await fixture.close(); }
 });
 
 test("context/effort settings share the SDK, remain independent of autonomy and bind actual worker requests", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {

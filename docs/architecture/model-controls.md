@@ -33,6 +33,152 @@ eligible as an anchor. Output is capped against the same estimate and headroom.
 This preserves finite-budget/context admission with stable source timestamps;
 it does not change actual usage, prices or billed-cost provenance.
 
+## New-session model defaults
+
+Reuse React, TypeBox, the existing SDK, model-option qualification and append-only
+encrypted store (MIT components); no dependency or provider transport is added.
+The global settings picker writes the existing shared-global control defaults.
+A fixed global model/effort applies to new sessions subject to the established
+profile, project and explicit session overrides. Existing sessions are never
+rewritten by saving a default.
+
+With no explicit model default, new independent sessions use the last model
+and thinking effort the user explicitly selected in the actual current profile.
+The user chose selection, not last inference or last sent prompt. Navigating,
+running a model/role, inheriting startup/parent controls, changing unrelated
+settings and failed selections cannot update this preference. An explicit
+no-model override remains no-model. Working-window settings are not copied
+from the remembered session; explicit higher-priority model settings remain
+authoritative.
+
+Protocol/database 55 adds a profile-owned model-selection preference and strict
+`model_defaults_schema` migration marker. A root-scoped
+`model.selection_remembered` event is committed atomically with the successful
+selection, outside session/project retention. It retains only the model/effort
+pair, actual-user/source identity and event provenance, never conversation,
+credentials, permissions or a model decision. Source-session deletion/restart
+cannot erase the preference or authorize another model call. Legacy state starts
+without an invented remembered choice; existing fixed defaults, ciphertext,
+keys, receipts and independent artifacts remain unchanged.
+
+The SDK, CLI/TUI selectors and desktop share explicit selection intent. Default
+resolution stays service-owned across Start, project-free/project/worktree/work
+entrypoints and unparented settings chats. Existing explicit parent/session
+inheritance and policy still win. An unavailable saved model/effort remains
+visible and blocked at the existing admission checks; no provider, environment
+or option is silently substituted and no discovery/inference is added.
+
+Fresh prerequisite probes pass all six generated groups: cancellation
+31.95 ms; SQLite append p95 0.044 ms/rebuild 0.521 ms; owned PTY cancellation
+152.79 ms with zero survivors; TUI updates 17.52 ms; hidden Electron cold start
+174.90 ms / 442.36 MiB / 8.22 ms per frame; 2,000-file search/Git
+0.882/5.860 ms. Separate live/native/notarized/Linux/quality gates remain
+FAIL/unqualified, not enabled by these preferences.
+
+### Model-default qualification
+
+Source `d23432a` and `7d5fb04` provide the shared-global picker and independently
+retained explicit-selection fallback. The before-fix generated resolver/service
+cases return no model after a real selection; three fail and the explicit
+no-model override already passes. The final cases cover fixed/last-selected/
+none, effort versus window-only changes, same-value selection, source-session/
+project deletion, actual restart, profile isolation, work-item/worktree/settings
+creation, explicit parent inheritance, unavailable models and atomic failures.
+Resetting tuning without a selected model cannot erase a remembered choice;
+only an explicit model clear does so.
+
+Migration 54-to-55 interruption retains the old version and exact ciphertext,
+keys, receipts and controls. Current missing/corrupt markers and forged
+user/source/turn/artifact owners fail explicitly. Programmatic old routing
+fixture setup opts out of remembered selection rather than relabel future
+preference events as legacy history. Refused-settings UI cleanup returns through
+the real saved navigation guard, not a sleep or forced unload.
+
+| Exact check | Observed result |
+| --- | --- |
+| Type checks/build/root, external-install and worker-image audits | PASS; zero vulnerabilities |
+| Fresh maintained model-transport/context probe | PASS; Responses/Anthropic low effort and provider-controlled Completions / 115.58 ms |
+| Final selection/retention/migration/older-workflow checks | 21 passed / 1,586.82 ms |
+| Default-model UI paths | 4 passed / 7.7 seconds; refused-save case repeated ten times: 10 passed / 18.4 seconds |
+| Complete final Node/worker/recovery/CLI/native-TUI suite | 1,315 passed, 14 physical-native skips, zero failures; 1,329 total / 1,109,292.21 ms |
+| Complete final hidden Electron suite | 157 passed, 2 physical-native skips, zero failures; 159 total / 5.1 minutes |
+| Actual packed external SDK/install | All entrypoints/flows and 12 installed-worker probes pass |
+| Actual installed protocol-55 model-default probe | SDK/CLI/shared-TUI selection, fixed-global precedence, no-model reset, source deletion/restart: PASS / 525.40 ms / zero model calls |
+| No-cache Linux arm64 payload/native PTY | PASS; exact protocol-55 input digests and locked install / 37,018.02 ms |
+| Actual newly packaged hidden app | Defaults/composer/settings/profiles/Start cases: 17 passed / 28.7 seconds |
+| Actual bundle/native distribution | PASS; protocol 55 / SendBox 0.2.4 |
+| Production ZIP/manifest consumer | PASS; 740,582,167-byte archive / 107,679.96 ms |
+| Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
+
+The final bundled workload is
+`docker.io/library/moguri-worker@sha256:7f4d9f522b6b8ebea0c54e3b21232e0a6505747e3baa7b6e6ae175408db14589`.
+The rebuilt DMG is 754,196,028 bytes, SHA-256
+`4b792e2ac20fe01b150cd1a1cbf0addfc58b0ccb03331ae71737230609c03cd2`.
+Older image/installer identities remain historical. This is fresh protocol-55
+evidence, not a relabeled earlier Node run. No personal account, model weights,
+microphone, conversation, administrator installation or paid inference was used;
+Electron and loopback fixtures are hidden/generated. Only owned verification
+mounts were detached, never an earlier user-opened image. Ad-hoc signing,
+FFI/chunk/optional-icon notices, downstream SDK-host compatibility overrides and
+physical-native/notarization/Linux release limits remain unchanged.
+
+## Per-response output and reasoning
+
+Ordinary requests use the prepared model's declared output maximum, bounded by
+the selected working window, fresh normalized input estimate and existing
+4,096-token context headroom. There is no additional fixed 8,192-token ceiling.
+That former application cap could exhaust reasoning capacity before a small
+README operation produced its next complete tool call. The maintained provider
+adapter receives the resulting bound, including explicit supported effort,
+without adding another thinking allowance outside it.
+
+Budget admission can reduce this bound further to the exact remaining token/USD
+capacity under all applicable session, profile and global policies. Larger model
+capacity never changes those policies, prices or unknown holds. Explicit
+router, compactor, candidate, owned-role and wind-down bounds still apply.
+Existing ledger entries retain the limit actually forwarded at their original
+admission; no historical output limits or charges are rewritten. No schema,
+dependency, permission, model substitution or automatic retry is introduced.
+
+A genuine provider length stop remains partial. Its diagnostic reports the
+actual forwarded response limit, explains shared reasoning capacity when
+applicable and states that pending tools from that incomplete response did not
+run. Earlier acknowledged effects are not undone or described as absent.
+Inspection/resume cannot replay that model response or execute its pending
+arguments; only a new explicit authorized turn can continue.
+
+The 2026-10-24 generated transport prerequisite passes Responses, Anthropic and
+provider-controlled Completions option probes in 249.73 ms without inference.
+Regression coverage exercises actual 32,768-token payload bounds, supported
+high reasoning without exceeding them, an approved existing README edit with
+9,500 reported output tokens, exact 64-token finite admission and a genuinely
+truncated tool request that cannot write or replay. Provider output usage remains
+separate from visible response length and unknown/billed costs.
+
+### Output-capacity source qualification
+
+Committed source `6df9e8a` passes the complete generated qualification. Source
+and compiled Node/renderer inputs remain unchanged throughout the final suites:
+
+| Check | Observed result |
+| --- | --- |
+| Full unit/worker/recovery/CLI/native-TUI suite | 1,266 passed, 14 physical-native skips, zero failures; 1,280 total / 1,391.05 s |
+| Full hidden Electron suite | 121 passed, 2 physical-native skips, zero failures; 123 total / 4.6 min |
+| Packed external SDK and actual installed-worker probes | All entrypoints/client paths pass; 12 worker probes pass |
+| Actual rebuilt packaged limit/rename/browser-audio UI | 3 hidden cases pass in 4.2 s |
+| Type checks, production build and dependency audits | PASS; zero vulnerabilities |
+| No-cache Linux arm64 worker payload and synthetic PTY | PASS in 45.16 s; exact new worker digest retained |
+| Actual macOS bundle/native-distribution/update ZIP and DMG | PASS; 740,345,780-byte archive verified through the production update consumer in 112.87 s |
+
+The immutable local workload identity is
+`docker.io/library/moguri-worker@sha256:83d2f7f4dc2bdc092854792cd52be8284470abdc28fb33c9ffa4eead26a13724`.
+It qualifies producer bytes and packaging, not physical SendBox containment,
+Linux release readiness or live provider behavior. The 14 unit and 2 desktop
+physical skips remain explicitly gated. No personal session/account, microphone,
+speech model weights or paid inference was used. The app is ad-hoc signed, not
+notarized; known external-host npm override and non-blocking chunk/icon notices
+remain documented in the setup qualification.
+
 ## Domain and persistence
 
 Issue #17 replaces arbitrary numeric windows with one browser-safe SDK contract:

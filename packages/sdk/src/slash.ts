@@ -1,10 +1,10 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
+import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, sessionPullRequestUrl, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 
-export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
+export type SessionPanel = "Terminal" | "Global Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
 export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
 export type SlashResult =
@@ -19,6 +19,7 @@ export type SlashResult =
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
   { name: "progress", description: "Compare the bound plan checklist with optional long-task model estimates" },
+  { name: "activity", description: "Inspect exact retained chat operations or original turn metadata", argument: "[before SEQUENCE ID|read ID arguments|output [OFFSET]|turn ID]" },
   { name: "attach-file", description: "Capture a local source/text file, image, PDF, DOCX or XLSX snapshot", argument: "ABSOLUTE_PATH" },
   { name: "attach-document", description: "Extract a PDF/DOCX/XLSX locally without whole-document model injection", argument: "ABSOLUTE_PATH" },
   { name: "document-read", description: "Bounded retained page/section/spreadsheet-range inspection", argument: "ID [OPTIONS_JSON]" },
@@ -36,11 +37,13 @@ export const slashCommands = [
   { name: "read-only", description: "Answer questions with edit and execution tools disabled" },
   { name: "agent", description: "Return to agent mode at the next safe steer boundary" },
   { name: "rename", description: "Rename this session", argument: "NAME" },
+  { name: "reorder-sessions", description: "Set the exact shared order of one complete sibling section", argument: "SESSION_ID..." },
   { name: "side", description: "Open parallel, question-only context" },
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
-  { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal", desktopOnly: true },
+  { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal, or a Local data-root global console", argument: "[global]", desktopOnly: true },
   { name: "clone", description: "Explicitly clone a repository into a new Local project folder without inference", argument: '{\"repository\":\"URL\",\"path\":\"ABSOLUTE_NEW_PATH\"} confirm-clone' },
   { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open [LOCAL_ROOT]|global [LOCAL_ROOT]|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
+  { name: "agent-terminal", description: "Inspect this session's approved Agent command output, never its private User/Global consoles", argument: "[list [SEQUENCE ID]|read COMMAND_ID [UTF8_OFFSET|tail]]" },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
@@ -91,8 +94,10 @@ export const slashCommands = [
   { name: "file", description: "Read one allowed file from the session's actual root", argument: "PATH" },
   { name: "help", description: "List slash commands" },
 ] as const;
-export const attachmentTriggers = { "^": "Local text file", ":": "Folder", "#": "GitHub issue or PR", "!": "Session", "@": "Project file" } as const;
+export const attachmentTriggers = { "^": "Local file or folder", ":": "Session", "#": "Issue or pull request", "!": "Session", "@": "Project file or folder, or GitHub file" } as const;
 export function parseAttachmentTrigger(text: string): { prefix: keyof typeof attachmentTriggers; query: string; start: number } | null {
+  const qualified = text.match(/(?:^|\s)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*)$/);
+  if (qualified) return { prefix: "#", query: qualified[1]!, start: text.length - qualified[1]!.length };
   const match = text.match(/(?:^|\s)([@^:#!])([^\s]*)$/);
   if (!match || !(match[1]! in attachmentTriggers)) return null;
   const prefix = match[1] as keyof typeof attachmentTriggers;
@@ -122,6 +127,27 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "documents": return { kind: "text", text: JSON.stringify(await sdk.attachments.listDocuments(session.id, parse(DocumentListOptionsSchema, JSON.parse(command.argument || "{}"))), null, 2) };
     case "progress": return { kind: "text", text: JSON.stringify(await sdk.sessions.progress(session.id), null, 2) };
+    case "activity": {
+      const [action, id, part, offset, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!action) return { kind: "text", text: JSON.stringify(await sdk.activity.list(session.id), null, 2) };
+      if (action === "before" && id && /^\d+$/.test(id) && Number.isSafeInteger(Number(id)) && part && !offset) return { kind: "text", text: JSON.stringify(await sdk.activity.list(session.id, { before: { sequence: Number(id), id: part } }), null, 2) };
+      if (action === "turn" && id && !part) return { kind: "text", text: JSON.stringify(await sdk.activity.turn(session.id, id), null, 2) };
+      if (action === "read" && id && (part === "arguments" || part === "output") && !extra && (!offset || /^\d+$/.test(offset) && Number.isSafeInteger(Number(offset)))) return {
+        kind: "text", text: JSON.stringify(await sdk.activity.read(session.id, id, part, { offset: Number(offset ?? 0) }), null, 2),
+      };
+      throw new ClientError("activity_input", "Use /activity, /activity before SEQUENCE ID, /activity turn ID or /activity read ID arguments|output [UTF8_OFFSET]. No source is inferred.");
+    }
+    case "agent-terminal": {
+      const [action, id, offset, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if ((!action || action === "list") && !id) return { kind: "text", text: JSON.stringify(await sdk.agentTerminals.list(session.id), null, 2) };
+      if (action === "list" && id && /^\d+$/.test(id) && Number.isSafeInteger(Number(id)) && offset && !extra) return {
+        kind: "text", text: JSON.stringify(await sdk.agentTerminals.list(session.id, { before: { sequence: Number(id), id: offset } }), null, 2),
+      };
+      if (action === "read" && id && !extra && (!offset || offset === "tail" || /^\d+$/.test(offset) && Number.isSafeInteger(Number(offset)))) return {
+        kind: "text", text: JSON.stringify(await sdk.agentTerminals.read(session.id, id, offset === "tail" ? { tail: true } : { offset: Number(offset ?? 0) }), null, 2),
+      };
+      throw new ClientError("agent_terminal_input", "Use /agent-terminal list [SEQUENCE ID] or /agent-terminal read COMMAND_ID [UTF8_OFFSET|tail]. No user console was accessed.");
+    }
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument);
     case "knowledge":
@@ -134,8 +160,11 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!command.argument) return { kind: "text", text: JSON.stringify({ options: session.controls.modelOptions ?? {}, context: (await sdk.sessions.context(session.id)).context }, null, 2) };
       if (command.argument === "reset") {
         const { modelOptions: _, ...controls } = session.controls;
-        await sdk.sessions.configure(session.id, controls, session.revision);
-      } else await sdk.sessions.modelOptions(session.id, parse(ModelOptionsSchema, JSON.parse(command.argument)), session.revision);
+        await sdk.sessions.configure(session.id, controls, session.revision, session.controls.modelId !== null);
+      } else {
+        const options = parse(ModelOptionsSchema, JSON.parse(command.argument));
+        await sdk.sessions.modelOptions(session.id, options, session.revision, Object.hasOwn(options, "thinkingEffort") || undefined);
+      }
       return { kind: "ok", message: "Model tuning saved. Supported windows are rechecked before dispatch; history was not truncated." };
     }
     case "model-evidence": {
@@ -216,8 +245,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (command.name === "models" || !command.argument) return client === "cli" ? { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.provider.models, null, 2) } : { kind: "panel", panel: "Models" };
       const model = sdk.getState().snapshot!.provider.models.find((model) => model.id === command.argument && (!model.environments || model.environments.includes(session.controls.env)));
       if (!model) throw new ClientError("model_unavailable", "Choose an exact available model ID for this env. Inspect /models and /kupo status; no provider or policy fallback was used.");
-      const { modelOptions: _, ...controls } = session.controls;
-      await sdk.sessions.configure(session.id, { ...controls, modelId: model.id }, session.revision);
+      await sdk.sessions.selectModel(session.id, model.id, session.revision);
       return { kind: "ok", message: model.synthetic ? `kupo ${sdk.routing.policy()?.workflow === "compound" ? "Compound" : "Single"} selected. Actual roles are metered separately; no inference started and no permission changed.` : `${model.name} selected explicitly. Previous model-specific options were cleared; no inference started.` };
     }
     case "roles": {
@@ -728,6 +756,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "rename":
       if (!command.argument) throw new ClientError("slash_arguments", "Use /rename NAME.");
       await sdk.sessions.rename(sessionId, command.argument); return { kind: "ok", message: "Renamed." };
+    case "reorder-sessions":
+      if (!command.argument.trim()) throw new ClientError("slash_arguments", "Use /reorder-sessions followed by every sibling session ID in the desired order.");
+      await sdk.sessions.reorder(command.argument.trim().split(/\s+/));
+      return { kind: "ok", message: "Shared sibling order saved. No session was reparented or resumed." };
     case "side":
     case "subsession": {
       const side = command.name === "side";
@@ -735,14 +767,18 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "session", sessionId: result.id!, side };
     }
     case "terminal":
+      if (command.argument === "global") {
+        if (client === "desktop") return { kind: "panel", panel: "Global Terminal" };
+        return { kind: "text", text: JSON.stringify(await sdk.terminal.openGlobal(), null, 2) };
+      }
       if (client !== "desktop") throw new ClientError("terminal_context", "This client is already a terminal. Use /terminals open/list/read for explicit Local or pinned SSH user consoles; /terminal opens Ghostty only in desktop.");
       return { kind: "panel", panel: "Terminal" };
     case "terminals": {
       const [action = "list", id, option, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
       if (action === "global") {
         const root = command.argument.slice("global".length).trim();
-        if (!root) return { kind: "text", text: JSON.stringify(await sdk.terminal.defaultRoot(), null, 2) + "\nUse /terminals global ABSOLUTE_ROOT to explicitly open the single profile-owned Local console." };
-        return { kind: "text", text: JSON.stringify(await sdk.terminal.openGlobal(root), null, 2) };
+        const opened = root ? await sdk.terminal.openGlobal(root) : await sdk.terminal.openGlobal();
+        return client === "desktop" ? { kind: "panel", panel: "Global Terminal" } : { kind: "text", text: JSON.stringify(opened, null, 2) };
       }
       if (action === "open") {
         const root = command.argument.slice("open".length).trim() || undefined;
@@ -762,7 +798,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "owner-acknowledge" && id && option === "confirm-inspected" && !extra) {
         await sdk.terminal.acknowledgeOwner(id, true); return { kind: "ok", message: "Your explicit shared-owner inspection was acknowledged. No cleanup proof, key removal or process replacement was inferred." };
       }
-      if (!id || extra || !sdk.getState().snapshot!.terminals.some((terminal) => terminal.id === id && (terminal.sessionId === session.id || terminal.sessionId === null))) throw new ClientError("terminal_scope", "Choose this session's or its profile's global terminal from /terminals.");
+      if (!id || extra || !sdk.getState().snapshot!.terminals.some((terminal) => terminal.id === id && (terminal.sessionId === session.id || terminal.sessionId === null))) throw new ClientError("terminal_scope", "Choose an existing terminal in this session or a profile-owned global console.");
       if (action === "read" && (!option || /^\d+$/.test(option) && Number.isSafeInteger(Number(option)))) return { kind: "text", text: JSON.stringify(await sdk.terminal.read(id, Number(option ?? 0)), null, 2) };
       if (action === "reconcile" && !option) {
         await sdk.terminal.reconcile(id);
@@ -823,7 +859,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "insights": return { kind: "panel", panel: "Insights" };
     case "pr": {
-      const url = session.prUrl ?? sdk.getState().snapshot?.issues.find((issue) => issue.id === session.workItemId)?.pullRequest?.url;
+      const url = sessionPullRequestUrl(session, sdk.getState().snapshot!);
       if (!url) throw new ClientError("pr_missing", "This session has no connected PR.");
       return { kind: "panel", panel: "PR", url };
     }

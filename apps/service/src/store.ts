@@ -69,6 +69,7 @@ function references(input: EventInput): string[] {
     case "mcp.remote_recorded": return [input.payload.call.intentDigest, input.payload.call.resultDigest].filter((hash): hash is string => hash !== null);
     case "compaction.saved": return [input.payload.compaction.inputDigest, input.payload.compaction.resultDigest, input.payload.compaction.replacementDigest].filter((hash): hash is string => hash !== null);
     case "draft.saved": return input.payload.attachments.flatMap(attachmentDigests);
+    case "skill.used": return [input.payload.contentDigest];
     case "steer.applied": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "model.completed": return [input.payload.contextDigest];
     case "capability.saved": return [input.payload.entry.contentDigest];
@@ -257,34 +258,48 @@ export class EventStore {
       if (version < 43) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('document_attachment_schema','1');
         PRAGMA user_version=43; COMMIT;`);
-      if (version < 44) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT OR IGNORE INTO retention_metadata(id,value) VALUES ('workspace_entry_schema','1');
-        PRAGMA user_version=44; COMMIT;`);
-      if (version < 45) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('settings_preferences_schema','1');
-        PRAGMA user_version=45; COMMIT;`);
-      if (version < 46) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('client_voice_capture_schema','1');
-        PRAGMA user_version=46; COMMIT;`);
-      if (version < 47) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('notification_sound_schema','1');
-        PRAGMA user_version=47; COMMIT;`);
-      if (version < 48) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('application_preferences_schema','1');
-        PRAGMA user_version=48; COMMIT;`);
-      if (version < 49) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('state_location_schema','1');
-        PRAGMA user_version=49; COMMIT;`);
-      if (version < 50) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('private_update_schema','1');
-        PRAGMA user_version=50; COMMIT;`);
-      if (version < 51) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('session_interactions_schema','1');
-        PRAGMA user_version=51; COMMIT;`);
-      if (version < 52) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('managed_sandbox_schema','1');
-        PRAGMA user_version=52; COMMIT;`);
+      if (version < 53) this.migrateDesktopMerge(version);
+      if (version < 54) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('session_indicators_schema','1');
+        PRAGMA user_version=54; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_indicators_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid retained session indicator schema marker. State was preserved.");
+      }
+      if (version < 55) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('model_defaults_schema','1');
+        PRAGMA user_version=55; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_defaults_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid retained model default schema marker. State was preserved.");
+      }
+      if (version < 56) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('browser_control_schema','1');
+        PRAGMA user_version=56; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='browser_control_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid browser control schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
+  }
+  private migrateDesktopMerge(version: number): void {
+    const markers = [
+      ["workspace_entry_schema", 44], ["settings_preferences_schema", 45], ["client_voice_capture_schema", 46],
+      ["notification_sound_schema", 47], ["application_preferences_schema", 48], ["state_location_schema", 49],
+      ["private_update_schema", 50], ["session_interactions_schema", 51], ["managed_sandbox_schema", 52],
+    ] as const;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const desktop = this.db.prepare("SELECT value FROM retention_metadata WHERE id='desktop_interaction_schema'").get();
+      if (desktop && desktop.value !== "1") throw new Error("Invalid desktop schema provenance. State was preserved.");
+      const repairBranch = version >= 44 && desktop?.value === "1";
+      for (const [id, introduced] of markers) {
+        const row = this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id);
+        if (!row) {
+          if (!repairBranch && version >= introduced) throw new Error(`Missing retained schema marker ${id}. State was preserved.`);
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?,?)").run(id, "1");
+        } else if (row.value !== "1") throw new Error(`Invalid retained schema marker ${id}. State was preserved.`);
+      }
+      if (!desktop) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES ('desktop_interaction_schema','1')").run();
+      this.db.exec("PRAGMA user_version=53; COMMIT;");
+    } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {
     const cached = this.keys.get(scope.scope);

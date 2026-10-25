@@ -69,6 +69,7 @@ export const SessionChangesSchema = object({
 export type SessionChanges = Static<typeof SessionChangesSchema>;
 export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema }),
+  object({ type: Type.Literal("session.reorder"), sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.reorder"), projectId: nullableId, parentSessionId: nullableId, groupId: nullableId, archived: Type.Boolean(),
     sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.mode"), sessionId: id, expectedRevision: revision, mode: SessionModeSchema }),
@@ -89,6 +90,7 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("artifact.capture"), sessionId: id, path: Type.Optional(path) }),
   object({ type: Type.Literal("plan.save"), sessionId: id, text: Type.String({ maxLength: 128 * 1024 }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }), expectedBinding: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })) }),
   object({ type: Type.Literal("terminal.open"), sessionId: id, root: Type.Optional(path), scriptId: Type.Optional(id), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
+  object({ type: Type.Literal("terminal.global.open"), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
   object({ type: Type.Literal("terminal.open-global"), root: path, cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),
   object({ type: Type.Literal("terminal.close"), terminalId: id }),
   object({ type: Type.Literal("terminal.reconcile"), terminalId: id }),
@@ -100,6 +102,16 @@ export const SessionWorkspaceCommandSchema = Type.Union([
 export type SessionWorkspaceCommand = Static<typeof SessionWorkspaceCommandSchema>;
 export function compareSessions(a: { pinned: boolean; order?: number; createdAt: string; id: string }, b: { pinned: boolean; order?: number; createdAt: string; id: string }): number {
   return Number(b.pinned) - Number(a.pinned) || (a.order ?? 0) - (b.order ?? 0) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
+}
+export const compareSessionOrder = compareSessions;
+export const sessionOrderScope = (session: { projectId: string | null; groupId: string | null; parentSessionId?: string; pinned: boolean; status: string }): string =>
+  JSON.stringify([session.projectId, session.groupId, session.parentSessionId ?? null, session.pinned, session.status === "archived"]);
+export function projectIdentifier(name: string, taken: Iterable<string> = []): string {
+  const base = name.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "project";
+  const names = new Set([...taken].map((value) => value.toLowerCase()));
+  let candidate = base, suffix = 2;
+  while (names.has(candidate.toLowerCase())) candidate = `${base}-${suffix++}`;
+  return candidate;
 }
 export const isSessionWorkspaceCommand = (value: unknown): value is SessionWorkspaceCommand => Value.Check(SessionWorkspaceCommandSchema, value);
 export const TerminalInputSchema = Type.Union([

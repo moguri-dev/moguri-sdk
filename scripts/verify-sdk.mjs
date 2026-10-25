@@ -21,7 +21,10 @@ try {
   execFileSync("npm", ["install-scripts", "approve", manifest.name, "--no-allow-scripts-pin"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["rebuild", manifest.name, "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["audit", "--audit-level=moderate"], { cwd: consumer, stdio: "inherit" });
-  const { PROTOCOL_VERSION: installedProtocol } = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
+  const installedSdk = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
+  const { PROTOCOL_VERSION: installedProtocol } = installedSdk;
+  const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
+  const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
@@ -56,6 +59,10 @@ try {
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
+    ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
+    ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
+    ${installedProtocol >= 54 ? 'import {sessionIndicator,sessionIndicatorColors,sessionPrScope,sessionPullRequest,sessionPullRequestUrl,type SessionPrObservation} from "moguri";' : ""}
+    ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     async function typedConsumer() {
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
@@ -67,6 +74,27 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${browserControl ? `
+      const browserState=await sdk.browser.state("generated-session");void browserState.browser.controlId;
+      const browserOwner={sessionId:"generated-session",hostId:"generated-host",lease:"ab".repeat(32)};
+      await sdk.browser.host.attach(browserOwner);
+      await sdk.browser.host.control(browserOwner,1,false);
+      const browserPoll=await sdk.browser.host.poll(browserOwner,"","");void browserPoll.request?.arguments;
+      await sdk.browser.host.reply(browserOwner,"generated-request",{text:"generated data",outcome:"partial"});
+      await sdk.browser.host.detach(browserOwner);
+      ` : ""}
+      ${installedProtocol >= 55 ? `
+      const remembered:ModelSelection|null=sdk.getState().snapshot?.lastModelSelection??null;void remembered?.thinkingEffort;
+      await sdk.sessions.selectModel("generated-id",null);
+      await sdk.sessions.modelOptions("generated-id",{thinkingEffort:"low"},undefined,true);
+      ` : ""}
+      ${installedProtocol >= 54 ? `
+      const statusView=(session:Session,state:Snapshot)=>{
+        const observed:SessionPrObservation|null|undefined=session.prObservation;void observed?.scope.root;void observed?.pullRequest.draft;
+        void sessionIndicator(session,state).prState;void sessionIndicatorColors("#151921").merged;
+        void sessionPrScope(session,state)?.access;void sessionPullRequest(session,state)?.checkedAt;void sessionPullRequestUrl(session,state);
+      };void statusView;
+      ` : ""}
       ${installedProtocol >= 44 ? `
       await sdk.projects.add("/generated/folder");
       const cloned=await sdk.projects.clone("https://example.invalid/generated.git","/generated/new-folder",true);void cloned.id;
@@ -85,6 +113,18 @@ try {
       void (await sdk.attachments.searchDocument("generated-id",capture.id!,literal)).result.nextCursor;
       await sdk.attachments.cancelDocument("generated-id","generated-typed-capture");
       const progress:TaskProgress=(await sdk.sessions.progress("generated-id")).progress;void progress.checklist.percent;void useTaskProgress;
+      ` : ""}
+      ${installedProtocol >= 53 ? `
+      const activity:SessionActivity=(await sdk.activity.list("generated-id",{limit:10})).activity;void activity.entries[0]?.updatedSequence;
+      const detail:ActivityContent|null=(await sdk.activity.read("generated-id","generated-activity","output",{offset:0,limit:4096})).content;void detail?.nextOffset;
+      const turn:TurnInfo=(await sdk.activity.turn("generated-id","generated-turn")).info;void turn.context?.window;
+      const response:string=sdk.activity.response("generated-id","generated-turn");void response;void useSessionActivity;
+      ` : ""}
+      ${installedProtocol >= 53 ? `
+      const agentRead:AgentTerminalRead={action:"read",commandId:"generated-command",offset:0,limit:4096};void agentRead;
+      const agentCommands=await sdk.agentTerminals.list("generated-id",{limit:20});void agentCommands.activity.entries[0]?.env;
+      const agentOutput=await sdk.agentTerminals.read("generated-id","generated-command",{tail:true,limit:4096});void agentOutput.content?.offset;
+      const typedAgentHook=(view:MoguriSdk,session:Session,state:Snapshot)=>useSessionActivity(view,session,state,"run_command");void typedAgentHook;
       ` : ""}
       ${installedProtocol >= 34 ? 'const evidence:ModelEvidenceReport=(await sdk.models.evidence("generated-model")).evidence;void evidence.claimed.family;void evidence.source.familyField;' : ""}
       const snapshot = sdk.settings.get();
@@ -315,7 +355,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
@@ -327,9 +367,12 @@ try {
     const provider=makeProvider(),providers=new Map([["default",provider]]),vaults=new Map();
     const remoteSecrets=new Map();
     const remoteVault={read:async id=>remoteSecrets.get(id)??null,write:async(id,value)=>{remoteSecrets.set(id,value);},remove:async id=>{remoteSecrets.delete(id);}};
-    let repositoryLookups=0;
+    let repositoryLookups=0,sessionPrLookups=0;
     const repositoryMetadata={id:42,name:"example",full_name:"generated/example",html_url:"https://github.com/generated/example",owner:{login:"generated",type:"Organization"},private:false,visibility:"public",license:{spdx_id:"MIT"},description:"GENERATED_UNRETAINED_REPOSITORY_BODY"};
-    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{assert.equal(String(url),"https://api.github.com/repos/generated/example");repositoryLookups++;return Response.json(repositoryMetadata);}}};
+    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{
+      if(String(url)==="https://api.github.com/repos/generated/example/pulls/7"){sessionPrLookups++;return Response.json({number:7,html_url:"https://github.com/generated/example/pull/7",state:"open",draft:true,merged:false,merged_at:null});}
+      assert.equal(String(url),"https://api.github.com/repos/generated/example");repositoryLookups++;return Response.json(repositoryMetadata);
+    }}};
     const runtime=await createRuntime({stateDir:join(root,"state"),retentionKey:Buffer.alloc(32,0x67),platform,profiles:{
       provider:id=>{if(!providers.has(id))providers.set(id,makeProvider());return providers.get(id);},
       platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
@@ -425,6 +468,81 @@ try {
       assert.equal(sdk.profileId,"default");assert.equal(beta.profileId,profile.id);
       assert.equal(beta.getState().snapshot.projects.length,0);assert.equal(beta.getState().snapshot.sessions.length,0);
       assert.equal(beta.getState().snapshot.provider.status,"disconnected");
+      ${installedProtocol >= 53 ? `
+      {
+      assert.deepEqual(sdk.settings.get().values.interactions,{confirmSessionAttachments:true,confirmTerminalClose:true});
+      const interactionRoot=join(root,"generated-interaction-project");await mkdir(interactionRoot);
+      await writeFile(join(interactionRoot,"generated.txt"),"Generated installed interaction snapshot.");
+      const interactionProject=await sdk.projects.add(interactionRoot,"generated_interactions");
+      const first=await sdk.sessions.create(interactionProject.id,"Generated installed first"),second=await sdk.sessions.create(interactionProject.id,"Generated installed second");
+      await sdk.sessions.reorder([second.id,first.id]);
+      assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===second.id).order,0);
+      const source=await sdk.attachments.projectPath(first.id,interactionProject.id,"generated.txt");
+      assert.equal(source.kind,"file");assert.equal(source.path,join(await realpath(interactionRoot),"generated.txt"));
+      const captured=await sdk.attachments.file(first.id,source.path);
+      assert.equal((await sdk.attachments.read(first.id,captured.id)).content.text,"Generated installed interaction snapshot.");
+      await assert.rejects(()=>beta.attachments.read(first.id,captured.id),{code:"attachment_session"});
+      await sdk.slash(first.id,"/reorder-sessions "+first.id+" "+second.id,"tui");
+      assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===first.id).order,0);
+      await sdk.sessions.delete(first.id,true);await sdk.sessions.delete(second.id,true);await sdk.projects.remove(interactionProject.id,true,0);
+      console.log("Installed protocol-53 browser-safe SDK and TUI commands preserve safe identifiers, exact Local context resolution, profile-private snapshots and atomic shared sibling order without inference.");
+      }
+      ` : ""}
+      ${installedProtocol >= 53 ? `
+      {
+      const activityRoot=join(root,"generated-activity-project");await mkdir(activityRoot);
+      const activityText="---\\nname: generated-installed-activity\\ndescription: Generated installed skill\\n---\\nGenerated exact retained skill bytes.\\n";
+      const activityPath=join(activityRoot,"SKILL.md");await writeFile(activityPath,activityText);
+      const activityProject=await sdk.projects.add(activityRoot,"generated_activity");
+      const activitySession=await sdk.sessions.create(activityProject.id,"Generated installed activity");
+      assert.deepEqual((await sdk.activity.list(activitySession.id)).activity.entries,[]);
+      const imported=await sdk.capabilities.importSkill(activityProject.id,activityPath);await sdk.capabilities.toggle(imported.id,true,0);
+      const skill=sdk.getState().snapshot.registry.find(value=>value.id===imported.id);
+      await sdk.capabilities.useSkill(activitySession.id,skill.id,skill.contentDigest);
+      const loaded=(await sdk.activity.list(activitySession.id)).activity.entries[0];
+      assert.equal(loaded.kind,"load-skill");assert.equal(loaded.actor,"user");assert.equal(loaded.turnId,null);
+      assert.equal(loaded.outputBytes,Buffer.byteLength(activityText));
+      assert.equal((await sdk.activity.read(activitySession.id,loaded.id,"output")).content.text,activityText);
+      assert.equal(JSON.parse((await sdk.activity.read(activitySession.id,loaded.id,"arguments")).content.text).contentDigest,skill.contentDigest);
+      await assert.rejects(()=>beta.activity.list(activitySession.id),{code:"activity_scope"});
+      await assert.rejects(()=>beta.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
+      assert.equal((await sdk.slash(activitySession.id,"/activity","tui")).kind,"text");
+      const activityCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"activity","list","--session",activitySession.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+      assert.equal(JSON.parse(activityCli.stdout).activity.entries[0].id,loaded.id);
+      ${installedProtocol >= 53 ? `
+      assert.deepEqual((await sdk.agentTerminals.list(activitySession.id)).activity.entries,[]);
+      await assert.rejects(()=>sdk.agentTerminals.read(activitySession.id,loaded.id),{code:"activity_missing"});
+      await assert.rejects(()=>beta.agentTerminals.list(activitySession.id),{code:"activity_scope"});
+      const agentCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"agent-terminal","list","--session",activitySession.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
+      assert.deepEqual(JSON.parse(agentCli.stdout).activity.entries,[]);
+      const agentShared=await sdk.slash(activitySession.id,"/agent-terminal list","tui");
+      assert.equal(agentShared.kind,"text");assert.deepEqual(JSON.parse(agentShared.text).activity.entries,[]);
+      console.log("Installed protocol-53 Agent SDK/React/CLI/TUI views preserve exact session/profile/source filters; a retained skill cannot masquerade as a command and inspection starts no shell or inference.");
+      ` : ""}
+      await sdk.sessions.delete(activitySession.id,true);
+      await assert.rejects(()=>sdk.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
+      await sdk.projects.remove(activityProject.id,true,(await sdk.projects.configuration(activityProject.id)).configuration.revision);
+      console.log("Installed protocol-53 SDK/React/CLI/TUI activity preserves exact session-granted source bytes, profile/deletion isolation and actual user provenance without inference or private-ledger content.");
+      }
+      ` : ""}
+      ${installedProtocol >= 54 ? `
+      {
+      const linkedPr="https://github.com/generated/example/pull/7",pr=await sdk.sessions.fromWork(p.id,{prUrl:linkedPr});
+      const state=sdk.getState().snapshot,owner=state.sessions.find(value=>value.id===pr.id);
+      assert.equal(owner.prObservation.pullRequest.draft,true);assert.equal(sessionIndicator(owner,state).prState,"draft");
+      assert.equal(sessionPrScope(owner,state).root,await realpath(project));assert.equal(sessionPullRequestUrl(owner,state),linkedPr);
+      assert.equal(sessionPullRequest(owner,beta.getState().snapshot),null);
+      assert.equal((await sdk.slash(pr.id,"/pr","tui")).url,linkedPr);assert.equal(sessionPrLookups,1);
+      const publicPr=await sdk.sessions.create(null,"Generated installed root-null PR");
+      await sdk.sessions.organize(publicPr.id,{prUrl:linkedPr});
+      for(let attempt=0;attempt<200&&!sdk.getState().snapshot.sessions.find(value=>value.id===publicPr.id).prObservation;attempt++)await new Promise(resolve=>setTimeout(resolve,10));
+      const publicOwner=sdk.getState().snapshot.sessions.find(value=>value.id===publicPr.id);
+      assert.equal(publicOwner.prObservation.scope.root,null);assert.equal(publicOwner.prObservation.scope.access,"public");
+      assert.equal(publicOwner.status,"idle");assert.equal(sessionPrLookups,2);
+      await sdk.sessions.delete(publicPr.id,true);await sdk.sessions.delete(pr.id,true);
+      console.log("Installed protocol-54 browser-safe session/PR selectors, retained draft metadata and shared TUI PR commands preserve exact project/profile and public root-null scope without a model, Git write or duplicate verification.");
+      }
+      ` : ""}
       const betaSession=await beta.sessions.create(null,"Generated installed Beta chat");
       assert.equal(beta.getState().snapshot.sessions[0].controls.modelId,null);
       const betaDocument=await beta.artifacts.create(betaSession.id,{kind:"decision",name:"Generated Beta private note",text:"Generated Beta-only installed bytes."});
@@ -432,7 +550,7 @@ try {
       const scopedCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"status","--profile",profile.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
       assert.equal(JSON.parse(scopedCli.stdout).profileId,profile.id);
       assert.equal((await beta.voice.status()).voice.runtimeReady,true);
-      assert.deepEqual((await beta.mcp.tools("builtin","",0,betaSession.id)).tools.map(tool=>tool.name),["fetch_page"]);
+      assert.deepEqual((await beta.mcp.tools("builtin","",0,betaSession.id)).tools.map(tool=>tool.name),${JSON.stringify(rootlessTools)});
       for(const client of [sdk,beta]){const settings=structuredClone(client.settings.get().values);settings.mcpServers=[{id:"generated-installed-mcp",name:"Generated scoped MCP",enabled:true,transport:{type:"http",url:"https://generated-sdk.invalid/mcp",auth:"bearer"}}];await client.settings.update(settings,client.settings.get().revision);}
       await sdk.mcp.setToken("generated-installed-mcp","generated-installed-default-only");
       assert.equal((await sdk.mcp.auth("generated-installed-mcp")).state,"configured");
@@ -610,7 +728,7 @@ try {
       ` : ""}
       const folder=(await sdk.attachments.folderPreview(general.id,project)).preview;
       await sdk.attachments.folder(general.id,project,folder.digest,true);
-      assert.deepEqual((await sdk.mcp.tools("builtin","",0,general.id)).tools.map(t=>t.name),["fetch_page"]);
+      assert.deepEqual((await sdk.mcp.tools("builtin","",0,general.id)).tools.map(t=>t.name),${JSON.stringify(rootlessTools)});
       await assert.rejects(()=>sdk.plans.read(general.id),/Select a project/);
       const meta=await sdk.metachat.create(null,general.id,"Generated external settings request.");
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===meta.id).kind,"metachat");
@@ -841,7 +959,7 @@ try {
         const compact=await beta.sessions.create(null,"Generated installed compaction",{modelId:generatedModel.id,autonomy:"Manual"});
         for(let turn=0;turn<3;turn++){
           const current=beta.getState().snapshot.sessions.find(value=>value.id===compact.id);
-          await beta.command({type:"draft.save",sessionId:compact.id,expectedRevision:current.draft.revision,text:"Generated installed retained turn "+turn+". "+"Generated retained compaction detail. ".repeat(64),attachments:[]});
+          await beta.command({type:"draft.save",sessionId:compact.id,expectedRevision:current.draft.revision,text:"Generated installed retained turn "+turn+". "+"Generated retained compaction detail. ".repeat(32),attachments:[]});
           const sizing=(await beta.sessions.context(compact.id)).context;
           assert.ok(sizing.estimatedTokens+4096<generatedModel.contextWindow,"The generated compaction fixture must fit the unchanged input/headroom bound before dispatch.");
           await beta.command({type:"message.send",sessionId:compact.id,expectedRevision:current.draft.revision+1,delivery:"queue"});
@@ -1046,7 +1164,17 @@ try {
         assert.equal(after.data.split("GENERATED_INSTALLED_CONSOLE_READY").length-1,1);
         const read=JSON.parse((await invoke(["terminal","read",opened.id])).stdout);assert.equal(read.terminal.pid,before.terminal.pid);
         const tui=await consoleSdk.slash(session.id,"/terminals read "+opened.id,"tui");assert.equal(tui.kind,"text");assert.equal(JSON.parse(tui.text).terminal.pid,before.terminal.pid);
-        await consoleSdk.terminal.close(opened.id);consoleSdk.disconnect();await stopMoguriService(consoleState,{expectedConnection:consoleRuntime.connection});
+        await consoleSdk.terminal.close(opened.id);
+        if(PROTOCOL_VERSION>=53&&mode==="Local"){
+          const global=await consoleSdk.terminal.openGlobal(),globalState=(await consoleSdk.terminal.read(global.id)).terminal;
+          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(consoleState));
+          const globalCli=JSON.parse((await invoke(["terminal","read",global.id])).stdout);assert.equal(globalCli.terminal.id,global.id);
+          const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
+          await consoleSdk.sessions.delete(session.id,true);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);
+          await consoleSdk.terminal.close(global.id);
+          console.log("Installed protocol-44 global Local console owns the exact data directory independently of sessions/projects through SDK, CLI and TUI, with no model context or launch replay.");
+        }
+        consoleSdk.disconnect();await stopMoguriService(consoleState,{expectedConnection:consoleRuntime.connection});
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }
@@ -1056,6 +1184,14 @@ try {
   if (installedProtocol >= 44) {
     const { qualifyWorkspaceEntry } = await import("./qualify-workspace-entry.mjs");
     console.log(await qualifyWorkspaceEntry({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-entry") }));
+  }
+  if (installedProtocol >= 55 && process.platform === "darwin") {
+    const { qualifyModelDefaults } = await import("./qualify-model-defaults.mjs");
+    console.log(await qualifyModelDefaults({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-model-defaults") }));
+  }
+  if (browserControl) {
+    const { qualifyBrowser } = await import("./qualify-browser.mjs");
+    console.log(await qualifyBrowser({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-browser") }));
   }
   if (installedProtocol >= 40 && process.platform === "darwin") {
     const { qualifyDecisions } = await import("./qualify-decisions.mjs");

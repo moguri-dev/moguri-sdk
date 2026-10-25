@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DraftEditor, MoguriSdk, type Session } from "../packages/sdk/src/index.ts";
+import { BROWSER_MCP_TOOLS, DraftEditor, MoguriSdk, type Session } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { executeTool } from "../apps/service/src/tools.ts";
 
@@ -26,7 +26,8 @@ test("a genuinely project-free chat has model context but no inherited root, att
     await assert.rejects(() => sdk.slash(session.id, "/diff", "tui"), /Select a project/);
     await assert.rejects(() => executeTool(null, { id: "generated-no-root", name: "run_command", arguments: { command: "pwd", timeoutMs: 1000 } }, new AbortController().signal, () => {}, () => {}), /no workspace/);
     const catalog = await sdk.mcp.tools("builtin", "", 0, session.id);
-    assert.deepEqual(catalog.tools.map((tool) => tool.name), ["fetch_page"]);
+    assert.deepEqual(catalog.tools.map((tool) => tool.name), [...BROWSER_MCP_TOOLS.map((tool) => tool.name), "fetch_page"]);
+    assert.equal((await sdk.browser.state(session.id)).browser.available, false);
     session = sdk.getState().snapshot!.sessions.find((value) => value.id === session.id)!;
     await send(sdk, session, "Generated project-free question without workspace operations.");
     await waitFor(() => fixture.service.controller.snapshot().sessions.find((value) => value.id === session.id)?.status === "completed");

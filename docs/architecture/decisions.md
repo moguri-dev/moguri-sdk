@@ -220,7 +220,7 @@ execution, Linux/Rust acceptance or complete descendant containment.
 - Preserve the same typed commands, events, budgets, Git policies, and cancellation semantics across all envs. In Sandbox, terminals and agent file/tool operations stay within the approved guest workspace and brokers. Remote is off-machine execution, not an assertion of SendBox controls or protection of unrelated data on that remote host.
 
 **Managed desktop setup direction.** The owner now requires bundled SendBox
-0.2.3 and a compatible pinned Linux worker/runtime/dependency image, reviewed
+0.2.4 and a compatible pinned Linux worker/runtime/dependency image, reviewed
 in-app setup and public-release update checks, automatic private workspaces
 without per-turn text previews, and selected-provider endpoint/CNAME resolution.
 [Managed Sandbox](managed-sandbox.md) records the prerequisite measurements,
@@ -230,11 +230,18 @@ private staging, no-replay, permission or budget boundaries. Legacy manual
 configurations are not silently granted the new managed policy.
 
 Explicitly reviewed `*.domain.com` tool rules use the existing released native
-matcher, qualified against the real 0.2.3 guest/proxy. Exact entries remain exact,
+matcher, qualified against the real 0.2.3 guest/proxy. In that release exact entries remain exact,
 the apex is separate, and actual provider endpoints/CNAME provenance stay exact.
-This adds no automatic wildcard, new dependency or release pin. The separately
-developing upstream GitHub Meta delegation is not activated by this adapter
-change; it requires a newly qualified signed release and effective-scope review.
+The adapter adds no wildcard or dependency. For the 0.2.4 default, the owner
+explicitly selected GitHub Meta delegation with clear setup disclosure. The
+`github.com` grant includes Meta domains and IPv4/IPv6 CIDRs, including
+shared-cloud ranges, refreshed before readiness and hourly. It is not labeled
+exact-host-only egress; the service's review digest binds this warning and
+activation still requires the user's network-policy acknowledgement. Actual
+0.2.4 guest qualification remains separate from authenticated artifact/package
+verification. The
+[default release pins](managed-sandbox.md#default-sendbox-024) preserve older
+selected versions, signed history and separate setup approval.
 
 ## D11. kupo synthetic model and routing
 
@@ -527,9 +534,14 @@ checkout/index. Failed or interrupted publication is partial, not successful.
 Repo MCP imports bind the exact reviewed digest and start disabled. Porto is
 read-only inventory access, not daemon/process control.
 
-The isolated browser is a basic native preview, not the deferred Stainless
-automation integration. Sandbox, Remote, managed worktrees and the wider release
-gates remain unqualified. CI remains main-push-only.
+The isolated browser uses Electron's existing `WebContentsView`, with optional
+user-enabled [Local agent control](agent-browser.md) through maintained Chromium
+accessibility/input APIs and the existing exact-approval MCP gateway. No
+personal browser, debug port, new browser runtime or Stainless release is
+required. The top switch defaults off and revokes pending control immediately.
+Stainless diagnostics/Playwright integration remains deferred; this does not
+qualify Sandbox or Remote browser transports or the wider release gates.
+CI remains main-push-only.
 
 ## D17. Compact composer and model settings
 

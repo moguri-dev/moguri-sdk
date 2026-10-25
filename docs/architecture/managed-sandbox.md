@@ -7,7 +7,7 @@ The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
 ## Prerequisite measurements
 
-The generated distribution spike uses the exact public SendBox 0.2.3 arm64
+The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64
 archive, freshly verified against SHA-256
 `ab9508dffa9f3299621248d6cff8efb8fd84b44556f630b6e343329ab1eafb3e`
 and its GitHub attestation. No personal model credential, inference, admin
@@ -45,11 +45,85 @@ node --import tsx scripts/managed-sandbox-spike.mjs \
 
 The macOS app carries a compatible immutable OCI worker archive, including
 Moguri's compiled worker/bridge, Linux Node and locked native dependencies.
-It also carries the pinned public SendBox 0.2.3 release and a no-script component
+It also carries the pinned public SendBox 0.2.4 release and a no-script component
 installer. A bounded distribution descriptor binds protocol, actual worker
 bytes, OCI index/archive hashes, vendor archive, CLI/key/manifest and installer
 hashes. Source/embedded runtimes can explicitly supply this same descriptor;
 missing bundled artifacts are an explicit setup limitation, not a mutable pull.
+
+### Default SendBox 0.2.4
+
+Factory management and the packaged producer now select the requested stable
+[0.2.4 release](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.4).
+The 16,582,697-byte macOS arm64 archive matches its adjacent checksum and verified
+GitHub artifact attestation, whose source is tag `v0.2.4` at
+`5e83a179ed83ef2b3b184b60b7fef82105aa504c`.
+SendBox remains Apache-2.0; no Node dependency or durable schema changes.
+
+| Exact release identity | SHA-256 / value |
+| --- | --- |
+| Public host archive | `94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31` |
+| Host executable | `cfa71d5db3ec747ab785c86c6d79dce174893955066ff80ecf6eab827afd2e73` |
+| Existing trusted guest key | `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88` |
+| Signed guest manifest | `afdf6182b6935322454ccc4d0f8426fafadcc1dbe27a35c88963646e1b34b91d` |
+| Trust root / minimum release sequence | `external-release-root` / `8` |
+
+Actual artifact inspection verifies the unchanged Ed25519 root, host/guest
+0.2.4 binding, every signed guest byte/mode and the real CLI version/help before
+any executable admission. This does not claim privileged installation or a
+live 0.2.4 guest. Earlier 0.2.3 VM/network measurements remain historical.
+
+The producer cache binds the exact vendor pins, current Moguri protocol and
+worker/dependency payload. Old cache pointers are misses, not authority to reuse
+0.2.3 as 0.2.4; matching entries still reverify actual package/image bytes and
+vendor identity. Old distribution artifacts and explicitly retained 0.2.3
+settings are not deleted, rewritten, implicitly installed or switched.
+Fresh use of the new bundle retains the original setup review, side-by-side
+administrator approval and readiness gates. The owner explicitly chose to keep
+the 0.2.4 default `github.com` grant with clear Meta disclosure: it delegates
+GitHub Meta domains and IPv4/IPv6 CIDRs, including shared-cloud ranges, refreshed
+before readiness and hourly. This is broader than exact-host-only egress and
+must not be described as strict GitHub-only access.
+
+The service places that warning into the version/network-bound review
+diagnostic, hence its canonical digest; desktop shows it before Enable Sandbox
+and its user/network-policy acknowledgement. CLI/TUI/SDK use the same review.
+Existing 0.2.3 reviews retain their earlier exact-host semantics. The decision
+does not grant tool permission, a new wildcard, provider credentials or Local
+fallback. Artifact/package verification does not claim an actual 0.2.4 guest
+or dynamic effective-scope qualification.
+
+#### Default-update qualification
+
+Source `10f7708` passes the release-specific SDK, state, review, archive-safety
+and generated network gates, including explicit old-version preservation and
+the version-bound Meta warning. The source and compiled inputs remain unchanged
+during its complete desktop and package checks.
+
+| Check | Observed result |
+| --- | --- |
+| Generated native setup/default/cache/recovery gate | 24 passed, 7 physical-native skips; zero failures |
+| Shared settings/reopen/regression gate | 32 passed; zero failures |
+| Meta-review/default/scope follow-up | 29 passed; zero failures |
+| Complete hidden Electron suite | 121 passed, 2 physical-native skips; zero failures / 4.4 min |
+| Actual rebuilt packaged Meta review and consent | 1 hidden case passed / 2.4 s |
+| Packed external SDK and installed workers | All entrypoints/client paths and all 12 worker probes pass |
+| Old packaged 0.2.3 under the new exact-pin gate | Correctly refused before execution |
+| Actual 0.2.4 producer cache hit and retained old 0.2.3 | PASS / 565.39 ms; same exact new directory reused, old artifacts preserved |
+| No-cache Linux arm64 worker payload/synthetic PTY | PASS / 42.09 s |
+| Actual package/native-distribution/update ZIP/DMG | PASS; exact 0.2.4 vendor/default/BOM checked; 740,556,177-byte ZIP verified in 102.15 s |
+| Type checks, production build and dependency audits | PASS; zero vulnerabilities |
+
+The final image is
+`docker.io/library/moguri-worker@sha256:98168acab62b1b3891671add0c224cdccf4a8dae843b0acc35c64fe19cf55377`.
+The GitHub attestation check binds the hosted
+`mbianchidev/sendbox/.github/workflows/release.yaml` workflow, exact tag and
+source commit, rejecting self-hosted runners. The actual packaged Node/service
+discovers bundled 0.2.4 without credentials, keychain use, an administrator
+dialog or model request. Artifact/package verification is not physical 0.2.4
+guest/network qualification or Linux release readiness; those gates remain
+explicit. The app is ad-hoc signed, not notarized. Previously documented
+non-blocking chunk/icon and external-host npm override notices remain unchanged.
 
 The primary Settings flow shows these actual defaults and requires review and
 approval, not JSON authoring, a developer build or a SHA command. A matching
@@ -124,8 +198,10 @@ with its original execution and recheck the provider before handing over any cre
 endpoint/alias during a turn cannot launch another guest, replay a paid role or
 silently broaden its already installed policy.
 
-Default tool egress includes `github.com` and `api.github.com`; unrelated
-`google.com` stays denied. Provider aliases are not a general wildcard or approval
+Default tool grants include `github.com` and `api.github.com`. The earlier
+0.2.3 qualification rejected unrelated `google.com`; 0.2.4's disclosed GitHub
+Meta delegation is broader and those old exact-host guarantees are not carried
+forward. Provider aliases are not a general wildcard or approval
 for web/MCP/browser features without a qualified native transport. Show effective
 provider hosts separately from manually configured tool destinations.
 
@@ -196,8 +272,9 @@ Node/service/resource discovery in **4,673.06 ms**. The updated
 **744,768,834-byte** ZIP passes the bounded production updater in
 **102,215.62 ms**, and its read-only DMG passes the real Applications layout
 check. These are focused follow-up measurements, not a claim that the earlier
-complete suites below were rerun. GitHub Meta delegation still requires its own
-new signed upstream release and reviewed qualification; it is not enabled here.
+complete suites below were rerun. Those 0.2.3 measurements did not enable or
+qualify GitHub Meta. The later 0.2.4 default and explicit review disclosure are
+documented separately above.
 
 ## Earlier managed-setup qualification
 

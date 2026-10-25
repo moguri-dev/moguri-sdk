@@ -65,6 +65,12 @@ Global control preferences are shared intentionally, with explicit provenance.
 Profile/project/session overrides stay scoped and never widen hard policy.
 Changing a preference does not rewrite saved session controls. A default model
 unavailable in a disconnected/new profile is not silently substituted.
+Protocol 55's remembered model/effort selection is separate profile-owned
+metadata, never a shared global selection history. It survives its source
+session/project deletion without retaining conversation or granting root access.
+Only explicit selectors update it; inherited controls, model/role calls and
+other profiles do not. A fixed shared global default and scoped overrides win
+over this fallback, and no unavailable model is silently substituted.
 
 Hard profile budgets remain profile-owned; global caps, when configured, must
 check all profile reservations before dispatch without disclosing foreign

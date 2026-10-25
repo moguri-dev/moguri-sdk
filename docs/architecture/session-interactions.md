@@ -18,11 +18,95 @@ owning project or Chats group detaches. Keyboard menu actions provide the same
 operations. Other profiles and projects cannot be adopted by a drag payload.
 
 Session actions open from right-click, a macOS two-finger click, Context Menu or
-Shift+F10. Ordinary click opens the chat. Archive is not a chat-header action.
+Shift+F10. Ordinary click opens the chat; double-click opens the existing Rename
+dialog for project and project-free sessions. The name is focused and selected
+after the modal opens, and Escape or Cancel leaves it unchanged. Rename uses the
+same SDK command and service-owned metadata event as the context menu, without
+changing drafts, workspaces, controls or permissions. No schema or migration is
+added. Archive is not a chat-header action.
 Routine archive/delete confirmation preferences are profile-owned settings, not
 permissions, automatic deletion grants or a way around project/artifact review.
 Failure to save a requested preference prevents the action; failed resource
 cleanup still blocks deletion. Independent artifacts and repository files survive.
+
+## Reliable session reordering
+
+This desktop repair reuses React/Electron (MIT), the existing typed SDK,
+`compareSessions`/`sessionOrderScope`, native drag events and owned SVG glyphs.
+No dependency, API, event, setting, schema or migration is added.
+
+The existing session-action control is also a visible grip, making reorder-only
+dragging explicit without taking more title space or adding a duplicate button.
+Its top/bottom target halves insert before/after a sibling, never nest the source.
+Alt+Up/Down on the focused grip/link and existing context-menu actions share the
+same order path. Whole-row edge reorder and middle-to-attach remain;
+project/Chats headers still explicitly detach within the original project.
+Pin priority, archive, parent/group and profile boundaries are preserved.
+Leaving a target removes its insertion cue; invalid targets show no accepted
+move cue. Unpin uses a crossed-out pin; Pin and pinned-state markers stay pins.
+
+Dragging binds the original complete sibling set, order and structural scope,
+not every unrelated session revision. Live unread, draft, title or turn changes
+cannot invalidate an otherwise unchanged arrangement. Drop checks the actual
+fixed-profile SDK view and sends fresh complete revisions through the same
+atomic service CAS; concurrent membership/order/pin/hierarchy changes refuse
+the move rather than overwrite another arrangement. Background UI work does
+not disable dragging; the actual pending order/action gate remains effective.
+
+One definitive `revision_conflict` can refresh and retry once only while the
+complete original structural intent still matches. The service checks every
+revision before appending any order event. Unknown/network/non-revision errors
+never retry, and a second failure remains explicit. Attachment/detachment does
+not inherit this metadata-only retry or change its existing authority checks.
+
+Fresh prerequisites pass all six available generated groups: cancellation
+31.94 ms; SQLite append p95 0.048 ms/rebuild 0.501 ms; owned PTY cancellation
+152.72 ms with zero survivors; TUI updates 17.69 ms; hidden Electron cold start
+242.80 ms / 443.06 MiB / 8.19 ms per frame; 2,000-file search/Git
+0.917/5.957 ms. Separate live/native/notarized/Linux/quality gates remain
+FAIL/unqualified, not enabled by this navigation repair.
+
+### Session ordering qualification
+
+Source `287f887` fixes a reproduced native failure: an ordinary unread update
+during a real mouse drag changed the full session revision and cancelled the
+move. Exact structural intent now survives that unrelated activity, while a
+concurrent pin change still refuses the captured move without an order-event
+prefix. Unknown/non-revision failures do not retry. Grip drags use insertion
+halves rather than the whole row's attachment center, and old hover cues clear.
+The existing action control supplies the grip without reducing title space;
+the 6-pixel point, 15-pixel status glyph and narrow captions remain unchanged.
+
+The first full run also exposed an old keyboard-readiness race: `connect()`
+can seed a snapshot before its event channel authenticates. `39e02cd` waits for
+the mode switch to be enabled and verifies Attach focus before testing Tab.
+It neither bypasses the actual connected gate nor weakens the focus assertion.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/fresh audit | PASS; zero vulnerabilities |
+| Native ordering, hierarchy, keyboard and narrow-row checks | 21 passed / 20.8 seconds |
+| Nine new ordering/icon cases repeated twice | 18 passed / 13.8 seconds |
+| Atomic sibling CAS/restart/shared-session service checks | 7 passed / 2,708.10 ms |
+| Authenticated mode/keyboard case repeated ten times | 10 passed / 19.1 seconds |
+| Complete final hidden Electron suite | 153 passed, 2 physical-native skips, zero failures; 155 total / 4.7 minutes |
+| Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
+| Actual newly packaged hidden app | All ordering/icon/hierarchy/keyboard/narrow-row cases: 21 passed / 21.0 seconds |
+| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned worker image unchanged |
+| Production ZIP/manifest consumer | PASS; 740,546,225-byte archive / 100,592.68 ms |
+| Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
+
+The rebuilt DMG is 754,157,653 bytes, SHA-256
+`b3c9b3081f04121b2251d0bfc966d460eb0300d59923dc7fca3d1eea7c27eb4d`.
+Earlier installer identities remain historical. The complete 1,294-pass/
+14-skip Node baseline is retained, not relabeled: no service/SDK/CLI/TUI/protocol
+source changed, and only the focused service checks were freshly rerun.
+All ordering fixtures are generated and make no model request. Hidden UI and
+owned resources were used, never personal app/browser/account/microphone,
+paid inference or administrator installation. An earlier user-opened image
+was not closed. Ad-hoc signing, FFI/chunk/optional-icon notices, downstream
+SDK-host compatibility overrides and physical-native/notarization/Linux limits
+remain unchanged.
 
 ## Explicit plans and questions
 
@@ -59,6 +143,77 @@ Releasing the modifier while that request is pending keeps the disabled clock
 visible until acknowledgement or failure. Compact control rows wrap without
 overlap; popovers stay above the complete toolbar, not a newly wrapped row.
 
+### Composer recovery action
+
+Desktop recovery reuses React/Electron (MIT), the existing Play glyph and typed
+`session.resume` command. No dependency, capability, event, schema or migration
+is added; CLI/TUI/SDK resume operations and service policy stay unchanged.
+
+An inactive session with an authoritative blocked-session, exact managed-root,
+or applicable base-project marker exposes **Resume** in the composer's primary
+button, not a separate **Resume after inspection** header action. Failure text
+or a partial status alone cannot invent a recovery boundary. The compact icon,
+accessible name, inspection warning and form guidance distinguish Resume from
+sending a prompt; resuming never claims cleanup succeeded or grants permission.
+An active turn retains Stop and the existing explicit Hold override.
+
+Pointer, plain Enter and native form submission call the same existing Resume
+operation for the actual selected session, without sending, clearing or replacing
+its draft/attachments. No model or nonempty draft is needed merely to acknowledge
+an inspected boundary; actual queued execution still passes service admission.
+Shift+Enter stays newline, Cmd/Ctrl+Enter stays Hold, and slash commands retain
+their explicit action. Existing queued-message controls remain separate.
+
+Resume is single-flight through acknowledgement. Pending work is disabled/
+announced; a refusal remains visible with the boundary and draft intact, and
+only a new explicit action retries. Disconnect/archive/configuration gates
+remain effective. Rendering, reload, typing and changing modifiers cannot
+automatically resume, answer a question, approve an action or replay work.
+
+Fresh prerequisites pass all six available generated groups: cancellation
+32.58 ms; SQLite append p95 0.049 ms/rebuild 0.567 ms; owned PTY cancellation
+152.64 ms with zero survivors; TUI updates 18.05 ms; hidden Electron cold start
+251.34 ms / 439.20 MiB / 8.30 ms per frame; 2,000-file search/Git
+1.235/6.299 ms. Separate live/native/notarized/Linux/quality gates remain
+FAIL/unqualified, not enabled by this desktop presentation change.
+
+#### Composer recovery qualification
+
+Source `b9ee41c` removes the separate header action and reuses the compact
+primary slot, without adding a new service operation. The before-fix native
+case has no Resume control in that slot. Generated unconfirmed worker startup
+creates real service quarantine, rather than fabricating a failed-status badge.
+Tests cover project, project-free, shared-base and managed-root recovery,
+including a fresh same-root session without a selected model.
+
+Pointer, Enter and native form submission preserve the exact draft/context.
+A held/refused request admits only once, shows its original error, retains the
+blocked boundary and retries only after a new explicit action. Hold,
+Shift+Enter, slash commands, Stop and existing queue/menu behavior remain.
+These six recovery cases make no model request and touch no personal data.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/fresh audit | PASS; zero vulnerabilities |
+| Six recovery cases repeated twice | 12 passed / 10.8 seconds |
+| Final recovery and existing composer cases | 9 passed / 8.6 seconds |
+| Complete hidden Electron suite | 144 passed, 2 physical-native skips, zero failures; 146 total / 4.8 minutes |
+| Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
+| Actual newly packaged hidden app | All recovery, composer and Start/Stop cases: 14 passed / 18.4 seconds |
+| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned worker image unchanged |
+| Production ZIP/manifest consumer | PASS; 740,545,367-byte archive / 108,514.36 ms |
+| Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
+
+The rebuilt DMG is 754,160,386 bytes, SHA-256
+`93c95c1b5533656da69ac86455b8b73134233d7a85405a3b38ef6e3e773b2261`.
+Previous installer identities remain historical. The complete 1,294-pass/
+14-skip Node baseline is retained, not relabeled as another run: no service,
+SDK, CLI, TUI or protocol source changed. Hidden/generated UI and owned fixtures
+were used; no personal app/browser/account/microphone, paid inference or
+administrator installation was used. An earlier user-opened image was not
+closed. Ad-hoc signing, FFI/chunk/optional-icon notices, downstream SDK-host
+compatibility overrides and physical-native/notarization/Linux limits remain.
+
 Closed terminals disappear from the visible selector, not from retained ownership
 or cleanup evidence. The embedded renderer remains Ghostty. Default shells resolve
 on the actual execution host, including its account login shell when a desktop
@@ -79,6 +234,161 @@ native context-menu, drag, confirmation, panel geometry and modifier interaction
 Qualify the packed external SDK, actual development bundle, build and audit before
 publication. Record measured prerequisite and qualification results here.
 
+## Session status and linked PR indicators
+
+This protocol-54 addition reuses React, Electron and TypeBox (MIT), the existing
+GitHub API/explicit `gh` reader, SDK event stream and encrypted store. No library,
+executor, model call or client-owned status store is added.
+
+Required user input takes precedence over active work, which takes precedence
+over a verified attached-PR merge. Completion is the actual completed session
+state, not a held queue, failed/partial/stopped outcome, notification read
+acknowledgement or attached URL. Structured questions and permissions retain
+their yellow question/pause even when in-app notifications are disabled or
+acknowledged. Optional heuristic questions remain labelled possible questions;
+they cannot answer a question or approve work.
+
+Active work has a blue pulsing point and rotating loading glyph. Completion has
+a green point/check plus a green open-PR or gray draft-PR glyph when applicable.
+A verified merge has a purple point/merged-PR glyph. Unknown draft/PR access is
+neutral and labelled unverified, never guessed ready or merged. Labels and
+distinct glyphs supplement color; selected, hover and normal colors meet 3:1
+non-text contrast in light/dark/custom palettes. Reduced-motion preference
+disables both new animations without hiding the work indicator.
+
+Row-state styling uses scoped data attributes, never bare `approval` or other
+component-state classes. Otherwise the approval card's padding/background can
+inflate the point and pause glyph and squeeze out the title. The point remains
+6-by-6 pixels and the trailing glyph 15-by-15. The secondary attention caption
+stays one line with ellipsis at narrow widths, while the full session title and
+actual input/approval descriptions remain accessible. The main approval card
+keeps its own layout and permission controls.
+
+Actual native regression coverage measures rendered bounds, not only nominal
+CSS width: the prior approval point is 34 pixels wide, and the narrow question
+caption wraps to 23 pixels high. Fixed rows retain the 6-pixel point, 15-pixel
+glyph, one-line caption and visible title at 232/180-pixel sidebar widths in
+selected and unselected states, without changing required input or card padding.
+Both states also pass in the actual newly packaged hidden app.
+
+Unread session names use modest 550-weight emphasis instead of an extra dot;
+read names retain weight 400 and the same typeface/size. The existing manual
+unread flag and enabled unacknowledged attention state drive that presentation,
+with an accessible unread description. Choosing a session or explicitly
+marking it read clears the corresponding flag/attention acknowledgement through
+existing SDK actions. Mark read captures its exact attention IDs before yielding;
+a later question cannot be acknowledged by an older held action. Read acknowledgement never answers a question, approves
+a tool, completes work or removes an actual yellow question/approval marker.
+The separate top-bar notification indicator is unchanged. Manual unread remains
+visible when in-app notifications are disabled. No event/schema/settings change
+or client-owned durable read state is introduced.
+
+Before this typography follow-up, all six available generated prerequisites
+passed: provider cancellation 31.47 ms; SQLite append p95 0.175 ms/rebuild
+2.173 ms; owned PTY cancellation 151.96 ms with zero survivors; TUI updates
+17.19 ms; hidden Electron cold start 426.72 ms / 439.88 MiB / 8.07 ms per frame;
+2,000-file search/Git 2.658/25.924 ms. The baseline's separate live/native/
+notarized/Linux/quality gates remain FAIL/unqualified.
+
+### Unread typography qualification
+
+Source `0591c38` adds no dependency, durable schema, setting or API. Before the
+fix both actual manual/background unread cases fail at unchanged 400-weight
+text. Fixed titles use weight 550 without extra unread-only row dots, retain the
+same family/size, and return to 400 on an actual read acknowledgement.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/fresh audit | PASS; zero vulnerabilities |
+| Focused unread, exact-read-race, attention, lifecycle and native interaction cases | 17 passed / 28.8 seconds |
+| Final direct unread cases | 3 passed / 6.7 seconds |
+| Complete hidden Electron suite | 129 passed, 2 physical-native skips, zero failures; 131 total / 5.1 minutes |
+| Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
+| Actual newly packaged hidden app | Unread/read/race, compact attention and navigation: 7 passed / 9.3 seconds |
+| Actual bundle/native distribution/production update/DMG | PASS; protocol 54 / SendBox 0.2.4; 740,545,039-byte ZIP/manifest / 100,762.14 ms; exact native layout and unchanged signed app verified |
+
+The newest DMG is 754,147,235 bytes, SHA-256
+`7433b9681143a274186cc35d532f37fdb5d4ce3b3352c41abcdcfbaa564019bf`.
+Previous installer identities remain historical measurements. The held read
+test admits a later real question before releasing the earlier action and
+verifies that the newer attention stays unread/pending. Read state never
+answers it or removes its actual yellow status. No service/SDK/CLI/TUI/protocol
+source changed from the preserved complete 1,294-pass Node baseline; that
+earlier full run is not relabeled. All fixtures/windows are generated/hidden;
+no personal UI, account, microphone or paid inference was used.
+
+`session.pr_observed` retains version-1 metadata in the owning session, bound to
+the actual profile, session, canonical PR URL, project, managed workspace/root/revision,
+configured access mode and configuration revision. Its projection does not
+change session revisions, updated time, unread state, draft, queue, order or
+lifecycle. Protocol/schema 54 adds `session_indicators_schema` transactionally;
+legacy PR links may lack draft information and remain unknown. Upgrade/reopen
+preserves event ciphertext, keys, blobs, receipts and grants; missing/corrupt
+markers fail explicitly, not through state deletion or a guessed downgrade.
+
+Linking authorizes only bounded metadata reads. The service observes direct or
+exact managed-change links, reuses the work-item board's current observation,
+and respects its auto-refresh opt-out. Direct PR verification seeds its actual
+result in the session-create transaction, avoiding a second request.
+At most four requests remain admitted until settlement, including aborts whose
+transport has not settled. Fresh results and failed attempts are held for at
+least two minutes; verified merged metadata is stable. Unexpected parse or
+commit failure cannot trigger immediate retries.
+
+Automatic observation rechecks source/root/access and auto-refresh before
+retaining a result. URL/root/configuration changes, archival/deletion, revoked refresh and
+shutdown discard late results without resurrection. Missing access retains an
+unknown result with a diagnostic, not a success-shaped fallback. Private reads
+assert the exact Local root before and after the selected control-plane `gh`
+read; a missing managed root never adopts the base checkout. Project-free
+reads are public/root-null and cannot inherit a previous account. This remains
+the disclosed control-plane linked-PR boundary, not a captured SSH account or
+permission to refresh Remote repository metadata. Explicit from-work verification
+remains a single user-requested read. No PR write, merge, CI,
+checkout change or model execution is authorized by an observation.
+
+All clients receive the same typed optional observation and browser-safe
+selectors. Desktop PR panels and shared `/pr` commands resolve the same source.
+Rendering, clicking or reloading a client does not initiate metadata reads.
+
+The fresh pre-change generated baseline passed all six available groups:
+provider cancellation 31.78 ms; SQLite append p95 0.143 ms/rebuild 0.609 ms;
+owned PTY cancellation 151.82 ms with zero survivors; TUI updates 17.09 ms;
+hidden Electron cold start 255.71 ms / 442.23 MiB / 8.14 ms per frame;
+2,000-file search/Git 1.016/6.139 ms. The baseline's separate live provider,
+Rust/Linux, signed/notarized, physical SendBox, model-routing, live decision and
+personal SSH gates remain FAIL/unqualified, not enabled by these indicators.
+No personal login, repository content, microphone or paid inference was used.
+
+### Protocol-54 qualification
+
+Source `234ed00` passed the following generated gates with the same frozen
+production build; no source or distribution was rebuilt during a suite.
+
+| Exact check | Observed result |
+| --- | --- |
+| Type checks and production build | PASS |
+| Focused indicators, PR reads, lifecycle races and both retained lineages | 45 passed, zero failures / 2,487.23 ms |
+| Existing native-management retention and archive gates | 4 passed, zero failures / 299.44 ms |
+| Complete serialized unit/integration/worker/CLI/native-TUI suite | 1,289 passed, 14 physical-native skips, zero failures; 1,303 total / 1,170,944.47 ms |
+| Complete hidden Electron suite | 123 passed, 2 physical-native skips, zero failures; 125 total / 4.3 minutes |
+| Actual packed external SDK | Root/React/Node/MCP imports, declarations, approved install, exact profile/root-null PR metadata and shared TUI PR commands pass; all 12 installed-worker probes pass |
+| Actual new packaged app | Both indicator scenarios and double-click rename pass hidden: 3 cases / 6.6 seconds |
+| Fresh root, external-consumer and no-cache image dependency audits | Zero vulnerabilities |
+| Actual protocol-54 native distribution | Bundled SendBox 0.2.4 and exact no-script side-by-side installer/image bytes verified without installation or administrator UI |
+| Production update consumer and read-only DMG layout | PASS; 740,542,481-byte ZIP/manifest / 101,567.60 ms; app never executed by the update verifier |
+
+The rebuilt no-cache Linux arm64 worker image is
+`docker.io/library/moguri-worker@sha256:2b9a68d46acb5696d3762123a0be292f903619fa96e7a2c27a521a21eb25553d`.
+That proves the compiled artifact/protocol and locked dependencies, not physical
+SendBox guest/effective-network containment or Linux release readiness.
+The development app is ad-hoc signed, not notarized. Existing OpenTUI FFI,
+large-chunk and optional `.icon` notices remain non-blocking; minimal external
+SDK hosts still need their own documented compatibility overrides for the
+upstream deprecation notices. Root and image installs emit neither requested
+deprecated-package notice. No personal account, microphone, real speech weights
+or paid inference was used.
+
 ## Fresh prerequisites
 
 The generated baseline commands completed before implementation. Passed probes:
@@ -95,6 +405,23 @@ matrix FAIL/unqualified. These are the baseline's separate gates, not capabiliti
 silently enabled by this UI slice. Later qualified contracts are not replaced by
 those initial-checkpoint labels. No personal login, shell, clipboard, microphone
 or paid inference was a prerequisite fixture.
+
+## Double-click rename prerequisites and qualification
+
+The 2026-10-24 prerequisite rerun passed all six available generated baseline
+groups before implementation: cancellation 31.77 ms, SQLite append p95 0.053 ms
+and rebuild 0.90 ms, owned PTY cancellation 151.85 ms with zero survivors, TUI
+updates 16.98 ms, hidden Electron cold start 179.87 ms / 443.98 MiB /
+11.43 ms per scroll frame, and 2,000-file search/Git 1.01/8.40 ms.
+The baseline's separate unavailable live/native/release groups remain
+FAIL/unqualified, not newly enabled by a metadata shortcut.
+
+The new generated desktop regression fails before the handler exists and
+passes for both project and project-free sessions, actual typed replacement,
+Escape cancellation/focus return, keyboard Rename, shared SDK observation and
+reload persistence without inference. Type checks and production build pass;
+the shared session/interaction gate passes 15 cases, and the hidden navigation,
+drag, profile, terminal and rename gate passes 21 cases in 36.8 seconds.
 
 ## Dependency security follow-up
 

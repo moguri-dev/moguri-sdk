@@ -148,6 +148,12 @@ have a terminal. Browser/diff/plan use the appropriate client surface.
 
 Sessions have durable pin/unread/group/parent metadata. Reparenting is
 project-scoped, acyclic and bounded; it does not rewrite captured context.
+Protocol 44 adds stable sibling order through one complete, revision-checked
+`session.reorder` transaction. Desktop drop indicators do not mutate order on
+hover. Dragging into the composer copies reviewed transcript context instead
+of changing navigation ownership. Both clients sort with the shared comparator;
+keyboard/menu alternatives use the same SDK command. Confirmation preferences
+are independently saved profile settings, defaulting to asking.
 Explicit user subsessions are distinct from off-by-default model subagents.
 Writable siblings serialize through the project lease; read-only questions
 may run in parallel. PR/work-item bindings never implicitly check out a branch.
@@ -183,7 +189,7 @@ keys and never access a personal keychain. This is a retention mechanism, not a
 claim of filesystem protection, SSD secure erasure or deletion of user backups.
 
 Stop owned work before deleting its session; preserve requested, acknowledged,
-partial and failed cleanup. Closing a UI panel does not stop its PTY. Terminal
+partial and failed cleanup. Closing a UI panel does not stop its PTY. User-console
 input/output are ephemeral, never durable conversation/event payloads or model
 context. Restart does not relaunch a shell or replay terminal input.
 Protocol 23's [user-console ownership](terminal-reattachment.md) preserves an
@@ -191,6 +197,12 @@ authenticated per-profile broker across explicit service restart or controller
 loss. Ordinary service stop still closes known groups. Exact root/policy,
 private cleanup and input-generation guards apply to every client; legacy
 ownerless metadata is unconfirmed, never adopted from a saved PID.
+
+Protocol 46 adds a separate [Agent command view](agent-terminal.md), backed by
+approved `run_command` PTYs and ordinary scoped tool results, not these private
+user-console buffers. Its read-only model inspection preserves exact approval,
+source identity and current policy. Per-command output does not create
+persistent interactive shell state or a user-input route.
 
 Archived-session cleanup is off by default and requires an explicit user
 retention policy. It preserves independently retained artifacts and never
