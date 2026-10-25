@@ -1,5 +1,6 @@
 import { MoguriError, type DashboardQuery, type DashboardResponse, type Snapshot, type StoredEvent, type WorkCounts, type WorkspaceDashboard } from "../../../packages/protocol/src/index.ts";
 import { BudgetRuntime, budgetTotals, budgetWindow } from "./budgets.ts";
+import { externalOperationTurns } from "./operation-telemetry.ts";
 
 const DAY = 86_400_000;
 const date = (time: number) => new Date(time).toISOString().slice(0, 10);
@@ -23,7 +24,10 @@ export function dashboardOverview(snapshot: Snapshot, events: StoredEvent[], bud
   const byDay = new Map(days.map((day) => [day.date, day])), durations: number[] = [], dayDurations = new Map<string, number[]>();
   const inRange = (timestamp: string) => { const time = Date.parse(timestamp); return time >= bounds.from! && time < bounds.to!; };
   const scoped = events.filter((event) => event.profile_id === snapshot.profileId && (query.projectId === undefined || event.project_id === query.projectId));
-  const starts = new Map(scoped.flatMap((event) => event.event_type === "turn.started" && event.turn_id ? [[event.turn_id, event] as const] : []));
+  const external = externalOperationTurns(scoped, snapshot), kinds = new Map(snapshot.sessions.map((session) => [session.id, session.kind]));
+  for (const event of scoped) if (event.event_type === "session.created" && event.session_id) kinds.set(event.session_id, event.payload.kind ?? "agent");
+  const starts = new Map(scoped.flatMap((event) => event.event_type === "turn.started" && event.turn_id && !external.has(event.turn_id) &&
+    kinds.get(event.session_id ?? "") !== "subagent" ? [[event.turn_id, event] as const] : []));
   const velocity: WorkspaceDashboard["velocity"] = {
     completedTurns: 0, failedTurns: 0, interruptedTurns: 0, interventions: 0, medianCompletionMs: null,
     unmeasuredCompletions: 0, previousCompletedTurns: 0, completionChangePercent: null, productivityIncrease: null, coverage: "retained-agent-turns-only",

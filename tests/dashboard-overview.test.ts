@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BudgetRuntime } from "../apps/service/src/budgets.ts";
 import { dashboardOverview } from "../apps/service/src/dashboard.ts";
-import type { BudgetEntry, Snapshot, StoredEvent } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, type BudgetEntry, type Snapshot, type StoredEvent } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 
 test("dashboard projects and models retain all-role known/unknown accounting while velocity excludes control and interrupted turns", async () => {
@@ -22,17 +22,19 @@ test("dashboard projects and models retain all-role known/unknown accounting whi
     ];
     snapshot.budgetEntries = entries;
     snapshot.sessions = [{ ...session, status: "completed", updatedAt: time(9000) },
-      { ...session, id: "generated-active-chat", projectId: null, status: "running", turnId: "generated-active-turn" }];
+      { ...session, id: "generated-active-chat", projectId: null, status: "running", turnId: "generated-active-turn" },
+      { ...session, id: "generated-private-helper", kind: "subagent", status: "completed", updatedAt: time(15000) }];
     const prototype = fixture.service.controller.events(0)[0]!, events: StoredEvent[] = [];
-    const turn = (id: string, offset: number, outcome: "completed" | "failed" | "partial" | "stopped") => {
-      events.push({ ...prototype, event_type: "turn.started", id: `${id}-start`, turn_id: id, session_id: session.id, project_id: session.projectId,
+    const turn = (id: string, offset: number, outcome: "completed" | "failed" | "partial" | "stopped", sessionId = session.id) => {
+      events.push({ ...prototype, event_type: "turn.started", id: `${id}-start`, turn_id: id, session_id: sessionId, project_id: session.projectId,
         timestamp: time(offset), payload: { item: { id: `${id}-prompt`, text: "Generated dashboard fixture.", attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: 0 } });
-      events.push({ ...prototype, event_type: "turn.finished", id: `${id}-finish`, turn_id: id, session_id: session.id, project_id: session.projectId,
+      events.push({ ...prototype, event_type: "turn.finished", id: `${id}-finish`, turn_id: id, session_id: sessionId, project_id: session.projectId,
         timestamp: time(offset + 2000), payload: { outcome, diagnostic: null } });
     };
     turn("generated-previous", -8 * 86_400_000, "completed");
     turn("generated-complete", 1000, "completed"); turn("generated-failed", 4000, "failed");
     turn("generated-partial", 7000, "partial"); turn("generated-stopped", 10000, "stopped");
+    turn("generated-private", 13000, "completed", "generated-private-helper");
     events.push({ ...prototype, event_type: "tool.decided", turn_id: "generated-complete", project_id: session.projectId, timestamp: time(2500), payload: { approvalId: "generated-approval", allow: true, actor: "user" } });
     events.push({ ...prototype, event_type: "tool.decided", turn_id: "generated-complete", project_id: session.projectId, timestamp: time(2500), payload: { approvalId: "generated-policy-approval", allow: true, actor: "policy" } });
     events.push({ ...prototype, event_type: "turn.control_started", turn_id: "generated-control", project_id: session.projectId, timestamp: time(1000),
@@ -51,6 +53,19 @@ test("dashboard projects and models retain all-role known/unknown accounting whi
     assert.equal(filtered.totals.calls, 1); assert.equal(filtered.work.total, 1);
     assert.equal(filtered.models.length, 1); assert.equal(fixture.requests.length, 0);
   } finally { await fixture.close(); }
+});
+
+test("a completed standalone MCP control job is not a completed agent task or an agent intervention", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools[0]!;
+    const admitted = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "original" }, tool.digest);
+    await fixture.approve();
+    assert.equal((await sdk.jobs.wait(admitted.id!)).status, "completed");
+    const { dashboard } = await sdk.dashboard.overview();
+    assert.equal(dashboard.velocity.completedTurns, 0); assert.equal(dashboard.velocity.interventions, 0);
+    assert.equal(dashboard.totals.calls, 0); assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
 });
 
 test("dashboard date windows are exact and reject all-time or reversed ranges rather than silently changing them", async () => {

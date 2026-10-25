@@ -1789,9 +1789,13 @@ node bin/moguri.mjs mcp --session SESSION_ID
 
 Configure that command as a stdio MCP in another client. It exposes only
 `moguri_discover_mcps`, `moguri_find_tools`, `moguri_auth_status`,
-`moguri_call_tool` and `moguri_read_result`. It cannot change settings,
+`moguri_call_tool`, `moguri_read_result`, `moguri_find_skills` and
+`moguri_read_skill`. It cannot change settings,
 credentials, permissions or answer its own approval. Calls wait for the human
 in the bound idle session, then retain a paged result.
+Skill discovery/read instead uses freshly checked configured sources, without
+a model call or new capability installation. Skill text is untrusted guidance,
+not approval for its instructions or bundled scripts.
 
 Protocol-24 development also exposes `mcp.servers(sessionId?)` as authoritative,
 non-connecting metadata for the model gateway, outward MCP, CLI and clients.

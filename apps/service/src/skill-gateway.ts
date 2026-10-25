@@ -16,7 +16,7 @@ export class SkillGateway {
   constructor(private readonly store: EventStore, private readonly host: {
     snapshot(): Snapshot; skill(content: string): { name: string; description: string }; compatible(entry: CapabilityEntry): void;
   }, private readonly options: SkillGatewayOptions = {}) {}
-  close() { this.abort.abort(new Error("Skill gateway is closing. No result was published.")); }
+  close() { this.abort.abort(new MoguriError("skill_gateway_closing", "Skill gateway is closing. No result was published.", 409)); }
   private scope(sessionId?: string): string {
     const snapshot = this.host.snapshot(), session = sessionId === undefined ? undefined : snapshot.sessions.find((value) => value.id === sessionId);
     if (sessionId !== undefined && !session) throw new MoguriError("skill_scope", "The bound skill session is outside this profile.", 404);

@@ -238,3 +238,38 @@ test("saved skill sources survive restart but their bodies are always re-read in
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); peer?.disconnect(); await restarted?.close(); await fixture.close(); }
 });
+
+test("a cancelled query ID prevents late admission before any source bytes are read", async () => {
+  let downloads = 0;
+  const fixture = await setupFixture({ platform: { skillGateway: { fetch: async () => { downloads++; throw new Error("A cancelled read cannot start."); } } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await sources(sdk, [remote]);
+    const requestId = crypto.randomUUID(), headers = { Authorization: `Bearer ${fixture.service.connection.token}`, "Content-Type": "application/json", "X-Moguri-Profile": sdk.profileId };
+    const cancelled = await fetch(`${fixture.service.connection.baseUrl}/v1/query-cancel`, { method: "POST", headers, body: JSON.stringify({ requestId }) });
+    assert.equal(cancelled.status, 200);
+    const late = await fetch(`${fixture.service.connection.baseUrl}/v1/query`, { method: "POST", headers: { ...headers, "X-Moguri-Query-Id": requestId },
+      body: JSON.stringify({ type: "skills.find", query: "", offset: 0, sessionId: fixture.sessionId }) });
+    assert.equal(late.status, 409); assert.equal((await late.json()).error.code, "query_cancelled"); assert.equal(downloads, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("an explicit read cancellation binds its exact profile even when another profile uses the same request ID", async () => {
+  let stopped = false;
+  const started = Promise.withResolvers<void>();
+  const fixture = await setupFixture({ platform: { skillGateway: { fetch: async (_url, options) => new Promise<Response>((_resolve, reject) => {
+    started.resolve(); options!.signal!.addEventListener("abort", () => { stopped = true; reject(options!.signal!.reason); }, { once: true });
+  }) } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const other = await sdk.profiles.create("Generated cancellation isolation"); await sdk.profiles.wait(other.id!);
+    await sources(sdk, [remote]);
+    const requestId = crypto.randomUUID(), headers = { Authorization: `Bearer ${fixture.service.connection.token}`, "Content-Type": "application/json", "X-Moguri-Profile": sdk.profileId };
+    const pending = fetch(`${fixture.service.connection.baseUrl}/v1/query`, { method: "POST", headers: { ...headers, "X-Moguri-Query-Id": requestId },
+      body: JSON.stringify({ type: "skills.find", query: "", offset: 0, sessionId: fixture.sessionId }) });
+    await started.promise;
+    const wrong = await fetch(`${fixture.service.connection.baseUrl}/v1/query-cancel`, { method: "POST", headers: { ...headers, "X-Moguri-Profile": other.id! }, body: JSON.stringify({ requestId }) });
+    assert.equal(wrong.status, 200); assert.equal(stopped, false);
+    const own = await fetch(`${fixture.service.connection.baseUrl}/v1/query-cancel`, { method: "POST", headers, body: JSON.stringify({ requestId }) });
+    assert.equal(own.status, 200); assert.equal(stopped, true);
+    assert.equal((await pending).status, 409); assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});

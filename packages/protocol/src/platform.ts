@@ -102,6 +102,8 @@ const path = Type.String({ minLength: 1, maxLength: 4096 });
 const revision = Type.Integer({ minimum: 0 });
 const decision = Type.Union([Type.Literal("ask"), Type.Literal("allow"), Type.Literal("deny")]);
 const notificationSound = object({ enabled: Type.Boolean(), id: Type.String({ minLength: 1, maxLength: 128 }) });
+export const QUERY_ID_PATTERN = "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$";
+export const QueryCancellationSchema = object({ requestId: Type.String({ pattern: QUERY_ID_PATTERN, maxLength: 36 }) });
 
 export const DEFAULT_SYSTEM_PROMPT = `You are Moguri, a practical software engineering agent.
 

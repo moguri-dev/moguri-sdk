@@ -27,6 +27,15 @@ Archives are bounded and validated without extraction or execution. Loading bind
 the selected source/path and exact SHA-256 body. Sources are control-plane Local
 reads, not an implicit SSH/Sandbox filesystem transport. Revocation, changed
 configuration and cancellation must invalidate pending results.
+Cancellation uses an authenticated, exact-profile query ID and explicit
+`/v1/query-cancel` message as well as transport abort. Electron's custom-protocol
+Request signal alone does not propagate renderer cancellation reliably. The
+native proxy forwards the query ID and cancel route; the service aborts that
+original source read, rather than only hiding its reply. A cancelled lookup
+releases the settings navigation guard. A 30-second, bounded ephemeral marker
+also rejects cancellation-before-admission races. IDs never identify commands,
+model calls, permission grants or durable work; cancellation cannot replay or
+refund any of those. Missing acknowledgement is an explicit client error.
 
 Global suggestions preview profile-wide usage gaps and bounded prior prompts
 without creating a hidden chat or calling a model. Selecting a chat narrows the
@@ -38,7 +47,10 @@ initial range; 30/60/90-day presets and a custom range are available. Custom sta
 at the trailing year. All-role model accounting keeps estimates, missing usage,
 held capacity and invoices distinct. Velocity shows observed completions,
 completion time and user interventions; these are not a causal productivity or
-time-saved claim. Date filtering never changes cumulative budget admission.
+time-saved claim. External MCP/tool-control turns and private subagent turns
+are excluded from completion/intervention velocity, not relabeled as user
+tasks. Their operations and all-role costs remain in their own accounting.
+Date filtering never changes cumulative budget admission.
 
 New Local user consoles default to configured HOME, never the state directory.
 Project consoles still bind the actual Moguri worktree. Existing owners retain
