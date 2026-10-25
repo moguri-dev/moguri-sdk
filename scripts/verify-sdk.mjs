@@ -24,6 +24,7 @@ try {
   const installedSdk = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   const { PROTOCOL_VERSION: installedProtocol } = installedSdk;
   const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
+  const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
@@ -549,7 +550,7 @@ try {
       const scopedCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"status","--profile",profile.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
       assert.equal(JSON.parse(scopedCli.stdout).profileId,profile.id);
       assert.equal((await beta.voice.status()).voice.runtimeReady,true);
-      assert.deepEqual((await beta.mcp.tools("builtin","",0,betaSession.id)).tools.map(tool=>tool.name),["fetch_page"]);
+      assert.deepEqual((await beta.mcp.tools("builtin","",0,betaSession.id)).tools.map(tool=>tool.name),${JSON.stringify(rootlessTools)});
       for(const client of [sdk,beta]){const settings=structuredClone(client.settings.get().values);settings.mcpServers=[{id:"generated-installed-mcp",name:"Generated scoped MCP",enabled:true,transport:{type:"http",url:"https://generated-sdk.invalid/mcp",auth:"bearer"}}];await client.settings.update(settings,client.settings.get().revision);}
       await sdk.mcp.setToken("generated-installed-mcp","generated-installed-default-only");
       assert.equal((await sdk.mcp.auth("generated-installed-mcp")).state,"configured");
@@ -727,7 +728,7 @@ try {
       ` : ""}
       const folder=(await sdk.attachments.folderPreview(general.id,project)).preview;
       await sdk.attachments.folder(general.id,project,folder.digest,true);
-      assert.deepEqual((await sdk.mcp.tools("builtin","",0,general.id)).tools.map(t=>t.name),["fetch_page"]);
+      assert.deepEqual((await sdk.mcp.tools("builtin","",0,general.id)).tools.map(t=>t.name),${JSON.stringify(rootlessTools)});
       await assert.rejects(()=>sdk.plans.read(general.id),/Select a project/);
       const meta=await sdk.metachat.create(null,general.id,"Generated external settings request.");
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===meta.id).kind,"metachat");
