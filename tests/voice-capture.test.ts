@@ -8,16 +8,21 @@ import { encodeSpeechWav } from "../packages/protocol/src/audio.ts";
 import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 
-test("an exact original client capture accepts bounded PCM once, uses file ASR and retains no audio or upload credential", async () => {
+async function captureFixture(args: string[] = []) {
   const weights = Buffer.from("generated client-capture recognizer weights");
   const fixture = await setupFixture({ platform: { speech: {
-    executable: process.execPath, prefixArgs: [resolve("tests/fixtures/fake-speech.mjs")],
+    executable: process.execPath, prefixArgs: [resolve("tests/fixtures/fake-speech.mjs"), ...args],
     model: { ...NEMOTRON_MODEL, filename: "generated-client-capture.gguf", bytes: weights.length, sha256: createHash("sha256").update(weights).digest("hex") },
     fetch: async () => new Response(weights),
   } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  await sdk.jobs.wait((await sdk.voice.download(true)).id!);
+  return { fixture, sdk };
+}
+
+test("an exact original client capture accepts bounded PCM once, uses file ASR and retains no audio or upload credential", async () => {
+  const { fixture, sdk } = await captureFixture();
   try {
-    await sdk.jobs.wait((await sdk.voice.download(true)).id!);
     const settings = sdk.settings.get()!;
     await sdk.settings.update({ ...settings.values, voice: { ...settings.values.voice, inputDeviceId: "generated-exact-client-device" } }, settings.revision);
     const capture = await sdk.voice.startCapture(fixture.sessionId);
@@ -28,6 +33,9 @@ test("an exact original client capture accepts bounded PCM once, uses file ASR a
     const result = await sdk.jobs.wait(capture.id);
     assert.equal(result.kind, "voice.capture"); assert.equal(result.status, "completed");
     assert.equal(JSON.parse((await sdk.mcp.readResult(result.id)).text).text, "Generated local dictation.");
+    assert.equal(await sdk.voice.transcript(fixture.sessionId, result.id), "Generated local dictation.");
+    const other = await sdk.sessions.create(null);
+    await assert.rejects(() => sdk.voice.transcript(other.id!, result.id), /this session/i);
     await assert.rejects(() => sdk.voice.uploadCapture(fixture.sessionId, capture.id, capture.token, audio), /original|consumed|running/i);
     const retained = JSON.stringify(fixture.service.controller.events(0));
     assert.equal(retained.includes(capture.token), false);
@@ -39,15 +47,8 @@ test("an exact original client capture accepts bounded PCM once, uses file ASR a
 });
 
 test("the original capture can be cancelled after its client disconnects without reopening audio or reconnecting a profile", async () => {
-  const weights = Buffer.from("generated cancelled-capture weights");
-  const fixture = await setupFixture({ platform: { speech: {
-    executable: process.execPath, prefixArgs: [resolve("tests/fixtures/fake-speech.mjs")],
-    model: { ...NEMOTRON_MODEL, filename: "generated-cancel-capture.gguf", bytes: weights.length, sha256: createHash("sha256").update(weights).digest("hex") },
-    fetch: async () => new Response(weights),
-  } } });
-  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const { fixture, sdk } = await captureFixture();
   try {
-    await sdk.jobs.wait((await sdk.voice.download(true)).id!);
     const capture = await sdk.voice.startCapture(fixture.sessionId);
     sdk.disconnect();
     await sdk.voice.cancelCapture(fixture.sessionId, capture.id, capture.token);
@@ -57,4 +58,23 @@ test("the original capture can be cancelled after its client disconnects without
     assert.equal(original.resultDigest, null);
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("paged and JSON-escaped transcripts are reviewed and inserted completely, without submitting a model request", async () => {
+  for (const [flag, text] of [
+    ["--long-transcript", "Generated paged local dictation. ".repeat(2000).trim()],
+    ["--escaped-transcript", '"'.repeat(80_000)],
+  ] as const) {
+    const { fixture, sdk } = await captureFixture([flag]);
+    try {
+      const capture = await sdk.voice.startCapture(fixture.sessionId);
+      await assert.rejects(() => sdk.voice.transcript(fixture.sessionId, capture.id), /completed/i);
+      await sdk.voice.uploadCapture(fixture.sessionId, capture.id, capture.token, encodeSpeechWav(new Float32Array(160).fill(0.1)));
+      assert.equal((await sdk.jobs.wait(capture.id)).status, "completed");
+      assert.equal(await sdk.voice.transcript(fixture.sessionId, capture.id), text);
+      await sdk.voice.insert(fixture.sessionId, capture.id, fixture.session().draft.revision);
+      assert.equal(fixture.session().draft.text, text);
+      assert.equal(fixture.requests.length, 0);
+    } finally { sdk.disconnect(); await fixture.close(); }
+  }
 });

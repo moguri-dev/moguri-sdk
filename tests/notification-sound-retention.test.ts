@@ -15,13 +15,14 @@ test("an explicitly imported sound has its own encrypted grant across session de
     const result = await sdk.notifications.importSound("Generated explicit earcon", audio, "generated-sound-original-import");
     const sound = (await sdk.notifications.sound(result.id!)).sound;
     const settings = sdk.settings.get()!;
-    await sdk.settings.update({ ...settings.values, notifications: { ...settings.values.notifications, needsInputSound: { enabled: true, id: sound.id } } }, settings.revision);
+    await sdk.settings.update({ ...settings.values, notifications: { ...settings.values.notifications, needsInputSound: { enabled: true, id: sound.id }, soundWhileFocused: false } }, settings.revision);
     await sdk.sessions.delete(fixture.sessionId, true);
     assert.equal((await sdk.notifications.sound(sound.id)).audio, Buffer.from(audio).toString("base64"));
     assert.ok(String(fixture.service.store.db.prepare("SELECT scope FROM blob_payloads WHERE digest=?").get(sound.contentDigest)?.scope).includes("notification-sound"));
     sdk.disconnect(); await fixture.service.close();
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     sdk = await new MoguriSdk(restarted.connection).ready();
+    assert.equal(sdk.settings.get()!.values.notifications.soundWhileFocused, false);
     assert.equal((await sdk.notifications.sound(sound.id)).audio, Buffer.from(audio).toString("base64"));
     await assert.rejects(() => sdk.notifications.removeSound(sound.id, sound.contentDigest, true), /in use/i);
     const current = sdk.settings.get()!;
@@ -71,7 +72,7 @@ test("schema-46 notification defaults migrate additively without rewriting exist
       assert.deepEqual(table === "events" ? actual[1].slice(0, rows.length) : actual[1], rows);
     }
     assert.deepEqual(restarted.controller.snapshot().settings.values.notifications, { inApp: false, os: true, previewContent: true,
-      needsInputSound: { enabled: true, id: "default" }, completedSound: { enabled: true, id: "default" }, soundWhileFocused: false });
+      needsInputSound: { enabled: true, id: "default" }, completedSound: { enabled: true, id: "default" }, soundWhileFocused: true });
     assert.equal(restarted.controller.snapshot().settings.values.voice.inputDeviceId, "generated-explicit-device");
     assert.equal(restarted.controller.snapshot().settings.values.voice.pushToTalk, true);
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }
