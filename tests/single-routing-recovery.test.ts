@@ -19,6 +19,7 @@ test("schema 15 preserves both profiles' ciphertexts, receipts and retained gran
     const artifact = await beta.artifacts.create(second.id!, { kind: "decision", name: "Generated old routing note", text: "Generated unchanged retained routing bytes." });
     for (const id of ["default", profile.id]) {
       const control = await fixture.service.profiles.control(id), settings = structuredClone(control.snapshot().settings);
+      settings.values.notifications = { inApp: true, os: false, previewContent: false };
       Reflect.deleteProperty(settings.values, "kupo");
       control.store.commit([{ event_type: "settings.updated", profile_id: id, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision } }]);
     }
