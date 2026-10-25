@@ -6,6 +6,7 @@ const ready = () => {
 };
 const live = process.argv.includes("--live");
 const argument = (name) => process.argv[process.argv.indexOf(name) + 1];
+const transcript = process.argv.includes("--empty-transcript") ? "" : process.argv.includes("--long-transcript") ? "Generated paged local dictation. ".repeat(2000).trim() : process.argv.includes("--escaped-transcript") ? '"'.repeat(80_000) : "Generated local dictation.";
 if (process.argv.includes("--stderr-bytes")) process.stderr.write(Buffer.alloc(Number(argument("--stderr-bytes")), "x"));
 if (process.argv.includes("--unconfirmed-output")) {
   console.log("Generated unconfirmed output.");
@@ -31,12 +32,12 @@ if (process.argv.includes("--unconfirmed-output")) {
     if (process.argv.includes("--ignore-stop")) return;
     if (finishing) { console.error("Generated duplicate stop interrupted finalization."); process.exit(9); }
     finishing = true;
-    setTimeout(() => { clearInterval(hold); console.log("Generated local dictation."); },
+    setTimeout(() => { clearInterval(hold); console.log(transcript); },
       process.argv.includes("--finalize-delay") ? Number(argument("--finalize-delay")) : 0);
   });
   ready();
 } else {
   ready();
-  if (process.argv.includes("--transcribe-delay")) setTimeout(() => console.log("Generated local dictation."), Number(argument("--transcribe-delay")));
-  else console.log("Generated local dictation.");
+  if (process.argv.includes("--transcribe-delay")) setTimeout(() => console.log(transcript), Number(argument("--transcribe-delay")));
+  else console.log(transcript);
 }

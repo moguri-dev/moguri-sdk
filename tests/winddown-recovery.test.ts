@@ -8,7 +8,7 @@ import { compoundApiFixture } from "./fixtures/compound-api.ts";
 import { waitFor } from "./fixture.ts";
 
 test("schema-39 wind-down migration preserves exact schema-38 compound roles/tests, receipts and independent ciphertext through failure/reopen", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
-  const f = await compoundApiFixture(); let reopened: EventStore | undefined;
+  const f = await compoundApiFixture({ legacyNotifications: true }); let reopened: EventStore | undefined;
   try {
     await f.configure();
     const preview = await f.sdk.compound.preview(f.input), started = await f.sdk.compound.start(f.input, preview.preview.digest, true); assert.ok(started.id);

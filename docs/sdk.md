@@ -697,7 +697,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `capabilities` | Import disabled standard skills/plugins, inspect source, toggle with revision, propose, review and decide against an exact SHA-256. |
 | `mcp` | Paged tool discovery, non-secret auth status, explicit OAuth begin/status/cancel/clear/registered-client setup, user-only keychain credentials, exact approval-bound call and retained result pages. |
 | `subagents` | Explicit opt-in, depth-one tool-less child using the inherited selected model policy and approved parent context. Every role charges its real owner. |
-| `voice` | Local status, explicit licensed download, record/transcribe, stop/finalize and revision-safe draft insertion. |
+| `voice` | Local status, explicit licensed download, record/transcribe, stop/finalize, bounded session-owned transcript reading and revision-safe draft insertion. |
 | `jobs` | Wait or explicitly cancel. A wait timeout/disconnection does not cancel or retry the service's job. |
 | `sandbox` | Truthful readiness/configuration diagnostics. Configuration is not proof of a qualified SendBox transport. |
 | `issues` | Local feature/bug/misc board, create/update/move/archive, revision-checked phases and read-only linked-PR refresh. |
@@ -1133,8 +1133,10 @@ production derives the packaged installation root from the actual pinned Node
 runtime, never a user-selected arbitrary application path.
 
 `needsInputSound` and `completedSound` each default to
-`{enabled: true, id: "default"}`; `soundWhileFocused` defaults false. Sounds do
-not depend on the banner flag. `notifications.importSound(name, pcmWav,
+`{enabled: true, id: "default"}`; `soundWhileFocused` defaults true. Saved explicit
+mute/focus choices remain unchanged. Attention audio covers actual unanswered
+questions, pending approvals and failed/partial work, never a heuristic badge.
+Sounds do not depend on the banner flag. `notifications.importSound(name, pcmWav,
 optionalCommandId)`, `notifications.list()`, `notifications.sound(id)` and
 `notifications.removeSound(id, observedContentDigest, true)` use immutable,
 profile-owned encrypted snapshots. Imports require canonical mono 16-kHz PCM16
@@ -1156,6 +1158,13 @@ Audio and upload nonces are never retained in events/receipts. Actual ASR jobs
 and explicit transcript insertion still use existing shared APIs. Root exports
 `encodeSpeechWav`, `validateSpeechWav`, shortcut parsing/matching helpers and
 typed preferences without importing native/provider runtime.
+
+`await sdk.voice.transcript(sessionId, jobId)` returns the complete recognized
+text from a completed local speech job owned by that exact session/profile.
+It reads bounded result pages, including JSON escaping, without truncating them
+or opening a microphone. Pending/cancelled/foreign-session results are rejected.
+`voice.insert(sessionId, jobId, expectedDraftRevision)` remains a separate
+explicit write and never submits a prompt.
 
 ### Held prompts, modes and retained plans
 

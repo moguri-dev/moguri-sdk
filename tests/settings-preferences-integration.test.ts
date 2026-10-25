@@ -36,6 +36,7 @@ test("schema-44 upgrade preserves original ciphertext, grants, receipts, prefere
     settings.appearance = { theme: "light" };
     settings.permissions = { tools: [], commands: [] };
     settings.voice = { language: "it-IT", backend: "cpu" };
+    settings.notifications = { inApp: true, os: false, previewContent: false };
     settings.retention = { deleteArchived: false, afterDays: 91 };
     delete settings.guidance; delete settings.shortcuts; delete settings.lifecycle;
     await sdk.settings.update(settings, sdk.settings.get()!.revision);

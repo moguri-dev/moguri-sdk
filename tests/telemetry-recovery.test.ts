@@ -22,6 +22,7 @@ test("schema-17 accounting gains only provable category metadata without rewriti
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const settings = structuredClone(sdk.settings.get()!.values);
+    settings.notifications = { inApp: true, os: false, previewContent: false };
     settings.budgets.rates = [{ modelId: fixture.modelId, inputUsdPerMillion: 1, outputUsdPerMillion: 2, effectiveAt: new Date().toISOString().slice(0, 10), source: "user-estimate" }];
     await sdk.settings.update(settings, sdk.settings.get()!.revision);
     await sdk.budgets.policy({ basis: "estimate", tokens: 100000 }, 0, true);

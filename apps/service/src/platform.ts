@@ -1126,7 +1126,9 @@ ${knowledge ? `\n<approved-project-knowledge>\n${knowledge}\n</approved-project-
       case "voice.insert": {
         const session = this.session(command.sessionId);
         if (session.draft.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "The draft changed during dictation. Review the transcript and insert it against the current draft.", 409);
-        const value: unknown = JSON.parse(this.readResult(command.jobId, 0, 128 * 1024, session.id).text);
+        const result = this.readResult(command.jobId, 0, 1024 * 1024, session.id);
+        if (result.nextOffset !== null) throw new MoguriError("speech_result", "The local transcript exceeded its bounded retained result. No text was truncated or inserted.");
+        const value: unknown = JSON.parse(result.text);
         if (!isRecord(value) || typeof value.text !== "string" || value.source !== "local") throw new MoguriError("speech_result", "This job is not a completed local transcript.");
         const text = `${session.draft.text}${session.draft.text ? "\n" : ""}${value.text}`;
         if (text.length > 128 * 1024) throw new MoguriError("draft_limit", "The transcript does not fit the bounded draft. Copy a smaller selection.");

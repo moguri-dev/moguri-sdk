@@ -170,7 +170,7 @@ export const defaultSettings = (): UserSettings => ({
   winddown: defaultWinddownSettings(),
   decisions: defaultDecisionSettings(),
   notifications: { inApp: true, os: false, previewContent: false,
-    needsInputSound: { enabled: true, id: "default" }, completedSound: { enabled: true, id: "default" }, soundWhileFocused: false },
+    needsInputSound: { enabled: true, id: "default" }, completedSound: { enabled: true, id: "default" }, soundWhileFocused: true },
   localModels: [], startup: { global: {}, profile: {} },
   remote: null,
 });

@@ -258,6 +258,63 @@ Failed audio cleanup retains its exact context for explicit retry. OS banners
 are silent; separate application audio follows its own saved enable/focus flags.
 Migration preserves prior ciphertext, exact defaults and explicit device choices.
 
+### Press/release dictation and audible attention
+
+The desktop microphone button follows the saved push-to-talk preference, just
+like its keyboard shortcut: press owns one capture, release flushes and transcribes
+it once, including release outside the button through pointer capture. Space and
+Enter provide the same hold/release interaction when the button has focus.
+Toggle mode keeps its click/start, click/stop behavior. Early release before
+microphone readiness never opens a late input and explains why no transcript
+exists. Interrupted or externally cancelled captures are visible, not silent
+returns to idle. Hiding the window after Stop does not cancel local recognition
+of the already-finalizing clip; active microphone capture is still discarded
+on blur, hiding, sleep or owner changes.
+
+Completed text is displayed for review before revision-checked insertion.
+`sdk.voice.transcript(sessionId, jobId)` reads the exact completed local speech
+job through the existing bounded result pages, without truncation or a new
+service route. It never sends a prompt. Settings, CLI and TUI keep the same local
+recognizer and explicit insertion authority.
+
+Attention audio also covers actual failed/partial work, alongside exact pending
+questions and approvals. Completed audio still excludes failed, partial, stopped
+and runnable follow-up work. New factory preferences enable both sounds while
+focused as well as in the background; saved explicit mute/focus preferences
+remain authoritative. Native banners stay independently disabled and silent.
+There are no new durable events, schema changes, dependencies or migrations.
+Reuse React/Electron (MIT), Web Audio and the existing Apache-2.0 NeMo-Speech
+runtime; no models are downloaded by tests. The MIT-licensed
+[Handy](https://github.com/cjpais/Handy) press/release interaction and
+[pi-voice](https://github.com/earendil-works/pi-voice) single-take capture/stop/result
+lifecycle inform the behavior, without importing their application runtimes.
+
+Before integration, the repeated macOS Phase 0 run passed the six executable
+spikes: SQLite append p95 **0.047 ms**, rebuild **0.52 ms**, PTY cancellation
+**151.91 ms** with no fixture survivors, TUI updates **17.04 ms**, Electron shell
+startup **190.57 ms**, working set **444.94 MiB**, scrolling **11.99 ms**, and
+2,000-file Git status **5.92 ms**. Existing unavailable live-provider, Rust/Linux,
+release-signing, SendBox, routing and remote-host gates remain unqualified.
+Generated tests cover physical pointer/keyboard release, early admission,
+cancelled outcomes, actual bounded WAV delivery, transcript/draft isolation and
+attention/completion/focus preferences without a real microphone or speaker.
+The signal check uses a generated 48-kHz Web Audio MediaStream, requires actual
+normalized 16-kHz PCM with a peak above 1,000 PCM16 units, and checks one upload
+and zero generative-model calls. The host's plain Chromium fake microphone can
+return silence, so a recognizer fixture returning text alone is not evidence
+that waveform samples survived capture. Real microphone hardware and ASR
+accuracy remain unqualified by these generated checks.
+
+Final qualification: **82/82** focused voice/audio/settings/recovery checks pass
+in **11.31 s**; the full hidden Electron rerun passes **174 cases**, with **3**
+existing skips, in **5.5 min**, using the generated `.moguri/artifacts` output
+directory. The full unit run exercised **1,359 cases**: **1,341** passed and
+**14** skipped; its four pre-sound recovery-fixture incompatibilities were
+corrected at fixture generation and all pass in the focused rerun. No migration
+guard was weakened or ciphertext rewritten. Type checks, production build,
+packed external SDK verification and the moderate-level dependency audit pass
+with **zero vulnerabilities**. Vite retains its existing large-chunk warning.
+
 ## Reused components and persistence
 
 Reuse React and Electron (MIT), Ghostty Web (MIT), Node builtins/SQLite, the
