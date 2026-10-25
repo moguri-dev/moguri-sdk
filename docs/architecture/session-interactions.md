@@ -98,6 +98,43 @@ Fresh prerequisites pass all six available generated groups: cancellation
 1.235/6.299 ms. Separate live/native/notarized/Linux/quality gates remain
 FAIL/unqualified, not enabled by this desktop presentation change.
 
+#### Composer recovery qualification
+
+Source `b9ee41c` removes the separate header action and reuses the compact
+primary slot, without adding a new service operation. The before-fix native
+case has no Resume control in that slot. Generated unconfirmed worker startup
+creates real service quarantine, rather than fabricating a failed-status badge.
+Tests cover project, project-free, shared-base and managed-root recovery,
+including a fresh same-root session without a selected model.
+
+Pointer, Enter and native form submission preserve the exact draft/context.
+A held/refused request admits only once, shows its original error, retains the
+blocked boundary and retries only after a new explicit action. Hold,
+Shift+Enter, slash commands, Stop and existing queue/menu behavior remain.
+These six recovery cases make no model request and touch no personal data.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/fresh audit | PASS; zero vulnerabilities |
+| Six recovery cases repeated twice | 12 passed / 10.8 seconds |
+| Final recovery and existing composer cases | 9 passed / 8.6 seconds |
+| Complete hidden Electron suite | 144 passed, 2 physical-native skips, zero failures; 146 total / 4.8 minutes |
+| Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
+| Actual newly packaged hidden app | All recovery, composer and Start/Stop cases: 14 passed / 18.4 seconds |
+| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned worker image unchanged |
+| Production ZIP/manifest consumer | PASS; 740,545,367-byte archive / 108,514.36 ms |
+| Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
+
+The rebuilt DMG is 754,160,386 bytes, SHA-256
+`93c95c1b5533656da69ac86455b8b73134233d7a85405a3b38ef6e3e773b2261`.
+Previous installer identities remain historical. The complete 1,294-pass/
+14-skip Node baseline is retained, not relabeled as another run: no service,
+SDK, CLI, TUI or protocol source changed. Hidden/generated UI and owned fixtures
+were used; no personal app/browser/account/microphone, paid inference or
+administrator installation was used. An earlier user-opened image was not
+closed. Ad-hoc signing, FFI/chunk/optional-icon notices, downstream SDK-host
+compatibility overrides and physical-native/notarization/Linux limits remain.
+
 Closed terminals disappear from the visible selector, not from retained ownership
 or cleanup evidence. The embedded renderer remains Ghostty. Default shells resolve
 on the actual execution host, including its account login shell when a desktop
