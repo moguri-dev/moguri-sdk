@@ -12,10 +12,12 @@ import { executeUserPlan } from "./user-plan.ts";
 import { executeRemoteMcp } from "./remote-mcp-runtime.ts";
 import { executeCompoundValidation } from "./compound-validation.ts";
 import { discoverTools } from "./tool-catalog.ts";
+import { OwnedDebugRuntime } from "./owned-debug.ts";
 
 const abort = new AbortController();
 let authority = true;
 let terminalRequested = false;
+let debuggerRuntime: OwnedDebugRuntime | undefined;
 const pending = new Map<string, { resolve: (message: WorkerReply) => void; reject: (error: Error) => void; interruptible: boolean }>();
 const send = (message: WorkerRequest) => { if (process.connected) process.send?.(message); };
 async function request(message: WorkerRequest & { requestId: string }): Promise<WorkerReply> {
@@ -26,6 +28,7 @@ async function request(message: WorkerRequest & { requestId: string }): Promise<
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible }); send(message); });
 }
 async function finish(outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): Promise<void> {
+  if (debuggerRuntime && !await debuggerRuntime.close()) { outcome = "partial"; diagnostic = "Debugger process cleanup/retention was not acknowledged. Inspect the original target before resuming."; }
   terminalRequested = true;
   await request({ kind: "finished", requestId: randomUUID(), outcome, diagnostic });
 }
@@ -33,6 +36,7 @@ async function run(start: WorkerStart): Promise<void> {
   const context: Message[] = start.context;
   const loadedTools = new Set<string>();
   const instructionSources = new Set<string>();
+  debuggerRuntime = start.readOnly ? undefined : new OwnedDebugRuntime();
   let incompleteCleanup = false, mcpDispatched = false;
   const lifecycle = async (trigger: "turn.start" | "turn.end") => {
     for (const hook of start.hooks?.filter((hook) => hook.definition.trigger === trigger) ?? []) {
@@ -63,7 +67,7 @@ async function run(start: WorkerStart): Promise<void> {
     }
   };
   const delegate = async (stepId: string, call: ToolCall): Promise<DelegatedResult> => {
-    const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call });
+    const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call, quiescent: debuggerRuntime?.quiescent ?? true });
     if (reply.error || !reply.value) throw new Error(reply.error ?? "Missing delegated authorization.");
     if ("kind" in reply.value && reply.value.kind === "remote-mcp") {
       const result = await executeRemoteMcp(reply.value, { call, stepId, root: start.root, env: start.env }, abort.signal,
@@ -210,15 +214,19 @@ async function run(start: WorkerStart): Promise<void> {
             try {
               result = await executeTool(start.root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
                 (pid) => send({ kind: "process", stepId, callId: call.id, pid }),
-                (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders, env: start.env }, boundary.toolCatalog ?? boundary.tools);
+                (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders, env: start.env }, boundary.toolCatalog ?? boundary.tools,
+                debuggerRuntime ? { runtime: debuggerRuntime, ended: async (pid, outcome) => {
+                  const reply = await request({ kind: "process.ended", requestId: randomUUID(), stepId, callId: call.id, pid, outcome });
+                  if (reply.error || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error(reply.error ?? "Process cleanup observation was not retained.");
+                } } : undefined);
             } catch (error) {
-              result = { text: error instanceof Error ? error.message : "Tool execution failed.", isError: true, outcome: incompleteCleanup ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
+              result = { text: error instanceof Error ? error.message : "Tool execution failed.", isError: true, outcome: incompleteCleanup || error instanceof Error && "code" in error && error.code === "tool_partial" ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
             }
           }
           if (call.name === "discover_tools" && !result.isError) {
             for (const tool of discoverTools(boundary.toolCatalog ?? boundary.tools, String(call.arguments.query), Number(call.arguments.offset ?? 0)).tools) loadedTools.add(tool.name);
           }
-          if (call.name === "read_file" && !result.isError) {
+          if (["read_file", "inspect_document"].includes(call.name) && !result.isError) {
             const view: unknown = JSON.parse(result.text);
             if (isRecord(view) && Array.isArray(view.instructions)) {
               const refs = view.instructions.filter(isRecord).map((source) => `${String(source.path)}:${String(source.digest)}`);
@@ -228,7 +236,7 @@ async function run(start: WorkerStart): Promise<void> {
             }
           }
           if (result.rawText !== undefined) {
-            if (result.rawText.length > 512 * 1024) throw new Error("The original result exceeds its retained-output bound. No complete source or next step was inferred.");
+            if (result.rawText.length > 2 * 1024 * 1024) throw new Error("The original result exceeds its retained-output bound. No complete source or next step was inferred.");
             const view: unknown = JSON.parse(result.text);
             if (!isRecord(view)) throw new Error("A retained result needs an explicit structured view.");
             result.text = JSON.stringify({ ...view, retainedSource: { stepId, callId: call.id, rawComplete: result.rawComplete === true } });
@@ -254,6 +262,7 @@ async function run(start: WorkerStart): Promise<void> {
       console.error("Worker lost the control plane. Final outcome cannot be confirmed durably; no retry will run.");
     }
   } finally {
+    await debuggerRuntime?.close();
     for (const waiter of pending.values()) waiter.reject(new Error("Worker finished."));
     pending.clear();
     if (process.connected) process.disconnect?.();

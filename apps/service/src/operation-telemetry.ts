@@ -18,7 +18,7 @@ function provenance(events: StoredEvent[], snapshot?: Snapshot) {
   const externalCaptures = new Map(events.flatMap((event) => event.event_type === "turn.started" && event.turn_id && event.payload.repositoryCapture ? [[event.turn_id, event.payload.repositoryCapture] as const] : []));
   for (const event of events) {
     if (event.event_type === "model.started") modelSteps.set(scopedStep(event), event);
-    if (event.event_type === "job.started" && event.payload.job.kind === "mcp.call" && event.turn_id) externalTurns.add(event.turn_id);
+    if (event.event_type === "job.started" && ["mcp.call", "tool.call"].includes(event.payload.job.kind) && event.turn_id) externalTurns.add(event.turn_id);
     if (event.event_type === "turn.control_started" && event.payload.purpose === "plan.save" && event.turn_id) planTurns.add(event.turn_id);
     if (event.event_type === "turn.started" || event.event_type === "turn.control_started") if (event.turn_id) envs.set(event.turn_id, event.payload.controls.env);
   }

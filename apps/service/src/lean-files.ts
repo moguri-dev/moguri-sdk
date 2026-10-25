@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import { readdir, realpath } from "node:fs/promises";
-import { join, relative, matchesGlob } from "node:path";
+import { realpath } from "node:fs/promises";
+import { normalize } from "node:path";
 import { performance } from "node:perf_hooks";
 import { parseDocument } from "yaml";
 import { MoguriError, isRecord } from "../../../packages/protocol/src/index.ts";
-import { readProjectFile, writeProjectBytes, scopedPath, isProtectedProjectPath, textFilePage } from "./files.ts";
+import { readProjectFile, writeProjectBytes, isProtectedProjectPath, textFilePage } from "./files.ts";
 import { assertFolderAccess, matchesFolder, repositoryInstructionLayers, type FolderPolicy } from "./project-policy.ts";
 import { defaultProjectSettings } from "../../../packages/protocol/src/sessions.ts";
 import { stopGroup } from "./supervisor.ts";
@@ -15,7 +15,7 @@ export async function boundedProgram(root: string, executable: string, args: str
   signal.throwIfAborted();
   const started = performance.now(), maximum = options.maxBytes ?? 512 * 1024;
   const child = spawn(executable, args, { cwd: root, detached: true, stdio: ["pipe", "pipe", "pipe"],
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "en_US.UTF-8", LC_ALL: "C", NO_COLOR: "1", GIT_PAGER: "cat" } });
+    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "en_US.UTF-8", LC_ALL: "C", NO_COLOR: "1", GIT_PAGER: "cat", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } });
   const stdout: Buffer[] = [], stderr: Buffer[] = [];
   let bytes = 0, clipped = false, timedOut = false, stopping: Promise<boolean> | undefined;
   const stop = () => { if (child.pid) stopping ??= stopGroup(child.pid); };
@@ -38,6 +38,7 @@ export async function boundedProgram(root: string, executable: string, args: str
       child.once("close", (exitCode, exitSignal) => resolve({ exitCode, signal: exitSignal }));
     });
     const cleanup = stopping ? await stopping : child.pid ? await stopGroup(child.pid) : true;
+    if (!cleanup) throw new MoguriError("tool_partial", "The exact owned program group did not confirm cleanup. Inspect it before resuming; no successful cancellation was inferred.");
     signal.throwIfAborted();
     const decode = (parts: Buffer[]) => {
       let buffer = Buffer.concat(parts);
@@ -50,7 +51,7 @@ export async function boundedProgram(root: string, executable: string, args: str
 }
 export function programSucceeded(result: ProgramResult, allowed = [0]): void {
   if (result.clipped || result.timedOut || !result.cleanup || !allowed.includes(result.exitCode ?? -1)) {
-    throw new MoguriError("tool_program_failed", `Program did not complete: exit=${result.exitCode}, deadline=${result.timedOut}, clipped=${result.clipped}, cleanup=${result.cleanup}. ${result.stderr.slice(0, 1000)}`);
+    throw new MoguriError(result.cleanup ? "tool_program_failed" : "tool_partial", `Program did not complete: exit=${result.exitCode}, deadline=${result.timedOut}, clipped=${result.clipped}, cleanup=${result.cleanup}. ${result.stderr.slice(0, 1000)}`);
   }
 }
 export async function editProjectFile(root: string, args: { path: string; expectedDigest: string; edits: { oldText: string; newText: string }[] }, signal: AbortSignal) {
@@ -106,46 +107,50 @@ export async function readFileSelection(root: string, args: Record<string, unkno
         omittedLines: lines.length - shown.length, columnsBoundedAt: 300, diagnostic: "Deterministic definition/import/heading preview, not a semantic or complete code summary. Use exact line/byte reads before conclusions." };
     }
     const text = JSON.stringify({ ...view, ...(instructions.length ? { instructions } : {}), sourceRef: { path: file.path, expectedDigest: file.digest },
-      sourceRetention: Buffer.byteLength(file.text) <= 512 * 1024 ? "retained-source" : "live-version-bound; original exceeds the 512 KiB retention limit" });
+      sourceRetention: "retained-source" });
     if (text.length > 128 * 1024) throw new MoguriError("file_view_limit", "The complete selected text/instructions exceed the tool envelope. Select a smaller explicit view; no instructions were omitted.");
-    return { text, ...(Buffer.byteLength(file.text) <= 512 * 1024 ? { rawText: file.text, rawComplete: true } : {}), isError: false, outcome: "completed" };
+    return { text, rawText: file.text, rawComplete: true, isError: false, outcome: "completed" };
 }
-export async function findProjectFiles(root: string, args: { pattern: string; path?: string; offset?: number; limit?: number }, policy: FolderPolicy, signal: AbortSignal) {
+function searchExclusions(policy: FolderPolicy): string[] {
+  const literal = (folder: string) => normalize(folder).replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "").replace(/[?*[\]{}!]/g, "\\$&");
+  return ["**/{.git,.moguri,node_modules,.ssh,.aws,.azure,.kube,.docker,Moguri}/**", "**/.moguri-dependencies-*/**",
+    "**/{.npmrc,.pypirc,.netrc,.git-credentials}", "**/.env*", "**/*.{pem,key,p12,pfx}", "**/{credentials,id_rsa,id_ed25519}{,.*}",
+    ...policy.denied.map((folder) => `${literal(folder)}/**`)].flatMap((pattern) => ["--iglob", `!${pattern}`]);
+}
+const ignoreFlags = ["--hidden", "--no-follow", "--no-ignore-global", "--no-ignore-parent", "--no-require-git"];
+export async function findProjectFiles(root: string, args: { pattern: string; path?: string; offset?: number; limit?: number }, policy: FolderPolicy, signal: AbortSignal, started: (pid: number) => void = () => {}) {
   root = await realpath(root);
-  const base = args.path && args.path !== "." ? await scopedPath(root, args.path) : await realpath(root);
   await assertFolderAccess(root, args.path ?? ".", false, policy);
-  const queue = [base], files: string[] = [], deadline = performance.now() + 5000;
-  let visited = 0, complete = true;
-  for (let index = 0; index < queue.length; index++) {
-    signal.throwIfAborted();
-    if (visited >= 10000 || performance.now() > deadline) { complete = false; break; }
-    const entries = await readdir(queue[index]!, { withFileTypes: true });
-    for (const entry of entries) {
-      if (++visited > 10000) { complete = false; break; }
-      const path = join(queue[index]!, entry.name), name = relative(root, path).replaceAll("\\", "/");
-      if (entry.isSymbolicLink() || isProtectedProjectPath(name) || matchesFolder(name, policy.denied)) continue;
-      if (entry.isDirectory()) queue.push(path);
-      else if (entry.isFile() && matchesGlob(name, args.pattern)) files.push(name);
-    }
-  }
+  const result = await boundedProgram(root, "rg", ["--files", "--null", ...ignoreFlags, ...searchExclusions(policy), "--", args.path ?? "."], signal, { timeoutMs: 5000, started });
+  if (!result.clipped && !result.timedOut || !result.cleanup) programSucceeded(result, [0, 1]);
+  // Explicit rg globs override ignore rules; intersect with the ordinary inventory.
+  const matching = await boundedProgram(root, "rg", ["--files", "--null", ...ignoreFlags, "--glob", `/${args.pattern.replace(/^\//, "")}`, ...searchExclusions(policy), "--", args.path ?? "."], signal, { timeoutMs: 5000, started });
+  if (!matching.clipped && !matching.timedOut || !matching.cleanup) programSucceeded(matching, [0, 1]);
+  const observed = result.stdout.split("\0");
+  if (observed.at(-1) === "" || result.clipped) observed.pop();
+  const selected = matching.stdout.split("\0");
+  if (selected.at(-1) === "" || matching.clipped) selected.pop();
+  const names = new Set(selected.map((name) => name.replace(/^\.\//, "")));
+  const complete = !result.clipped && !result.timedOut && !matching.clipped && !matching.timedOut && observed.length <= 10000;
+  const files = observed.slice(0, 10000).map((name) => name.replace(/^\.\//, ""))
+    .filter((name) => !isProtectedProjectPath(name) && !matchesFolder(name, policy.denied) && names.has(name));
   files.sort();
   const offset = args.offset ?? 0, limit = args.limit ?? 100;
   if (offset > files.length) throw new MoguriError("file_cursor", "This offset is outside the observed file inventory. Start again.");
   return { files: files.slice(offset, offset + limit), nextOffset: offset + limit < files.length ? offset + limit : null,
-    complete, observedMatches: files.length, visited, omitted: Math.max(0, files.length - offset - limit), observation: "Bounded traversal, not an atomic filesystem snapshot." };
+    complete, observedMatches: files.length, visited: Math.min(observed.length, 10000), omitted: Math.max(0, files.length - offset - limit),
+    observation: "Bounded ripgrep inventory honoring nested .gitignore/.ignore/.rgignore; no personal/global/ancestor ignore configuration or atomic filesystem snapshot." };
 }
 export async function searchProjectFiles(root: string, args: { pattern: string; path?: string; glob?: string; literal?: boolean; ignoreCase?: boolean; context?: number; limit?: number }, policy: FolderPolicy, signal: AbortSignal, started: (pid: number) => void) {
   const path = args.path ?? ".";
   await assertFolderAccess(root, path, false, policy);
-  const flags = ["--json", "--hidden", "--no-follow", "--max-count", String(args.limit ?? 50), "--context", String(args.context ?? 2)];
+  const flags = ["--json", ...ignoreFlags, "--max-count", String(args.limit ?? 50), "--context", String(args.context ?? 2)];
   if (args.literal) flags.push("--fixed-strings");
   if (args.ignoreCase) flags.push("--ignore-case");
   if (args.glob) flags.push("--glob", args.glob);
-  for (const pattern of ["**/{.git,.moguri,node_modules,.ssh,.aws,.azure,.kube,.docker,Moguri}/**", "**/.moguri-dependencies-*/**",
-    "**/{.npmrc,.pypirc,.netrc,.git-credentials}", "**/.env*", "**/*.{pem,key,p12,pfx}", "**/{credentials,id_rsa,id_ed25519}{,.*}",
-    ...policy.denied.map((folder) => `${folder}/**`)]) flags.push("--iglob", `!${pattern}`);
+  flags.push(...searchExclusions(policy));
   const result = await boundedProgram(root, "rg", [...flags, "--", args.pattern, path], signal, { started });
-  if (!result.clipped && !result.timedOut) programSucceeded(result, [0, 1]);
+  if (!result.clipped && !result.timedOut || !result.cleanup) programSucceeded(result, [0, 1]);
   const matches: { path: string; line: number; text: string; context: boolean; clipped: boolean }[] = [];
   for (const line of result.stdout.split("\n").filter(Boolean)) {
     let value: unknown;

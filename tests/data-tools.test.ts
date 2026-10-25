@@ -19,6 +19,10 @@ test("structured authors create actual parseable formats and make digest-bound e
       assert.equal(result.outcome, "completed");
       const bytes = await readFile(join(root, path)), parsed = await extractDocument(bytes, format);
       assert.ok(parsed.units.some((unit) => unit.text.includes("Generated")));
+      const inspection = JSON.parse((await run("inspect_document", { path })).text);
+      assert.equal(inspection.digest, bytesDigest(bytes)); assert.equal(inspection.boundary, "approved-project-file");
+      assert.match(inspection.text, /Generated/);
+      await assert.rejects(() => run("inspect_document", { path, expectedDigest: "0".repeat(64) }), { code: "file_conflict" });
       if (format !== "pdf") {
         const edited = await run("edit_document", { path, expectedDigest: bytesDigest(bytes),
           ...(format === "docx" ? { replacements: [{ oldText: "Generated source", newText: "Generated updated" }] } :

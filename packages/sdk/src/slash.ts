@@ -3,6 +3,7 @@ import type { MoguriSdk } from "./index.ts";
 import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, sessionPullRequestUrl, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
+import { toolingSlash } from "./tooling-slash.ts";
 
 export type SessionPanel = "Terminal" | "Global Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -18,6 +19,16 @@ export type SlashResult =
   | { kind: "profile"; profileId: string }
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
+  { name: "review", description: "Investigate and fix current changes, or the project when clean, within existing policy", argument: "[PROMPT]" },
+  { name: "security", description: "Investigate and fix reachable security weaknesses within existing authority", argument: "[PROMPT]" },
+  { name: "performance", description: "Measure and improve current-code performance without changing outcomes", argument: "[PROMPT]" },
+  { name: "debug", description: "Debug current code and the session-owned app/logs, using approved DAP when available", argument: "[PROMPT]" },
+  { name: "tools", description: "Discover the actual scoped typed tool catalogue without inference", argument: "[OFFSET] [QUERY]" },
+  { name: "tool", description: "Admit an exact approved Local user tool job; model-only capabilities stay blocked", argument: "NAME SCHEMA_SHA ARGUMENTS_JSON" },
+  { name: "tool-result", description: "Page one exact retained original result without replay", argument: "STEP_ID CALL_ID [UTF8_OFFSET]" },
+  { name: "state", description: "Query service-backed todo/memory views, not raw storage", argument: "SELECT_SQL" },
+  { name: "watch", description: "Inspect or acknowledge actual captured command/watch work", argument: "read JOB [OFFSET]|acknowledge JOB SHA confirm-inspected" },
+  { name: "coordinate", description: "Scoped parent/child messages, context and explicit orchestration", argument: "[list|inbox|snapshot|read JSON|message TARGET TEXT|control JSON|preview CHILD|grant CHILD SHA on|off confirm-reviewed]" },
   { name: "progress", description: "Compare the bound plan checklist with optional long-task model estimates" },
   { name: "activity", description: "Inspect exact retained chat operations or original turn metadata", argument: "[before SEQUENCE ID|read ID arguments|output [OFFSET]|turn ID]" },
   { name: "attach-file", description: "Capture a local source/text file, image, PDF, DOCX or XLSX snapshot", argument: "ABSOLUTE_PATH" },
@@ -117,6 +128,13 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
+      return toolingSlash(sdk, session.id, command.name, command.argument);
+    case "review": case "security": case "performance": case "debug": {
+      const consume = !session.draft.text || session.draft.text.trim() === text.trim();
+      await sdk.workflows.start(session.id, command.name, command.argument, consume ? session.draft.revision : undefined);
+      return { kind: "ok", message: `Queued /${command.name} through this session's existing model, environment, budget and permission policy.` };
+    }
     case "clone": {
       const match = command.argument.match(/^([\s\S]+)\s+confirm-clone$/);
       if (!match) throw new ClientError("clone_review", 'Use /clone {"repository":"URL","path":"ABSOLUTE_NEW_PATH"} confirm-clone after reviewing both values. Partial files are preserved.');

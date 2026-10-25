@@ -42,6 +42,15 @@ export function describeActivityCall(call: ToolCall, snapshot: Snapshot): { kind
   if (call.name === "list_files" || call.name === "list_documents") return { kind: "search-files", label: call.name === "list_files" ? "List files" : "List documents", subject };
   if (["memory_search", "search_document"].includes(call.name)) return { kind: "search-files", label: call.name === "memory_search" ? "Search repository memory" : "Search document", subject };
   if (call.name === "run_command") return { kind: "command", label: call.hook ? "Run configured script" : "Run command", subject: text(args.command) };
+  if (call.name === "command_job") return { kind: "command", label: args.action === "start" ? "Start command job" : "Stop command job", subject: text(args.command) ?? text(args.jobId) };
+  if (call.name === "debug") return { kind: "command", label: "Debug adapter", subject: text(args.command) ?? text(args.action) };
+  if (call.name === "create_issue") return { kind: "tool", label: args.action === "preview" ? "Review issue creation" : "Request issue creation", subject: text(args.service) };
+  if (call.name === "inspect_document") return { kind: "read-file", label: "Inspect project document", subject: text(args.path) };
+  if (["edit_file", "edit_document"].includes(call.name)) return { kind: "edit-file", label: call.name === "edit_file" ? "Edit file" : "Edit document", subject };
+  if (call.name === "write_document") return { kind: args.expectedDigest === "absent" ? "create-file" : "edit-file", label: "Write document", subject };
+  if (["find_files", "search_files", "query_data", "sqlite_query"].includes(call.name)) return { kind: "search-files", label: "Search/query files", subject };
+  if (["web_search", "web_fetch"].includes(call.name)) return { kind: "search-web", label: call.name === "web_search" ? "Search web" : "Read web page", subject: text(args.query) ?? text(args.url) };
+  if (call.name === "use_skill") return { kind: args.action === "load" ? "load-skill" : "search-skills", label: args.action === "load" ? "Load skill" : "Find skills", subject: text(args.query) ?? text(args.id) };
   if (call.name === "read_agent_terminal") return { kind: "command", label: "Read agent terminal", subject: text(args.commandId) ?? "Command history" };
   if (call.name === "ask_user") return { kind: "ask-user", label: "Asked user", subject: text(args.question) };
   if (call.name === "mcp_gateway") {
@@ -108,7 +117,7 @@ export class ChatActivity {
         const value = previous ?? { call, first: event, updatedSequence: event.seq, result: null, completed: false, ambiguous: false };
         value.updatedSequence = event.seq;
         if (previous && json(previous.call) !== json(call)) value.ambiguous = true;
-        if (event.event_type === "tool.completed") { value.result = event.payload.text; value.completed = true; }
+        if (event.event_type === "tool.completed") { value.result = event.payload.rawDigest ? this.store.blob(event.payload.rawDigest) : event.payload.text; value.completed = true; }
         tools.set(key, value); sourceKeys.set(event.id, key);
       } else if (event.event_type === "tool.output") {
         const value = tools.get(toolKey(event.turn_id ?? null, event.step_id ?? null, digest(event.payload.callId)));
@@ -165,7 +174,7 @@ export class ChatActivity {
       sources.push({ entry, arguments: () => json({ capabilityId: used.capabilityId, contentDigest: used.contentDigest }), output: () => this.store.blob(used.contentDigest) });
     }
     const appendWorkflow = (source: "github" | "linear", operation: {
-      id: string; status: string; createdAt: string; updatedAt: string; resultDigest: string | null; action: string;
+      id: string; status: string; createdAt: string; updatedAt: string; resultDigest: string | null; action: string; actor: "user" | "model";
     }) => {
       const first = events.find((event) => source === "github" ? event.event_type === "github.operation_recorded" && event.payload.operation.id === operation.id :
         event.event_type === "linear.operation_recorded" && event.payload.operation.id === operation.id);
@@ -176,7 +185,7 @@ export class ChatActivity {
       const creating = source === "github" ? operation.action === "github.issue.create" : operation.action === "issue.create";
       const entry: ActivityEntry = {
         id: digest(json([source, profileId, session.id, operation.id])), sessionId: session.id, turnId: null, stepId: null, messageId: null,
-        sequence: first.seq, updatedSequence: latest.seq, source, actor: "user", kind: creating ? "create-issue" : operation.action.startsWith("git.") ? "command" : "tool",
+        sequence: first.seq, updatedSequence: latest.seq, source, actor: operation.actor, kind: creating ? "create-issue" : operation.action.startsWith("git.") ? "command" : "tool",
         label: creating ? `Create ${source === "github" ? "GitHub" : "Linear"} issue` : source === "github" ? "GitHub operation" : "Linear operation",
         subject: operation.action, status: status(operation.status), startedAt: validTime(operation.createdAt), finishedAt: done ? validTime(operation.updatedAt) : null,
         durationMs: done ? elapsed(validTime(operation.createdAt), validTime(operation.updatedAt)) : null, durationBasis: "observed-lifecycle",
@@ -185,7 +194,7 @@ export class ChatActivity {
       sources.push({ entry, arguments: async () => json(await this.host.workflow(source, operation.id)), output: () => output });
     };
     for (const operation of snapshot.githubOperations.filter((operation) => operation.originSessionId === session.id)) appendWorkflow("github", { ...operation, action: operation.kind });
-    for (const operation of snapshot.linearOperations.filter((operation) => operation.sessionId === session.id)) appendWorkflow("linear", operation);
+    for (const operation of snapshot.linearOperations.filter((operation) => operation.sessionId === session.id)) appendWorkflow("linear", { ...operation, actor: operation.modelSource ? "model" : "user" });
     return { sources: sources.sort((a, b) => a.entry.sequence - b.entry.sequence || a.entry.id.localeCompare(b.entry.id)),
       messageOrder: [...messageOrder].map(([id, sequence]) => ({ id, sequence })) };
   }

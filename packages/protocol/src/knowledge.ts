@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
+import { ModelAdviceSourceSchema } from "./questions.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -28,6 +29,7 @@ export const KnowledgeRecordSchema = object({
   intent: object({ id, digest: hash }),
   createdAt: Type.String({ format: "date-time" }), updatedAt: Type.String({ format: "date-time" }),
   origin: Type.Union([object({ sourceId: id, sourceDigest: hash, sourceRevision: revision, actor: Type.Literal("user") }), Type.Null()]),
+  modelSource: Type.Optional(ModelAdviceSourceSchema), createdModelSource: Type.Optional(ModelAdviceSourceSchema),
 });
 export type KnowledgeRecord = Static<typeof KnowledgeRecordSchema>;
 export interface KnowledgeEventPayloads {
@@ -73,7 +75,7 @@ export function projectKnowledge(previous: KnowledgeRecord | undefined, next: Kn
     !previous && next.revision !== 0 ||
     previous && (next.revision !== previous.revision + 1 ||
       (["id", "profileId", "tier", "projectId", "sessionId", "workItemId", "expiresTurnId", "createdAt"] as const).some((key) => previous[key] !== next[key]) ||
-      JSON.stringify(previous.intent) !== JSON.stringify(next.intent))) {
+      JSON.stringify(previous.intent) !== JSON.stringify(next.intent) || JSON.stringify(previous.createdModelSource) !== JSON.stringify(next.createdModelSource))) {
     throw new MoguriError("knowledge_corrupt", "Tiered knowledge changed its original profile, lifetime or revision. State was preserved.", 409);
   }
   return structuredClone(next);

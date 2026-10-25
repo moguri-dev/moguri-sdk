@@ -23,6 +23,12 @@ test("lean edits are exact, atomic, conflict-safe and obey read-only/folder rest
     assert.equal(await readFile(join(root, "sample.ts"), "utf8"), current);
     await mkdir(join(root, "nested"));
     await writeFile(join(root, "nested", "generated.ts"), "export function generated() {}\n");
+    await writeFile(join(root, ".gitignore"), "root-ignored.ts\n");
+    await writeFile(join(root, ".ignore"), "scratch-ignored.ts\n");
+    await writeFile(join(root, "nested", ".gitignore"), "local-ignored.ts\n");
+    await writeFile(join(root, "root-ignored.ts"), "Generated ignored source");
+    await writeFile(join(root, "scratch-ignored.ts"), "Generated ignored source");
+    await writeFile(join(root, "nested", "local-ignored.ts"), "Generated ignored source");
     const found = JSON.parse((await run("find_files", { pattern: "**/*.ts" })).text);
     assert.deepEqual(found.files, ["nested/generated.ts", "sample.ts"]);
     assert.equal(found.complete, true);

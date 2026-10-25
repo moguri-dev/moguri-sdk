@@ -62,7 +62,7 @@ function references(input: EventInput): string[] {
       input.payload.publication.documentDigest, input.payload.publication.operationDigest].filter((hash): hash is string => hash !== null);
     case "queue.enqueued": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "queue.edited": return input.payload.attachments?.flatMap(attachmentDigests) ?? [];
-    case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.pasteFiles ?? []).flatMap(attachmentDigests), ...(input.payload.documents ?? []).flatMap(attachmentDigests)];
+    case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.parentSnapshotDigest ? [input.payload.parentSnapshotDigest] : []), ...(input.payload.pasteFiles ?? []).flatMap(attachmentDigests), ...(input.payload.documents ?? []).flatMap(attachmentDigests)];
     case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.flatMap(attachmentDigests)];
     case "turn.prompt_bound": return [input.payload.promptDigest];
     case "turn.control_started": return [input.payload.purpose === "plan.save" ? input.payload.intentDigest : input.payload.promptDigest];

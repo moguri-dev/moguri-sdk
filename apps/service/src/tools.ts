@@ -14,6 +14,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { performance } from "node:perf_hooks";
 import { executeDataTool } from "./data-tools.ts";
 import { searchWeb } from "./web-search.ts";
+import type { OwnedDebugRuntime, DebugProcessOutcome } from "./owned-debug.ts";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 export const tools: Tool[] = [
@@ -58,17 +59,19 @@ export const tools: Tool[] = [
     parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }, { additionalProperties: false }),
   })),
 ];
-export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; metachat?: boolean; env?: Controls["env"]; pasteFiles?: boolean; documents?: boolean } = { project: true }): Tool[] {
+export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; metachat?: boolean; env?: Controls["env"]; pasteFiles?: boolean; documents?: boolean; coordinator?: boolean } = { project: true }): Tool[] {
   if (readOnly) return [];
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
     .filter((tool) => tool.name !== "fetch_page" || scope.env === "Sandbox")
+    .filter((tool) => !["command_job", "create_issue"].includes(tool.name) || scope.env === "Local")
+    .filter((tool) => tool.name !== "diff_files" || scope.env !== "Sandbox")
     .filter((tool) => !isDocumentTool(tool.name) || scope.documents)
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
     .filter((tool) => scope.project || scope.pasteFiles && tool.name === "read_file" || !workspaceTools.has(tool.name))
     .filter((tool) => !scope.metachat || tool.name === "moguri_config" || tool.name === "ask_user")
     .filter((tool) => scope.env !== "Sandbox" || ["discover_tools", "read_tool_result", "clock", "web_search", "web_fetch", "fetch_page", "ask_user", "task_progress", "list_documents", "read_document", "search_document", ...fileTools, "run_command", "read_agent_terminal"].includes(tool.name))
-    .filter((tool) => mode !== "read-only" || readTools.has(tool.name))
-    .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "mcp_gateway", "debug", "diff_files"].includes(tool.name))
+    .filter((tool) => mode !== "read-only" || readTools.has(tool.name) || scope.coordinator && tool.name === "session_control")
+    .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "command_job", "mcp_gateway", "debug", "diff_files"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)
     .filter((tool) => !tool.name.startsWith("propose_") || settings.evolution.enabled)
     .filter((tool) => scope.env !== "Remote" || tool.name !== "mcp_gateway" || scope.project && Boolean(settings.remote?.mcpGrants?.length))
@@ -79,12 +82,26 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
 export function validateTool(call: ToolCall): void {
   const tool = tools.find((tool) => tool.name === call.name);
   if (!tool || !Value.Check(tool.parameters, call.arguments)) throw new MoguriError("invalid_tool", "Unknown tool or invalid arguments. No operation was executed.");
-  if (leanTools.some((tool) => tool.name === call.name) && Buffer.byteLength(JSON.stringify(call.arguments)) > 256 * 1024) throw new MoguriError("tool_input_limit", "Structured tool arguments exceed 256 KiB. Use a smaller explicit operation.");
+  if (leanTools.some((tool) => tool.name === call.name)) {
+    const pending: { value: unknown; depth: number }[] = [{ value: call.arguments, depth: 0 }], seen = new Set<object>();
+    let nodes = 0;
+    while (pending.length) {
+      const { value, depth } = pending.pop()!;
+      if (++nodes > 20000 || depth > 64) throw new MoguriError("tool_input_limit", "Structured arguments exceed their node/depth bound.");
+      if (typeof value === "string" && !value.isWellFormed()) throw new MoguriError("tool_unicode", "Structured arguments need lossless Unicode.");
+      if (value !== null && typeof value === "object") {
+        if (seen.has(value)) throw new MoguriError("tool_input_limit", "Cyclic or shared-reference arguments are not a JSON tool request.");
+        seen.add(value); pending.push(...Object.values(value).map((value) => ({ value, depth: depth + 1 })));
+      }
+    }
+    if (Buffer.byteLength(JSON.stringify(call.arguments)) > (call.name === "create_issue" ? 512 : 256) * 1024) throw new MoguriError("tool_input_limit", "Structured arguments exceed their complete byte bound. Use a smaller explicit operation.");
+  }
 }
-export async function executeTool(root: string | null, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall) => Promise<{ text: string; isError: boolean; outcome: string }>, safety?: { mode: SessionMode; folders: FolderPolicy; env?: Controls["env"] }, catalog?: Tool[]): Promise<{ text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean }> {
+export async function executeTool(root: string | null, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall) => Promise<{ text: string; isError: boolean; outcome: string }>, safety?: { mode: SessionMode; folders: FolderPolicy; env?: Controls["env"] }, catalog?: Tool[],
+  debuggerOwner?: { runtime: OwnedDebugRuntime; ended(pid: number, outcome: DebugProcessOutcome): Promise<void> }): Promise<{ text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean }> {
   signal.throwIfAborted();
   validateTool(call);
-  if (safety?.mode === "read-only" && !readTools.has(call.name)) throw new MoguriError("read_only", "Edit and execution tools are disabled for this read-only session.", 403);
+  if (safety?.mode === "read-only" && !readTools.has(call.name) && call.name !== "session_control") throw new MoguriError("read_only", "Edit and execution tools are disabled for this read-only session.", 403);
   if (isDocumentTool(call.name)) {
     if (!delegate) throw new MoguriError("attachment_boundary", "This worker has no authenticated document snapshot broker. No host-path fallback was attempted.", 409);
     return delegate(call);
@@ -97,10 +114,15 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
   }
   if (!root && workspaceTools.has(call.name)) throw new MoguriError("project_required", "This chat has no workspace. No file or command operation was executed.");
   if (root && safety && fileTools.has(call.name)) await assertFolderAccess(root, String(call.arguments.path ?? "."), fileWriteTools.has(call.name), safety.folders);
-  if (safety && (safety.folders.denied.length || safety.folders.readOnly.length) && ["run_command", "mcp_gateway", "debug", "diff_files"].includes(call.name)) throw new MoguriError("folder_containment", "This host execution cannot enforce configured folder restrictions.", 403);
+  if (safety && (safety.folders.denied.length || safety.folders.readOnly.length) && ["run_command", "command_job", "mcp_gateway", "debug", "diff_files"].includes(call.name)) throw new MoguriError("folder_containment", "This host execution cannot enforce configured folder restrictions.", 403);
   const args = call.arguments;
   switch (call.name) {
-    case "sqlite_query": case "sqlite_transaction": case "write_document": case "edit_document": return executeDataTool(root!, call, signal, started);
+    case "debug": {
+      if (!debuggerOwner) throw new MoguriError("dap_owner", "DAP needs the original owning model turn. No adapter was started.");
+      try { return await debuggerOwner.runtime.execute(root!, args, signal, started, debuggerOwner.ended); }
+      catch (error) { if (error instanceof MoguriError && error.code === "tool_partial") return { text: error.message, isError: true, outcome: "partial" }; throw error; }
+    }
+    case "sqlite_query": case "sqlite_transaction": case "inspect_document": case "write_document": case "edit_document": return executeDataTool(root!, call, signal, started, safety?.folders);
     case "web_search": return { text: JSON.stringify(await searchWeb(String(args.query), Number(args.limit ?? 5), safety?.env, signal)), isError: false, outcome: "completed" };
     case "web_fetch": {
       if (!safety?.env) throw new MoguriError("web_boundary", "Page fetching needs an explicit owning environment; no Local fallback.");
@@ -112,16 +134,28 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
       return { text: JSON.stringify({ ...result, tools: result.tools.map(({ name, description, schemaDigest }) => ({ name, description, schemaDigest })), schemas: "Loaded as native typed functions on the next step." }), isError: false, outcome: "completed" };
     }
     case "edit_file": return editProjectFile(root!, parse(EditFileSchema, args), signal);
-    case "find_files": return { text: JSON.stringify(await findProjectFiles(root!, parse(FindFilesSchema, args), safety?.folders ?? { denied: [], readOnly: [] }, signal)), isError: false, outcome: "completed" };
+    case "find_files": return { text: JSON.stringify(await findProjectFiles(root!, parse(FindFilesSchema, args), safety?.folders ?? { denied: [], readOnly: [] }, signal, started)), isError: false, outcome: "completed" };
     case "search_files": {
       const result = await searchProjectFiles(root!, parse(SearchFilesSchema, args), safety?.folders ?? { denied: [], readOnly: [] }, signal, started);
       const { rawText, ...view } = result;
       return { text: JSON.stringify(view), rawText, rawComplete: result.complete, isError: false, outcome: "completed" };
     }
     case "diff_files": {
-      const result = await boundedProgram(root!, "git", ["--no-pager", "diff", "--no-ext-diff", "--no-textconv", ...(args.staged ? ["--cached"] : []), "--", String(args.path ?? ".")], signal, { started });
+      let base: string | undefined;
+      if (args.base !== undefined) {
+        if (args.staged || typeof args.base !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(args.base)) throw new MoguriError("diff_base", "Select one explicit branch/full commit base, separately from staged mode.");
+        const resolved = await boundedProgram(root!, "git", ["-c", "core.fsmonitor=false", "rev-parse", "--verify", "--end-of-options", `${args.base}^{commit}`], signal, { started });
+        programSucceeded(resolved);
+        const hash = resolved.stdout.trim();
+        if (!/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(hash)) throw new MoguriError("diff_base", "The selected base did not resolve to one full commit.");
+        const ancestor = await boundedProgram(root!, "git", ["-c", "core.fsmonitor=false", "merge-base", hash, "HEAD"], signal, { started });
+        programSucceeded(ancestor); base = ancestor.stdout.trim();
+        if (!/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(base)) throw new MoguriError("diff_base", "No actual common commit was observed; no comparison was invented.");
+      }
+      const result = await boundedProgram(root!, "git", ["-c", "core.fsmonitor=false", "--no-pager", "diff", "--no-ext-diff", "--no-textconv", ...(args.staged ? ["--cached"] : []), ...(base ? [base] : []), "--", String(args.path ?? ".")], signal, { started });
       programSucceeded(result);
-      return { text: JSON.stringify({ text: result.stdout.slice(0, 12000), complete: result.stdout.length <= 12000, elapsedMs: result.elapsedMs }), rawText: result.stdout, rawComplete: true, isError: false, outcome: "completed" };
+      return { text: JSON.stringify({ text: result.stdout.slice(0, 12000), complete: result.stdout.length <= 12000, elapsedMs: result.elapsedMs, base: base ?? null,
+        observation: "Tracked Git differences only, using local refs. Untracked files and remote freshness require separate observations." }), rawText: result.stdout, rawComplete: true, isError: false, outcome: "completed" };
     }
     case "query_data": {
       const result = await queryProjectData(root!, parse(QueryDataSchema, args), signal, started);
@@ -151,7 +185,12 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
           isError: true, outcome: "partial" };
       }
     }
-    case "run_command": return runCommand(root!, String(args.command), Number(args.timeoutMs), signal, output, started);
+    case "run_command": {
+      const result = await runCommand(root!, String(args.command), Number(args.timeoutMs), signal, output, started);
+      const { text, ...observed } = result;
+      return { ...result, text: JSON.stringify({ ...observed, output: text.length > 12000 ? `${text.slice(0, 3000)}\n[View omitted; original retained source is paged separately.]\n${text.slice(-8000)}` : text,
+        viewComplete: text.length <= 12000, originalComplete: result.outputComplete }), rawText: text, rawComplete: result.outputComplete };
+    }
     default:
       if (delegate) return delegate(call);
       throw new MoguriError("invalid_tool", "Unsupported tool. No operation was executed.");

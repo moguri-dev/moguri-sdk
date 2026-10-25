@@ -40,6 +40,20 @@ export class MoguriSdk extends TransportClient {
     catalog: (sessionId: string, query = "", offset = 0) => this.query({ type: "tooling.catalog", sessionId, query, offset }),
     execute: (sessionId: string, name: string, args: Record<string, unknown>, schemaDigest: string) => this.command({ type: "tooling.execute", sessionId, name, arguments: args, schemaDigest }),
     result: (sessionId: string, stepId: string, callId: string, offset = 0) => this.query({ type: "tooling.result", sessionId, input: { stepId, callId, offset } }),
+    command: (sessionId: string, jobId: string, offset = 0, targetSessionId?: string) => this.query({ type: "tooling.command", sessionId, input: { jobId, offset, ...(targetSessionId ? { targetSessionId } : {}) } }),
+    acknowledgeCommand: (sessionId: string, jobId: string, expectedDigest: string, confirmInspection: true) => this.command({ type: "tooling.command.acknowledge", sessionId, jobId, expectedDigest, confirmInspection }),
+    state: (sessionId: string, sql: string, parameters?: (string | number | boolean | null)[], limit = 100) => this.query({ type: "tooling.state", sessionId, input: { sql, ...(parameters ? { parameters } : {}), limit } }),
+  };
+  readonly coordination = {
+    preview: (sessionId: string, childId: string) => this.query({ type: "coordination.preview", sessionId, childId }),
+    grant: (sessionId: string, childId: string, expectedDigest: string, enabled: boolean, confirm: true) => this.command({ type: "coordination.grant", sessionId, childId, expectedDigest, enabled, confirm }),
+    read: (sessionId: string, input: import("../../protocol/src/coordination.ts").SessionContextInput) => this.query({ type: "coordination.read", sessionId, input }),
+    message: (sessionId: string, targetSessionId: string, text: string) => this.command({ type: "coordination.message", sessionId, input: { targetSessionId, text } }),
+    control: (sessionId: string, input: import("../../protocol/src/coordination.ts").SessionControlInput) => this.command({ type: "coordination.control", sessionId, input }),
+  };
+  readonly workflows = {
+    start: (sessionId: string, kind: import("../../protocol/src/workflows.ts").WorkflowKind, prompt = "", expectedDraftRevision?: number) =>
+      this.command({ type: "workflow.start", sessionId, kind, prompt, ...(expectedDraftRevision !== undefined ? { consumeDraft: { expectedRevision: expectedDraftRevision } } : {}) }),
   };
   private sessionRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);

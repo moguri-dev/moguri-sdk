@@ -2,13 +2,15 @@ import { fork } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { extname } from "node:path";
-import { MoguriError, isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, isRecord, defaultProjectSettings, type ToolCall } from "../../../packages/protocol/src/index.ts";
 import { scopedPath, readRegularFile, bytesDigest, writeProjectBytes } from "./files.ts";
 import { stopGroup } from "./supervisor.ts";
+import { repositoryInstructionLayers, type FolderPolicy } from "./project-policy.ts";
 
-export async function runDataTask(request: { kind: string; arguments: Record<string, unknown>; path?: string; source?: string }, signal: AbortSignal,
+export async function runDataTask(request: { kind: string; arguments: Record<string, unknown>; path?: string; source?: string; seed?: unknown }, signal: AbortSignal,
   started: (pid: number) => void = () => {}, writesDatabase = false): Promise<unknown> {
   signal.throwIfAborted();
+  if (Buffer.byteLength(JSON.stringify(request)) > 16 * 1024 * 1024) throw new MoguriError("tool_data_limit", "Complete structured input exceeds 16 MiB. No partial input was dispatched.");
   const path = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../../../dist/data-worker.mjs" : "./data-worker.mjs", import.meta.url));
   const dependency = createRequire(import.meta.url).resolve("docx");
   const modules = dependency.slice(0, dependency.indexOf("/node_modules/") + "/node_modules".length);
@@ -41,7 +43,7 @@ export async function runDataTask(request: { kind: string; arguments: Record<str
     return reply.value;
   } finally { clearTimeout(timer); signal.removeEventListener("abort", stop); if (child.connected) child.disconnect(); }
 }
-export async function executeDataTool(root: string, call: ToolCall, signal: AbortSignal, started: (pid: number) => void) {
+export async function executeDataTool(root: string, call: ToolCall, signal: AbortSignal, started: (pid: number) => void, policy: FolderPolicy = { denied: [], readOnly: [] }) {
   const input = call.arguments, name = String(input.path), writesDatabase = call.name === "sqlite_transaction";
   const path = await scopedPath(root, name, writesDatabase || call.name === "write_document");
   if (call.name === "sqlite_query" || writesDatabase) {
@@ -52,6 +54,17 @@ export async function executeDataTool(root: string, call: ToolCall, signal: Abor
       if (!(error instanceof MoguriError && error.code === "tool_partial")) throw error;
       return { text: error.message, isError: true, outcome: "partial" };
     }
+  }
+  if (call.name === "inspect_document") {
+    const source = await readRegularFile(path, 8 * 1024 * 1024), digest = bytesDigest(source);
+    if (input.expectedDigest !== undefined && input.expectedDigest !== digest) throw new MoguriError("file_conflict", "The original document changed. No newer bytes were substituted for this source.", 409);
+    const value = await runDataTask({ kind: call.name, arguments: input, source: source.toString("base64") }, signal, started);
+    if (!isRecord(value) || typeof value.rawText !== "string") throw new MoguriError("document_output", "Inspection returned no complete bounded inert extraction.");
+    const { rawText, ...view } = value;
+    const instructions = (await repositoryInstructionLayers(root, { ...defaultProjectSettings(), deniedFolders: policy.denied, readOnlyFolders: policy.readOnly }, name)).filter((layer) => layer.depth > 0);
+    const text = JSON.stringify({ ...view, path: name, digest, originalBytes: source.length, ...(instructions.length ? { instructions } : {}) });
+    if (Buffer.byteLength(text) > 128 * 1024) throw new MoguriError("document_view_limit", "The complete selected view/instructions exceed 128 KiB. Narrow the selection; no instructions were omitted.");
+    return { text, rawText, rawComplete: true, isError: false, outcome: "completed" };
   }
   let source: Buffer | undefined;
   try {

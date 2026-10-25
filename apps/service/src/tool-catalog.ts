@@ -17,6 +17,7 @@ export function catalogForModel(catalog: Tool[], selected: string[]): Tool[] {
   if (selected.length > 64) throw new MoguriError("tool_catalog", "At most 64 tools may be selected for one turn.");
   const names = [...new Set(["ask_user", "task_progress", ...selected])];
   if (selected.some((name) => !catalog.some((tool) => tool.name === name))) throw new MoguriError("tool_unavailable", "A selected tool is no longer in this execution scope. Rediscover the current catalogue.");
+  if (!catalog.some((tool) => tool.name === discoveryTool.name)) return catalog.slice();
   return [discoveryTool, ...names.flatMap((name) => catalog.filter((tool) => tool.name === name && name !== discoveryTool.name))];
 }
 

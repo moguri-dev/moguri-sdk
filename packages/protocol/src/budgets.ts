@@ -32,6 +32,7 @@ export const BudgetSettingsSchema = object({ rates: Type.Array(BudgetRateSchema,
 export interface BudgetEntry {
   id: string; sessionId: string | null; ownerSessionId: string | null; projectId: string | null; folderId: string | null;
   planId?: string;
+  scopePath?: string[];
   turnId: string | null; modelId: string; providerId: string | null; apiModelId: string | null; role: ModelRole;
   env: "Local" | "Sandbox" | "Remote" | "unknown"; createdAt: string; imported: boolean;
   status: "reserved" | "settled" | "unknown"; inputEstimate: number | null; outputLimit: number | null;
@@ -57,7 +58,7 @@ export interface BudgetTotals {
 }
 export interface BudgetStatus {
   sessionId: string; ownerSessionId: string; totals: BudgetTotals; profileTotals: BudgetTotals;
-  limits: Array<{ scope: "session" | "profile" | "global"; tokens: number | null; usd: number | null }>;
+  limits: Array<{ scope: "session" | "profile" | "global"; sessionId?: string; tokens: number | null; usd: number | null }>;
   remainingTokens: number | null; remainingUsd: number | null;
   basis: "estimate"; warning: string; diagnostics: string[]; rate: BudgetRate | null;
 }

@@ -7,7 +7,7 @@ import { SENDBOX_024 as pinnedRelease, sandboxDistributionCacheKey, sandboxFileH
 import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
 
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "scripts/worker-image/Containerfile"];
+const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", "scripts/worker-image/Containerfile"];
 const hashes = {};
 for (const path of inputs) hashes[path] = sha(await readFile(path));
 const payloadDigest = sha(JSON.stringify(hashes));
@@ -52,7 +52,7 @@ export async function prepareSandboxDistribution() {
   execFileSync(process.execPath, ["scripts/prepare-worker-image.mjs", "--build", "--receipt", imageReceipt], { stdio: "inherit", timeout: 10 * 60_000 });
   const image = JSON.parse(await readFile(imageReceipt, "utf8"));
   assert.equal(image.status, "PASS"); assert.equal(image.payload.protocol, PROTOCOL_VERSION);
-  for (const path of ["dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "package.json", "package-lock.json"]) assert.equal(image.payload.files[path], hashes[path]);
+  for (const path of ["dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", "package.json", "package-lock.json"]) assert.equal(image.payload.files[path], hashes[path]);
   const vendorCache = resolve(".native/sendbox-distribution", pinnedRelease.version); await mkdir(vendorCache, { recursive: true, mode: 0o700 });
   const archive = join(vendorCache, archiveName);
   try { await stat(archive); }

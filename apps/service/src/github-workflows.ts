@@ -15,6 +15,7 @@ import { runProgram } from "./program.ts";
 import { digest, type EventStore } from "./store.ts";
 import type { CandidateJobLifecycle } from "./candidates.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import type { ModelAdviceSource } from "../../../packages/protocol/src/questions.ts";
 import type { WorkflowHost } from "./workflow-host.ts";
 export { githubRootQuarantined };
 
@@ -574,8 +575,9 @@ export class GitHubWorkflows {
     const statusItems = items(statuses.data, "statuses").map((value) => ({ ...item(value, "status"), headSha: head }));
     return { items: [...values, ...statusItems], next: checks.next || statuses.next };
   }
-  async execute(command: GithubCommand, finish: WorkspaceFinish): Promise<CommandResult> {
+  async execute(command: GithubCommand, finish: WorkspaceFinish, modelSource?: ModelAdviceSource): Promise<CommandResult> {
     command = structuredClone(parse(GithubCommandSchema, command));
+    if (modelSource && (command.type !== "github.execute" || command.action.kind !== "github.issue.create" || !command.scope.sessionId)) throw new MoguriError("github_model_scope", "The approved model adapter supports issue creation only, never Git writes, merges or inspection acknowledgement.", 403);
     const intent = finish.intent;
     if (!intent || !/^[a-f0-9]{64}$/.test(intent.digest)) throw new MoguriError("github_intent", "An actual-user canonical command identity is required before Git/GitHub admission.", 409);
     if (command.type === "github.acknowledge") {
@@ -624,7 +626,7 @@ export class GitHubWorkflows {
           const now = new Date(this.now()).toISOString(), operation: GithubOperation = {
             version: 1, id: operationId, profileId: preview.document.profileId, projectId: command.scope.projectId,
             workspaceId: command.scope.workspaceId ?? null, originSessionId: command.scope.sessionId ?? null, root: preview.document.root,
-            kind: command.action.kind, actor: "user", commandId: intent.id, commandDigest: intent.digest, reviewDigest, inputDigest,
+            kind: command.action.kind, actor: modelSource ? "model" : "user", ...(modelSource ? { modelSource } : {}), commandId: intent.id, commandDigest: intent.digest, reviewDigest, inputDigest,
             resultDigest: null, jobId: job.id, revision: 0, status: "running", dispatched: false, cancelRequested: false,
             createdAt: now, updatedAt: now, diagnostic: null,
           };

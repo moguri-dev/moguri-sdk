@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { parseDocument } from "yaml";
@@ -60,6 +60,11 @@ import { frameDigest } from "./worker-wire.ts";
 import { MemoryPreparedSchema, type MemoryPrepared } from "./memory-mcp.ts";
 import { INTERNAL_MCP_TOOLS, builtinToolDigest } from "./gateway-tools.ts";
 import type { ToolingQuery, ToolingResponse } from "../../../packages/protocol/src/tooling.ts";
+import type { CoordinationQuery, CoordinationResponse } from "../../../packages/protocol/src/coordination.ts";
+import { CommandJobSchema, CommandJobReadSchema } from "../../../packages/protocol/src/tooling.ts";
+import { runCommand, commandTail } from "./supervisor.ts";
+import { textFilePage } from "./files.ts";
+import { performance } from "node:perf_hooks";
 import { BrowserBroker } from "./browser.ts";
 import { BROWSER_MCP_TOOLS, isBrowserCommand, isBrowserQuery, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
@@ -121,7 +126,8 @@ export interface PlatformHost {
   compactionQuery(query: CompactionQuery): CompactionResponse;
   compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult;
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
-  toolingQuery?(query: ToolingQuery): ToolingResponse;
+  toolingQuery?(query: ToolingQuery): ToolingResponse | Promise<ToolingResponse>;
+  coordinationQuery?(query: CoordinationQuery): CoordinationResponse;
   generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleProposal(id: string): import("../../../packages/protocol/src/index.ts").CandidateRoleProposalRead;
   compoundProposal(workflowId: string, stepId: string): CompoundCandidateProposal;
@@ -182,6 +188,7 @@ export class PlatformRuntime {
   readonly telemetry: OperationTelemetry;
   readonly repositories: RepositoryTelemetry;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
+  private commandTails = new Map<string, { text: string; bytes: number; startedAt: number; pid: number | null }>();
   private shuttingDown = false;
   private speechCleanupError: string | null = null;
   private voiceCaptures = new Map<string, { sessionId: string; token: string; consumed: boolean; input: ReturnType<typeof Promise.withResolvers<Uint8Array>> }>();
@@ -531,14 +538,16 @@ export class PlatformRuntime {
         diagnostic: "Service restarted during candidate work. Original intent/effects remain unconfirmed; inspect the retained source and owned staging root. Nothing was replayed." } },
     }));
     const native = this.nativePublications.recover();
-    if (interrupted.length || candidates.length || native.length) this.host.commit([...candidates, ...native, ...interrupted.map((job): EventInput => {
+    if (interrupted.length || candidates.length || native.length) this.host.commit([...candidates, ...native, ...interrupted.flatMap((job): EventInput[] => {
       const operation = job.operationId ? this.snapshot().linearOperations.find((operation) => operation.id === job.operationId) ??
         this.snapshot().githubOperations.find((operation) => operation.id === job.operationId) : undefined;
-      return { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
+      return [{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
         payload: { jobId: job.id, status: operation && operation.status !== "running" ? operation.status : "partial", resultDigest: null,
           error: operation?.diagnostic ?? "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed.",
           ...(job.operationId ? { operationId: job.operationId } : {}), ...(job.candidate ? { candidateId: job.candidate.candidateId } : {}),
-          ...(job.sandboxPublicationId ? { sandboxPublicationId: job.sandboxPublicationId } : {}) } };
+          ...(job.sandboxPublicationId ? { sandboxPublicationId: job.sandboxPublicationId } : {}) } },
+        ...(job.commandJob && job.sessionId ? [{ event_type: "session.blocked" as const, profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
+          payload: { diagnostic: "Service restarted with an owned command/watch intent. Inspect its original captured root/processes and acknowledge the exact job before Resume. No PID was adopted or command replayed." } }] : [])];
     })]);
     this.workspace.start();
     this.sessionPrs.start();
@@ -552,7 +561,7 @@ export class PlatformRuntime {
     const skillEntries = entries.filter((entry) => entry.kind === "skill");
     const knowledge = entries.filter((entry) => entry.kind !== "skill").map((entry) => `[${entry.kind}: ${entry.name}; source=${entry.source}; sha256=${entry.contentDigest}]\n${this.store.blob(entry.contentDigest)}`).join("\n\n");
     if (Buffer.byteLength(knowledge) > 16384) throw new MoguriError("knowledge_context_limit", "Enabled legacy knowledge exceeds 16 KiB. Review/disable or explicitly compact it; no instructions were silently truncated.", 409);
-    const skillMetadata = JSON.stringify({ skills: skillEntries.slice(0, 20).map((entry) => ({ id: entry.id, name: entry.name, description: entry.description.slice(0, 200), digest: entry.contentDigest })),
+    const skillMetadata = JSON.stringify({ skills: skillEntries.slice(0, 20).map((entry) => ({ id: entry.id, name: entry.name, description: entry.description.slice(0, 200), descriptionClipped: entry.description.length > 200, digest: entry.contentDigest })),
       omitted: Math.max(0, skillEntries.length - 20), loadWith: "use_skill find/load; load the complete selected body when relevant, never invent skill instructions" }).replaceAll("<", "\\u003c");
     return `${snapshot.settings.values.systemPrompt}
 ${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}${guidanceText(snapshot.settings.values.guidance, project ? this.sessions.projects.values(project.id).guidance : undefined)}${session?.controls.verbosity && verbosityGuidance[session.controls.verbosity] ? `\n<response-verbosity>${verbosityGuidance[session.controls.verbosity]}</response-verbosity>` : ""}
@@ -569,6 +578,8 @@ Use these known first-party facts for Moguri setup questions instead of asking t
 
 <moguri-execution-contract>
 Project: ${project ? session?.controls.env === "Remote" ? this.sessions.projects.configuration(project.id).values.remotePath ?? "(remote workspace not configured)" : project.path : "(no active project)"}
+Repository comparison defaults (local ref observations, not remote freshness): ${JSON.stringify(project ? { ...this.sessions.projects.values(project.id).repo,
+  baseCommit: snapshot.managedWorkspaces.find((workspace) => workspace.id === session?.workspaceId)?.baseCommit ?? null } : null).replaceAll("<", "\\u003c")}
 Execution boundary: ${session?.controls.env ?? "Local"}. Local is not sandboxed; an unready protected environment cannot fall back.
 Autonomy: ${session?.controls.autonomy ?? "Manual"}. A tool requires deterministic permission or a human approval. Model text cannot alter those limits.
 ${session?.controls.autonomy === "Guided" ? "Guided: when offering clarification choices, include a justified recommendation choiceIndex/reason only if no user-only fact is missing. Briefly explain the current tool request in this same model step. Always wait for the actual user; a recommendation is not an answer, approval or new permission." : ""}
@@ -632,7 +643,11 @@ ${skillEntries.length ? `\n<enabled-skill-catalog>\n${skillMetadata}\n</enabled-
     }));
   }
   async query(query: PlatformQuery): Promise<PlatformResponse> {
-    if (query.type === "tooling.catalog" || query.type === "tooling.result") {
+    if (query.type === "coordination.preview" || query.type === "coordination.read") {
+      if (!this.host.coordinationQuery) throw new MoguriError("coordination_authority", "The scoped coordination authority is unavailable.");
+      return this.host.coordinationQuery(query);
+    }
+    if (query.type === "tooling.catalog" || query.type === "tooling.result" || query.type === "tooling.command" || query.type === "tooling.state") {
       if (!this.host.toolingQuery) throw new MoguriError("tooling_authority", "The scoped service tooling authority is unavailable.");
       return this.host.toolingQuery(query);
     }
@@ -754,6 +769,63 @@ ${skillEntries.length ? `\n<enabled-skill-catalog>\n${skillMetadata}\n</enabled-
       }
     }
   }
+  commandJobRead(sessionId: string, id: string, offset = 0): import("../../../packages/protocol/src/tooling.ts").CommandJobRead {
+    this.session(sessionId);
+    const job = this.snapshot().jobs.find((job) => job.id === id && job.sessionId === sessionId && job.kind === "command.watch" && job.commandJob);
+    if (!job?.commandJob) throw new MoguriError("command_scope", "This is not an original approved command job in the exact session.", 403);
+    const live = this.commandTails.get(id);
+    if (live && job.status === "running") {
+      if (offset) throw new MoguriError("command_cursor", "Live output is a changing tail, not an immutable paged result. Start at zero; retained completion output is paged separately.");
+      return { id, status: job.status, env: job.commandJob.env, root: job.commandJob.root, text: commandTail(live.text, 12000),
+        source: "live-owned-command-tail", complete: false, outputBytes: live.bytes, retainedBytes: Buffer.byteLength(live.text),
+        elapsedMs: performance.now() - live.startedAt, pid: live.pid, nextOffset: null, observedAt: new Date().toISOString() };
+    }
+    const inspectionDigest = createHash("sha256").update(JSON.stringify([job.id, job.commandJob, job.status, job.resultDigest])).digest("hex");
+    if (!job.resultDigest) return { id, status: job.status, env: job.commandJob.env, root: job.commandJob.root, text: null, outputBytes: null, elapsedMs: null, inspectionDigest,
+      source: "unavailable", diagnostic: job.error ?? "The original command has not supplied a retained result. Missing data is not zero output or success.", nextOffset: null };
+    const result: unknown = JSON.parse(this.store.blob(job.resultDigest));
+    if (!isRecord(result) || typeof result.text !== "string" || typeof result.exitCode !== "number" || !Number.isFinite(result.exitCode) ||
+      result.signal !== null && typeof result.signal !== "number" || typeof result.elapsedMs !== "number" || !Number.isFinite(result.elapsedMs) ||
+      typeof result.outputBytes !== "number" || !Number.isFinite(result.outputBytes) || !["known-group-stopped", "unconfirmed"].includes(String(result.cleanup))) {
+      throw new MoguriError("command_result", "Original command result is malformed; no alternate console or invented statistic was read.");
+    }
+    return { ...textFilePage(result.text, { offset, limit: 12000 }), id, status: job.status, env: job.commandJob.env, root: job.commandJob.root,
+      source: "retained-command-result", digest: job.resultDigest, complete: result.outputComplete === true,
+      exitCode: result.exitCode, signal: result.signal, elapsedMs: result.elapsedMs, outputBytes: result.outputBytes,
+      cleanup: result.cleanup === "known-group-stopped" ? "known-group-stopped" : "unconfirmed", inspectionDigest };
+  }
+  private commandJob(session: Session, call: ToolCall, signal: AbortSignal) {
+    const input = parse(CommandJobSchema, call.arguments);
+    signal.throwIfAborted();
+    if (input.action === "stop") {
+      const job = this.snapshot().jobs.find((job) => job.id === input.jobId && job.sessionId === session.id && job.kind === "command.watch");
+      if (!job) throw new MoguriError("command_scope", "Select this session's original command job.");
+      const active = this.active.get(job.id);
+      if (active) active.abort.abort();
+      return { id: job.id, status: job.status, stopRequested: Boolean(active), diagnostic: "A stop request is not acknowledgement or rollback; inspect the final job result." };
+    }
+    if (!input.command || !input.timeoutMs || session.controls.env !== "Local" || !session.projectId || !session.turnId) throw new MoguriError("command_boundary", "Watch start needs an approved Local workspace/owning turn, exact command and bounded timeout. No transport or root fallback.");
+    if (this.snapshot().jobs.filter((job) => job.kind === "command.watch" && job.status === "running").length >= 2) throw new MoguriError("command_limit", "Two original command/watch jobs already own this profile. Stop one explicitly first.");
+    const original = this.host.events().findLast((event) => event.event_type === "tool.started" && event.session_id === session.id && event.turn_id === session.turnId && event.payload.call.id === call.id);
+    if (!original?.step_id) throw new MoguriError("command_authority", "No original approved tool start owns this command. No process was launched.");
+    const id = createHash("sha256").update(JSON.stringify([session.id, session.turnId, original.step_id, call.id])).digest("hex");
+    if (this.snapshot().jobs.some((job) => job.id === id)) return { id, admission: "already-recorded", diagnostic: "Original command intent exists; no process was replayed." };
+    const root = this.managed.project(session).path, command = input.command, timeout = input.timeoutMs;
+    this.job("command.watch", session.projectId, session.id, async (jobSignal) => {
+      const current = this.session(session.id);
+      if (current.controls.env !== "Local" || this.managed.project(current).path !== root || !this.snapshot().policy.allowedEnvs.includes("Local") && !current.localFinishing) throw new MoguriError("command_scope", "Command scope changed before process dispatch. No fallback or process was started.");
+      await assertSessionTool(current, root, this.sessions.projects.values(current.projectId), call);
+      const tail = { text: "", bytes: 0, startedAt: performance.now(), pid: null as number | null };
+      this.commandTails.set(id, tail);
+      return runCommand(root, command, timeout, jobSignal, (text) => { tail.bytes += Buffer.byteLength(text); tail.text = commandTail(tail.text + text); },
+        (pid) => { tail.pid = pid; });
+    }, () => { this.commandTails.delete(id); }, (job) => {
+      job.commandJob = { root, command, timeoutMs: timeout, callId: call.id, env: "Local" };
+      this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { job } }]);
+    }, session.workspaceId ?? undefined, undefined, id);
+    return { id, admission: "recorded", lifetime: "session-owned; survives model turn, bounded by original timeout; stop cancels it", env: "Local", root,
+      diagnostic: "Admission is not successful command completion. Use read_command_job for actual logs, status and observed statistics." };
+  }
   readResult(id: string, offset: number, limit: number, modelSessionId?: string) {
     const job = this.snapshot().jobs.find((job) => job.id === id);
     if (!job || modelSessionId && job.sessionId !== modelSessionId) throw new MoguriError("result_scope", "Result is outside this session/profile.", 403);
@@ -828,9 +900,12 @@ ${skillEntries.length ? `\n<enabled-skill-catalog>\n${skillMetadata}\n</enabled-
     const abort = new AbortController();
     const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
-      abort.signal.throwIfAborted();
+      if (kind !== "command.watch") abort.signal.throwIfAborted();
       const resultDigest = this.store.putBlob(JSON.stringify(result)), events = lifecycle?.completed(result, resultDigest) ?? [];
-      this.host.commit([...events, { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: "completed", resultDigest, error: null, ...retention } }]);
+      const commandStatus = kind === "command.watch" && isRecord(result) ? result.outcome === "partial" ? "partial" : result.isError === true ? "failed" : "completed" : "completed";
+      const error = commandStatus === "completed" ? null : `Original command ${commandStatus}; inspect its actual exit, output and cleanup observation.`;
+      this.host.commit([...events, ...(commandStatus === "partial" && sessionId ? [{ event_type: "session.blocked" as const, profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { diagnostic: error! } }] : []),
+        { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: commandStatus, resultDigest, error, ...retention } }]);
     }).catch((error: unknown) => {
       const partial = error instanceof MoguriError && ["install_partial", "cache_partial", "cache_cleanup_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
         kind === "repository.refresh" && this.snapshot().repositoryObservations.some((observation) => observation.jobId === id) ||
@@ -893,7 +968,9 @@ ${skillEntries.length ? `\n<enabled-skill-catalog>\n${skillMetadata}\n</enabled-
     return { id: request.id, token: lease.token };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
-    if (command.type === "tooling.execute") throw new MoguriError("tooling_authority", "Tool jobs require the canonical service command/receipt authority.", 403);
+    if (command.type === "workflow.start") throw new MoguriError("workflow_authority", "Workflows use the shared session admission/receipt path.", 403);
+    if (command.type === "coordination.grant" || command.type === "coordination.message" || command.type === "coordination.control") throw new MoguriError("coordination_authority", "Coordination needs the canonical service command/receipt authority.", 403);
+    if (command.type === "tooling.execute" || command.type === "tooling.command.acknowledge") throw new MoguriError("tooling_authority", "Tool jobs require the canonical service command/receipt authority.", 403);
     if (isBrowserCommand(command)) { this.browser.command(command); return finish([]); }
     if (isApplicationCommand(command)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (command.type === "project.clone") {
@@ -1180,9 +1257,14 @@ ${skillEntries.length ? `\n<enabled-skill-catalog>\n${skillMetadata}\n</enabled-
     return this.gateway.operate({ action: "call", server, root, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared, scripts: await this.scripts(project?.id) }, signal, session.id);
   }
   async delegate(session: Session, call: ToolCall, signal: AbortSignal): Promise<{ text: string; isError: boolean; outcome: string }> {
+    if (call.name === "command_job") return { text: JSON.stringify(this.commandJob(session, call, signal)), isError: false, outcome: "completed" };
+    if (call.name === "read_command_job") {
+      const input = parse(CommandJobReadSchema, call.arguments);
+      return { text: JSON.stringify(this.commandJobRead(session.id, input.jobId, input.offset)), isError: false, outcome: "completed" };
+    }
     if (call.name === "read_tool_result") {
       if (!this.host.toolingQuery) throw new MoguriError("tooling_authority", "The scoped result authority is unavailable.");
-      const result = this.host.toolingQuery({ type: "tooling.result", sessionId: session.id, input: {
+      const result = await this.host.toolingQuery({ type: "tooling.result", sessionId: session.id, input: {
         stepId: String(call.arguments.stepId), callId: String(call.arguments.callId), offset: Number(call.arguments.offset ?? 0),
       } });
       return { text: JSON.stringify(result), isError: false, outcome: "completed" };
@@ -1195,8 +1277,10 @@ ${skillEntries.length ? `\n<enabled-skill-catalog>\n${skillMetadata}\n</enabled-
       if (call.arguments.action === "find") {
         const query = String(call.arguments.query ?? "").toLowerCase();
         const found = entries.filter((entry) => !query || `${entry.name} ${entry.description}`.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
-        return { text: JSON.stringify({ skills: found.slice(0, 20).map((entry) => ({ id: entry.id, name: entry.name, description: entry.description, digest: entry.contentDigest })),
-          omitted: Math.max(0, found.length - 20) }), isError: false, outcome: "completed" };
+        const offset = Number(call.arguments.offset ?? 0);
+        if (offset > found.length) throw new MoguriError("skill_cursor", "The skill result changed. Start a fresh bounded search.");
+        return { text: JSON.stringify({ skills: found.slice(offset, offset + 8).map((entry) => ({ id: entry.id, name: entry.name, description: entry.description, digest: entry.contentDigest })),
+          nextOffset: offset + 8 < found.length ? offset + 8 : null, total: found.length }), isError: false, outcome: "completed" };
       }
       const entry = entries.find((entry) => entry.id === call.arguments.id);
       if (!entry || entry.contentDigest !== call.arguments.expectedDigest) throw new MoguriError("skill_source", "Select an enabled skill and its current exact digest. No changed, disabled or foreign body was loaded.", 409);

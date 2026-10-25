@@ -162,22 +162,35 @@ export class BudgetRuntime {
     if (!session) throw new MoguriError("budget_session", "Choose an existing session in this profile.", 404);
     return session;
   }
-  owner(session: Session): Session {
+  private ownershipPath(session: Session): string[] {
     const seen = new Set<string>();
-    while (session.kind === "subagent") {
-      if (!session.parentSessionId || seen.has(session.id)) throw new MoguriError("budget_owner", "This model-created child has no valid owning session. No model charge was authorized.", 409);
-      seen.add(session.id); session = this.session(session.parentSessionId);
+    const path = [session.id];
+    while (session.kind === "subagent" || session.coordinationParentId) {
+      const parentId = session.coordinationParentId ?? session.createdParentSessionId;
+      if (!parentId || seen.has(session.id)) throw new MoguriError("budget_owner", "This coordinated/model-created child has no valid original owner. No model charge was authorized.", 409);
+      seen.add(session.id); session = this.session(parentId); path.push(session.id);
+      if (path.length > 8) throw new MoguriError("budget_owner", "Coordination budget ancestry exceeds its bound.");
     }
-    return session;
+    return path;
+  }
+  owner(session: Session): Session { return this.session(this.ownershipPath(session).at(-1)!); }
+  private scopedEntries(entries: BudgetEntry[], ownerId: string, sessionId = ownerId): BudgetEntry[] {
+    return sessionId === ownerId ? this.owned(entries, ownerId) : entries.filter((entry) => entry.sessionId === sessionId || entry.scopePath?.includes(sessionId));
+  }
+  private scopedPlans(plans: BudgetPlan[], ownerId: string, sessionId = ownerId): BudgetPlan[] {
+    return plans.filter((plan) => sessionId === ownerId ? plan.ownerSessionId === ownerId : plan.sessionId === sessionId || plan.scopePath?.includes(sessionId));
   }
   private rate(modelId: string | null): BudgetRate | null {
     const settings = this.host.snapshot().settings.values.budgets, rate = settings.rates.find((rate) => rate.modelId === modelId);
     return rate && Date.now() - Date.parse(rate.effectiveAt) <= settings.maxPriceAgeDays * 86_400_000 ? structuredClone(rate) : null;
   }
     private owned(entries: BudgetEntry[], ownerId: string): BudgetEntry[] { return entries.filter((entry) => entry.ownerSessionId === ownerId || entry.ownerSessionId === null && ["subagent", "unknown"].includes(entry.role)); }
-  private limits(owner: Session): Array<{ scope: "session" | "profile" | "global"; limit: BudgetLimit }> {
-    const limits: Array<{ scope: "session" | "profile" | "global"; limit: BudgetLimit }> = [], profile = this.host.snapshot().budgetPolicy.limit;
-    if (owner.controls.budget.kind === "limited") { this.validateLimit(owner.controls.budget); limits.push({ scope: "session", limit: { ...owner.controls.budget, basis: "estimate" } }); }
+  private limits(owner: Session, session: Session = owner): Array<{ scope: "session" | "profile" | "global"; sessionId?: string; limit: BudgetLimit }> {
+    const limits: Array<{ scope: "session" | "profile" | "global"; sessionId?: string; limit: BudgetLimit }> = [], profile = this.host.snapshot().budgetPolicy.limit;
+    for (const id of this.ownershipPath(session)) {
+      const current = this.session(id);
+      if (current.controls.budget.kind === "limited") { this.validateLimit(current.controls.budget); limits.push({ scope: "session", sessionId: current.id, limit: { ...current.controls.budget, basis: "estimate" } }); }
+    }
     if (profile) { this.validateLimit(profile); limits.push({ scope: "profile", limit: profile }); }
     const global = this.host.global?.().limit;
     if (global) { this.validateLimit(global); limits.push({ scope: "global", limit: global }); }
@@ -185,11 +198,11 @@ export class BudgetRuntime {
   }
   status(sessionId: string, actualModelId?: string): BudgetStatus {
     const session = this.session(sessionId), owner = this.owner(session), entries = this.host.snapshot().budgetEntries, plans = this.host.snapshot().budgetPlans,
-      owned = this.owned(entries, owner.id), ownedPlans = plans.filter((plan) => plan.ownerSessionId === owner.id), limits = this.limits(owner);
+      owned = this.owned(entries, owner.id), ownedPlans = plans.filter((plan) => plan.ownerSessionId === owner.id), limits = this.limits(owner, session);
     const diagnostics: string[] = [], remainingTokens: number[] = [], remainingUsd: number[] = [];
-    for (const { scope, limit } of limits) {
-      const scoped = scope === "session" ? owned : entries, global = scope === "global" ? this.host.global?.() : undefined;
-      const charges = budgetCharges(scoped, scope === "session" ? ownedPlans : plans), tokens = global ? global.chargedTokens : charges.tokens, usd = global ? global.chargedUsdMicros : charges.usdMicros;
+    for (const { scope, limit, sessionId: limitSession } of limits) {
+      const scoped = scope === "session" ? this.scopedEntries(entries, owner.id, limitSession) : entries, global = scope === "global" ? this.host.global?.() : undefined;
+      const charges = budgetCharges(scoped, scope === "session" ? this.scopedPlans(plans, owner.id, limitSession) : plans), tokens = global ? global.chargedTokens : charges.tokens, usd = global ? global.chargedUsdMicros : charges.usdMicros;
       if (limit.tokens !== undefined) { if (tokens === null) diagnostics.push(`${scope} has unbounded historical token usage; finite admission is blocked.`); else remainingTokens.push(Math.max(0, limit.tokens - tokens)); }
       if (limit.usd !== undefined) { if (usd === null) diagnostics.push(`${scope} has unpriced calls or planned holds; cumulative USD admission is blocked.`); else remainingUsd.push(Math.max(0, micros(limit.usd) - usd) / 1_000_000); }
     }
@@ -197,7 +210,7 @@ export class BudgetRuntime {
     if (limits.some(({ limit }) => limit.usd !== undefined) && !rate) diagnostics.push("The selected model needs an explicit fresh dated USD estimate; unknown pricing is not zero.");
     if (limits.length && entries.some((entry) => entry.modelId === selectedModelId && entry.outputLimitViolation)) diagnostics.push("This provider exceeded an actual forwarded output limit. Finite admission for this model is unqualified; verify the provider instead of retrying around it.");
     return { sessionId, ownerSessionId: owner.id, totals: budgetTotals(owned, ownedPlans), profileTotals: budgetTotals(entries, plans),
-      limits: limits.map(({ scope, limit }) => ({ scope, tokens: limit.tokens ?? null, usd: limit.usd ?? null })),
+      limits: limits.map(({ scope, limit, sessionId }) => ({ scope, ...(sessionId ? { sessionId } : {}), tokens: limit.tokens ?? null, usd: limit.usd ?? null })),
       remainingTokens: remainingTokens.length ? Math.min(...remainingTokens) : null, remainingUsd: remainingUsd.length ? Math.min(...remainingUsd) : null,
       basis: "estimate", warning: BUDGET_WARNING, diagnostics, rate };
   }
@@ -205,15 +218,16 @@ export class BudgetRuntime {
     return this.reservation(session, input);
   }
   private reservation(session: Session, input: ModelReservationInput, planned?: BudgetPlan): { event: EventInput; maxTokens: number } {
-    const snapshot = this.host.snapshot(), owner = this.owner(session), limits = this.limits(owner), entries = snapshot.budgetEntries;
+    const snapshot = this.host.snapshot(), owner = this.owner(session), limits = this.limits(owner, session), entries = snapshot.budgetEntries;
     if (entries.some((entry) => entry.id === input.stepId)) throw new MoguriError("budget_duplicate", "This exact model step already has an accounting reservation. It was not charged/dispatched again.", 409);
     const selectedModelId = input.modelId ?? session.controls.modelId;
     if (!integer(input.inputEstimate) || !integer(input.maxOutputTokens) || !Number.isSafeInteger(input.inputEstimate + input.maxOutputTokens) || input.maxOutputTokens < 1 || input.role === "unknown" || !selectedModelId) throw new MoguriError("budget_request", "Model accounting needs an actual role, selected model, bounded input estimate and a positive actual output limit.");
     const rate = this.rate(selectedModelId), status = this.status(session.id, selectedModelId);
     if (status.diagnostics.length) throw new MoguriError("budget_unavailable", status.diagnostics.join(" "), 409);
-    const availability = limits.map(({ scope, limit }) => {
-      const scoped = scope === "session" ? this.owned(entries, owner.id) : entries, global = scope === "global" ? this.host.global?.() : undefined;
-      const charges = budgetCharges(scoped, snapshot.budgetPlans.filter((plan) => plan.id !== planned?.id && (scope !== "session" || plan.ownerSessionId === owner.id)));
+    const availability = limits.map(({ scope, limit, sessionId: limitSession }) => {
+      const scoped = scope === "session" ? this.scopedEntries(entries, owner.id, limitSession) : entries, global = scope === "global" ? this.host.global?.() : undefined;
+      const availablePlans = snapshot.budgetPlans.filter((plan) => plan.id !== planned?.id);
+      const charges = budgetCharges(scoped, scope === "session" ? this.scopedPlans(availablePlans, owner.id, limitSession) : availablePlans);
       return { limit, tokens: limit.tokens === undefined ? null : limit.tokens - (global ? global.chargedTokens! - (planned?.tokens ?? 0) : charges.tokens!),
         usd: limit.usd === undefined ? null : micros(limit.usd) - (global ? global.chargedUsdMicros! - (planned?.usdMicros ?? 0) : charges.usdMicros!) };
     });
@@ -226,6 +240,7 @@ export class BudgetRuntime {
     while (low < high) { const middle = low + Math.ceil((high - low) / 2); if (fits(middle)) low = middle; else high = middle - 1; }
     const entry: BudgetEntry = {
       id: input.stepId, sessionId: session.id, ownerSessionId: owner.id, projectId: session.projectId, folderId: snapshot.projectConfigurations.find((configuration) => configuration.projectId === session.projectId)?.folderId ?? null,
+      ...(owner.id !== session.id ? { scopePath: this.ownershipPath(session) } : {}),
       turnId: input.turnId, modelId: selectedModelId, providerId: input.providerId, apiModelId: input.apiModelId, role: input.role,
       env: session.controls.env, createdAt: new Date().toISOString(), imported: false, status: "reserved", inputEstimate: input.inputEstimate, outputLimit: low,
       reservedTokens: input.inputEstimate + low, reportedTokens: null, reservedUsdMicros: rate ? price(rate, input.inputEstimate, low) : null,
@@ -274,6 +289,7 @@ export class BudgetRuntime {
       role: input.role, modelId: entry.modelId, providerId: input.providerId, apiModelId: input.apiModelId, authorityDigest: input.authorityDigest,
       inputBound: input.inputEstimate, outputBound: input.maxOutputTokens, tokens: entry.reservedTokens, usdMicros: entry.reservedUsdMicros, rate: entry.rate,
       revision: 0, createdAt: entry.createdAt, updatedAt: entry.createdAt, status: "held", consumedStepId: null, release: null,
+      ...(entry.scopePath ? { scopePath: entry.scopePath } : {}),
     });
     return { plan, event: { event_type: "budget.plan_recorded", profile_id: plan.profileId, payload: { plan } } };
   }
@@ -305,17 +321,17 @@ export class BudgetRuntime {
       entry.reservedTokens !== entry.inputEstimate + entry.outputLimit) throw new MoguriError("budget_reservation", "This exact role/model/session/input has no matching bounded reservation. No held capacity was borrowed or dispatched.", 409);
     if (this.host.events().some((event) => event.event_type === "model.started" && event.step_id === input.stepId)) throw new MoguriError("budget_duplicate", "The reserved model step already has a recorded dispatch. No lost-receipt request was replayed.", 409);
     if (entry.status !== "reserved") throw new MoguriError("budget_reservation", "Only an original undispatched reservation can start. Settled or unknown work was not replayed or refunded.", 409);
-    const status = this.status(session.id, input.modelId), limits = this.limits(owner);
+    const status = this.status(session.id, input.modelId), limits = this.limits(owner, session);
     if (status.diagnostics.length) throw new MoguriError("budget_unavailable", status.diagnostics.join(" "), 409);
     if (limits.some(({ limit }) => limit.usd !== undefined) && !sameBudgetRate(entry.rate, this.rate(input.modelId))) throw new MoguriError("budget_reservation", "The captured USD estimate changed before reserved dispatch. Review a new policy; no repricing or free call was invented.", 409);
     this.assertHeldCapacity(session);
     return entry.outputLimit;
   }
   private assertHeldCapacity(session: Session): void {
-    const snapshot = this.host.snapshot(), owner = this.owner(session), limits = this.limits(owner);
-    for (const { scope, limit } of limits) {
-      const scoped = scope === "session" ? this.owned(snapshot.budgetEntries, owner.id) : snapshot.budgetEntries, global = scope === "global" ? this.host.global?.() : undefined;
-      const charges = budgetCharges(scoped, snapshot.budgetPlans.filter((plan) => scope !== "session" || plan.ownerSessionId === owner.id)),
+    const snapshot = this.host.snapshot(), owner = this.owner(session), limits = this.limits(owner, session);
+    for (const { scope, limit, sessionId: limitSession } of limits) {
+      const scoped = scope === "session" ? this.scopedEntries(snapshot.budgetEntries, owner.id, limitSession) : snapshot.budgetEntries, global = scope === "global" ? this.host.global?.() : undefined;
+      const charges = budgetCharges(scoped, scope === "session" ? this.scopedPlans(snapshot.budgetPlans, owner.id, limitSession) : snapshot.budgetPlans),
         tokens = global ? global.chargedTokens : charges.tokens, usd = global ? global.chargedUsdMicros : charges.usdMicros;
       if (limit.tokens !== undefined && (tokens === null || tokens > limit.tokens) ||
         limit.usd !== undefined && (usd === null || usd > micros(limit.usd))) throw new MoguriError("budget_exhausted", "The latest cumulative policy is below actual/held usage. Reserved wind-down cannot override a stricter cap; work and its hold were preserved.", 409);
