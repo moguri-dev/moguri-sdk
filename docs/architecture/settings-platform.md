@@ -298,6 +298,22 @@ release-signing, SendBox, routing and remote-host gates remain unqualified.
 Generated tests cover physical pointer/keyboard release, early admission,
 cancelled outcomes, actual bounded WAV delivery, transcript/draft isolation and
 attention/completion/focus preferences without a real microphone or speaker.
+The signal check uses a generated 48-kHz Web Audio MediaStream, requires actual
+normalized 16-kHz PCM with a peak above 1,000 PCM16 units, and checks one upload
+and zero generative-model calls. The host's plain Chromium fake microphone can
+return silence, so a recognizer fixture returning text alone is not evidence
+that waveform samples survived capture. Real microphone hardware and ASR
+accuracy remain unqualified by these generated checks.
+
+Final qualification: **82/82** focused voice/audio/settings/recovery checks pass
+in **11.31 s**; the full hidden Electron rerun passes **174 cases**, with **3**
+existing skips, in **5.5 min**, using the generated `.moguri/artifacts` output
+directory. The full unit run exercised **1,359 cases**: **1,341** passed and
+**14** skipped; its four pre-sound recovery-fixture incompatibilities were
+corrected at fixture generation and all pass in the focused rerun. No migration
+guard was weakened or ciphertext rewritten. Type checks, production build,
+packed external SDK verification and the moderate-level dependency audit pass
+with **zero vulnerabilities**. Vite retains its existing large-chunk warning.
 
 ## Reused components and persistence
 
