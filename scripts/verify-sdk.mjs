@@ -377,6 +377,7 @@ try {
     import {createHash,randomUUID} from "node:crypto";
     import {createServer} from "node:http";
     import {fileURLToPath} from "node:url";
+    import {homedir} from "node:os";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
     import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}} from "moguri";
@@ -1240,12 +1241,12 @@ try {
         await consoleSdk.terminal.close(opened.id);
         if(PROTOCOL_VERSION>=53&&mode==="Local"){
           const global=await consoleSdk.terminal.openGlobal(),globalState=(await consoleSdk.terminal.read(global.id)).terminal;
-          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(consoleState));
+          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(PROTOCOL_VERSION>=59?homedir():consoleState));
           const globalCli=JSON.parse((await invoke(["terminal","read",global.id])).stdout);assert.equal(globalCli.terminal.id,global.id);
           const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
           await consoleSdk.sessions.delete(session.id,true);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);
           await consoleSdk.terminal.close(global.id);
-          console.log("Installed protocol-44 global Local console owns the exact data directory independently of sessions/projects through SDK, CLI and TUI, with no model context or launch replay.");
+          console.log("Installed protocol-"+PROTOCOL_VERSION+" global Local console owns the exact "+(PROTOCOL_VERSION>=59?"configured HOME":"data directory")+" independently of sessions/projects through SDK, CLI and TUI, with no model context or launch replay.");
         }
         consoleSdk.disconnect();await stopMoguriService(consoleState,{expectedConnection:consoleRuntime.connection});
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
