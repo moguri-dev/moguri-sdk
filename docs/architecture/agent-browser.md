@@ -93,7 +93,7 @@ failed** (168 total) in **5.3 minutes**, including the actual sliding-button
 shape, thumb movement, 44-pixel hit area, Space/Enter and focus regression.
 Its log is `.moguri/artifacts/agent-browser-full-e2e.log`.
 
-## Distribution qualification
+## Browser-control checkpoint distribution qualification
 
 The packed external SDK passed its public imports/declarations, approved fresh
 install/audit, shared CLI/TUI/API probes and all 12 actual installed-worker
