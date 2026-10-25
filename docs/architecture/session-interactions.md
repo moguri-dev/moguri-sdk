@@ -66,6 +66,48 @@ Fresh prerequisites pass all six available generated groups: cancellation
 0.917/5.957 ms. Separate live/native/notarized/Linux/quality gates remain
 FAIL/unqualified, not enabled by this navigation repair.
 
+### Session ordering qualification
+
+Source `287f887` fixes a reproduced native failure: an ordinary unread update
+during a real mouse drag changed the full session revision and cancelled the
+move. Exact structural intent now survives that unrelated activity, while a
+concurrent pin change still refuses the captured move without an order-event
+prefix. Unknown/non-revision failures do not retry. Grip drags use insertion
+halves rather than the whole row's attachment center, and old hover cues clear.
+The existing action control supplies the grip without reducing title space;
+the 6-pixel point, 15-pixel status glyph and narrow captions remain unchanged.
+
+The first full run also exposed an old keyboard-readiness race: `connect()`
+can seed a snapshot before its event channel authenticates. `39e02cd` waits for
+the mode switch to be enabled and verifies Attach focus before testing Tab.
+It neither bypasses the actual connected gate nor weakens the focus assertion.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/fresh audit | PASS; zero vulnerabilities |
+| Native ordering, hierarchy, keyboard and narrow-row checks | 21 passed / 20.8 seconds |
+| Nine new ordering/icon cases repeated twice | 18 passed / 13.8 seconds |
+| Atomic sibling CAS/restart/shared-session service checks | 7 passed / 2,708.10 ms |
+| Authenticated mode/keyboard case repeated ten times | 10 passed / 19.1 seconds |
+| Complete final hidden Electron suite | 153 passed, 2 physical-native skips, zero failures; 155 total / 4.7 minutes |
+| Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
+| Actual newly packaged hidden app | All ordering/icon/hierarchy/keyboard/narrow-row cases: 21 passed / 21.0 seconds |
+| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned worker image unchanged |
+| Production ZIP/manifest consumer | PASS; 740,546,225-byte archive / 100,592.68 ms |
+| Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
+
+The rebuilt DMG is 754,157,653 bytes, SHA-256
+`b3c9b3081f04121b2251d0bfc966d460eb0300d59923dc7fca3d1eea7c27eb4d`.
+Earlier installer identities remain historical. The complete 1,294-pass/
+14-skip Node baseline is retained, not relabeled: no service/SDK/CLI/TUI/protocol
+source changed, and only the focused service checks were freshly rerun.
+All ordering fixtures are generated and make no model request. Hidden UI and
+owned resources were used, never personal app/browser/account/microphone,
+paid inference or administrator installation. An earlier user-opened image
+was not closed. Ad-hoc signing, FFI/chunk/optional-icon notices, downstream
+SDK-host compatibility overrides and physical-native/notarization/Linux limits
+remain unchanged.
+
 ## Explicit plans and questions
 
 Only an acknowledged owning-model `task_progress` plan action with at least two
