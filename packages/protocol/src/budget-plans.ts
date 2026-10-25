@@ -9,6 +9,7 @@ const units = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const timestamp = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" });
 export const BudgetPlanSchema = object({
   version: Type.Literal(1), id, profileId: id, sessionId: id, ownerSessionId: id, turnId: id, ownerTurnId: Type.Union([id, Type.Null()]),
+  scopePath: Type.Optional(Type.Array(id, { minItems: 1, maxItems: 8, uniqueItems: true })),
   projectId: Type.Union([id, Type.Null()]), folderId: Type.Union([id, Type.Null()]),
   env: Type.Union([Type.Literal("Local"), Type.Literal("Remote"), Type.Literal("Sandbox")]),
   purpose: Type.Literal("winddown"), role: ModelRoleSchema, modelId: id, providerId: Type.Union([id, Type.Null()]), apiModelId: id,
@@ -33,6 +34,7 @@ export function projectBudgetPlan(previous: BudgetPlan | undefined, value: unkno
   if (!validTime(plan.createdAt) || !validTime(plan.updatedAt) || plan.role === "unknown" ||
     !Number.isSafeInteger(plan.inputBound + plan.outputBound) || plan.tokens !== plan.inputBound + plan.outputBound) corrupt("Planned role, UTC observations or complete token bound is invalid.");
   if (plan.sessionId === plan.ownerSessionId && plan.ownerTurnId !== plan.turnId) corrupt("A primary plan lost its exact owning turn.");
+  if (plan.scopePath && (plan.scopePath[0] !== plan.sessionId || plan.scopePath.at(-1) !== plan.ownerSessionId)) corrupt("Planned capacity lost its exact original coordination path.");
   if (plan.rate && (!/^\d{4}-\d{2}-\d{2}$/.test(plan.rate.effectiveAt) || !Number.isFinite(Date.parse(plan.rate.effectiveAt)) ||
     new Date(plan.rate.effectiveAt).toISOString().slice(0, 10) !== plan.rate.effectiveAt || plan.rate.effectiveAt > plan.createdAt.slice(0, 10))) corrupt("The captured plan price has no valid current/past admission date.");
   const cost = plan.rate ? Math.ceil(plan.inputBound * plan.rate.inputUsdPerMillion + plan.outputBound * plan.rate.outputUsdPerMillion) : null;
@@ -46,7 +48,7 @@ export function projectBudgetPlan(previous: BudgetPlan | undefined, value: unkno
     const immutable = ["version", "id", "profileId", "sessionId", "ownerSessionId", "turnId", "ownerTurnId", "projectId", "folderId", "env", "purpose", "role",
       "modelId", "providerId", "apiModelId", "authorityDigest", "inputBound", "outputBound", "tokens", "usdMicros", "createdAt"] as const;
     if (previous.status !== "held" || plan.status === "held" || plan.revision !== previous.revision + 1 ||
-      immutable.some((key) => previous[key] !== plan[key]) || !sameBudgetRate(previous.rate, plan.rate)) corrupt("Original planned ownership/bounds changed or terminal capacity was replayed.");
+      immutable.some((key) => previous[key] !== plan[key]) || JSON.stringify(previous.scopePath) !== JSON.stringify(plan.scopePath) || !sameBudgetRate(previous.rate, plan.rate)) corrupt("Original planned ownership/bounds changed or terminal capacity was replayed.");
   }
   return structuredClone(plan);
 }
@@ -57,6 +59,7 @@ export function validateBudgetPlanEntries(plans: BudgetPlan[], entries: BudgetEn
     const plan = byId.get(entry.planId);
     if (!plan || plan.status !== "consumed" || plan.consumedStepId !== entry.id || used.has(plan.id) ||
       entry.sessionId !== plan.sessionId || entry.ownerSessionId !== plan.ownerSessionId || entry.turnId !== plan.turnId || (entry.ownerTurnId ?? null) !== plan.ownerTurnId ||
+      JSON.stringify(entry.scopePath) !== JSON.stringify(plan.scopePath) ||
       entry.projectId !== plan.projectId || entry.folderId !== plan.folderId || entry.env !== plan.env || entry.role !== plan.role ||
       entry.modelId !== plan.modelId || entry.providerId !== plan.providerId || entry.apiModelId !== plan.apiModelId ||
       entry.inputEstimate === null || entry.outputLimit === null || !Number.isSafeInteger(entry.inputEstimate) || !Number.isSafeInteger(entry.outputLimit) ||

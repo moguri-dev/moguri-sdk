@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
+import { ModelAdviceSourceSchema } from "./questions.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -24,6 +25,7 @@ export const GithubScopeSchema = object({
 export type GithubScope = Static<typeof GithubScopeSchema>;
 const github = { repository, account };
 const release = { tag: ref, target: ref, name: title, body, draft: Type.Boolean(), prerelease: Type.Boolean() };
+export const GithubIssueCreateActionSchema = object({ kind: Type.Literal("github.issue.create"), ...github, title, body });
 export const GithubActionSchema = Type.Union([
   object({ kind: Type.Literal("git.push"), remote, branch: ref, forceWithLease: Type.Boolean() }),
   object({ kind: Type.Literal("git.rebase"), mode: Type.Literal("start"), onto: ref }),
@@ -32,7 +34,7 @@ export const GithubActionSchema = Type.Union([
   object({ kind: Type.Literal("git.tag.push"), remote, tag: ref }),
   object({ kind: Type.Literal("git.tag.delete"), tag: ref, location: Type.Literal("local") }),
   object({ kind: Type.Literal("git.tag.delete"), tag: ref, location: Type.Literal("remote"), remote }),
-  object({ kind: Type.Literal("github.issue.create"), ...github, title, body }),
+  GithubIssueCreateActionSchema,
   object({ kind: Type.Literal("github.issue.update"), ...github, number, title: Type.Optional(title), body: Type.Optional(body),
     state: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("closed")])) }),
   object({ kind: Type.Literal("github.issue.comment"), ...github, number, body: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
@@ -99,7 +101,7 @@ export type GithubInspection = Static<typeof GithubInspectionSchema>;
 export const GithubOperationSchema = object({
   version: Type.Literal(1), id, profileId: id, projectId: id, workspaceId: Type.Union([id, Type.Null()]),
   originSessionId: Type.Union([id, Type.Null()]), root: GithubReviewDocumentSchema.properties.root,
-  kind: operationKind, actor: Type.Literal("user"),
+  kind: operationKind, actor: Type.Union([Type.Literal("user"), Type.Literal("model")]), modelSource: Type.Optional(ModelAdviceSourceSchema),
   commandId: id, commandDigest: hash, reviewDigest: hash, inputDigest: hash, resultDigest: maybeHash, jobId: id,
   revision: count, status: Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("cancelled"), Type.Literal("partial")]),
   dispatched: Type.Boolean(), cancelRequested: Type.Boolean(), createdAt: timestamp, updatedAt: timestamp,
@@ -118,6 +120,8 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
   const corrupt = (): never => { throw new MoguriError("github_corrupt", "Git/GitHub intent, scope or lifecycle is corrupt. State was preserved; no operation was replayed.", 409); };
   if (!Value.Check(GithubOperationSchema, value)) return corrupt();
   const next = value;
+  if (next.actor === "model" && (!next.modelSource || next.kind !== "github.issue.create" || !next.originSessionId) ||
+    next.actor === "user" && next.modelSource) return corrupt();
   if (![next.createdAt, next.updatedAt].every((value) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value) ||
     !next.root.root.startsWith("/") || next.root.root.includes("\0") || !next.root.root.isWellFormed() ||
     next.status === "completed" && (!next.dispatched || !next.resultDigest || next.cancelRequested || next.diagnostic !== null) ||
@@ -141,7 +145,7 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
     const immutable = ["version", "id", "profileId", "projectId", "workspaceId", "originSessionId", "kind", "actor", "commandId",
       "commandDigest", "reviewDigest", "inputDigest", "jobId", "createdAt"] as const;
     if (next.inspection || next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
-      JSON.stringify(next.root) !== JSON.stringify(previous.root) || previous.dispatched && !next.dispatched ||
+      JSON.stringify(next.root) !== JSON.stringify(previous.root) || JSON.stringify(next.modelSource) !== JSON.stringify(previous.modelSource) || previous.dispatched && !next.dispatched ||
       previous.cancelRequested && !next.cancelRequested) return corrupt();
   }
   return structuredClone(next);

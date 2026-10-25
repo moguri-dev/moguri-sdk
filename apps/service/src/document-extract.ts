@@ -57,7 +57,7 @@ function required(parts: Map<string, Buffer>, path: string): XmlNode {
   if (!value) fail("document_structure", `The OOXML package is missing ${path}.`);
   return xml(value);
 }
-async function archive(data: Buffer, format: "docx" | "xlsx"): Promise<Map<string, Buffer>> {
+export async function archive(data: Buffer, format: "docx" | "xlsx"): Promise<Map<string, Buffer>> {
   if (data.readUInt32LE(0) !== 0x04034b50) fail("document_signature", "The selected Office document is not an unencrypted OOXML ZIP package.");
   const zip = await fromBufferPromise(data, { lazyEntries: true, strictFileNames: true, validateEntrySizes: true });
   const parts = new Map<string, Buffer>(), names = new Set<string>();

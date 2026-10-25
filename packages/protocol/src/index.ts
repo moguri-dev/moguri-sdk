@@ -45,13 +45,15 @@ import { projectLinearOperation, type LinearEventPayloads, type LinearOperation 
 import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts";
 import type { TaskPlan, TaskProgressReport } from "./progress.ts";
 import { SessionPrObservationSchema, sameSessionPrScope, sessionPrScope, type SessionPrObservation } from "./session-status.ts";
+import { CoordinationLinkSchema, CoordinationMessageSchema, type CoordinationLink, type CoordinationMessage, type CoordinationTaskOrigin } from "./coordination.ts";
+import type { WorkflowKind } from "./workflows.ts";
 export * from "./session-status.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 57;
+export const PROTOCOL_VERSION = 58;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -147,9 +149,11 @@ export interface QueueItem {
   targetTurnId?: string;
   held?: boolean;
   mode?: SessionMode;
+  origin?: CoordinationTaskOrigin;
+  workflow?: { kind: WorkflowKind };
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
-export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; outcome: string; env?: Controls["env"] }
+export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; stepId?: string; outcome: string; env?: Controls["env"] }
 export type SessionStatus = "idle" | "queued" | "running" | "waiting_input" | "stopping" | "completed" | "stopped" | "failed" | "partial" | "archived";
 export interface Session {
   id: string;
@@ -176,6 +180,9 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   parentSessionId?: string;
+  createdParentSessionId?: string;
+  coordinationParentId?: string;
+  parentSnapshotDigest?: string;
   readOnly?: boolean;
   mode: SessionMode;
   pendingMode: SessionMode | null;
@@ -233,7 +240,12 @@ export interface Connection {
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
+  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
+  "coordination.linked": { link: CoordinationLink };
+  "coordination.message": { message: CoordinationMessage };
+  "coordination.delivered": { messageId: string; turnId: string; stepId: string };
+  "command.inspected": { jobId: string; root: string; actor: "user" };
+  "process.ended": { callId: string; pid: number; outcome: "completed" | "stopped" | "failed" | "partial" };
   "session.workspace_bound": { workspaceId: string | null };
   "session.pr_observed": { observation: SessionPrObservation };
   "session.sandbox_bound": { workspaceId: string };
@@ -287,7 +299,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
-  "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string };
+  "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; rawDigest?: string; rawComplete?: boolean };
   "task.progress_reported": { report: TaskProgressReport };
   "task.plan_updated": { plan: TaskPlan };
   "turn.stop_requested": { holdQueue?: true };
@@ -376,6 +388,7 @@ export type StoredEvent = EventInput & {
   artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
+  "coordination.linked", "coordination.message", "coordination.delivered", "command.inspected", "process.ended",
   "project.added", "session.created", "session.configured", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
@@ -411,6 +424,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const registry = new Map<string, CapabilityEntry>();
   const proposals = new Map<string, Proposal>();
   const knowledge = new Map<string, KnowledgeRecord>();
+  const coordinationLinks = new Map<string, CoordinationLink>();
+  const coordinationMessages = new Map<string, CoordinationMessage>();
   const githubOperations = new Map<string, GithubOperation>();
   const linearOperations = new Map<string, LinearOperation>();
   const dependencyRegistries = new Map<string, DependencyRegistry>();
@@ -560,7 +575,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (event.project_id || event.session_id || event.turn_id || event.step_id || event.payload.version !== 1 || event.payload.priorHistory !== "retained-events-only") throw new MoguriError("telemetry_corrupt", "Unsupported or non-root operation coverage metadata. State was preserved.", 409);
       operationCoverage ??= { ...event.payload, since: event.timestamp, sourceSeq: event.seq };
     }
-    if (event.event_type === "budget.recorded") budgetEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
+    if (event.event_type === "budget.recorded") {
+      const entry = event.payload.entry, previous = budgetEntries.get(entry.id), path = entry.scopePath;
+      if (path && (path.length < 1 || path.length > 8 || new Set(path).size !== path.length || path[0] !== entry.sessionId || path.at(-1) !== entry.ownerSessionId) ||
+        previous && JSON.stringify(previous.scopePath) !== JSON.stringify(path)) throw new MoguriError("budget_owner", "An accounting update changed or lost its original coordination capacity path.", 409);
+      budgetEntries.set(entry.id, structuredClone(entry));
+    }
     if (event.event_type === "candidate.usage_retained") {
       const { usage, sessionId, generationId } = event.payload, entry = budgetEntries.get(usage.stepId);
       if (event.project_id || event.session_id || event.turn_id || event.step_id || event.artifact_id ||
@@ -919,6 +939,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         }
       }
     }
+    if (event.event_type === "command.inspected") {
+      const job = jobs.get(event.payload.jobId);
+      if (!job?.commandJob || job.status !== "partial" || job.sessionId !== event.session_id || job.commandJob.root !== event.payload.root || event.payload.actor !== "user") throw new MoguriError("command_scope", "Command inspection lost its exact original root/owner.", 409);
+      job.commandJob = { ...job.commandJob, inspected: true };
+    }
     if (event.event_type === "job.progress") {
       const job = jobs.get(event.payload.jobId);
       if (job) { job.progress = event.payload.progress; if (event.payload.status) job.status = event.payload.status; }
@@ -926,7 +951,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "job.finished") {
       const job = jobs.get(event.payload.jobId);
       if (job) Object.assign(job, { status: event.payload.status, resultDigest: event.payload.resultDigest, error: event.payload.error });
-      if (job && (job.kind.startsWith("git.") || ["cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply", "compound.validate", "winddown.commit"].includes(job.kind)) && event.payload.status === "partial" && job.projectId) {
+      if (job && (job.kind.startsWith("git.") || ["command.watch", "cache.install", "project.defaults", "project.artifacts.materialize", "candidate.stage", "candidate.apply", "compound.validate", "winddown.commit"].includes(job.kind)) && event.payload.status === "partial" && job.projectId) {
         if (job.workspaceId) blockedWorkspaces.add(job.workspaceId); else blockedProjects.add(job.projectId);
       }
     }
@@ -959,7 +984,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         controls: structuredClone(event.payload.controls), defaults: event.payload.defaults ? structuredClone(event.payload.defaults) : undefined, revision: 0, status: "idle", draft: { revision: 0, text: "", attachments: [] },
         queue: [], queueRevision: 0, messages: [], usage: [], processes: [], turnId: null, pendingApproval: null, pendingQuestionId: null,
         lastError: null, localFinishing: false, createdAt: event.timestamp, updatedAt: event.timestamp,
-        parentSessionId: event.payload.parentSessionId, readOnly: event.payload.readOnly,
+        parentSessionId: event.payload.parentSessionId, createdParentSessionId: event.payload.parentSessionId, coordinationParentId: event.payload.coordinationParentId, parentSnapshotDigest: event.payload.parentSnapshotDigest, readOnly: event.payload.readOnly,
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
         kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, order: nextSessionOrder++, unread: false, groupId: null, archivedAt: null,
         prUrl: event.payload.prUrl ?? null, prObservation: null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
@@ -970,6 +995,27 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     const session = event.session_id ? sessions.get(event.session_id) : undefined;
     if (!session) continue;
+    if (event.event_type === "coordination.linked") {
+      const link = event.payload.link, previous = coordinationLinks.get(link.childId);
+      if (!Value.Check(CoordinationLinkSchema, link) || link.origin.actor === "service" || event.session_id !== link.childId ||
+        session.createdParentSessionId !== link.parentId || session.projectId !== event.project_id ||
+        link.revision !== (previous?.revision ?? -1) + 1 || previous && previous.parentId !== link.parentId) throw new MoguriError("coordination_corrupt", "A coordination grant changed its actual birth owner, scope or revision.", 409);
+      coordinationLinks.set(link.childId, structuredClone(link));
+    }
+    if (event.event_type === "coordination.message") {
+      const message = event.payload.message;
+      if (!Value.Check(CoordinationMessageSchema, message) || message.toSessionId !== session.id || message.deliveredTo !== null ||
+        coordinationMessages.has(message.id)) throw new MoguriError("coordination_corrupt", "A session message lost its original recipient, actor or unique identity.", 409);
+      coordinationMessages.set(message.id, structuredClone(message));
+      session.messages.push({ id: `coordination:${message.id}`, turnId: event.turn_id ?? "", role: "notice",
+        text: `From session ${message.fromSessionId} (${message.origin.actor}): ${message.text}`, timestamp: event.timestamp });
+      session.unread = true;
+    }
+    if (event.event_type === "coordination.delivered") {
+      const message = coordinationMessages.get(event.payload.messageId);
+      if (!message || message.toSessionId !== session.id || message.deliveredTo || session.turnId !== event.payload.turnId || event.turn_id !== event.payload.turnId) throw new MoguriError("coordination_corrupt", "Message delivery lost its exact recipient/turn or was replayed.", 409);
+      message.deliveredTo = { turnId: event.payload.turnId, stepId: event.payload.stepId };
+    }
     if (event.event_type === "session.pr_observed") {
       const observation = event.payload.observation;
       const scope = sessionPrScope(session, { issues: [...issues.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()],
@@ -983,7 +1029,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     session.updatedAt = event.timestamp;
     const addUser = (item: QueueItem) => session.messages.push({
-      id: item.id, turnId: event.turn_id ?? "", role: "user", text: item.text +
+      id: item.id, turnId: event.turn_id ?? "", role: item.origin ? "notice" : "user", text: (item.origin ? `Delegated by session ${item.origin.fromSessionId} (${item.origin.origin.actor}): ` : "") + item.text +
         (item.attachments.length ? `\n\nAttached: ${item.attachments.map((attachment) => attachment.path).join(", ")}` : ""),
       timestamp: event.timestamp, attachments: item.attachments.length ? structuredClone(item.attachments) : undefined,
     });
@@ -1035,7 +1081,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       case "queue.edited": {
         const item = session.queue.find((item) => item.id === event.payload.messageId);
-        if (item) { item.text = event.payload.text; if (event.payload.attachments) item.attachments = event.payload.attachments; }
+        if (item) { item.text = event.payload.text; delete item.origin; delete item.workflow; if (event.payload.attachments) item.attachments = event.payload.attachments; }
         session.queueRevision++;
         break;
       }
@@ -1139,7 +1185,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         if (message) message.text = (message.text + event.payload.text).slice(-MAX_TEXT);
         break;
       }
-      case "process.started": session.processes.push({ ...event.payload, turnId: event.turn_id ?? "", outcome: "running" }); break;
+      case "process.started": session.processes.push({ ...event.payload, turnId: event.turn_id ?? "", stepId: event.step_id ?? undefined, outcome: "running" }); break;
+      case "process.ended": {
+        const process = session.processes.find((process) => process.callId === event.payload.callId && process.pid === event.payload.pid && process.turnId === event.turn_id && process.stepId === event.step_id);
+        if (!process) throw new MoguriError("process_owner", "Process completion has no original owned process observation.", 409);
+        process.outcome = event.payload.outcome; break;
+      }
       case "tool.completed": {
         const message: PublicMessage = {
           id: event.payload.call.id, turnId: event.turn_id ?? "", role: "tool", text: event.payload.text,
@@ -1147,7 +1198,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         };
         const index = session.messages.findIndex((item) => item.id === message.id);
         if (index >= 0) session.messages[index] = message; else session.messages.push(message);
-        for (const process of session.processes) if (process.callId === event.payload.call.id) process.outcome = event.payload.outcome;
+        for (const process of session.processes) if (process.callId === event.payload.call.id && !(event.payload.call.name === "debug" && event.payload.call.arguments.action === "start")) process.outcome = event.payload.outcome;
         break;
       }
       case "turn.stop_requested":
@@ -1190,6 +1241,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       control.payload.promptDigest !== sequence.inputDigest || control.payload.controls.env !== sequence.env) throw new MoguriError("role_sequence_corrupt", "Role metadata lost its exact original owning control turn. No model or root authority was adopted.", 409);
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
+    coordinationLinks: [...coordinationLinks.values()].filter((link) => sessions.has(link.parentId) && sessions.has(link.childId)),
+    coordinationMessages: [...coordinationMessages.values()].filter((message) => sessions.has(message.toSessionId)),
     settings, lastModelSelection, notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],

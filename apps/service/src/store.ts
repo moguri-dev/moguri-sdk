@@ -53,6 +53,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "tool.completed": return input.payload.rawDigest ? [input.payload.rawDigest] : [];
     case "candidate.owner_bound": {
       const evidence = input.payload.owner.generationEvidence;
       return evidence ? [evidence.inputDigest, evidence.resultDigest, evidence.proposalDocumentDigest] : [];
@@ -67,7 +68,7 @@ function references(input: EventInput): string[] {
       input.payload.publication.documentDigest, input.payload.publication.operationDigest].filter((hash): hash is string => hash !== null);
     case "queue.enqueued": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "queue.edited": return input.payload.attachments?.flatMap(attachmentDigests) ?? [];
-    case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.pasteFiles ?? []).flatMap(attachmentDigests), ...(input.payload.documents ?? []).flatMap(attachmentDigests)];
+    case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.parentSnapshotDigest ? [input.payload.parentSnapshotDigest] : []), ...(input.payload.pasteFiles ?? []).flatMap(attachmentDigests), ...(input.payload.documents ?? []).flatMap(attachmentDigests)];
     case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.flatMap(attachmentDigests)];
     case "turn.prompt_bound": return [input.payload.promptDigest];
     case "turn.control_started": return [input.payload.purpose === "plan.save" ? input.payload.intentDigest : input.payload.promptDigest];
@@ -283,9 +284,24 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='browser_control_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid browser control schema marker. State was preserved.");
       }
+      const candidateMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='candidate_retention_schema'").get();
+      const toolingMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_schema'").get();
+      const convergenceMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_convergence_schema'").get();
+      const tooling57 = version === 57 && toolingMarker?.value === "1" && !candidateMarker && !convergenceMarker;
+      if (version === 57 && !tooling57 && !(candidateMarker?.value === "1" && !toolingMarker && !convergenceMarker) ||
+        version < 57 && (toolingMarker || convergenceMarker)) throw new Error("Invalid protocol-57 lineage markers. State was preserved.");
       if (version < 57) this.migrateCandidateRetention();
+      else if (tooling57) this.migrateCandidateRetention(true);
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='candidate_retention_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid candidate retention schema marker. State was preserved.");
+      }
+      if (version < 58 && !tooling57) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('lean_tooling_schema','1');
+        INSERT INTO retention_metadata(id,value) VALUES ('lean_tooling_convergence_schema','1');
+        PRAGMA user_version=58; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_schema'").get()?.value !== "1" ||
+        this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_convergence_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid lean tooling/convergence schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }
@@ -311,7 +327,7 @@ export class EventStore {
       this.db.exec("PRAGMA user_version=53; COMMIT;");
     } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
   }
-  private migrateCandidateRetention(): void {
+  private migrateCandidateRetention(convergeTooling57 = false): void {
     const rows = this.db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all();
     const live = new Map<string, StoredEvent>(), generations = new Map<string, CandidateGenerationRecord>(), artifacts = new Set<string>();
     for (const row of rows) {
@@ -362,7 +378,9 @@ export class EventStore {
           CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END;
           CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END;`);
       }
-      this.db.exec("INSERT INTO retention_metadata(id,value) VALUES ('candidate_retention_schema','1'); PRAGMA user_version=57; COMMIT;");
+      this.db.exec(`INSERT INTO retention_metadata(id,value) VALUES ('candidate_retention_schema','1');
+        ${convergeTooling57 ? "INSERT INTO retention_metadata(id,value) VALUES ('lean_tooling_convergence_schema','1'); PRAGMA user_version=58;" : "PRAGMA user_version=57;"}
+        COMMIT;`);
       if (moved.size) this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); this.keys.clear(); throw error; }
   }

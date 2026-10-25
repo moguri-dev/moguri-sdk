@@ -51,12 +51,22 @@ These decisions define the implementation stack and constraints for the [impleme
 | D27 | Reviewed platform workflows add independent tiered knowledge, bounded lifecycle hooks, repository-backed catalogs, explicit Git/GitHub/Linear writes and scoped ecosystem caches; whole-descendant guarantees require qualified SendBox. | Exact review, privacy, compatibility, root leases, command/no-replay, migration/recovery, native VM teardown or packed-client qualification fails. |
 | D28 | Plan checklist completion is periodically observed; long-task owning-model estimates stay separate, untrusted advice without hidden inference. | Plan/root ownership, stale reports, cancellation, recovery or cross-client comparison fails. |
 | D29 | Document attachments reuse scoped encrypted snapshots and bounded inspection; PDF.js and streamed ZIP/strict XML parse in restricted resource-bounded processes. | Parser content/resource qualification, grant retention, provenance, worker transport or browser-safe packed SDK checks fail. |
+| D30 | Lazy typed discovery and compact recoverable views reuse the owned worker; deterministic utilities, structured authoring/SQL and root-bound parent/child coordination extend the same SDK/policy/budget authority. | Required evidence becomes unreachable, actual actor/root/cap ownership fails, or representative task-quality evaluation regresses. |
 
 D28's [task progress contract](task-progress.md) records generated checklist and
 hidden-client qualification. D29's [document contract](document-attachments.md)
 records parser licenses, limits and measured Phase 0 results before integration.
 Neither decision expands unrelated roadmap, model authority or unqualified
 execution transports.
+
+D30's [lean tooling and coordination contract](lean-tooling.md) records
+prerequisite measurements, independent implementation, reused MIT libraries,
+strict schema-58 lineage convergence and qualified/unsupported boundaries. Typed native
+schemas won the generated interface comparison over a generic untyped gateway;
+that comparison is not live token/cache/quality evidence. Node supervises
+existing `rg`/`jq` and isolated data workers under the D06 checkpoint allowance.
+No new Rust helper, agent framework, silent compaction or permission-bearing
+model/router advice is introduced.
 
 ## D01. Build from zero with borrowed libraries
 

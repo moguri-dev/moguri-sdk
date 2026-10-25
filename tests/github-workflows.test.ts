@@ -19,6 +19,7 @@ import { removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
 import { runProgram } from "../apps/service/src/program.ts";
 import type { WorkflowHost } from "../apps/service/src/workflow-host.ts";
 import type { WorkspaceFinish } from "../apps/service/src/session-workspace.ts";
+import { setupFixture } from "./fixture.ts";
 
 const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
 type Fields = Record<string, string | number | boolean>;
@@ -151,11 +152,11 @@ async function generated(options: GitHubWorkflowOptions & { gh?: GeneratedGithub
       const done = Promise.resolve().then(() => execute(abort.signal, () => {}, id)).then((value) => {
         abort.signal.throwIfAborted();
         const resultDigest = store.putBlob(JSON.stringify(value)), observed = state().jobs.find((job) => job.id === id)!;
-        append([...(lifecycle?.completed(value, resultDigest) ?? []), { event_type: "job.finished", profile_id: "default", project_id: projectId,
+        append([...(lifecycle?.completed(value, resultDigest) ?? []), { event_type: "job.finished", profile_id: "default", project_id: projectId, session_id: sessionId ?? null,
           payload: { jobId: id, status: "completed", resultDigest, error: null, operationId: observed.operationId } }]);
       }).catch((error: unknown) => {
         const failure = lifecycle!.failed(error, abort.signal.aborted), observed = state().jobs.find((job) => job.id === id)!;
-        append([...failure.events, { event_type: "job.finished", profile_id: "default", project_id: projectId,
+        append([...failure.events, { event_type: "job.finished", profile_id: "default", project_id: projectId, session_id: sessionId ?? null,
           payload: { jobId: id, status: failure.status, resultDigest: null, error: failure.error, operationId: observed.operationId } }]);
       }).finally(() => { settled?.(); });
       jobs.set(id, { abort, done }); return id;
@@ -189,6 +190,44 @@ async function generated(options: GitHubWorkflowOptions & { gh?: GeneratedGithub
   return { directory, root, remote, hooks, git, bare, store, storePath, key, runtime, host, state, extra, configuration, scope, preview, command, finish, start, settled, append, jobs,
     close: async () => { runtime.close(); await Promise.all([...jobs.values()].map((value) => value.done)); store.close(); await rm(directory, { recursive: true, force: true }); } };
 }
+
+test("approved model issue creation retains model origin without granting Git or inspection authority", async () => {
+  const f = await generated({ gh: new GeneratedGithub() });
+  try {
+    f.append([{ event_type: "session.created", profile_id: "default", project_id: f.scope.projectId, session_id: "generated-model-owner",
+      payload: { title: "Generated model owner", controls: factoryControls() } }]);
+    const scope = { ...f.scope, sessionId: "generated-model-owner" };
+    const source = { actor: "model" as const, modelId: "generated-model", providerId: "generated-provider", stepId: "generated-step", callId: "generated-call" };
+    const review = await f.runtime.query({ type: "github.preview", scope, action: { kind: "github.issue.create", repository: "generated/repo", account: "generated-user", title: "Generated model issue", body: "Generated body" } });
+    if (review.type !== "github.preview") assert.fail("Missing preview.");
+    const command = f.command(review.preview), created = await f.runtime.execute(command, f.finish(command), source);
+    const result = await f.settled(created.id!);
+    assert.equal(result.operation.actor, "model"); assert.deepEqual(result.operation.modelSource, source);
+    const forbidden = { ...command, action: { kind: "git.push" as const, remote: "origin", branch: "main", forceWithLease: false } };
+    await assert.rejects(() => f.runtime.execute(forbidden, f.finish(forbidden), source), { code: "github_model_scope" });
+  } finally { await f.close(); }
+});
+
+for (const lostResponse of [false, true]) test(`the actual worker creates an issue with ${lostResponse ? "a retained partial/lost response" : "separate exact approvals"}`, { timeout: 15000 }, async () => {
+  const gh = new GeneratedGithub(), f = await setupFixture({
+    issueCreation: { service: "github", input: { kind: "github.issue.create", repository: "generated/repo", account: "generated-user", title: "Generated native issue", body: "Generated native body." } },
+    platform: { github: { runProgram: async (executable, args, options) => executable === "gh" ? gh.handle(args) : runProgram(executable, args, options) } },
+  });
+  try {
+    gh.loseResponse = lostResponse;
+    const git = (...args: string[]) => execFileSync("git", ["-C", f.project, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+    git("init", "--initial-branch=main"); git("add", "fixture.txt");
+    git("-c", "user.name=Generated Fixture", "-c", "user.email=generated@example.invalid", "commit", "--no-gpg-sign", "-m", "Generated issue fixture");
+    await f.configure(); await f.send("Generated native issue request.");
+    await f.approve(); await f.approve();
+    assert.equal((await f.terminal()).status, lostResponse ? "partial" : "completed");
+    const operation = f.service.controller.snapshot().githubOperations[0]!;
+    assert.equal(operation.status, lostResponse ? "partial" : "completed"); assert.equal(operation.actor, "model");
+    assert.equal(operation.modelSource?.modelId, f.modelId); assert.equal(operation.originSessionId, f.sessionId);
+    assert.equal(gh.writes.length, 1); assert.equal(gh.writes[0]!.fields.title, "Generated native issue");
+    assert.equal(f.requests.length, lostResponse ? 2 : 3);
+  } finally { await f.close(); }
+});
 
 test("GitHub workflow protocol is typed, Local-only, and rejects unsafe remote/ref syntax without retaining credentials", () => {
   assert.equal(Value.Check(GithubCommandSchema, { type: "github.raw", endpoint: "/arbitrary" }), false);

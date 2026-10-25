@@ -296,6 +296,23 @@ test("a retention-grant rollback cannot mutate the live generation notice into a
   } finally { await f.close(); }
 });
 
+test("candidate deletion blocked by an interrupted watch still permits exact user inspection and retry", { timeout: 30_000 }, async () => {
+  const f = await candidateApiFixture({ toolCall: { name: "command_job", args: { action: "start", command: "printf 'GENERATED_CLEANUP_WATCH\\n'; sleep 30", timeoutMs: 60000 } } });
+  try {
+    await f.stage(); await f.configure(); await f.send("Generated candidate/watch cleanup."); await f.approve(); await f.terminal();
+    const job = await waitFor(() => f.service.controller.snapshot().jobs.find((job) => job.commandJob));
+    await assert.rejects(() => f.sdk.sessions.delete(f.sessionId, true), { code: "cleanup_unconfirmed" });
+    const inspection = await f.sdk.tools.command(f.sessionId, job.id);
+    assert.equal(inspection.data.status, "partial"); assert.ok(inspection.data.inspectionDigest);
+    await f.sdk.tools.acknowledgeCommand(f.sessionId, job.id, inspection.data.inspectionDigest, true);
+    await f.sdk.command({ type: "session.resume", sessionId: f.sessionId });
+    await f.sdk.sessions.delete(f.sessionId, true);
+    assert.equal(f.service.controller.snapshot().sessions.some((session) => session.id === f.sessionId), false);
+    assert.equal(f.service.controller.snapshot().candidates.length, 0);
+    assert.equal(f.requests.length, 2);
+  } finally { await f.close(); }
+});
+
 test("failed deletion still permits the draft flush required by desktop retry, without admitting new candidate work", { timeout: 30_000 }, async () => {
   const f = await candidateApiFixture();
   const editor = new DraftEditor(f.sdk, f.sessionId, f.session().draft);

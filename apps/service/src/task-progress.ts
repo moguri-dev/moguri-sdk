@@ -20,13 +20,31 @@ export class TaskProgressRuntime {
     if (!start || this.now() - Date.parse(report?.timestamp ?? start.timestamp) < LONG_TASK_MS || session.kind === "metachat" || session.kind === "subagent") return "";
     return "\nTask progress check is due at this safe boundary. Use task_progress read, then report a grounded estimate against the actual plan if useful. Keep working on the user's task; do not launch a separate model, infer acceptance or edit checklist items merely to raise progress. Percentages are untrusted estimates.";
   }
+  currentPlan(sessionId: string) {
+    const session = this.host.session(sessionId), events = this.host.events().filter((event) => event.session_id === sessionId);
+    const external = new Set(events.flatMap((event) => event.event_type === "job.started" && ["mcp.call", "tool.call"].includes(event.payload.job.kind) ? [event.turn_id] : []));
+    const control = events.some((event) => event.event_type === "turn.control_started" && event.turn_id === session.turnId);
+    const latest = session.turnId && !external.has(session.turnId) && !control ? session.turnId :
+      events.findLast((event) => event.event_type === "turn.started" && !external.has(event.turn_id))?.turn_id;
+    const binding = createHash("sha256").update(this.host.binding({ ...session, turnId: null })).digest("hex");
+    const plan = session.taskPlan;
+    return plan && plan.turnId === latest && plan.binding === binding ? structuredClone(plan) : null;
+  }
+  planEvent(sessionId: string, turnId: string, source: ModelAdviceSource, input: Extract<TaskProgressInput, { action: "plan" }>): EventInput {
+    const session = this.host.session(sessionId);
+    if (session.turnId !== turnId || ["stopping", "archived"].includes(session.status)) throw new MoguriError("progress_owner", "The original task no longer owns this plan. No late plan was recorded.", 409);
+    if (!input.title.trim() || input.steps.length < 2 || input.steps.length > 50 ||
+      [input.title, ...input.steps.map((step) => step.text)].some((text) => !text.trim() || /[\u0000-\u001f\u007f]/.test(text)) ||
+      new Set(input.steps.map((step) => step.text.trim())).size !== input.steps.length) throw new MoguriError("plan_input", "Use a readable multi-step plan with two to fifty distinct steps.");
+    const binding = createHash("sha256").update(this.host.binding({ ...session, turnId: null })).digest("hex");
+    const plan = { title: input.title, steps: structuredClone(input.steps), revision: (session.taskPlan?.revision ?? -1) + 1,
+      turnId, binding, source, digest: createHash("sha256").update(JSON.stringify([turnId, binding, input.title, input.steps])).digest("hex") };
+    return { event_type: "task.plan_updated", profile_id: this.host.profileId, project_id: session.projectId, session_id: sessionId, turn_id: turnId, step_id: source.stepId, payload: { plan } };
+  }
   async read(sessionId: string): Promise<TaskProgress> {
     const session = this.host.session(sessionId), binding = this.host.binding(session);
     const events = this.host.events().filter((event) => event.profile_id === this.host.profileId && event.session_id === sessionId);
-    const latestTurn = session.turnId ?? events.findLast((event) => event.event_type === "turn.started")?.turn_id;
-    const scope = createHash("sha256").update(this.host.binding({ ...session, turnId: null })).digest("hex");
-    const candidate = session.taskPlan;
-    const plan = candidate && candidate.turnId === latestTurn && candidate.binding === scope ? structuredClone(candidate) : null;
+    const plan = this.currentPlan(sessionId);
     let checklist: TaskProgress["checklist"] = { path: null, digest: null, completed: 0, total: 0, percent: null, diagnostic: "This chat has no bound project plan." };
     if (plan) {
       const completed = plan.steps.filter((step) => step.status === "done").length;
@@ -51,19 +69,8 @@ export class TaskProgressRuntime {
   async tool(sessionId: string, turnId: string, source: ModelAdviceSource, input: TaskProgressInput, signal: AbortSignal): Promise<TaskProgress> {
     signal.throwIfAborted();
     if (input.action === "plan") {
-      const session = this.host.session(sessionId);
-      if (session.turnId !== turnId || ["stopping", "archived"].includes(session.status)) throw new MoguriError("progress_owner", "The original task no longer owns this plan. No late plan was recorded.", 409);
-      if (!input.title.trim() || input.steps.length < 2 || input.steps.length > 50 ||
-        [input.title, ...input.steps.map((step) => step.text)].some((text) => !text.trim() || /[\u0000-\u001f\u007f]/.test(text)) ||
-        new Set(input.steps.map((step) => step.text.trim())).size !== input.steps.length) {
-        throw new MoguriError("plan_input", "Use a readable multi-step plan with two to fifty distinct steps. A simple answer does not need a checklist.");
-      }
-      const binding = createHash("sha256").update(this.host.binding({ ...session, turnId: null })).digest("hex");
-      const plan = { title: input.title, steps: structuredClone(input.steps), revision: (session.taskPlan?.revision ?? -1) + 1,
-        turnId, binding, source, digest: createHash("sha256").update(JSON.stringify([turnId, binding, input.title, input.steps])).digest("hex") };
       signal.throwIfAborted();
-      this.host.commit([{ event_type: "task.plan_updated", profile_id: this.host.profileId, project_id: session.projectId,
-        session_id: sessionId, turn_id: turnId, step_id: source.stepId, payload: { plan } }]);
+      this.host.commit([this.planEvent(sessionId, turnId, source, input)]);
       return this.read(sessionId);
     }
     const progress = await this.read(sessionId);

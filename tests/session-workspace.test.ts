@@ -44,7 +44,10 @@ test("read-only mode disables edit/shell/MCP tools and rejects an undeclared wri
     assert.equal(names.includes("write_file"), false);
     assert.equal(names.includes("run_command"), false);
     assert.equal(names.includes("mcp_gateway"), false);
-    assert.equal(names.includes("read_agent_terminal"), true);
+    assert.equal(names.includes("discover_tools"), true);
+    const catalog = await sdk.tools.catalog(fixture.sessionId, "read_agent_terminal");
+    assert.equal(catalog.type, "tooling.catalog");
+    if (catalog.type === "tooling.catalog") assert.ok(catalog.tools.some((tool) => tool.name === "read_agent_terminal"));
     await sdk.slash(fixture.sessionId, "/agent", "tui");
     assert.equal(fixture.session().mode, "agent");
     await sdk.slash(fixture.sessionId, "/rename Generated renamed session", "desktop");
@@ -78,7 +81,10 @@ test("side context runs in parallel without edit authority and explicit nested s
     try { draft.edit("generated parallel question"); await draft.send("queue"); } finally { draft.dispose(); }
     await waitFor(() => fixture.service.controller.snapshot().sessions.find((session) => session.id === side.id)?.status === "completed");
     assert.equal(fixture.session().status, "running");
-    assert.match(JSON.stringify(fixture.requests[1]?.messages), /generated slow parent context/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[1]?.messages), /generated slow parent context/);
+    assert.match(JSON.stringify(fixture.requests[1]?.messages), /parent-session-reference/);
+    const captured = await sdk.coordination.read(side.id!, { action: "snapshot" });
+    assert.match(JSON.stringify(captured), /generated slow parent context/);
     assert.equal(fixture.service.controller.snapshot().sessions.find((session) => session.id === side.id)?.usage[0]?.role, "side");
     await assert.rejects(() => sdk.sessions.mode(side.id!, "agent"), /question-only|Question-only/);
     const nested = await sdk.sessions.spawn(fixture.sessionId, "agent");

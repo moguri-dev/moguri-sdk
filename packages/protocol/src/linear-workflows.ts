@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
+import { ModelAdviceSourceSchema } from "./questions.ts";
 import type { CapabilityJob } from "./platform.ts";
 import type { LocalIssue } from "./workspace.ts";
 
@@ -38,8 +39,9 @@ export type LinearPhaseMapping = Static<typeof LinearPhaseMappingSchema>;
 export const LinearRelationTypeSchema = Type.Union([Type.Literal("blocks"), Type.Literal("duplicate"), Type.Literal("related")]);
 export type LinearRelationType = Static<typeof LinearRelationTypeSchema>;
 
+export const LinearIssueCreateInputSchema = object({ action: Type.Literal("issue.create"), fields: object({ ...issueFields, title: Type.String({ minLength: 1, maxLength: 160 }) }) });
 export const LinearWorkflowInputSchema = Type.Union([
-  object({ action: Type.Literal("issue.create"), fields: object({ ...issueFields, title: Type.String({ minLength: 1, maxLength: 160 }) }) }),
+  LinearIssueCreateInputSchema,
   object({ action: Type.Literal("issue.update"), issueId: remoteId, fields: LinearIssueFieldsSchema }),
   object({ action: Type.Literal("issue.move"), issueId: remoteId, stateId: remoteId }),
   object({ action: Type.Literal("issue.archive"), issueId: remoteId, archived: Type.Boolean() }),
@@ -134,7 +136,8 @@ export const LinearOperationSchema = object({
   status, revision: Type.Integer({ minimum: 0 }), createdAt: timestamp, updatedAt: timestamp,
   dispatched: Type.Boolean(), stopRequested: Type.Boolean(), remoteIds: Type.Array(remoteId, { maxItems: 10, uniqueItems: true }),
   diagnostic: Type.Union([Type.String({ maxLength: 4000 }), Type.Null()]),
-  acceptance: object({ actor: Type.Literal("user"), commandId: id, commandDigest: hash, reviewDigest: hash }),
+  modelSource: Type.Optional(ModelAdviceSourceSchema),
+  acceptance: object({ actor: Type.Union([Type.Literal("user"), Type.Literal("tool-grant")]), commandId: id, commandDigest: hash, reviewDigest: hash }),
 });
 export type LinearOperation = Static<typeof LinearOperationSchema>;
 export interface LinearSnapshot { linearOperations: LinearOperation[] }
@@ -143,6 +146,8 @@ export interface LinearEventPayloads { "linear.operation_recorded": { operation:
 export function projectLinearOperation(previous: LinearOperation | undefined, next: LinearOperation): LinearOperation {
   const corrupt = (): never => { throw new MoguriError("linear_corrupt", "Retained Linear ownership or lifecycle is corrupt. State was preserved.", 409); };
   if (!Value.Check(LinearOperationSchema, next) || next.acceptance.commandId !== next.commandId ||
+    next.modelSource && (next.action !== "issue.create" || next.acceptance.actor !== "tool-grant" || !next.sessionId) ||
+    !next.modelSource && next.acceptance.actor !== "user" ||
     next.acceptance.commandDigest !== next.commandDigest || next.acceptance.reviewDigest !== next.reviewDigest ||
     next.inputDigest !== next.reviewDigest || !next.root.startsWith("/") || next.root.includes("\0") ||
     !["issue.create", "issue.update", "issue.move", "issue.archive", "issue.delete", "comment.create", "comment.update", "comment.delete", "project.create", "project.update", "project.archive", "relation.create", "relation.delete", "ticket.sync", "ticket.publish"].includes(next.action) ||
@@ -157,7 +162,7 @@ export function projectLinearOperation(previous: LinearOperation | undefined, ne
       "credentialGeneration", "action", "commandId", "commandDigest", "reviewDigest", "inputDigest", "jobId", "createdAt"] as const;
     if (previous.status !== "running" && previous.status !== "partial" ||
       next.revision !== previous.revision + 1 || immutable.some((field) => previous[field] !== next[field]) ||
-      JSON.stringify(next.acceptance) !== JSON.stringify(previous.acceptance) ||
+      JSON.stringify(next.acceptance) !== JSON.stringify(previous.acceptance) || JSON.stringify(next.modelSource) !== JSON.stringify(previous.modelSource) ||
       previous.status !== "running" && next.status !== previous.status ||
       previous.dispatched && !next.dispatched || previous.stopRequested && !next.stopRequested ||
       previous.resultDigest !== null && previous.resultDigest !== next.resultDigest ||

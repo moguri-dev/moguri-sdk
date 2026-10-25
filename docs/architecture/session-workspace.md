@@ -61,6 +61,13 @@ operations remain enforced. Side chats retain their snapshot/read-only scope
 and expose explicit available-model selection when the inherited selection is
 missing, stale or synthetic, never a provider/model fallback.
 
+Protocol 58's [coordination contract](lean-tooling.md#coordinated-sessions)
+adds explicit original-parent/root grants, bounded live public context and
+bidirectional messages without changing that read-only boundary. Separate
+agent children execute authorized tasks. Captured snapshots, current live
+access and mutable navigation nesting are distinct. Stale/revoked incoming
+work cannot silently enter a new root/model boundary.
+
 Generated coverage must include concurrent opens/clones, missing receipts,
 cancel/restart/partial outcomes, migration rollback, profile and null-scope
 isolation, preserved root/index intent, real Ghostty input/resize/reattachment,

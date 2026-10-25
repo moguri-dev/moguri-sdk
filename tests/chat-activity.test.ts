@@ -57,7 +57,8 @@ test("tool activity uses exact original starts, outcomes, arguments and retained
     const finished = fixture.service.controller.events(0).find((event) => event.event_type === "tool.completed")!;
     if (finished.event_type !== "tool.completed") throw new Error("Generated result missing.");
     assert.equal(entry.startedAt, start.timestamp); assert.equal(entry.status, "completed");
-    assert.equal(entry.outputBytes, Buffer.byteLength(finished.payload.text)); assert.equal(entry.outputBasis, "retained-utf8");
+    const original = finished.payload.rawDigest ? fixture.service.store.blob(finished.payload.rawDigest) : finished.payload.text;
+    assert.equal(entry.outputBytes, Buffer.byteLength(original)); assert.equal(entry.outputBasis, "retained-utf8");
     assert.equal(entry.durationMs, Date.parse(finished.timestamp) - Date.parse(start.timestamp));
     const args = await sdk.activity.read(fixture.sessionId, entry.id, "arguments");
     assert.equal(JSON.parse(args.content!.text).path, "fixture.txt");

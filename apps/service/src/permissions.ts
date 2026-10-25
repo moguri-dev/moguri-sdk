@@ -30,7 +30,7 @@ export function validateSettings(settings: UserSettings): void {
     }
   }
   for (const rule of settings.permissions.tools) {
-    if (rule.tool === "run_command" && rule.decision === "allow") throw new MoguriError("unsafe_rule", "Allow shell commands only by exact command rules, never a blanket tool grant.");
+    if (["run_command", "command_job", "debug"].includes(rule.tool) && rule.decision === "allow") throw new MoguriError("unsafe_rule", "Allow shell/watch commands or DAP actions only by exact command/request rules, never a blanket execution grant.");
     if (rule.tool === "*" && rule.decision === "allow") throw new MoguriError("unsafe_rule", "A wildcard cannot grant all tools. Name each delegated tool.");
     if (isAbsolute(rule.pathPrefix) || normalize(rule.pathPrefix).split(/[\\/]/).includes("..")) throw new MoguriError("unsafe_rule", "Tool path rules must remain inside the approved project.");
   }
@@ -52,8 +52,9 @@ export function authorizeTool(settings: UserSettings, call: ToolCall, root: stri
   });
   const denial = matched.find((rule) => rule.decision === "deny");
   if (denial) return { decision: "deny", ruleId: denial.id, reason: "Denied by user tool policy." };
-  if (call.name === "run_command") {
-    const commands = settings.permissions.commands.filter((rule) => rule.command === call.arguments.command);
+  if (call.name === "run_command" || call.name === "command_job" && call.arguments.action === "start" || call.name === "debug") {
+    const exact = call.name === "debug" ? `debug ${JSON.stringify(call.arguments)}` : call.arguments.command;
+    const commands = settings.permissions.commands.filter((rule) => rule.command === exact);
     const rule = commands.find((rule) => rule.decision === "deny") ?? commands.find((rule) => rule.decision === "allow") ?? commands.find((rule) => rule.decision === "ask");
     return rule ? { decision: rule.decision, ruleId: rule.id, reason: `Exact command ${rule.decision} rule.` } : unspecified;
   }

@@ -13,6 +13,12 @@ import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inpu
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
+import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "./tooling.ts";
+export * from "./tooling.ts";
+import { CoordinationCommandSchema, CoordinationQuerySchema, type CoordinationResponse, type CoordinationLink, type CoordinationMessage } from "./coordination.ts";
+export * from "./coordination.ts";
+import { WorkflowCommandSchema } from "./workflows.ts";
+export * from "./workflows.ts";
 import { BrowserCommandSchema, BrowserQuerySchema, type BrowserResponse } from "./browser.ts";
 export * from "./browser.ts";
 export * from "./activity.ts";
@@ -201,6 +207,9 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  WorkflowCommandSchema,
+  CoordinationCommandSchema,
+  ToolingCommandSchema,
   BrowserCommandSchema,
   ApplicationCommandSchema,
   NotificationSoundCommandSchema,
@@ -257,6 +266,8 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  CoordinationQuerySchema,
+  ToolingQuerySchema,
   BrowserQuerySchema,
   ActivityQuerySchema,
   UpdateQuerySchema,
@@ -337,10 +348,14 @@ export interface CapabilityJob {
   compoundWorkflowId?: string;
   winddownId?: string;
   id: string; kind: string; sessionId: string | null; projectId: string | null; parentTurnId: string | null;
+  toolingIntent?: { id: string; digest: string };
+  commandJob?: { root: string; command: string; timeoutMs: number; callId: string; env: "Local"; inspected?: true };
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot {
+  coordinationLinks: CoordinationLink[];
+  coordinationMessages: CoordinationMessage[];
   lastModelSelection: ModelSelection | null;
   candidates: CandidateRecord[];
   candidateOwners: CandidateOwner[];
@@ -383,6 +398,8 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse
+  | CoordinationResponse
+  | ToolingResponse
   | BrowserResponse
   | UpdateResponse
   | StorageResponse

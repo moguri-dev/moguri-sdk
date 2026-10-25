@@ -74,6 +74,22 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 58 ? `
+      const nativeCatalogue=await sdk.tools.catalog("generated-id","file");
+      void nativeCatalogue.tools[0]?.parameters;void nativeCatalogue.tools[0]?.schemaDigest;
+      await sdk.tools.execute("generated-id","read_file",{path:"generated.ts"},"a".repeat(64));
+      await sdk.tools.result("generated-id","generated-step","generated-call",0);
+      const commandJob=await sdk.tools.command("generated-id","generated-job");void commandJob.data.source;void commandJob.data.elapsedMs;
+      await sdk.tools.acknowledgeCommand("generated-id","generated-job","a".repeat(64),true);
+      await sdk.tools.state("generated-id","SELECT id,text,status FROM todos");
+      const childContext=await sdk.coordination.read("generated-id",{action:"inspect",targetSessionId:"generated-child"});
+      if(childContext.data.action==="inspect"){void childContext.data.question?.revision;void childContext.data.plan?.source.actor;}
+      const coordinationReview=await sdk.coordination.preview("generated-id","generated-child");void coordinationReview.parentBinding.env;
+      await sdk.coordination.grant("generated-id","generated-child",coordinationReview.digest,false,true);
+      await sdk.coordination.message("generated-id","generated-child","Generated advisory, not approval.");
+      await sdk.coordination.control("generated-id",{action:"stop",targetSessionId:"generated-child",expectedTurnId:null});
+      await sdk.workflows.start("generated-id","review","Generated optional prompt.");
+      ` : ""}
       ${browserControl ? `
       const browserState=await sdk.browser.state("generated-session");void browserState.browser.controlId;
       const browserOwner={sessionId:"generated-session",hostId:"generated-host",lease:"ab".repeat(32)};
@@ -404,6 +420,32 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
+      ${installedProtocol >= 58 ? `{
+      const child=await sdk.sessions.spawn(s.id,"side","Generated installed coordinated side");
+      const review=await sdk.coordination.preview(s.id,child.id);
+      assert.equal(review.parentBinding.env,"Local");assert.equal(review.childBinding.root,await realpath(project));
+      const inspected=await sdk.coordination.read(s.id,{action:"inspect",targetSessionId:child.id});
+      assert.equal(inspected.data.mode,"read-only");
+      await sdk.coordination.message(child.id,s.id,"Generated installed advisory.");
+      assert.equal((await sdk.coordination.read(s.id,{action:"inbox"})).data.messages[0].origin.actor,"user");
+      const source=(await sdk.tools.catalog(s.id,"write_document")).tools.find(tool=>tool.name==="write_document");assert.ok(source);
+      const admitted=await sdk.tools.execute(s.id,source.name,{path:"generated-installed.docx",format:"docx",expectedDigest:"absent",paragraphs:[{text:"Generated installed structured document."}]},source.schemaDigest);
+      const approval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;assert.ok(approval);
+      await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:approval.id,allow:true});
+      assert.equal((await sdk.jobs.wait(admitted.id)).status,"completed");
+      assert.ok((await readFile(join(project,"generated-installed.docx"))).length>0);
+      const doc=(await sdk.tools.catalog(s.id,"inspect_document")).tools.find(tool=>tool.name==="inspect_document");assert.ok(doc);
+      const checked=await sdk.tools.execute(s.id,doc.name,{path:"generated-installed.docx"},doc.schemaDigest);
+      const readApproval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;assert.ok(readApproval);
+      await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:readApproval.id,allow:true});
+      assert.equal((await sdk.jobs.wait(checked.id)).status,"completed");
+      assert.match(JSON.stringify(await sdk.mcp.readResult(checked.id)),/Generated installed structured document/);
+      assert.equal((await sdk.tools.state(s.id,"SELECT count(*) AS count FROM todos")).data.rows[0].count,0);
+      await sdk.coordination.grant(s.id,child.id,(await sdk.coordination.preview(s.id,child.id)).digest,false,true);
+      await assert.rejects(()=>sdk.coordination.read(s.id,{action:"transcript",targetSessionId:child.id}),{code:"coordination_changed"});
+      await sdk.sessions.delete(child.id,true);
+      console.log("Installed protocol-58 typed catalogue, actual restricted data worker, canonical SQL reads and root-bound coordination preserve actor, approval and no-model authority.");
+      }` : ""}
       ${installedProtocol >= 41 ? `{
       assert.equal(sdk.settings.get().values.memory.useTieredContext,false);
       const temporarySession=await sdk.sessions.create(p.id,"Generated installed knowledge source");

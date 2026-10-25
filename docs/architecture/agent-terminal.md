@@ -51,6 +51,15 @@ stdin and background command adoption are not introduced. The desktop Agent
 view has no stdin route: models run commands, while personal typing belongs in
 the private User terminal. Stop in chat cancels the actual owning agent turn.
 
+Protocol 58 adds a distinct explicit Local `command_job` watch lifecycle:
+original root/call/timeout intent precedes effects, and a watch may outlive a
+finished model turn. Agent displays those jobs separately through
+`tools.command`/`read_command_job`; it never relabels an ordinary background
+shell as a successful watch. Unknown restart/stop cleanup remains partial and
+quarantines the captured root until exact actual-user inspection, then explicit
+Resume. Logs/statistics remain separate from private consoles. See
+[owned commands and DAP](lean-tooling.md#owned-commands-and-dap).
+
 ## Shared presentation and retention
 
 User remains the original private Ghostty console, with its current explicit

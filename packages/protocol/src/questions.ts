@@ -13,6 +13,11 @@ export type UserQuestionInput = Static<typeof UserQuestionSchema>;
 export interface ModelAdviceSource {
   actor: "model"; modelId: string; providerId: string | null; stepId: string; callId: string;
 }
+export const ModelAdviceSourceSchema = object({
+  actor: Type.Literal("model"), modelId: Type.String({ minLength: 1, maxLength: 512 }),
+  providerId: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
+  stepId: Type.String({ minLength: 1, maxLength: 128 }), callId: Type.String({ minLength: 1, maxLength: 256 }),
+});
 export interface QuestionRecommendation extends ModelAdviceSource { choice: string; reason: string }
 export interface QuestionAnswer {
   text: string; actor: "user" | "model" | "decision-provider"; modelId: string | null; sourceCallId: string | null; answeredAt: string;

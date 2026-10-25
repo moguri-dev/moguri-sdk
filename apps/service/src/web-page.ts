@@ -5,15 +5,16 @@ import { MoguriError } from "../../../packages/protocol/src/index.ts";
 import { publicAddress } from "./public-network.ts";
 import { boundedBody } from "./network.ts";
 
-function pageText(url: URL, body: string, type: string): { source: "untrusted-web"; url: string; title: string; text: string } {
+function pageText(url: URL, body: string, type: string) {
   if (!/text\/(?:html|plain)/i.test(type)) throw new MoguriError("web_format", "The page is not HTML or plain text; no conversion service was used.");
-  if (type.includes("text/plain")) return { source: "untrusted-web", url: url.toString(), title: url.hostname, text: body.slice(0, 50_000) };
+  if (type.includes("text/plain")) return { source: "untrusted-web" as const, url: url.toString(), title: url.hostname, text: body.slice(0, 50_000), complete: body.length <= 50000, omittedCharacters: Math.max(0, body.length - 50000) };
   const document = load(body);
   document("script,style,noscript,iframe,form").remove();
-  return { source: "untrusted-web", url: url.toString(), title: document("title").text().trim(),
-    text: (document("main").text() || document("article").text() || document("body").text()).replace(/\s+/g, " ").trim().slice(0, 50_000) };
+  const text = (document("main").text() || document("article").text() || document("body").text()).replace(/\s+/g, " ").trim();
+  return { source: "untrusted-web" as const, url: url.toString(), title: document("title").text().trim(),
+    text: text.slice(0, 50_000), complete: text.length <= 50000, omittedCharacters: Math.max(0, text.length - 50000) };
 }
-export async function fetchNativePage(input: string, signal: AbortSignal, redirects = 0): Promise<ReturnType<typeof pageText>> {
+export async function fetchNativeSource(input: string, signal: AbortSignal, redirects = 0): Promise<{ url: string; body: string; type: string }> {
   if (process.platform !== "linux" || process.env.NODE_USE_ENV_PROXY !== "1" || !process.env.HTTPS_PROXY || !process.env.ALL_PROXY) {
     throw new MoguriError("native_web_boundary", "Native public-page reads require the actual verified guest's enforced proxy. No controller or Local fetch was attempted.", 409);
   }
@@ -26,13 +27,17 @@ export async function fetchNativePage(input: string, signal: AbortSignal, redire
   if ([301, 302, 303, 307, 308].includes(response.status)) {
     const location = response.headers.get("Location"); await response.body?.cancel();
     if (!location) throw new MoguriError("web_destination", "The approved native page redirect has no exact destination.");
-    return fetchNativePage(new URL(location, url).href, signal, redirects + 1);
+    return fetchNativeSource(new URL(location, url).href, signal, redirects + 1);
   }
   if (!response.ok) { await response.body?.cancel(); throw new MoguriError("web_failed", `Native page returned HTTP ${response.status}. The configured guest network policy was not broadened.`, 502); }
   const content = await boundedBody(response, 1024 * 1024, signal);
-  return pageText(url, content.toString("utf8"), response.headers.get("Content-Type") ?? "");
+  return { url: url.href, body: content.toString("utf8"), type: response.headers.get("Content-Type") ?? "" };
 }
-export async function fetchPage(input: string, signal: AbortSignal, redirects = 0): Promise<{ source: "untrusted-web"; url: string; title: string; text: string }> {
+export async function fetchNativePage(input: string, signal: AbortSignal): Promise<ReturnType<typeof pageText>> {
+  const source = await fetchNativeSource(input, signal);
+  return pageText(new URL(source.url), source.body, source.type);
+}
+export async function fetchPublicSource(input: string, signal: AbortSignal, redirects = 0): Promise<{ url: string; body: string; type: string }> {
   const url = new URL(input);
   if (url.protocol !== "https:" || url.username || url.password || redirects > 3) throw new MoguriError("web_destination", "Only public HTTPS pages with at most three safe redirects are supported.");
   const records = await lookup(url.hostname, { all: true });
@@ -41,7 +46,7 @@ export async function fetchPage(input: string, signal: AbortSignal, redirects = 
   const response = await new Promise<{ status: number; location?: string; body: string; type: string }>((resolve, reject) => {
     const req = request({
       hostname: address.address, servername: url.hostname, port: url.port || 443,
-      path: url.pathname + url.search, method: "GET", signal,
+      path: url.pathname + url.search, method: "GET", signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
       headers: { Host: url.host, "User-Agent": "Moguri/0.2 local-tool", Accept: "text/html,text/plain" },
     }, (response) => {
       const chunks: Buffer[] = [];
@@ -57,7 +62,11 @@ export async function fetchPage(input: string, signal: AbortSignal, redirects = 
     req.on("error", reject);
     req.end();
   });
-  if ([301, 302, 303, 307, 308].includes(response.status) && response.location) return fetchPage(new URL(response.location, url).toString(), signal, redirects + 1);
+  if ([301, 302, 303, 307, 308].includes(response.status) && response.location) return fetchPublicSource(new URL(response.location, url).toString(), signal, redirects + 1);
   if (response.status < 200 || response.status >= 300) throw new MoguriError("web_failed", `Page returned HTTP ${response.status}.`);
-  return pageText(url, response.body, response.type);
+  return { url: url.href, body: response.body, type: response.type };
+}
+export async function fetchPage(input: string, signal: AbortSignal): Promise<ReturnType<typeof pageText>> {
+  const source = await fetchPublicSource(input, signal);
+  return pageText(new URL(source.url), source.body, source.type);
 }

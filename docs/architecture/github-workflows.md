@@ -30,6 +30,13 @@ never fall back to the base project. A supplied session must still own that
 exact project/workspace and be explicitly Local. Side/read-only sessions
 cannot mutate either Git or GitHub.
 
+Protocol 58's Local native `create_issue` adapter reuses this exact preview/
+intent/receipt path for `github.issue.create` only. The approved current
+model's source is retained as `actor: model`, not user acceptance. It cannot
+authenticate, switch account, write Git/PRs or acknowledge inspection. Its
+controller-derived intent remains bound to the original turn/step/call; a lost
+response returns partial evidence and never triggers another API request.
+
 Global allowed-env policy, project closing, current permission rules and
 project configuration are checked before review and immediately before
 effects. A user confirmation does not override a hard denial. The review

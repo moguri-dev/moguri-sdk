@@ -157,7 +157,10 @@ test("standard skills, plugins and model evolution remain disabled until their r
     const imported = await sdk.capabilities.importSkill(fixture.session().projectId, skillPath);
     assert.equal(sdk.getState().snapshot?.registry.find((entry) => entry.id === imported.id)?.enabled, false);
     await sdk.capabilities.toggle(imported.id!, true, 0);
-    assert.match((await sdk.prompt.preview(fixture.sessionId)).effective, /Prefer explicit result types/);
+    assert.doesNotMatch((await sdk.prompt.preview(fixture.sessionId)).effective, /Prefer explicit result types/);
+    const entry = sdk.getState().snapshot!.registry.find((entry) => entry.id === imported.id)!;
+    assert.match((await fixture.service.controller.platform.delegate(fixture.session(), { id: "generated-skill-load", name: "use_skill",
+      arguments: { action: "load", id: entry.id, expectedDigest: entry.contentDigest } }, new AbortController().signal)).text, /Prefer explicit result types/);
     await fixture.configure();
     await configure(sdk, (settings) => { settings.evolution.enabled = true; });
     await fixture.send("generated propose skill");
@@ -179,7 +182,9 @@ test("standard skills, plugins and model evolution remain disabled until their r
     await assert.rejects(() => sdk.capabilities.toggle(child.id, true, child.revision), /owning plugin/);
     await sdk.capabilities.toggle(plugin.id!, true, 0);
     await sdk.capabilities.toggle(child.id, true, child.revision);
-    assert.match((await sdk.prompt.preview(fixture.sessionId)).effective, /Do not invent test results/);
+    assert.doesNotMatch((await sdk.prompt.preview(fixture.sessionId)).effective, /Do not invent test results/);
+    assert.match((await fixture.service.controller.platform.delegate(fixture.session(), { id: "generated-plugin-skill-load", name: "use_skill",
+      arguments: { action: "load", id: child.id, expectedDigest: child.contentDigest } }, new AbortController().signal)).text, /Do not invent test results/);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

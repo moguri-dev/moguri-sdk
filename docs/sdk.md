@@ -5,12 +5,15 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **57**, including
+Current source uses protocol **58**, including
+[lean tools and coordinated sessions](architecture/lean-tooling.md),
 [session-owned candidate cleanup](architecture/candidate-cleanup.md),
 shared-global/last-selected model defaults and
 [ephemeral browser control](architecture/agent-browser.md).
 Schema 57 rekeys only exactly recorded generation output and retains required
 accounting; the earlier schema-55 model-default upgrade is metadata-only.
+Schema 58 strictly converges the candidate-retention and earlier development
+lean-tooling lineages using their actual markers, preserving both guarantees.
 Older running services require reviewed restart.
 It retains protocol-54 exact-scoped session PR observations
 and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
@@ -72,6 +75,63 @@ unread state or lifecycle. Metadata is not a user answer, PR-write permission
 or evidence that the session's work succeeded. Legacy missing draft remains
 unknown; project-free scope cannot inherit a root or authenticated account.
 The schema-54 marker upgrades transactionally without rewriting ciphertext.
+
+## Lean tools and session coordination
+
+`tools.catalog(sessionId, query, offset)` returns scoped native schemas and
+digests. Normal model solver turns use the same catalogue through
+`discover_tools`, exposing only the loaded native functions at the next
+boundary. The complete service capability set remains authoritative; schema
+discovery is not permission. Model-turn-only functions require their actual
+owner and cannot be called as standalone user jobs.
+
+`tools.execute(sessionId, name, arguments, schemaDigest)` admits a Local user
+tool job under exact normal approval, without a model call or Env fallback.
+Its returned ID is admission, not success: inspect `jobs.wait` and the original
+result. `tools.result(sessionId, stepId, callId, offset)` pages an original
+public model-tool source and preserves outcome/`rawComplete`; private controls,
+hooks and other/deleted sessions are excluded. `tools.state` queries the
+canonical in-memory todo/memory projection, not persistent internal tables.
+
+`tools.command(sessionId, jobId, offset, targetSessionId?)` reads the original
+watch job. Another session needs an actual coordination grant. Its typed
+`data.source` distinguishes live owned tail, retained result and unavailable;
+missing wall time/output stays null. `tools.acknowledgeCommand` requires the
+exact returned inspection digest and actual-user confirmation; partial work
+does not become successful. Resume stays separate.
+
+`coordination.read(sessionId, input)` selects list, inspect, transcript, inbox
+or the child's original captured parent snapshot. The discriminated
+`data.action` carries actual public state/plan/question or a UTF-8 page/digest.
+Use that digest for continuations. No hidden reasoning, private consoles,
+credentials or unbounded history expansion is authorized.
+
+```ts
+const review = await sdk.coordination.preview(parentId, childId);
+// Display both actual bindings before an explicit user grant/revocation.
+console.log(review.parentBinding, review.childBinding);
+await sdk.coordination.grant(parentId, childId, review.digest, true, true);
+await sdk.coordination.message(childId, parentId, "An advisory observation.");
+await sdk.coordination.control(parentId, {
+  action: "dispatch", targetSessionId: childId, text: "The explicitly selected task.",
+});
+```
+
+Messages retain actual user/model/service origin. Advisory delivery does not
+consume drafts, answer/approve or launch paid work. Fresh delivery and queued
+task admission require the original grant/root proof; stale messages remain
+inspectable with a diagnostic. Dispatch is explicitly metered work under the
+child's current controls; stop binds `expectedTurnId`, including null before
+admission. Actual question/approval actions use their original owning APIs.
+Live native coordination is unqualified, never a Local fallback.
+
+`workflows.start(sessionId, "review" | "security" | "performance" | "debug",
+prompt, expectedDraftRevision?)` uses the existing prompt admission path.
+Draft consumption is an exact optional CAS; unrelated drafts stay intact.
+The four lowercase shared slash presets investigate/fix within current policy.
+Shared `/tools`, `/tool`, `/tool-result`, `/state`, `/watch` and `/coordinate`
+also reach CLI/TUI/desktop; CLI accepts the corresponding non-slash names with
+`--session ID`. See [setup usage](setup.md#lean-tools-and-coordinated-work).
 
 ## Agent command output
 
@@ -697,6 +757,9 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | --- | --- |
 | `profiles` | Root catalog/create/revisioned name-color update/explicit retry-stop/wait, shared global defaults/caps and `open(id)` returning a new immutable scoped client. No account/data copy or automatic selection. |
 | `settings` / `prompt` | Get, revision-checked update/reset, effective prompt preview. Prompt edits require explicit risk acknowledgement; running turns retain their prompt digest. |
+| `tools` | Scoped typed catalogue, exact Local user-job admission, public original-result pages, canonical state SQL reads and captured watch inspection. Discovery grants nothing; no model-owner or Env fallback. |
+| `coordination` | Exact original-parent/root grant preview, actual sender messages, bounded public context/progress and explicitly owned child tasks/stop. Navigation nesting and read acknowledgement are not authority. |
+| `workflows` | Lowercase review/security/performance/debug prompt admission under the existing session controls, with optional exact draft consumption. |
 | `memory` | Opt-in index, lexical-vector search, import/symbol graph, explicit project-style facts. Context injection has a separate opt-in. |
 | `capabilities` | Import disabled standard skills/plugins, inspect source, toggle with revision, propose, review and decide against an exact SHA-256. |
 | `mcp` | Paged tool discovery, non-secret auth status, explicit OAuth begin/status/cancel/clear/registered-client setup, user-only keychain credentials, exact approval-bound call and retained result pages. |
@@ -1647,7 +1710,8 @@ SSH credential is copied for memory. See [the memory contract](architecture/remo
 
 Standard skills are `SKILL.md` files with YAML `name` and `description`, followed
 by Markdown instructions. Imports start disabled and grant no permissions.
-Enabled skills enter the protected prompt as identified project knowledge.
+Enabled skills contribute identified metadata/digests; `use_skill` loads one
+selected complete body on demand. Neither metadata nor body grants permission.
 Model proposals retain their model actor and base digest. Human approval
 installs disabled content; enabling it is a separate explicit action.
 

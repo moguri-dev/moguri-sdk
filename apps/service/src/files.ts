@@ -2,9 +2,8 @@ import { constants } from "node:fs";
 import { isUtf8 } from "node:buffer";
 import { open, realpath, lstat, stat, readdir, rename, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
-import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/index.ts";
-import { digest } from "./store.ts";
+import { randomUUID, createHash } from "node:crypto";
+import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/core.ts";
 
 const protectedPart = (part: string) => part === ".git" || part === ".moguri" || part.startsWith(".moguri-dependencies-") || part === "node_modules" ||
   [".ssh", ".aws", ".azure", ".kube", ".docker", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "Moguri"].includes(part) ||
@@ -38,7 +37,7 @@ export async function readProjectFile(root: string, input: string, maxBytes = MA
   const content = await readRegularFile(path, maxBytes);
   if (content.includes(0) || !isUtf8(content)) throw new MoguriError("file_limit", "The file is binary or not valid UTF-8.");
   const text = content.toString("utf8");
-  return { text, digest: digest(text), bytes: content.length, path: relative(await realpath(root), path) };
+  return { text, digest: bytesDigest(content), bytes: content.length, path: relative(await realpath(root), path) };
 }
 export function textFilePage(text: string, args: Record<string, unknown>) {
   const content = Buffer.from(text), offset = args.offset ?? 0, limit = args.limit ?? 16 * 1024, search = args.search;
@@ -68,13 +67,21 @@ export async function readRegularFile(path: string, maxBytes: number): Promise<B
   } finally { await file.close(); }
 }
 export async function writeProjectFile(root: string, input: string, text: string, expectedDigest: string, options: { signal?: AbortSignal; beforeCommit?: () => void; committed?: () => void } = {}): Promise<string> {
+  if (!text.isWellFormed() || text.includes("\0")) throw new MoguriError("file_encoding", "File writes need lossless UTF-8 without NUL.");
+  if (Buffer.byteLength(text) > MAX_TEXT) throw new MoguriError("file_limit", "File writes are limited to 128 KiB.");
+  try { await readProjectFile(root, input); }
+  catch (error) { if (!(expectedDigest === "absent" && error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+  return writeProjectBytes(root, input, Buffer.from(text), expectedDigest, options);
+}
+export const bytesDigest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+export async function writeProjectBytes(root: string, input: string, bytes: Buffer, expectedDigest: string, options: { signal?: AbortSignal; beforeCommit?: () => void; committed?: () => void } = {}): Promise<string> {
   options.signal?.throwIfAborted();
   const path = await scopedPath(root, input, true);
-  if (Buffer.byteLength(text) > MAX_TEXT) throw new MoguriError("file_limit", "File writes are limited to 128 KiB.");
+  if (bytes.length > 8 * 1024 * 1024) throw new MoguriError("file_limit", "Structured binary writes are limited to 8 MiB.");
   const checkBase = async () => {
     try {
-      const current = await readProjectFile(root, input);
-      if (expectedDigest !== current.digest) throw new MoguriError("file_conflict", "The file changed since it was read. Read it again before writing.", 409);
+      const current = await readRegularFile(await scopedPath(root, input), 8 * 1024 * 1024);
+      if (expectedDigest !== bytesDigest(current)) throw new MoguriError("file_conflict", "The file changed since it was read. Read it again before writing.", 409);
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT" && expectedDigest === "absent") return;
       throw error;
@@ -85,7 +92,7 @@ export async function writeProjectFile(root: string, input: string, text: string
   const metadata = await stat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
   const file = await open(temporary, "wx", metadata ? metadata.mode & 0o777 : 0o600);
   try {
-    await file.writeFile(text, "utf8");
+    await file.writeFile(bytes);
     await file.sync();
     await file.close();
     await scopedPath(root, input, true);
@@ -97,7 +104,7 @@ export async function writeProjectFile(root: string, input: string, text: string
     options.committed?.();
     const directory = await open(dirname(path), "r");
     try { await directory.sync(); } finally { await directory.close(); }
-    return digest(text);
+    return bytesDigest(bytes);
   } finally {
     await file.close();
     await unlink(temporary).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });

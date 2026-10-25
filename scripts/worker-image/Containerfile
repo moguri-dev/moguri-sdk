@@ -1,7 +1,7 @@
 FROM docker.io/library/node@sha256:f6e55fb0e92f7f115549278ab36f68f0659790f5d4fd7cb4446486d8ed70d842
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates nftables python3 make g++ \
+    && apt-get install -y --no-install-recommends ca-certificates nftables python3 make g++ ripgrep jq \
     && rm -r /var/lib/apt/lists
 
 WORKDIR /opt/moguri

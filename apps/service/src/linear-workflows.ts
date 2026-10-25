@@ -13,6 +13,7 @@ import type { CandidateJobLifecycle } from "./candidates.ts";
 import { LinearResponseError, ProjectIntegrations, validateLinearCursor, type LinearAccess } from "./project-integrations.ts";
 import { sourceRoot, sourceRootSync } from "./repository-source.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import type { ModelAdviceSource } from "../../../packages/protocol/src/questions.ts";
 import { digest, EventStore } from "./store.ts";
 import type { WorkflowHost } from "./workflow-host.ts";
 
@@ -572,8 +573,9 @@ export class LinearWorkflows {
       },
     };
   }
-  async execute(command: LinearCommand, finish: WorkspaceFinish): Promise<CommandResult> {
+  async execute(command: LinearCommand, finish: WorkspaceFinish, modelSource?: ModelAdviceSource): Promise<CommandResult> {
     command = structuredClone(parse(LinearCommandSchema, command));
+    if (modelSource && (command.type !== "linear.workflow.execute" || command.input.action !== "issue.create" || !command.sessionId)) throw new MoguriError("linear_model_scope", "The approved model adapter supports issue creation only, never other mutations, ticket acceptance or cancellation acknowledgement.", 403);
     if (command.type === "linear.workflow.cancel") {
       const operation = this.operation(command.operationId), controller = this.active.get(operation.id);
       if (operation.status !== "running") return finish([], { id: operation.id, revision: operation.revision });
@@ -602,7 +604,7 @@ export class LinearWorkflows {
       return finish([], { id: repeated.id, revision: repeated.revision });
     }
     const document = prepared.preview.document, binding = document.binding;
-    if (this.host.rootBusy(binding.root) || this.operations().some((entry) => entry.status === "running" && entry.root === binding.root)) throw new MoguriError("linear_busy", "The bound root already has owned work. Finish/cancel it before admitting this explicit Linear operation.", 409);
+    if (!modelSource && this.host.rootBusy(binding.root) || this.operations().some((entry) => entry.status === "running" && entry.root === binding.root)) throw new MoguriError("linear_busy", "The bound root already has owned work. Finish/cancel it before admitting this explicit Linear operation.", 409);
     const id = randomUUID(), controller = new AbortController(); this.active.set(id, controller);
     let response: CommandResult | undefined;
     try {
@@ -611,7 +613,7 @@ export class LinearWorkflows {
         signal.throwIfAborted();
         await this.host.assertRoot(binding.projectId, binding.workspaceId ?? undefined, signal);
         const latest = await this.prepare(command, command.input, signal, document.reviewId);
-        if (latest.preview.digest !== command.expectedDigest || this.host.rootBusy(binding.root, jobId)) throw new MoguriError("linear_review_stale", "The exact reviewed Linear bases or root ownership changed after admission. No stale mutation was sent.", 409);
+        if (latest.preview.digest !== command.expectedDigest || !modelSource && this.host.rootBusy(binding.root, jobId)) throw new MoguriError("linear_review_stale", "The exact reviewed Linear bases or root ownership changed after admission. No stale mutation was sent.", 409);
         latest.current(); signal.throwIfAborted();
         if (!document.mutation) {
           const result: LinearResult = { format: "moguri-linear-result", version: 1, operationId: id, action: document.input.action,
@@ -653,7 +655,8 @@ export class LinearWorkflows {
           credentialGeneration: binding.credentialGeneration, action: command.input.action, commandId: intent.id, commandDigest: intent.digest,
           reviewDigest: command.expectedDigest, inputDigest: this.store.putBlob(canonical(document)), resultDigest: null, jobId: job.id,
           status: "running", revision: 0, createdAt: now, updatedAt: now, dispatched: false, stopRequested: false, remoteIds: [], diagnostic: null,
-          acceptance: { actor: "user", commandId: intent.id, commandDigest: intent.digest, reviewDigest: command.expectedDigest },
+          ...(modelSource ? { modelSource } : {}),
+          acceptance: { actor: modelSource ? "tool-grant" : "user", commandId: intent.id, commandDigest: intent.digest, reviewDigest: command.expectedDigest },
         };
         response = finish([this.event(operation), { event_type: "job.started", profile_id: operation.profileId, project_id: operation.projectId, session_id: operation.sessionId, payload: { job: { ...job, operationId: id } } }], { id, revision: 0 });
         this.reviews.delete(command.expectedDigest);
