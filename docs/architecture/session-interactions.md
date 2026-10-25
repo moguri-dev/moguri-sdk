@@ -29,6 +29,43 @@ permissions, automatic deletion grants or a way around project/artifact review.
 Failure to save a requested preference prevents the action; failed resource
 cleanup still blocks deletion. Independent artifacts and repository files survive.
 
+## Reliable session reordering
+
+This desktop repair reuses React/Electron (MIT), the existing typed SDK,
+`compareSessions`/`sessionOrderScope`, native drag events and owned SVG glyphs.
+No dependency, API, event, setting, schema or migration is added.
+
+The existing session-action control is also a visible grip, making reorder-only
+dragging explicit without taking more title space or adding a duplicate button.
+Its top/bottom target halves insert before/after a sibling, never nest the source.
+Alt+Up/Down on the focused grip/link and existing context-menu actions share the
+same order path. Whole-row edge reorder and middle-to-attach remain;
+project/Chats headers still explicitly detach within the original project.
+Pin priority, archive, parent/group and profile boundaries are preserved.
+Leaving a target removes its insertion cue; invalid targets show no accepted
+move cue. Unpin uses a crossed-out pin; Pin and pinned-state markers stay pins.
+
+Dragging binds the original complete sibling set, order and structural scope,
+not every unrelated session revision. Live unread, draft, title or turn changes
+cannot invalidate an otherwise unchanged arrangement. Drop checks the actual
+fixed-profile SDK view and sends fresh complete revisions through the same
+atomic service CAS; concurrent membership/order/pin/hierarchy changes refuse
+the move rather than overwrite another arrangement. Background UI work does
+not disable dragging; the actual pending order/action gate remains effective.
+
+One definitive `revision_conflict` can refresh and retry once only while the
+complete original structural intent still matches. The service checks every
+revision before appending any order event. Unknown/network/non-revision errors
+never retry, and a second failure remains explicit. Attachment/detachment does
+not inherit this metadata-only retry or change its existing authority checks.
+
+Fresh prerequisites pass all six available generated groups: cancellation
+31.94 ms; SQLite append p95 0.048 ms/rebuild 0.501 ms; owned PTY cancellation
+152.72 ms with zero survivors; TUI updates 17.69 ms; hidden Electron cold start
+242.80 ms / 443.06 MiB / 8.19 ms per frame; 2,000-file search/Git
+0.917/5.957 ms. Separate live/native/notarized/Linux/quality gates remain
+FAIL/unqualified, not enabled by this navigation repair.
+
 ## Explicit plans and questions
 
 Only an acknowledged owning-model `task_progress` plan action with at least two
