@@ -94,10 +94,12 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
       assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), original);
       const artifact = (await sdk.artifacts.read(record.id)).artifact; await sdk.artifacts.delete(record.id, artifact.revision, true);
       linked = staged.candidate;
-      assert.equal(JSON.parse((await sdk.artifacts.export(linked.id)).export.text).schemaVersion, 5);
+      assert.equal(JSON.parse((await sdk.artifacts.export(linked.id)).export.text).schemaVersion, Array.isArray(sdk.getState().snapshot.candidateOwners) ? 10 : 5);
     }
     await sdk.refresh();
-    await sdk.sessions.delete(source.id, true, sdk.getState().snapshot.sessions.find((session) => session.id === source.id).revision);
+    const sessionOwned = Array.isArray(sdk.getState().snapshot.candidateOwners);
+    if (linked && sessionOwned) await sdk.command({ type: "session.archive", sessionId: source.id });
+    else await sdk.sessions.delete(source.id, true, sdk.getState().snapshot.sessions.find((session) => session.id === source.id).revision);
     return {
       async verifyRecovery(current, owner) {
         assert.equal((await current.budgets.calls({ sessionId: source.id })).calls.length, count);
@@ -112,7 +114,7 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
         } else {
           assert.deepEqual((await current.candidates.read(linked.id)).candidate.roleOrigin, linked.roleOrigin);
           const copy = JSON.parse((await current.artifacts.export(linked.id)).export.text);
-          assert.equal(copy.schemaVersion, 5);
+          assert.equal(copy.schemaVersion, sessionOwned ? 10 : 5);
           for (const digest of [linked.roleOrigin.sequenceInputDigest, linked.roleOrigin.roleInputDigest, linked.roleOrigin.resultDigest]) {
             assert.ok(copy.documents[0].candidate.results.some((result) => result.digest === digest && result.text.length));
           }
@@ -123,6 +125,13 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
           assert.equal(applied.candidate.acceptance.actor, "user"); assert.deepEqual(applied.candidate.roleOrigin, linked.roleOrigin);
           assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), patch.edits[0].text);
           assert.deepEqual(await readFile(join(directory, ".git/index")), index); assert.equal(git(["rev-parse", "HEAD"]), head);
+          if (sessionOwned) {
+            await current.sessions.delete(source.id, true);
+            await assert.rejects(() => current.candidates.read(linked.id), { code: "candidate_missing" });
+            for (const digest of [linked.roleOrigin.sequenceInputDigest, linked.roleOrigin.roleInputDigest, linked.roleOrigin.resultDigest]) {
+              assert.throws(() => owner.store.blob(digest), /Missing or deleted/);
+            }
+          }
         }
         await assert.rejects(() => owner.executeOwnedRoles(input, review, commandId), { code: "role_sequence_deleted" });
         assert.equal(requests.length, before + count);

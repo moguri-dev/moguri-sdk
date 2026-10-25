@@ -60,7 +60,7 @@ export const slashCommands = [
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
   { name: "artifacts", description: "View independent retained documents" },
   { name: "candidates", description: "Review retained repository proposals and actual stage/apply outcomes" },
-  { name: "candidate", description: "Read retained role proposals, generate unaccepted data or stage reviewed bytes; application stays separate", argument: "[role-proposal ID|generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
+  { name: "candidate", description: "Create only in an explicit Git project; origin deletion or verified exact PR merge deletes proposals", argument: "[eligibility|role-proposal ID|generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
   { name: "model-evidence", description: "Explicitly inspect provider-declared family/version, not independence or approval; no inference", argument: "[MODEL_ID]" },
   { name: "roles", description: "Inspect retained role intent, calls, raw data and declared contracts; never dispatch or approve", argument: "[SEQUENCE_ID [ROLE_INDEX]|contract SEQUENCE_ID ROLE_INDEX]" },
   { name: "compound", description: "Review bounded Cascade/Critique and separately approve owned project tests; source application stays separate", argument: "[list|preview INPUT_JSON|start SHA confirm-cost INPUT_JSON|read ID|validation ID|review ID VALIDATION REV SHA confirm-stage-and-test|deny ID VALIDATION REV SHA confirm-deny|stop ID confirm-stop]" },
@@ -193,6 +193,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "candidates": return client === "desktop" ? { kind: "panel", panel: "Candidates" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.candidates.filter((candidate) => !session.projectId || candidate.projectId === session.projectId), null, 2) };
     case "candidate": {
       const [action = "", ...parts] = command.argument.split(/\s+/).filter(Boolean), result = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+      if (action === "eligibility" && parts.length === 0) return result(await sdk.candidates.eligibility(session.id));
       if (action === "generate-preview" || action === "generate") {
         let input = command.argument.slice(action.length).trim();
         if (action === "generate") {

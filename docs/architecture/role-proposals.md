@@ -4,6 +4,14 @@ Status: **qualified 0.27.0-alpha.1 / protocol and database 33**.
 The qualified 0.26 source and frozen 0.25 SDK/native delivery remain preserved.
 Sandbox stays paused and live personal inference stays off.
 
+Protocol 57's [candidate retention](candidate-cleanup.md) supersedes only the
+staged candidate copy's lifetime. Source role reports stay independent, but
+permanent deletion of a candidate's canonical origin session or fresh exact
+associated-PR merge deletes that candidate's separate origin/blob grants.
+Archiving preserves the candidate, and later application never changes its
+origin owner. New ownership-bearing candidate exports use version 10; the
+frozen qualification below describes its original version-5 delivery.
+
 Reuse Node, maintained pi-ai, TypeBox, React/Electron/OpenTUI (MIT), existing
 source capture and patch validation, the actual role ledger, independent
 artifact encryption and the owned candidate jobs. System Git remains the
@@ -40,7 +48,8 @@ raw-result blobs gain the candidate's independent grant before effects.
 Version-5 candidate exports include them; earlier formats retain their versions.
 The exact staging preview discloses this separate retention in every client.
 A later deletion of the source role report does not erase this separately
-retained copy or refund its calls. A staged candidate
+retained candidate copy or refund its calls. The candidate still has the
+session-owned lifetime above. A staged candidate
 still needs a separate fresh source review and actual-user acceptance. No
 automatic source write, commit, push or branch action.
 

@@ -30,7 +30,7 @@ never fall back to the base project. A supplied session must still own that
 exact project/workspace and be explicitly Local. Side/read-only sessions
 cannot mutate either Git or GitHub.
 
-Protocol 57's Local native `create_issue` adapter reuses this exact preview/
+Protocol 58's Local native `create_issue` adapter reuses this exact preview/
 intent/receipt path for `github.issue.create` only. The approved current
 model's source is retained as `actor: model`, not user acceptance. It cannot
 authenticate, switch account, write Git/PRs or acknowledge inspection. Its

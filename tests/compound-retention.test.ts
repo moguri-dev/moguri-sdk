@@ -5,7 +5,7 @@ import { projectEvents } from "../packages/sdk/src/index.ts";
 import { compoundApiFixture } from "./fixtures/compound-api.ts";
 import { waitFor } from "./fixture.ts";
 
-test("public role/test history survives source deletion; candidate model grants survive report deletion and the lost original paid intent cannot replay", { skip: process.platform !== "darwin", timeout: 25000 }, async () => {
+test("public role/test reports survive source deletion while candidates are deleted, and a lost original paid intent cannot replay after report deletion", { skip: process.platform !== "darwin", timeout: 25000 }, async () => {
   const f = await compoundApiFixture(); let reopened: EventStore | undefined;
   try {
     await f.configure();
@@ -20,13 +20,13 @@ test("public role/test history survives source deletion; candidate model grants 
     const exported = JSON.parse((await f.sdk.artifacts.export(created.id)).export.text);
     assert.equal(exported.schemaVersion, 7);
     assert.ok(JSON.stringify(exported.documents[0].compound).includes("GENERATED_REAL_PROJECT_TEST_PASSED"));
-    const source = f.session();
-    await f.sdk.sessions.delete(source.id, true, source.revision);
+    const candidate = (await f.sdk.candidates.read(candidateId)).candidate; assert.ok(candidate.compoundOrigin);
+    await f.sdk.sessions.delete(f.sessionId, true);
     const retained = await f.sdk.compound.read(created.id);
     assert.equal(retained.workflow.status, "proposed");
     assert.ok(retained.roles[1]?.result?.includes("Generated public candidate"));
     assert.equal(retained.validations[0]?.result?.exitCode, 0);
-    const candidate = (await f.sdk.candidates.read(candidateId)).candidate; assert.ok(candidate.compoundOrigin);
+    await assert.rejects(() => f.sdk.candidates.read(candidateId), { code: "candidate_missing" });
     const report = (await f.sdk.artifacts.read(created.id)).artifact;
     await f.sdk.artifacts.delete(created.id, report.revision, true);
     f.service.store.db.prepare("DELETE FROM receipts WHERE id=?").run(original.workflow.commandId);
@@ -37,9 +37,10 @@ test("public role/test history survives source deletion; candidate model grants 
     reopened = new EventStore(path, f.retentionKey);
     const restored = projectEvents(reopened.events());
     assert.equal(restored.compoundWorkflows.length, 0);
-    assert.equal(restored.candidates.find((value) => value.id === candidateId)?.acceptance, null);
-    assert.ok(reopened.blob(candidate.compoundOrigin.workflowInputDigest).includes(f.input.input.task));
-    assert.ok(reopened.blob(candidate.compoundOrigin.roleInputDigest).includes("untrustedSelectedFiles"));
-    assert.ok(reopened.blob(candidate.compoundOrigin.resultDigest).includes("Generated public candidate"));
+    assert.equal(restored.candidates.length, 0);
+    for (const hash of [candidate.compoundOrigin.workflowInputDigest, candidate.compoundOrigin.roleInputDigest, candidate.compoundOrigin.resultDigest]) {
+      assert.throws(() => reopened!.blob(hash), /Missing or deleted/);
+    }
+    assert.equal(restored.budgetEntries.reduce((tokens, entry) => tokens + (entry.reportedTokens ?? 0), 0), 84);
   } finally { reopened?.close(); await f.close(); }
 });

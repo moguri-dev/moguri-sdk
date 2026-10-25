@@ -51,7 +51,7 @@ stdin and background command adoption are not introduced. The desktop Agent
 view has no stdin route: models run commands, while personal typing belongs in
 the private User terminal. Stop in chat cancels the actual owning agent turn.
 
-Protocol 57 adds a distinct explicit Local `command_job` watch lifecycle:
+Protocol 58 adds a distinct explicit Local `command_job` watch lifecycle:
 original root/call/timeout intent precedes effects, and a watch may outlive a
 finished model turn. Agent displays those jobs separately through
 `tools.command`/`read_command_job`; it never relabels an ordinary background

@@ -112,7 +112,7 @@ before dispatch, including solver, side, subagent, routing, critic, revision,
 decision and retry roles. Model-created children charge their owning session;
 different roles or envs never reset a cumulative ledger.
 
-Protocol 57 coordinated children also retain the immutable original task owner
+Protocol 58 coordinated children also retain the immutable original task owner
 and an accounting scope path. The root owner is charged once while stricter
 child/intermediate caps and prospective holds remain enforceable. Reparenting,
 source deletion or a changed navigation tree cannot reassign ownership or

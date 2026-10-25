@@ -32,6 +32,7 @@ import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
 import { MemoryIndexIntentSchema } from "./memory.ts";
 import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord, type CandidateRecord } from "./candidates.ts";
 import { CandidateGenerationRecordSchema, projectCandidateGeneration, type CandidateGenerationRecord } from "./candidate-generations.ts";
+import { projectCandidateOwners, projectCandidateCleanup, type CandidateOwner, type CandidateCleanup } from "./candidate-retention.ts";
 import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedger, successfulRoleEntry, type RoleSequenceRecord } from "./role-sequences.ts";
 import { projectSandboxPublication, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
 import type { SandboxSetupOperation } from "./sandbox-management.ts";
@@ -52,7 +53,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 57;
+export const PROTOCOL_VERSION = 58;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -288,7 +289,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "routing.planned": { routingId: string; classifierStepId: string; plan: SingleRoutingPlan };
   "routing.finished": { routingId: string; status: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
   "assistant.delta": { text: string };
-  "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage };
+  "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage; candidateGenerationId?: string };
   "model.late_usage": { usage: Usage; executionId: string; sequence: number };
   "execution.started": { execution: RemoteExecution };
   "execution.changed": { executionId: string; status: RemoteExecution["status"]; cancellation: RemoteExecution["cancellation"]; cleanup: RemoteExecution["cleanup"]; diagnostic: string | null; workerPid?: number };
@@ -339,9 +340,12 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "session.group_saved": { group: SessionGroup };
   "artifact.saved": { artifact: LegacyRetainedArtifact };
   "artifact.revised": { artifact: LegacyVersionedArtifact };
-  "artifact.deleted": { artifactId: string; generationIntent?: { commandId: string; commandDigest: string }; roleSequenceIntent?: { commandId: string; commandDigest: string }; compoundIntent?: { commandId: string; commandDigest: string }; decisionIntent?: { sessionId: string; turnId: string; sourceDigest: string } };
+  "artifact.deleted": { artifactId: string; candidateIntents?: { commandId: string; commandDigest: string }[]; generationIntent?: { commandId: string; commandDigest: string }; roleSequenceIntent?: { commandId: string; commandDigest: string }; compoundIntent?: { commandId: string; commandDigest: string }; decisionIntent?: { sessionId: string; turnId: string; sourceDigest: string } };
   "candidate.saved": { candidate: CandidateRecord };
   "candidate.generation_recorded": { generation: CandidateGenerationRecord };
+  "candidate.owner_bound": { owner: CandidateOwner };
+  "candidate.cleanup_recorded": { cleanup: CandidateCleanup };
+  "candidate.usage_retained": { generationId: string; sessionId: string; usage: Usage };
   "role.sequence_recorded": { sequence: RoleSequenceRecord };
   "compound.recorded": { workflow: CompoundWorkflow };
   "winddown.recorded": { winddown: WinddownRecord };
@@ -402,7 +406,7 @@ export const eventTypes: readonly EventType[] = [
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
-  "candidate.saved", "candidate.generation_recorded", "role.sequence_recorded", "compound.recorded", "winddown.recorded", "decision.recorded",
+  "candidate.saved", "candidate.generation_recorded", "candidate.owner_bound", "candidate.cleanup_recorded", "candidate.usage_retained", "role.sequence_recorded", "compound.recorded", "winddown.recorded", "decision.recorded",
   "knowledge.saved", "knowledge.forgotten",
   "github.operation_recorded", "linear.operation_recorded", "cache.registry.saved", "cache.registry.removed",
 ];
@@ -445,6 +449,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const budgetEntries = new Map<string, BudgetEntry>();
   const budgetPlans = new Map<string, BudgetPlan>();
   const candidateGenerations = new Map<string, CandidateGenerationRecord>();
+  const candidateCleanups = new Map<string, CandidateCleanup>();
   const roleSequences = new Map<string, RoleSequenceRecord>();
   const compoundWorkflows = new Map<string, CompoundWorkflow>();
   const winddowns = new Map<string, WinddownRecord>();
@@ -475,6 +480,16 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   }
   for (const event of events) {
     if (event.profile_id !== profileId) continue;
+    if (event.event_type === "candidate.cleanup_recorded") {
+      const cleanup = projectCandidateCleanup(candidateCleanups.get(event.payload.cleanup.id), event.payload.cleanup);
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || event.artifact_id || cleanup.profileId !== profileId) {
+        throw new MoguriError("candidate_retention_corrupt", "Candidate cleanup must remain in its exact profile-owned recovery compartment.", 409);
+      }
+      candidateCleanups.set(cleanup.id, cleanup);
+      for (const root of cleanup.quarantinedRoots) {
+        if (root.workspaceId) blockedWorkspaces.add(root.workspaceId); else blockedProjects.add(root.projectId);
+      }
+    }
     if (event.event_type === "model.selection_remembered") {
       const selection = event.payload.selection, source = sessions.get(event.payload.sourceSessionId);
       const actual = source ? modelSelection(source.controls) : undefined;
@@ -565,6 +580,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (path && (path.length < 1 || path.length > 8 || new Set(path).size !== path.length || path[0] !== entry.sessionId || path.at(-1) !== entry.ownerSessionId) ||
         previous && JSON.stringify(previous.scopePath) !== JSON.stringify(path)) throw new MoguriError("budget_owner", "An accounting update changed or lost its original coordination capacity path.", 409);
       budgetEntries.set(entry.id, structuredClone(entry));
+    }
+    if (event.event_type === "candidate.usage_retained") {
+      const { usage, sessionId, generationId } = event.payload, entry = budgetEntries.get(usage.stepId);
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || event.artifact_id ||
+        !entry || entry.sessionId !== sessionId || entry.turnId !== generationId || entry.modelId !== usage.modelId ||
+        entry.role !== "draft" || usage.role !== "draft" || usage.quality === "provider-reported" && entry.reportedTokens !== usage.totalTokens) {
+        throw new MoguriError("candidate_retention_corrupt", "Retained usage lost its exact original candidate model/accounting owner. No proposal or charge was invented.", 409);
+      }
+      const session = sessions.get(sessionId), index = session?.usage.findIndex((value) => value.stepId === usage.stepId);
+      if (session && index !== undefined && index >= 0) session.usage[index] = structuredClone(usage);
+      const messageIndex = session?.messages.findIndex((message) => message.id === usage.stepId && message.role === "notice");
+      if (session && messageIndex !== undefined && messageIndex >= 0) session.messages[messageIndex] = { ...session.messages[messageIndex]!,
+        text: "Candidate proposal permanently deleted. Original model usage remains in accounting; no work was replayed.", outcome: "deleted" };
     }
     if (event.event_type === "budget.plan_recorded") {
       if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(BudgetPlanSchema, event.payload.plan) || event.payload.plan.profileId !== profileId) throw new MoguriError("budget_plan_corrupt", "Planned accounting must remain independently retained in its exact profile. State was preserved.", 409);
@@ -681,6 +709,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         event.payload.generation.profileId !== profileId || event.artifact_id !== event.payload.generation.id || roleSequences.has(event.payload.generation.id)) throw new MoguriError("candidate_generation_corrupt", "Generation must retain its original exact profile/artifact compartment. State was preserved.", 409);
       const generation = projectCandidateGeneration(candidateGenerations.get(event.payload.generation.id), event.payload.generation);
       candidateGenerations.set(generation.id, generation);
+    }
+    if (event.event_type === "model.completed" && event.payload.candidateGenerationId) {
+      const generation = candidateGenerations.get(event.payload.candidateGenerationId);
+      if (!generation || event.artifact_id !== generation.id || event.turn_id !== generation.id || event.session_id !== generation.sessionId ||
+        event.project_id !== generation.projectId || event.step_id !== generation.stepId || event.payload.usage.stepId !== generation.stepId ||
+        event.payload.usage.modelId !== generation.modelId || event.payload.usage.role !== "draft") {
+        throw new MoguriError("candidate_generation_corrupt", "Generation output must use its canonical proposal compartment, not an unrelated session or report.", 409);
+      }
     }
     if (event.event_type === "candidate.saved") {
       const candidate = event.payload.candidate;
@@ -1217,5 +1253,6 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     compoundWorkflows: [...compoundWorkflows.values()].filter((workflow) => artifacts.has(workflow.id)),
     winddowns: [...winddowns.values()].filter((record) => artifacts.has(record.id)),
     decisions: [...decisions.values()].filter((record) => artifacts.has(record.id)),
+    candidateOwners: projectCandidateOwners(events, profileId).filter((owner) => artifacts.has(owner.id)), candidateCleanups: [...candidateCleanups.values()],
     artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), candidateGenerations: [...candidateGenerations.values()].filter((generation) => artifacts.has(generation.id)), roleSequences: [...roleSequences.values()].filter((sequence) => artifacts.has(sequence.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], sandboxWorkspaces: [...sandboxWorkspaces.values()], sandboxExecutions: [...sandboxExecutions.values()].filter((execution) => artifacts.has(execution.id)), managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

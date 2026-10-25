@@ -118,7 +118,7 @@ retain their real destination and failure provenance; no hidden provider
 switch. Alternative/additive graph/vector memory backends and Stainless remain
 later work, not implied implemented by this contract.
 
-## Executable protocol 57
+## Executable protocol 58
 
 Normal fixed-model and kupo solver turns initially expose `discover_tools`,
 `ask_user` and `task_progress`. Discovery loads selected typed native functions
@@ -269,8 +269,15 @@ The desktop Side chat panel adds main/child context, advisory messages,
 explicit child tasks, grant review and original question/approval controls.
 Agent shows watch logs and exact user inspection alongside ordinary commands.
 
-Schema 57 adds a strict transactional `lean_tooling_schema` marker. It preserves
-existing ciphertext, drafts, receipts, Default identities and held accounting.
+Schema 58 adds a strict transactional `lean_tooling_schema` and convergence
+marker. It recognizes the actual candidate-retention or earlier development
+lean-tooling schema-57 lineage, never version numbers alone. Exactly one valid
+original marker is required; missing, corrupt or ambiguous combinations fail
+without healing state. The development tooling lineage runs the same original
+candidate rekey inside the atomic schema-58 convergence transaction.
+Existing ordinary ciphertext, drafts, receipts, Default identities and held
+accounting stay preserved; only main's already-qualified exact candidate
+generation evidence receives its intended retention scope.
 New raw-result/snapshot references and coordination/command/model-note
 provenance use the existing append-only stream, not mutable SQL state tables.
 Older healthy services require the established explicit matching-owner restart.
@@ -282,9 +289,14 @@ parent dispatch/writer handoff/budgets, restart migration/source retention,
 framed DAP disconnect and hidden Electron controls. The live public keyless
 probe returned three HTTPS results for `TypeScript official documentation`;
 this one observed page is not a provider-availability SLO.
-The [protocol-57 setup qualification](../setup.md#protocol-57-lean-tooling-qualification)
-records the complete full-suite, hidden-client and audited external-consumer
-results, including the actual installed data worker and all worker probes.
+The [pre-integration setup qualification](../setup.md#pre-integration-lean-tooling-qualification)
+records the original complete full-suite, hidden-client and audited
+external-consumer results before main's candidate-cleanup merge. Final
+integration additionally qualifies both schema-57 lineages and preserves
+candidate cleanup, coordination and stricter descendant accounting together.
+An integrated deletion blocked by a partial watch still permits only the exact
+actual-user watch inspection/acknowledgement and existing Resume/retry paths;
+candidate deletion cannot trap that recovery action or admit new model work.
 Live representative task/cache/quality evaluation,
 additional memory backends, arbitrary document preservation and independent
 language-adapter/native/remote transport qualifications remain separate.

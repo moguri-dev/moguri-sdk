@@ -161,6 +161,7 @@ export const CandidateCommandSchema = Type.Union([
 ]);
 export type CandidateCommand = Static<typeof CandidateCommandSchema>;
 export const CandidateQuerySchema = Type.Union([
+  object({ type: Type.Literal("candidate.eligibility"), sessionId: id }),
   object({ type: Type.Literal("candidate.preview"), ...stageInput, roleSequenceId: Type.Optional(id), compoundWorkflowId: Type.Optional(id), compoundStepId: Type.Optional(id) }),
   object({ type: Type.Literal("candidate.role.proposal"), sequenceId: id }),
   object({ type: Type.Literal("candidate.apply.preview"), candidateId: id, sessionId: id }),
@@ -176,6 +177,7 @@ export interface CandidateRoleProposalRead {
   modelSource: import("./artifacts.ts").ArtifactSource;
 }
 export type CandidateResponse =
+  | { type: "candidate.eligibility"; eligible: boolean; diagnostic: string | null }
   | { type: "candidate.preview"; preview: CandidateStagePreview }
   | { type: "candidate.apply.preview"; preview: CandidateApplyPreview }
   | CandidateRoleProposalRead

@@ -8,7 +8,7 @@ import { roleProposalFixture } from "./fixtures/role-proposal-api.ts";
 import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema-33 inspection compatibility marker preserves independent actual role-origin copies on rollback and reopen", { skip: process.platform !== "darwin" }, async () => {
-  const f = await roleProposalFixture(); let opened: EventStore | undefined;
+  const f = await roleProposalFixture({ legacyCandidateJournal: true }); let opened: EventStore | undefined;
   try {
     const preview = (await f.sdk.candidates.preview(f.sessionId, f.workspace.id, f.patch, f.reference)).preview;
     const staged = await f.sdk.candidates.wait((await f.sdk.candidates.stage(f.sessionId, f.workspace.id, f.patch, preview.digest, f.reference)).id!);

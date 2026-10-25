@@ -5,10 +5,16 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **57**, including [lean tools and coordinated sessions](architecture/lean-tooling.md),
-shared-global/last-selected model
-defaults and [ephemeral browser control](architecture/agent-browser.md), with a
-strict metadata-only schema-56 upgrade and reviewed restart of older running services.
+Current source uses protocol **58**, including
+[lean tools and coordinated sessions](architecture/lean-tooling.md),
+[session-owned candidate cleanup](architecture/candidate-cleanup.md),
+shared-global/last-selected model defaults and
+[ephemeral browser control](architecture/agent-browser.md).
+Schema 57 rekeys only exactly recorded generation output and retains required
+accounting; the earlier schema-55 model-default upgrade is metadata-only.
+Schema 58 strictly converges the candidate-retention and earlier development
+lean-tooling lineages using their actual markers, preserving both guarantees.
+Older running services require reviewed restart.
 It retains protocol-54 exact-scoped session PR observations
 and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
 [the separate Agent terminal](architecture/agent-terminal.md),
@@ -1533,9 +1539,13 @@ External worktree adoption and multi-candidate orchestration remain unavailable.
 
 ### Local reviewed repository candidates
 
-Use an explicitly Local agent-mode source session and a separate **clean
+Use an explicitly Local agent-mode source session with an explicit **Git-backed
+project** and a separate **clean
 owned worktree at the same HEAD**. Creating/selecting that worktree is a
 separate user action. Optional indexing, models and inference are not needed.
+`candidates.eligibility(sessionId)` exposes the service's current eligibility and
+diagnostic without creating a job, artifact or model call. It never borrows a
+previous project. Direct manual/generated/compound commands enforce this too.
 
 ```ts
 import type { CandidatePatch } from "moguri";
@@ -1554,13 +1564,23 @@ await sdk.candidates.apply(created.id!, sourceSessionId, staged.candidate.revisi
 const result = await sdk.candidates.wait(created.id!);
 ```
 
-`read(id)` retains the immutable document, exact roots, real stage/apply jobs
-and observed/attempted paths independently of origin-session retention.
+`read(id)` exposes the immutable document, exact roots, real stage/apply jobs
+and observed/attempted paths while its session-owned proposal remains retained.
 `wait` returns actual settled metadata, not a success-shaped retry. Inspect
 `candidate.status` and the original job; stop through `candidates.stop(id)`.
 A wait timeout or client abort does not cancel work. A partial result never
 rolls back or retries newer user files; explicit existing root recovery is
 still required.
+
+Permanent origin-session deletion, including archived-session expiry, deletes
+the candidate and its proposal/job/blob grants. Archiving alone preserves it.
+Fresh authoritative metadata for its exact first associated repository/PR can
+also delete it after a verified merge, including for archived sessions. Current
+metadata-access policy applies; no stale observation, closed PR or later session
+relink can authorize another candidate's deletion. Pending/failed cleanup is in
+`snapshot.candidateCleanups`; owner/PR bindings are in `candidateOwners`.
+Ordinary artifacts, shared grants, actual/unknown accounting and Git/filesystem
+resources are not erased or reverted. See the [retention contract](architecture/candidate-cleanup.md).
 
 New files use `baseDigest: "absent"` and need existing allowed parent
 directories. The slice accepts at most 20 portable distinct paths, 32-KiB
@@ -1589,7 +1609,7 @@ created clean managed worktree at the same HEAD.
 const file = await sdk.workspaces.file(sourceSessionId, "src/example.ts");
 const input = { task: "Describe the requested change", files: [{ path: file.path, baseDigest: file.digest }] };
 const preview = (await sdk.candidates.generatePreview(sourceSessionId, stageWorkspaceId, input)).preview;
-// The user reviews source/model/cost and independent retention before this call.
+// The user reviews source/model/cost and session-owned proposal retention.
 const started = await sdk.candidates.generate(sourceSessionId, stageWorkspaceId, input, preview.digest, true);
 const generated = await sdk.candidates.waitGeneration(started.id!);
 if (generated.generation.status !== "proposed" || !generated.proposal) throw new Error("Inspect the retained partial/stopped/failed outcome.");
@@ -1603,9 +1623,12 @@ Wait abort/timeout never cancels inference. Missing usage remains held and
 raw invalid/stale output/actual charges remain inspectable. No retries or model
 fallbacks. A changed patch cannot retain the `generationId` assertion.
 
-The report independently retains original input, raw output, canonical model
-provenance and version-3 export/history after source deletion. Its bytes are
-immutable; metadata edits remain available. Deleting the report prevents its
+The report has separate encrypted grants for original input, raw output and
+canonical model provenance, but its lifecycle is owned by its originating
+session and exact first PR association as described above. New candidate and
+generation exports use version 10 with exact ownership/PR events; ordinary and
+historical exports keep their prior formats. Bytes are immutable; metadata
+edits remain available. Deleting the report prevents its
 original command from calling a model again, even without its old receipt.
 These retained data are not automatically promoted to solver context.
 

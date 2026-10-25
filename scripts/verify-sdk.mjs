@@ -74,7 +74,7 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
-      ${installedProtocol >= 57 ? `
+      ${installedProtocol >= 58 ? `
       const nativeCatalogue=await sdk.tools.catalog("generated-id","file");
       void nativeCatalogue.tools[0]?.parameters;void nativeCatalogue.tools[0]?.schemaDigest;
       await sdk.tools.execute("generated-id","read_file",{path:"generated.ts"},"a".repeat(64));
@@ -420,7 +420,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      ${installedProtocol >= 57 ? `{
+      ${installedProtocol >= 58 ? `{
       const child=await sdk.sessions.spawn(s.id,"side","Generated installed coordinated side");
       const review=await sdk.coordination.preview(s.id,child.id);
       assert.equal(review.parentBinding.env,"Local");assert.equal(review.childBinding.root,await realpath(project));
@@ -444,7 +444,7 @@ try {
       await sdk.coordination.grant(s.id,child.id,(await sdk.coordination.preview(s.id,child.id)).digest,false,true);
       await assert.rejects(()=>sdk.coordination.read(s.id,{action:"transcript",targetSessionId:child.id}),{code:"coordination_changed"});
       await sdk.sessions.delete(child.id,true);
-      console.log("Installed protocol-57 typed catalogue, actual restricted data worker, canonical SQL reads and root-bound coordination preserve actor, approval and no-model authority.");
+      console.log("Installed protocol-58 typed catalogue, actual restricted data worker, canonical SQL reads and root-bound coordination preserve actor, approval and no-model authority.");
       }` : ""}
       ${installedProtocol >= 41 ? `{
       assert.equal(sdk.settings.get().values.memory.useTieredContext,false);
@@ -658,7 +658,8 @@ try {
           const command={type:"candidate.apply",candidateId:staged.candidate.id,sessionId:source.id,expectedRevision:staged.candidate.revision,expectedDigest:review.digest,confirm:true};
           await candidateSdk.command(command,commandId);assert.equal((await candidateSdk.candidates.wait(staged.candidate.id)).candidate.status,"applied");
           assert.deepEqual(await readFile(join(directory,".git/index")),index);assert.equal(git(["rev-parse","HEAD"],directory),head);
-          assert.equal(JSON.parse((await candidateSdk.artifacts.export(staged.candidate.id)).export.text).schemaVersion,2);
+          assert.equal(JSON.parse((await candidateSdk.artifacts.export(staged.candidate.id)).export.text).schemaVersion,PROTOCOL_VERSION>=57?10:2);
+          if(PROTOCOL_VERSION>=57)assert.equal((await candidateSdk.candidates.eligibility(source.id)).eligible,true);
           const shared=await candidateSdk.slash(source.id,"/candidate read "+staged.candidate.id,"tui");assert.equal(shared.kind,"text");
           candidateSdk.disconnect();await candidateRuntime.close();candidateRuntime=await createRuntime(options);candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
           assert.equal((await candidateSdk.candidates.read(staged.candidate.id)).candidate.acceptance.actor,"user");
@@ -666,11 +667,17 @@ try {
           await writeFile(join(directory,"candidate.txt"),"Generated newer installed user edit.\\n");
           assert.equal((await candidateSdk.command(command,commandId)).id,staged.candidate.id);
           assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
-          console.log("Installed SDK/CLI candidate stage, separate exact apply, version-2 history and canonical restart replay preserved source index/HEAD without a model.");
+          if(PROTOCOL_VERSION>=57){
+            await candidateSdk.sessions.delete(source.id,true);
+            await assert.rejects(()=>candidateSdk.candidates.read(staged.candidate.id),{code:"candidate_missing"});
+            assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
+          }
+          console.log("Installed SDK/CLI candidate stage, separate exact apply, ownership-bearing history, exact retention boundaries and canonical restart replay preserved source index/HEAD without a model.");
         }finally{candidateSdk.disconnect();await candidateRuntime.close();}
       }
       const general=await sdk.sessions.create();
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
+      if(PROTOCOL_VERSION>=57)assert.equal((await sdk.candidates.eligibility(general.id)).eligible,false);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
       assert.equal((await sdk.remote.status()).remote.ready,false);
       if(PROTOCOL_VERSION>=17&&process.env.MOGURI_GENERATED_REMOTE){
@@ -1070,7 +1077,7 @@ try {
           directory:join(root,"generated-installed-generation"),stateDir:options.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests});
         generationSdk.disconnect();await generationRuntime.close();generationRuntime=await createRuntime(options);generationSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
         await proof.verifyRecovery(generationSdk);
-        console.log("Installed protocol-31 SDK/CLI/shared generation used the actual owned worker/draft ledger, immutable model provenance/version-3 history, separate reviewed stage/apply and missing-receipt restart replay without another model request.");
+        console.log("Installed SDK/CLI/shared generation used the actual owned worker/draft ledger, immutable model provenance and ownership-bearing history, separate reviewed stage/apply and missing-receipt restart replay without another model request.");
         ${installedMajor > 0 || installedMinor >= 26 ? `
         generationSdk.disconnect();await generationRuntime.close();
         model.contextWindow=262144;provider.state.models[0].contextWindow=model.contextWindow;
@@ -1084,7 +1091,7 @@ try {
         generationSdk=await connectMoguri({stateDir:ownedOptions.stateDir,autoStart:false});
         await ownedProof.verifyRecovery(generationSdk,generationRuntime.controller);
         console.log("Actual installed controller/worker owns complete planned, bounded, independently retained roles with explicit untrusted prior-result context, shared CLI/TUI/SDK reads, source deletion/reopen and lost-receipt/deletion-intent replay refusal. No public compound or family-quality readiness.");
-        if(PROTOCOL_VERSION>=33)console.log("Actual installed SDK/CLI/shared final-role proposals preserve exact review-bound origin, separate staging/application, source-role deletion, independent raw-copy/export5/reopen and actual-user acceptance without another model.");
+        if(PROTOCOL_VERSION>=33)console.log("Actual installed SDK/CLI/shared final-role proposals preserve exact review-bound origin, separate staging/application, source-role deletion, independent raw-copy exports/reopen, actual-user acceptance and exact retention boundaries without another model.");
         if(PROTOCOL_VERSION>=35)console.log("Actual installed controller/worker binds version-2 router/patch/critic contracts, excludes router explanations from selected contexts and retains four actual 168-token role calls; SDK/CLI/shared contract reads, canonical origin/copy/reopen keep declared validity separate from quality or approval.");
         ` : ""}
       }finally{generationSdk?.disconnect();await generationRuntime?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

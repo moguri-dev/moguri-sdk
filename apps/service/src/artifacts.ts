@@ -150,10 +150,10 @@ export class ArtifactRuntime {
   private candidateEvents(id: string): StoredEvent[] {
     if (!this.host.snapshot().candidates.some((candidate) => candidate.id === id)) return [];
     return this.host.events().filter((event) => event.artifact_id === id &&
-      (event.event_type === "candidate.saved" || event.event_type === "job.started" || event.event_type === "job.progress" || event.event_type === "job.finished"));
+      (event.event_type === "candidate.saved" || event.event_type === "candidate.owner_bound" || event.event_type === "job.started" || event.event_type === "job.progress" || event.event_type === "job.finished"));
   }
   private generationHistory(id: string): StoredEvent[] {
-    return this.host.events().filter((event) => event.artifact_id === id && event.event_type === "candidate.generation_recorded");
+    return this.host.events().filter((event) => event.artifact_id === id && (event.event_type === "candidate.generation_recorded" || event.event_type === "candidate.owner_bound"));
   }
   private roleHistory(id: string): StoredEvent[] {
     return this.host.events().filter((event) => event.artifact_id === id && event.event_type === "role.sequence_recorded");
@@ -177,16 +177,34 @@ export class ArtifactRuntime {
       (event.event_type === "job.started" || event.event_type === "job.progress" || event.event_type === "job.finished") &&
         (event.event_type === "job.started" ? event.payload.job.sandboxPublicationId === id : event.payload.sandboxPublicationId === id)));
   }
-  private deleted(id: string): EventInput {
+  private deleted(id: string): EventInput[] {
+    const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === id);
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === id);
     const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === id);
     const compound = this.host.snapshot().compoundWorkflows.find((workflow) => workflow.id === id);
     const decision = this.host.snapshot().decisions.find((record) => record.id === id);
-    return { event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: id,
+    const completion = generation && this.host.events().findLast((event) => event.event_type === "model.completed" && event.payload.candidateGenerationId === generation.id &&
+      event.session_id === generation.sessionId && event.step_id === generation.stepId);
+    const usage: EventInput[] = completion?.event_type === "model.completed" ? [{ event_type: "candidate.usage_retained", profile_id: generation!.profileId,
+      payload: { generationId: generation!.id, sessionId: generation!.sessionId, usage: completion.payload.usage } }] : [];
+    return [...usage, { event_type: "artifact.deleted", profile_id: this.host.snapshot().profileId, payload: { artifactId: id,
+      ...(candidate ? { candidateIntents: [candidate.stageIntent, ...(candidate.applyIntent ? [candidate.applyIntent] : [])].map(({ commandId, commandDigest }) => ({ commandId, commandDigest })) } : {}),
       ...(generation ? { generationIntent: { commandId: generation.commandId, commandDigest: generation.commandDigest } } : {}),
       ...(sequence ? { roleSequenceIntent: { commandId: sequence.commandId, commandDigest: sequence.commandDigest } } : {}),
       ...(compound ? { compoundIntent: { commandId: compound.commandId, commandDigest: compound.commandDigest } } : {}),
-      ...(decision ? { decisionIntent: { sessionId: decision.sessionId, turnId: decision.turnId, sourceDigest: decision.sourceDigest } } : {}) } };
+      ...(decision ? { decisionIntent: { sessionId: decision.sessionId, turnId: decision.turnId, sourceDigest: decision.sourceDigest } } : {}) } }];
+  }
+  deleteCandidates(ids: string[]): EventInput[] {
+    const snapshot = this.host.snapshot();
+    return ids.filter((id) => snapshot.artifacts.some((artifact) => artifact.id === id)).flatMap((id) => {
+      const candidate = snapshot.candidates.find((candidate) => candidate.id === id), generation = snapshot.candidateGenerations.find((generation) => generation.id === id);
+      if (!candidate && !generation) throw new MoguriError("candidate_cleanup_scope", "Only canonical candidate/proposal compartments may be deleted by candidate cleanup. Ordinary artifacts were preserved.", 409);
+      if (candidate && ["staging", "applying"].includes(candidate.status) || generation?.status === "running" ||
+        snapshot.jobs.some((job) => job.candidate?.candidateId === id && ["running", "waiting_input"].includes(job.status))) {
+        throw new MoguriError("candidate_cleanup_pending", "Candidate-owned work has not settled. Candidate records and grants were preserved.", 409);
+      }
+      return this.deleted(id);
+    });
   }
   private source(sessionId: string, kind: "message" | "tool", id: string): ArtifactSourcePreview {
     this.session(sessionId);
@@ -234,6 +252,10 @@ export class ArtifactRuntime {
       });
       const events = this.candidateEvents(artifact.id), hashes = new Set<string>();
       for (const event of events) {
+        if (event.event_type === "candidate.owner_bound" && event.payload.owner.generationEvidence) {
+          const evidence = event.payload.owner.generationEvidence;
+          for (const hash of [evidence.inputDigest, evidence.resultDigest, evidence.proposalDocumentDigest]) hashes.add(hash);
+        }
         if (event.event_type === "candidate.saved") {
           if (event.payload.candidate.stageResultDigest) hashes.add(event.payload.candidate.stageResultDigest);
           if (event.payload.candidate.applyResultDigest) hashes.add(event.payload.candidate.applyResultDigest);
@@ -320,7 +342,8 @@ export class ArtifactRuntime {
     });
     const roleLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.roleOrigin));
     const compoundLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.compoundOrigin));
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: documents.some((document) => document.decision || document.decisionEvidence) ? 9 : documents.some((document) => document.winddown) ? 8 : compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const owned = documents.some((document) => [...document.candidate?.events ?? [], ...document.generation?.events ?? []].some((event) => event.event_type === "candidate.owner_bound"));
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: owned ? 10 : documents.some((document) => document.decision || document.decisionEvidence) ? 9 : documents.some((document) => document.winddown) ? 8 : compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
@@ -350,7 +373,7 @@ export class ArtifactRuntime {
       if (this.preview(projectId).digest !== preview.digest) throw new MoguriError("artifact_conflict", "The artifact set changed during copy verification. Stored copies were preserved.", 409);
     }
     if (choice?.action === "retain") return { events: preview.artifacts.map(({ id }) => { const artifact = this.artifact(id); return this.event({ ...artifact, projectId: null, workItemId: null, revision: artifact.revision + 1, updatedAt: new Date().toISOString() }); }), forget: [] };
-    return { events: preview.artifacts.map(({ id }) => this.deleted(id)), forget: preview.artifacts.map(({ id }) => id) };
+    return { events: preview.artifacts.flatMap(({ id }) => this.deleted(id)), forget: preview.artifacts.map(({ id }) => id) };
   }
   private async destination(projectId: string, workspaceId: string | null): Promise<{ project: Project; rootIdentity: string }> {
     const project = this.host.root(projectId, workspaceId), settings = this.host.projects().configuration(projectId).values;
@@ -504,7 +527,7 @@ export class ArtifactRuntime {
       if (sequence?.status === "running") throw new MoguriError("role_sequence_busy", "Stop and settle this role sequence before deleting its independent input/result history.", 409);
       if (generation?.status === "running") throw new MoguriError("candidate_generation_busy", "Stop generation before deleting its independently retained input/result report.", 409);
       if (activeCandidate) throw new MoguriError("candidate_busy", "Stop the candidate's active owned job before deleting its independent document/history.", 409);
-      return finish([this.deleted(artifact.id)], { id: artifact.id }, { artifacts: [artifact.id] });
+      return finish(this.deleted(artifact.id), { id: artifact.id }, { artifacts: [artifact.id] });
     }
     if (candidate && command.changes.text !== undefined) throw new MoguriError("candidate_document", "A candidate's exact proposal document is immutable. Export it or create a separately reviewed new proposal; renaming/organizing does not change its bytes.", 409);
     if (decision && command.changes.text !== undefined) throw new MoguriError("decision_document", "Original decision request, actual model result, actor and applied/rejected observations are immutable. Metadata edits cannot rewrite advice or authority.", 409);

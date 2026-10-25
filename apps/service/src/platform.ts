@@ -68,6 +68,7 @@ import { performance } from "node:perf_hooks";
 import { BrowserBroker } from "./browser.ts";
 import { BROWSER_MCP_TOOLS, isBrowserCommand, isBrowserQuery, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
+import { settleCandidateCleanup } from "./candidate-cleanup.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { SandboxPublications } from "./sandbox-publications.ts";
 import type { WinddownCommitHost } from "./winddown-commits.ts";
@@ -122,6 +123,7 @@ export interface PlatformHost {
   removeProject: SessionWorkspaceHost["removeProject"];
   validateAdmission: SessionWorkspaceHost["validateAdmission"];
   closingProject(id: string): boolean;
+  closingSession(id: string): boolean;
   contextPreview: SessionWorkspaceHost["contextPreview"];
   compactionQuery(query: CompactionQuery): CompactionResponse;
   compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult;
@@ -273,9 +275,9 @@ export class PlatformRuntime {
       },
     }, this.workspace.integrations, options.integrations?.prRefreshMs);
     this.candidates = new CandidateRuntime(store, {
-      snapshot: () => this.snapshot(), managed: this.managed, projects: () => this.sessions.projects,
+      snapshot: () => this.snapshot(), events: host.events, managed: this.managed, projects: () => this.sessions.projects,
       commit: (events) => this.host.commit(events),       artifact: (session, text, summary, patch, sources) => this.artifacts.candidate(session, text, summary, patch, sources),
-      localRootBusy: host.localRootBusy, closingProject: host.closingProject, wake: host.wake,
+      localRootBusy: host.localRootBusy, closingProject: host.closingProject, closingSession: host.closingSession, wake: host.wake,
       roleProposal: host.roleProposal,
       compoundProposal: host.compoundProposal,
       job: (kind, projectId, sessionId, workspaceId, execute, start, settled, lifecycle) => this.job(kind, projectId, sessionId, execute, settled, start, workspaceId ?? undefined, lifecycle),
@@ -1355,6 +1357,20 @@ ${skillEntries.length ? `\n<enabled-skill-catalog>\n${skillMetadata}\n</enabled-
     finally { for (const [, job] of jobs) job.abort.abort(); }
   }
   async settleSession(id: string): Promise<void> { this.browser.revokeSession(id); this.stopSession(id); await Promise.all([this.inputs.settleSession(id), ...[...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)]); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
+  async settleCandidateJobs(ids: string[]): Promise<void> {
+    const jobs = [...this.active.entries()].filter(([id]) => {
+      const candidateId = this.snapshot().jobs.find((job) => job.id === id)?.candidate?.candidateId;
+      return candidateId !== undefined && ids.includes(candidateId);
+    });
+    try {
+      const events = jobs.flatMap(([id]) => {
+        const candidateId = this.snapshot().jobs.find((job) => job.id === id)!.candidate!.candidateId;
+        return this.candidates.stopEvents(candidateId, id);
+      });
+      if (events.length) this.host.commit(events);
+    } finally { for (const [, job] of jobs) job.abort.abort(); }
+    await settleCandidateCleanup(Promise.all(jobs.map(([, job]) => job.done)));
+  }
   async cancelProject(id: string): Promise<void> {
     const sessions = this.snapshot().sessions.filter((session) => session.projectId === id);
     for (const session of sessions) this.browser.revokeSession(session.id);

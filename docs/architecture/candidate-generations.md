@@ -1,5 +1,12 @@
 # Owned reviewed proposal generation
 
+**Current retention, protocol 57:** [session-owned cleanup](candidate-cleanup.md)
+replaces this checkpoint's source-independent proposal lifecycle. Permanent
+origin-session deletion or fresh verification of its exact associated PR merge
+deletes proposal records, inputs and raw output grants. Archiving alone
+preserves them. Required usage/unknown capacity and ordinary artifacts remain
+independent; the historical qualification below is unchanged.
+
 Status: qualified **0.23.0-alpha.1, protocol/database 31**. This is one
 bounded, tool-less production `draft` role in the existing owned worker. It
 generates an unaccepted text patch from explicitly reviewed Local source
@@ -94,15 +101,20 @@ pushes, creates/deletes a branch, executes a validator or approves a model.
 ## Retention, cancellation and restart
 
 The complete input, normalized raw result, proposal, report revisions and
-generation events use the independent artifact grant, not the source session
-or project grant. Source deletion preserves them and the independent ledger.
+generation events use the proposal artifact grant. Protocol 57 also binds the
+generation's canonical model-completion payload to that compartment, removing
+the otherwise redundant session-only raw-output grant. Permanent source
+deletion removes these candidate-owned grants while preserving the ledger.
+Verified-merge cleanup retains only the exact usage metadata in the surviving
+session, not proposal text or another settlement/refund.
 Project removal still requires explicit clean-worktree removal and reviewed
 artifact retain/export/delete choices. Metadata edits are allowed; bound
 report text is immutable. Active reports cannot be archived or deleted.
 
-Exports containing generation use `moguri-artifacts` **version 3**, including
-exact generation events and referenced input/result/proposal blobs. Candidate-
-only version 2 and ordinary version 1 remain unchanged. The same exact 8-MiB
+New exports containing canonical candidate/generation ownership use
+`moguri-artifacts` **version 10**, including exact ownership/first-PR events.
+Earlier checkpoint formats, including generation version 3, remain readable
+as historical exports; ordinary documents keep their existing format. The same exact 8-MiB
 export bound applies. No report bytes enter model context automatically.
 
 Original commands are checked against retained intent before root/model
@@ -110,7 +122,7 @@ lookup. Lost receipts return the original identity, not another paid call.
 Explicit report deletion leaves only its profile-owned original-intent
 tombstone; that command returns `candidate_generation_deleted` even after
 source deletion rather than resurrecting the report or spending again.
-Other independently granted artifact copies remain independent.
+Other independently granted ordinary artifact copies remain independent.
 
 Explicit generation/session stopping reaches the actual owned worker even
 if either stop-intent journal append fails. A failed append is not described

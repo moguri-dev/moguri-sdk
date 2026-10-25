@@ -254,7 +254,7 @@ test("candidate writer ownership follows the physical source root across two iso
   } finally { release(); t.mock.restoreAll(); peer?.disconnect(); await f.close(); }
 });
 
-test("lost stage/apply receipts return the original candidate before filesystem probes even after origin deletion or later user edits", { timeout: 30_000 }, async (t) => {
+test("lost stage/apply receipts return the original candidate before filesystem probes after origin archival or later user edits", { timeout: 30_000 }, async (t) => {
   for (const phase of ["stage", "apply"] as const) {
     const f = await candidateFixture();
     try {
@@ -270,7 +270,7 @@ test("lost stage/apply receipts return the original candidate before filesystem 
       await f.sdk.candidates.wait(candidateId);
       const originalJobs = f.sdk.getState().snapshot!.jobs.filter((job) => job.candidate?.candidateId === candidateId).map((job) => job.id);
       f.service.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run("default", commandId);
-      if (phase === "stage") await f.sdk.sessions.delete(f.sessionId, true);
+      if (phase === "stage") await f.sdk.command({ type: "session.archive", sessionId: f.sessionId });
       else await writeFile(join(f.project, "fixture.txt"), "Generated newer user edit after completed application.\n");
       const root = t.mock.method(f.service.controller.platform.managed, "project", () => { throw new Error("A candidate replay cannot re-probe a source/stage root."); });
       assert.deepEqual(await f.sdk.command(command, commandId), admitted);
@@ -329,11 +329,11 @@ test("a stale completed stage-job stop cannot cancel or relabel the candidate's 
   } finally { release(); t.mock.restoreAll(); await f.close(); }
 });
 
-test("candidate acceptance after origin retention belongs to the explicit new Local source session, never a fake user-authored proposal", { timeout: 30_000 }, async () => {
+test("candidate acceptance after origin archival belongs to the explicit applying session without changing canonical origin ownership", { timeout: 30_000 }, async () => {
   const f = await candidateFixture();
   try {
     const staged = await f.stage();
-    await f.sdk.sessions.delete(f.sessionId, true);
+    await f.sdk.command({ type: "session.archive", sessionId: f.sessionId });
     const retained = await f.sdk.candidates.read(staged.candidate.id);
     assert.equal(retained.candidate.originSessionId, f.sessionId); assert.equal(retained.stageJob?.status, "completed");
     const source = await f.sdk.sessions.create(retained.candidate.projectId, "Generated new explicit candidate owner");
