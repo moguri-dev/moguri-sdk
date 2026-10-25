@@ -111,3 +111,36 @@ suggestion consent, dated accounting and truthful velocity samples. Hidden
 Electron checks cover navigation, all four dashboard pages, field copying,
 secret exclusion, keyboard tooltips and preserved edits. Build/type checks and
 an independently packed SDK consumer remain required.
+
+## Integrated qualification
+
+The final generated macOS arm64 runs pass **1,446 Node/worker/CLI/TUI cases**
+with **14 platform/native skips**, and **183 hidden desktop cases** with
+**three packaged/physical-native skips**. No tests remain failed or cancelled.
+Type checks and the production build pass. `npm ci`, the independently installed
+packed SDK consumer, all **12 installed worker continuation probes**, and
+moderate-level root/consumer audits pass with **zero vulnerabilities**.
+The SDK consumer explicitly checks fresh skill lookup/read, changed-body
+rejection, global previews, seven-day dashboard data and private HOME consoles.
+These generated providers/SSH endpoints are not live entitlement or physical
+SendBox/release qualification.
+
+The desktop pass also exposed a real Ghostty integration race: the host widened
+from 219 to 267 pixels while its canvas stayed at 200 pixels and the remote grid
+stayed at 25 columns. FitAddon's 50 ms resize guard discarded the single resize
+notification. Both User and Agent surfaces now debounce host observation before
+calling the existing FitAddon, and dispose pending fits before their terminal.
+The actual remote-grid/Agent cases pass **18 repeated checks**, without
+weakening the grid acknowledgement or adding a terminal parser.
+
+Detailed accounting stays mounted across background chart refreshes, preserving
+reservation controls and exact repository reviews. Copy announcements use a
+polite live region without impersonating each section's operational status.
+Capability limitations and errors stay visible; language/transport explanations
+remain keyboard-accessible information tooltips.
+
+Known advisories remain: OpenTUI's experimental FFI warning, Ghostty's lazy
+bundle-size warning, and deprecated transitive `whatwg-encoding` /
+`node-domexception` packages in the external consumer. Its existing install
+script review is explicitly approved and rebuilt by the verification harness.
+None is an audit vulnerability or a qualification of the skipped physical gates.
