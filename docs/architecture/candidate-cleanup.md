@@ -121,6 +121,10 @@ Unknown origin stays unknown. Late callbacks cannot recreate forgotten scopes,
 and dispatch checks deleted-command tombstones before looking up roots.
 Pending/failed cleanup appears in the shared snapshot and desktop Candidates /
 stored-session management. It never becomes a successful deletion receipt.
+After a failed attempt, the surviving session may still save its unsent draft
+so desktop's required pre-delete flush cannot deadlock retry. New model,
+candidate and other owned work remain blocked; saving a draft neither sends it
+nor lifts the retained deletion intent.
 
 ## Upgrade and clients
 
@@ -216,3 +220,22 @@ real installed worker/CLI workflows and twelve private role/receipt probes,
 with zero audit findings. Its installation reports existing transitive
 `whatwg-encoding` / `node-domexception` deprecations and an explicitly approved
 Moguri postinstall notice. These are not newly introduced dependencies.
+
+The complete Node compatibility rerun passes **1,374 cases, zero failures and
+14 physical-native skips out of 1,388 in 1,134.02 s**. The following full hidden
+desktop run retained **173 passes, two failures and three physical-native skips
+out of 178 in 5.9 min**: one usability assertion expected the superseded
+candidate warning, and an existing Remote resize fixture sampled hidden native
+geometry before acknowledgement. The copy assertion now checks the Git-project
+gate. The resize fixture awaits actual native content dimensions, explicitly
+matches the renderer viewport, then still requires real SSH grid growth and
+shrinkage; no terminal production code, fixed sleep or relaxed comparison.
+The repeated mixed usability/Remote gate passes **16/16 in 44.6 s**.
+
+Final failure-path coverage additionally found and fixed desktop retry's need
+to flush a newly edited unsent draft after failed cleanup. Only draft saving is
+allowed while that retained deletion is pending; candidate/model work remains
+blocked. The actual shared DraftEditor and hidden sidebar deletion flow pass,
+with **27/27** session-interaction/retention cases and **21/21** draft/retention
+cases. Installed SDK generation cleanup, deleted paid-intent rejection and
+independent actual usage retention also pass against the rebuilt package.

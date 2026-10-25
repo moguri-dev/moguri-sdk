@@ -1756,7 +1756,7 @@ export class ControlPlane extends EventEmitter {
     const browserCleanup = command.type === "browser.host.detach" || command.type === "browser.host.reply" || command.type === "browser.host.control" && !command.enabled;
     if (!browserCleanup && (projectId && this.deletingProjects.has(projectId) || "sessionId" in command && typeof command.sessionId === "string" && this.deletingSessions.has(command.sessionId))) throw new MoguriError("workspace_removing", "Owned work is settling for removal. No new mutation was admitted.", 409);
     if ("sessionId" in command && typeof command.sessionId === "string" && this.candidateCleanup.sessionDeleting(command.sessionId) &&
-      !["session.delete", "session.stop", "session.resume", "terminal.acknowledge", "terminal.close", "execution.reconcile", "execution.acknowledge"].includes(command.type) && !browserCleanup) {
+      !["session.delete", "session.stop", "session.resume", "draft.save", "terminal.acknowledge", "terminal.close", "execution.reconcile", "execution.acknowledge"].includes(command.type) && !browserCleanup) {
       throw new MoguriError("candidate_cleanup_pending", "This session has an unfinished permanent deletion. Retry deletion or reconcile its exact cleanup; no new work was admitted.", 409);
     }
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);

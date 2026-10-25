@@ -4,7 +4,7 @@ import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { candidateApiFixture } from "./fixtures/candidate-api.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { MoguriSdk } from "../packages/sdk/src/index.ts";
+import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { digest } from "../apps/service/src/store.ts";
 import { candidateGenerationFixture } from "./fixtures/candidate-generation-api.ts";
@@ -294,4 +294,25 @@ test("a retention-grant rollback cannot mutate the live generation notice into a
     await f.sdk.sessions.delete(f.sessionId, true, f.session().revision);
     assert.equal(f.service.controller.snapshot().candidateGenerations.length, 0);
   } finally { await f.close(); }
+});
+
+test("failed deletion still permits the draft flush required by desktop retry, without admitting new candidate work", { timeout: 30_000 }, async () => {
+  const f = await candidateApiFixture();
+  const editor = new DraftEditor(f.sdk, f.sessionId, f.session().draft);
+  try {
+    await f.stage();
+    f.service.store.db.exec(`CREATE TRIGGER generated_cleanup_retry_failure BEFORE INSERT ON events
+      WHEN json_extract(NEW.data,'$.event_type')='session.deleted'
+      BEGIN SELECT RAISE(ABORT,'Generated retry fixture interruption'); END;`);
+    await assert.rejects(() => f.sdk.sessions.delete(f.sessionId, true), { code: "candidate_cleanup_pending" });
+    f.service.store.db.exec("DROP TRIGGER generated_cleanup_retry_failure");
+    editor.edit("Generated unsent edit preserved until deletion succeeds.");
+    await editor.flush();
+    assert.equal(f.session().draft.text, editor.getState().text);
+    await assert.rejects(() => f.sdk.candidates.preview(f.sessionId, f.workspace.id, f.patch), { code: "candidate_cleanup_pending" });
+    await f.sdk.sessions.delete(f.sessionId, true, f.session().revision);
+    assert.equal(f.service.controller.snapshot().sessions.length, 0);
+    assert.equal(f.service.controller.snapshot().candidates.length, 0);
+    assert.equal(f.requests.length, 0);
+  } finally { editor.dispose(); await f.close(); }
 });
