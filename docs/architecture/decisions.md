@@ -83,6 +83,9 @@ execution transports.
 
 - Node.js 24 LTS is too old for OpenTUI. Node.js 26 is the Current line on the decision date and is scheduled to enter LTS on 2026-10-28. [N1]
 - Moguri ships its own pinned Node.js runtime rather than depending on the user's installation.
+- The macOS app also ships an `exec`-based [CLI/TUI launcher](cli-launcher.md).
+  Installing or removing the user-local command is explicit; copying the app
+  does not run the TUI or edit PATH.
 - CPU-heavy work must not block the event loop. Use worker threads or the Rust helpers in D06.
 
 ## D03. Electron, React and Vite desktop
