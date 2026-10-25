@@ -15,8 +15,9 @@ Text controls have an adjacent Save action. Neither search nor navigation
 discards edits or commits unrelated fields.
 
 The scrollable left navigation owns New and profile-wide Dashboard, Suggestions,
-Automations, Code change, Work item and Global Terminal. The automation/link
-destinations are intentionally empty in protocol 59. Independently retained
+Automations and Global Terminal. Automations is intentionally empty in protocol
+59. Code change and Work item live in the right rail, bound to the selected
+session, not global resources. Independently retained
 Artifacts/Candidates and native execution management live in Settings; Sandbox
 combines managed SendBox setup and retained workspace/publication controls.
 Attention has one entrypoint in the top bar.
@@ -28,6 +29,8 @@ Provider configuration and profile management live in Settings. Project-folder
 actions open the actual project's configuration. Original Moguri typography,
 colors and component patterns are retained; the reference image is not a design
 source.
+Copilot connection status is visible only under Settings / Models / Providers;
+the left footer does not contain a provider badge or connection button.
 
 The [protocol-59 experience](workspace-experience.md) keeps profile name, mascot
 Ask Moguri and icon-only Settings on one footer row. Non-secret input/textarea

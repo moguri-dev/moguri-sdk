@@ -5,8 +5,10 @@
 This slice simplifies the existing macOS alpha, not the wider release roadmap.
 The control plane remains authoritative for skill discovery, suggestion sources,
 accounting and work observations. Clients share typed SDK queries and slash
-commands. Automations, Code change and Work item are empty navigation
-destinations, not enabled scheduling or provider-write capabilities.
+commands. Automations is an empty left-sidebar destination. Code change and
+Work item are right-rail, per-session panels, not global resources or new
+provider-write capabilities. Code change preserves an already-linked PR;
+Work item remains a placeholder for issue links.
 
 Reuse React, TypeBox, the maintained MCP SDK, YAML and yauzl under their existing
 MIT licenses, Node's filesystem/crypto primitives, and the existing budget,
@@ -59,6 +61,9 @@ their original root and input is never replayed. Missing roots fail explicitly.
 Settings use hover/focus copy controls for non-secret text fields and information
 tooltips for explanations. Errors, live status and consequential safety warnings
 stay visible. Icon-only navigation keeps accessible names and keyboard focus.
+The footer contains profile name, Ask Moguri and Settings in one row. Copilot
+connection status is shown only in Settings / Models / Providers, not the left
+sidebar. Both new right-rail panels follow the actual selected session.
 
 ## Visual direction
 

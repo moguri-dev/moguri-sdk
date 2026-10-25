@@ -146,12 +146,13 @@ development-signing limitations remain.
 
 ## Global and session sidebar placement
 
-Protocol 59 updates the **left** resources to Dashboard, Suggestions, Automations,
-Code change, Work item and Global Terminal. Artifacts/Candidates/Sandbox move
-to Settings. The automation and external-link destinations are placeholders,
-not new scheduled work or provider-write authority. The
+Protocol 59 updates the **left** resources to Dashboard, Suggestions, Automations
+and Global Terminal. Artifacts/Candidates/Sandbox move to Settings. Code change
+and Work item belong to the **right**, following the selected session; an existing
+linked PR remains accessible without a new linking/write workflow. Automations
+and the issue-link panel are placeholders, not scheduled work or provider-write authority. The
 **right** rail contains only Terminal, Browser, Insights, Changes, Files, Plan,
-Side chat, in that order. The left resource group is a named native navigation
+Side chat, Code change and Work item, in that order. The left resource group is a named native navigation
 landmark; repeated selection still returns to chat after existing dirty/terminal
 checks. Existing styles, model controls and session hierarchy are unchanged.
 
@@ -160,7 +161,7 @@ The placement change itself adds no durable event or dependency; the associated
 [skill/dashboard contract](workspace-experience.md) describes protocol/schema 59.
 Legacy saved Artifacts/Candidates/Sandbox panel names restore their Settings
 destination rather than becoming invalid preferences or another right-rail tab;
-widths remain intact. PR and attention actions remain auxiliary, not new primary
+widths remain intact. Legacy PR actions open Code change; attention stays auxiliary, not another primary
 rail items. Hiding an auxiliary panel returns keyboard focus to Insights.
 Globals still create no hidden session/inference, terminal opening remains
 one-shot and hiding a live owner keeps its existing review/opt-out. Read-only/
@@ -202,7 +203,7 @@ accounts, terminals and ongoing owners were not closed or adopted.
 
 ## Right-pane icon toggles
 
-Each of the seven right-rail buttons opens its session view when inactive and
+Each of the nine right-rail buttons opens its session view when inactive and
 uses the existing guarded header-hide path when clicked again while visible.
 The icon rail remains, including after maximized-pane collapse; existing open/
 size preferences and keyboard focus are retained. Expanded/pressed state and
