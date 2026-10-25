@@ -34,7 +34,8 @@ test("both retained schema lineages converge and reopen without rewriting grants
       const settings = sdk.settings.get()!;
       await sdk.settings.update({
         ...settings.values,
-        ...(source.lineage === "desktop" ? { interactions: { confirmSessionAttachments: false, confirmTerminalClose: false } } : {
+        ...(source.lineage === "desktop" ? { interactions: { confirmSessionAttachments: false, confirmTerminalClose: false },
+          notifications: { inApp: settings.values.notifications.inApp, os: settings.values.notifications.os, previewContent: settings.values.notifications.previewContent } } : {
           voice: { ...settings.values.voice, inputDeviceId: "generated-audio-device", pushToTalk: true },
           retention: { ...settings.values.retention, confirmArchive: false, confirmDelete: false },
         }),

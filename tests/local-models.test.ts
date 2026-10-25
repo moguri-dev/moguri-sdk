@@ -89,7 +89,8 @@ test("startup preferences preserve precedence/provenance and existing sessions a
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const settings = sdk.settings.get()!;
-    await sdk.settings.update({ ...settings.values, startup: { global: { modelId: fixture.modelId, autonomy: "Guided" }, profile: { autonomy: "Manual" } } }, settings.revision);
+    await sdk.settings.update({ ...settings.values, notifications: { inApp: true, os: false, previewContent: false },
+      startup: { global: { modelId: fixture.modelId, autonomy: "Guided" }, profile: { autonomy: "Manual" } } }, settings.revision);
     const project = (await sdk.projects.configuration(fixture.session().projectId)).configuration;
     await sdk.projects.configure(project.projectId, { ...project.values, defaults: { autonomy: "Guided", modelOptions: { contextWindow: 16384 } } }, project.revision);
     const created = await sdk.sessions.create(project.projectId, "Generated inherited session", { autonomy: "Manual" });

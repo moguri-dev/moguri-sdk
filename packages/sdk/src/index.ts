@@ -619,6 +619,20 @@ export class MoguriSdk extends TransportClient {
     record: (sessionId: string) => this.command({ type: "voice.record", sessionId }),
     transcribe: (sessionId: string, path: string) => this.command({ type: "voice.transcribe", sessionId, path }),
     stop: (jobId: string) => this.command({ type: "voice.stop", jobId }),
+    transcript: async (sessionId: string, jobId: string): Promise<string> => {
+      const job = this.getState().snapshot?.jobs.find((job) => job.id === jobId);
+      if (!job || job.sessionId !== sessionId || !["voice.record", "voice.transcribe", "voice.capture"].includes(job.kind) || job.status !== "completed") throw new ClientError("speech_result", "Choose a completed local transcript from this session. No other result was substituted.");
+      let text = "", offset: number | null = 0;
+      do {
+        const page = await this.mcp.readResult(jobId, offset, 32768);
+        text += page.text;
+        if (text.length > 1024 * 1024 || page.nextOffset !== null && (page.nextOffset !== offset + page.text.length || page.nextOffset <= offset)) throw new ClientError("speech_result", "The local transcript exceeded its bounded result or returned invalid pages. No text was truncated.");
+        offset = page.nextOffset;
+      } while (offset !== null);
+      const result: unknown = JSON.parse(text);
+      if (!isRecord(result) || result.source !== "local" || typeof result.text !== "string" || !result.text.trim() || result.text.length > 128 * 1024) throw new ClientError("speech_result", "The retained result is not a complete bounded local transcript.");
+      return result.text;
+    },
     insert: (sessionId: string, jobId: string, expectedRevision: number) => this.command({ type: "voice.insert", sessionId, jobId, expectedRevision }),
   };
   readonly subagents = { run: (sessionId: string, prompt: string) => this.command({ type: "subagent.run", sessionId, prompt }) };
