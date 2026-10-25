@@ -295,6 +295,44 @@ Fresh pre-change probes pass all six available generated groups: cancellation
 1.197/6.768 ms. Separate live/native/notarized/Linux/quality gates remain
 FAIL/unqualified, not newly enabled.
 
+### Session-terminal startup qualification
+
+Source `8bdac15` fixes both reproduced desktop failures: changing the selected
+session lost the pane's opening intent, and an unrelated held read
+acknowledgement disabled startup/plus through App-wide busy state. Generated
+tests also cover new-chat and visible Chats entry, passive hidden selection,
+exact project/data roots, same-owner reuse, X without replay, a definite refusal
+with explicit retry, allowed-env rejection and a real pinned loopback SSH probe
+settling before one Remote admission.
+
+The full suite exposed a test-only close race: persisted backend draft text
+could be observed before its renderer acknowledgement. `930d7b6` waits for the
+actual **Draft saved** status before teardown, preserving the intended
+beforeunload guard rather than bypassing it or adding a sleep.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/fresh audit | PASS; zero vulnerabilities |
+| Six focused startup cases, each repeated three times | 18 passed / 41.4 seconds |
+| Policy/acknowledged-save teardown repeated ten times | 10 passed / 20.2 seconds |
+| Complete final hidden Electron suite | 138 passed, 2 physical-native skips, zero failures; 140 total / 4.7 minutes |
+| Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
+| Actual newly packaged hidden app | All six startup cases plus toggles, unread and navigation: 14 passed / 22.5 seconds |
+| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned image unchanged |
+| Production ZIP/manifest consumer | PASS; 740,545,228-byte archive / 101,592.62 ms |
+| Native DMG | PASS; exact Finder layout, portable metadata/resources and unchanged signed app |
+
+The new DMG is 754,148,542 bytes, SHA-256
+`2f83cc1fafdfcf62756758781c9fe78edce2e3aa0e0a7f91c4df108436bd948d`.
+Earlier installer identities remain historical. No service/SDK/CLI/TUI/protocol
+source changed from the retained complete 1,294-pass/14-skip Node baseline; it
+is not relabeled as another full run. All sessions, roots, SSH keys and consoles
+are generated, with hidden Electron and no personal UI/account/microphone,
+paid inference, administrator install or automatic user-app/browser opening.
+Only verifier-owned image mounts were detached; an earlier user-opened image
+was not closed. Ad-hoc signing, FFI/chunk/optional-icon notices, external SDK-host
+compatibility overrides and physical-native/notarization/Linux limits remain.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
