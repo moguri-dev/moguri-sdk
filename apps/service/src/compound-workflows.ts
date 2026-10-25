@@ -77,6 +77,7 @@ export class CompoundWorkflows {
     const state = this.host.snapshot(), session = state.sessions.find((session) => session.id === id);
     if (!session?.projectId || session.controls.env !== "Local" || session.controls.modelId !== KUPO_MODEL_ID || session.kind !== "agent" ||
       session.mode !== "agent" || session.pendingMode === "read-only" || session.status === "archived" || !state.policy.allowedEnvs.includes("Local")) throw new MoguriError("compound_scope", "Public compound work needs the exact restored Local writable project session with kupo selected. No fixed-model, Remote/native or root fallback.", 409);
+    this.host.candidates.assertSession(id);
     if (session.controls.budget.kind === "limited" || state.budgetPolicy.limit || this.host.globalLimit() || this.host.budgets.status(id).limits.length) {
       try { winddownCapability(state.settings.values.winddown, state.provider.models, "Local"); }
       catch (error) { if (!(error instanceof MoguriError)) throw error; throw new MoguriError("compound_budget", `Finite compound needs its exact qualified reserved wind-down/checkpoint policy. ${error.message}`, 409); }

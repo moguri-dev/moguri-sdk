@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import * as vec from "sqlite-vec";
-import { attachmentDigests, eventTypes, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { attachmentDigests, eventTypes, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
@@ -27,6 +27,8 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "candidate.owner_bound" ? input.payload.owner.id :
+  input.event_type === "model.completed" ? input.payload.candidateGenerationId ?? null :
   input.event_type === "notification.sound_saved" ? `notification-sound/${input.payload.sound.id}` :
   input.event_type === "github.operation_recorded" || input.event_type === "linear.operation_recorded" ? input.payload.operation.id :
   input.event_type === "knowledge.saved" ? `knowledge/${input.payload.record.id}` :
@@ -51,6 +53,10 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "candidate.owner_bound": {
+      const evidence = input.payload.owner.generationEvidence;
+      return evidence ? [evidence.inputDigest, evidence.resultDigest, evidence.proposalDocumentDigest] : [];
+    }
     case "notification.sound_saved": return [input.payload.sound.contentDigest];
     case "github.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.reviewDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "linear.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
@@ -277,6 +283,10 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='browser_control_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid browser control schema marker. State was preserved.");
       }
+      if (version < 57) this.migrateCandidateRetention();
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='candidate_retention_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid candidate retention schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateDesktopMerge(version: number): void {
@@ -300,6 +310,61 @@ export class EventStore {
       if (!desktop) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES ('desktop_interaction_schema','1')").run();
       this.db.exec("PRAGMA user_version=53; COMMIT;");
     } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+  }
+  private migrateCandidateRetention(): void {
+    const rows = this.db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all();
+    const live = new Map<string, StoredEvent>(), generations = new Map<string, CandidateGenerationRecord>(), artifacts = new Set<string>();
+    for (const row of rows) {
+      const data = this.validEvent(JSON.parse(String(row.data)), Number(row.seq)), scope = scopeFor(data, data.artifact_id ?? null), key = this.key(scope, false);
+      if (!key) continue;
+      const event = this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, data.seq);
+      live.set(event.id, event);
+      if (event.event_type === "artifact.saved" || event.event_type === "artifact.revised") artifacts.add(`${event.profile_id}/${event.payload.artifact.id}`);
+      if (event.event_type === "artifact.deleted") artifacts.delete(`${event.profile_id}/${event.payload.artifactId}`);
+      if (event.event_type === "candidate.generation_recorded") {
+        const id = `${event.profile_id}/${event.payload.generation.id}`;
+        generations.set(id, projectCandidateGeneration(generations.get(id), event.payload.generation));
+      }
+    }
+    const moved = new Map<string, { event: StoredEvent; previous: Scope }>();
+    for (const event of live.values()) if (event.event_type === "model.completed" && !event.payload.candidateGenerationId && event.payload.usage.role === "draft") {
+      const generation = generations.get(`${event.profile_id}/${event.turn_id}`);
+      if (!generation || !artifacts.has(`${event.profile_id}/${generation.id}`) || generation.profileId !== event.profile_id ||
+        generation.sessionId !== event.session_id || generation.projectId !== event.project_id || generation.stepId !== event.step_id ||
+        generation.stepId !== event.payload.usage.stepId || generation.modelId !== event.payload.usage.modelId || generation.resultDigest !== event.payload.contextDigest) continue;
+      moved.set(event.id, { previous: scopeFor(event, event.artifact_id ?? null),
+        event: { ...event, artifact_id: generation.id, payload: { ...event.payload, candidateGenerationId: generation.id } } });
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (moved.size) {
+        const needed = new Set([...live.values()].flatMap((event) => {
+          const actual = moved.get(event.id)?.event ?? event, scope = scopeFor(actual, artifactIdentity(actual));
+          return references(actual).map((hash) => JSON.stringify([scope.scope, hash]));
+        }));
+        this.db.exec("CREATE TABLE events_v57(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,data TEXT NOT NULL,payload TEXT NOT NULL)");
+        for (const row of rows) {
+          const entry = moved.get(String(row.id));
+          if (!entry) {
+            this.db.prepare("INSERT INTO events_v57 VALUES (?,?,?,?)").run(Number(row.seq), String(row.id), String(row.data), String(row.payload));
+            continue;
+          }
+          const scope = scopeFor(entry.event, artifactIdentity(entry.event));
+          for (const hash of references(entry.event)) {
+            this.bind(hash, scope);
+            if (entry.previous.scope !== scope.scope && !needed.has(JSON.stringify([entry.previous.scope, hash]))) this.db.prepare("DELETE FROM blob_payloads WHERE digest=? AND scope=?").run(hash, entry.previous.scope);
+          }
+          const payload = seal(JSON.stringify(entry.event.payload), this.key(scope, true)!, scope.scope, `event:${entry.event.id}`);
+          const { seq: _seq, ...data } = entry.event;
+          this.db.prepare("INSERT INTO events_v57 VALUES (?,?,?,?)").run(entry.event.seq, entry.event.id, JSON.stringify({ ...data, payload }), JSON.stringify(payload));
+        }
+        this.db.exec(`DROP TABLE events; ALTER TABLE events_v57 RENAME TO events;
+          CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END;
+          CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END;`);
+      }
+      this.db.exec("INSERT INTO retention_metadata(id,value) VALUES ('candidate_retention_schema','1'); PRAGMA user_version=57; COMMIT;");
+      if (moved.size) this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); this.keys.clear(); throw error; }
   }
   private key(scope: Scope, create: boolean): Buffer | null {
     const cached = this.keys.get(scope.scope);

@@ -616,7 +616,8 @@ try {
           const command={type:"candidate.apply",candidateId:staged.candidate.id,sessionId:source.id,expectedRevision:staged.candidate.revision,expectedDigest:review.digest,confirm:true};
           await candidateSdk.command(command,commandId);assert.equal((await candidateSdk.candidates.wait(staged.candidate.id)).candidate.status,"applied");
           assert.deepEqual(await readFile(join(directory,".git/index")),index);assert.equal(git(["rev-parse","HEAD"],directory),head);
-          assert.equal(JSON.parse((await candidateSdk.artifacts.export(staged.candidate.id)).export.text).schemaVersion,2);
+          assert.equal(JSON.parse((await candidateSdk.artifacts.export(staged.candidate.id)).export.text).schemaVersion,PROTOCOL_VERSION>=57?10:2);
+          if(PROTOCOL_VERSION>=57)assert.equal((await candidateSdk.candidates.eligibility(source.id)).eligible,true);
           const shared=await candidateSdk.slash(source.id,"/candidate read "+staged.candidate.id,"tui");assert.equal(shared.kind,"text");
           candidateSdk.disconnect();await candidateRuntime.close();candidateRuntime=await createRuntime(options);candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
           assert.equal((await candidateSdk.candidates.read(staged.candidate.id)).candidate.acceptance.actor,"user");
@@ -624,11 +625,17 @@ try {
           await writeFile(join(directory,"candidate.txt"),"Generated newer installed user edit.\\n");
           assert.equal((await candidateSdk.command(command,commandId)).id,staged.candidate.id);
           assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
+          if(PROTOCOL_VERSION>=57){
+            await candidateSdk.sessions.delete(source.id,true);
+            await assert.rejects(()=>candidateSdk.candidates.read(staged.candidate.id),{code:"candidate_missing"});
+            assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
+          }
           console.log("Installed SDK/CLI candidate stage, separate exact apply, version-2 history and canonical restart replay preserved source index/HEAD without a model.");
         }finally{candidateSdk.disconnect();await candidateRuntime.close();}
       }
       const general=await sdk.sessions.create();
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
+      if(PROTOCOL_VERSION>=57)assert.equal((await sdk.candidates.eligibility(general.id)).eligible,false);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
       assert.equal((await sdk.remote.status()).remote.ready,false);
       if(PROTOCOL_VERSION>=17&&process.env.MOGURI_GENERATED_REMOTE){

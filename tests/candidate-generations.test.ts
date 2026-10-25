@@ -23,7 +23,7 @@ test("owned generation uses the selected real worker/ledger and retains a model 
     assert.equal(calls.length, 1); assert.equal(calls[0]?.role, "draft"); assert.equal(calls[0]?.reportedTokens, 42);
     const artifact = (await f.sdk.artifacts.read(started.id)).artifact;
     assert.ok(artifact.sources.some((source) => source.actor === "model" && source.modelId === f.modelId));
-    assert.equal(JSON.parse((await f.sdk.artifacts.export(started.id)).export.text).schemaVersion, 3);
+    assert.equal(JSON.parse((await f.sdk.artifacts.export(started.id)).export.text).schemaVersion, 10);
     await assert.rejects(() => f.sdk.artifacts.update(started.id, { text: "Generated unauthorized replacement." }, artifact.revision), { code: "candidate_generation_document" });
     await f.send("Generated ordinary follow-up after proposal generation."); await f.terminal();
     assert.equal(f.requests.length, 2); assert.equal(JSON.stringify(f.requests[1]?.messages).includes("GENERATED_MODEL_PROPOSAL_NOT_CONTEXT"), false);
@@ -139,21 +139,18 @@ test("original generation commands cannot re-probe/re-dispatch after lost receip
   } finally { t.mock.restoreAll(); await f.close(); }
 });
 
-test("generation input, actual model provenance and version-3 history survive source deletion/reopen, while explicit report deletion prevents paid resurrection", { skip: process.platform !== "darwin" }, async () => {
+test("generation history survives source archival/reopen, then permanent source deletion removes proposals without refunding charges or allowing paid resurrection", { skip: process.platform !== "darwin" }, async () => {
   const f = await fixture(); let reopened: Awaited<ReturnType<typeof startService>> | undefined;
   try {
-    const started = await f.generate(), result = await f.settled(started.id), projectId = f.session().projectId;
+    const started = await f.generate(), result = await f.settled(started.id);
     assert.equal(result.generation.status, "proposed");
     const hashes = [result.generation.inputDigest, result.generation.resultDigest!, result.generation.proposalDocumentDigest!];
     const exported = JSON.parse((await f.sdk.artifacts.export(started.id)).export.text);
-    assert.equal(exported.schemaVersion, 3); assert.ok(exported.documents[0].generation.events.length >= 3);
+    assert.equal(exported.schemaVersion, 10); assert.ok(exported.documents[0].generation.events.length >= 3);
+    assert.ok(exported.documents[0].generation.events.some((event: { event_type: string }) => event.event_type === "candidate.owner_bound"));
     assert.equal(exported.documents[0].generation.results.length, 3);
-    await f.sdk.sessions.delete(f.sessionId, true);
+    await f.sdk.command({ type: "session.archive", sessionId: f.sessionId });
     assert.deepEqual((await f.sdk.candidates.generation(started.id)).input, result.input);
-    await f.sdk.workspaces.remove(f.workspace.id, f.workspace.revision, true); assert.equal((await f.sdk.workspaces.wait(f.workspace.id)).status, "removed");
-    const preview = (await f.sdk.artifacts.projectPreview(projectId)).preview, configuration = (await f.sdk.projects.configuration(projectId)).configuration;
-    await f.sdk.projects.remove(projectId, true, configuration.revision, { action: "retain", expectedDigest: preview.digest });
-    assert.equal((await f.sdk.artifacts.read(started.id)).artifact.projectId, null);
     f.sdk.disconnect(); await f.service.close();
     reopened = await startService({ stateDir: join(f.directory, "state"), provider: f.provider, retentionKey: f.retentionKey, platform: { terminal: { vault: f.terminalVault } } });
     const current = await new MoguriSdk(reopened.connection).ready();
@@ -165,7 +162,8 @@ test("generation input, actual model provenance and version-3 history survive so
       for (const hash of hashes) assert.ok(reopened.store.blob(hash));
       reopened.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run("default", started.commandId);
       assert.equal((await current.command(started.command, started.commandId)).id, started.id);
-      await current.artifacts.delete(started.id, artifact.revision, true);
+      await current.sessions.delete(f.sessionId, true);
+      await assert.rejects(() => current.candidates.generation(started.id), { code: "candidate_generation_missing" });
       for (const hash of hashes) assert.throws(() => reopened!.store.blob(hash), /Missing or deleted/);
       reopened.store.db.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run("default", started.commandId);
       await assert.rejects(() => current.command(started.command, started.commandId), { code: "candidate_generation_deleted" });

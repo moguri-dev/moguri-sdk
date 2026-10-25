@@ -33,7 +33,7 @@ export async function qualifyCandidateGeneration({ sdk, node, cli, directory, st
     assert.equal(await readFile(path, "utf8"), original); assert.equal(await readFile(join(workspace.path, "fixture.txt"), "utf8"), original);
     const calls = (await sdk.budgets.calls({ sessionId: source.id })).calls;
     assert.equal(calls.length, 1); assert.equal(calls[0].role, "draft"); assert.equal(calls[0].reportedTokens, 42); assert.equal(calls[0].status, "settled");
-    assert.equal(JSON.parse((await sdk.artifacts.export(generated.generation.id)).export.text).schemaVersion, 3);
+    assert.equal(JSON.parse((await sdk.artifacts.export(generated.generation.id)).export.text).schemaVersion, Array.isArray(sdk.getState().snapshot.candidateOwners) ? 10 : 3);
     assert.ok((await sdk.artifacts.read(generated.generation.id)).artifact.sources.some((source) => source.actor === "model" && source.modelId === modelId));
     const shared = await sdk.slash(source.id, `/candidate generation ${generated.generation.id}`, "tui");
     assert.equal(shared.kind, "text"); assert.equal(JSON.parse(shared.text).generation.status, "proposed");

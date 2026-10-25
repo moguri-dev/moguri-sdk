@@ -1,5 +1,5 @@
 import {
-  CandidateDocumentSchema, CandidateOperationResultSchema, MoguriError, parse, sameCandidateRoot, sameCandidatePatch,
+  candidateDeletionPending, CandidateDocumentSchema, CandidateOperationResultSchema, MoguriError, parse, sameCandidateRoot, sameCandidatePatch,
   type CandidateApplyPreview, type CandidateCommand, type CandidateDocument, type CandidateOperationResult, type CandidatePatch,
   type CandidateQuery, type CandidateRecord, type CandidateResponse, type CandidateRoot, type CandidateStagePreview,
   type ArtifactSource, type CapabilityJob, type CommandResult, type EventInput, type RetainedArtifact, type Session, type Snapshot, type CandidateRoleProposalRead,
@@ -22,12 +22,14 @@ export interface CandidateJobLifecycle {
 }
 interface Host {
   snapshot(): Snapshot;
+  events(): import("../../../packages/protocol/src/index.ts").StoredEvent[];
   managed: ManagedWorkspaces;
   projects(): ProjectService;
   commit(events: EventInput[]): void;
   artifact(session: Session, text: string, summary: string, patch: CandidatePatch, sources?: ArtifactSource[]): RetainedArtifact;
   localRootBusy(root: string, exceptJobId?: string): boolean;
   closingProject(id: string): boolean;
+  closingSession(id: string): boolean;
   roleProposal(id: string): CandidateRoleProposalRead;
   compoundProposal(workflowId: string, stepId: string): CompoundCandidateProposal;
   wake(): void;
@@ -69,19 +71,37 @@ export class CandidateRuntime {
   private session(id: string): Session {
     const snapshot = this.host.snapshot(), session = snapshot.sessions.find((session) => session.id === id);
     if (!session?.projectId || session.controls.env !== "Local") throw new MoguriError("candidate_env", "Choose an explicitly Local project session. No Remote/Sandbox or previous-root fallback.", 409);
+    if (!snapshot.projects.some((project) => project.id === session.projectId)) throw new MoguriError("candidate_repository_required", "Candidates require the session's explicit Git-backed project. No previous repository was inherited.", 409);
+    if (this.host.closingSession(id)) throw new MoguriError("candidate_cleanup_pending", "This source session is being permanently deleted. No candidate/model work was admitted.", 409);
     if (!snapshot.policy.allowedEnvs.includes("Local") || this.host.closingProject(session.projectId)) throw new MoguriError("candidate_env", "Current global/project policy excludes new Local candidate work. No root was read.", 403);
     if (session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only" || session.status === "archived") throw new MoguriError("read_only", "This session cannot stage or apply repository candidates.", 403);
     return session;
   }
+  assertSession(id: string): Session { return this.session(id); }
+  private available(id: string): void {
+    if (candidateDeletionPending(this.host.snapshot().candidateCleanups, id)) throw new MoguriError("candidate_cleanup_pending", "This exact proposal is pending permanent cleanup. No new application or file effect was admitted.", 409);
+  }
+  private async repository(session: Session, signal: AbortSignal) {
+    const project = this.host.managed.project(session);
+    try { return { project, git: await readGitBinding(project.path, signal) }; }
+    catch (error) {
+      if (error instanceof MoguriError && (error.code === "workspace_git_root" || error.code === "program_failed" && /not a git repository|not a work tree/i.test(error.message))) {
+        throw new MoguriError("candidate_repository_required", "Candidates require an explicit project backed by this exact Git working tree. Plain folders and project-free chats cannot create proposals; no previous repository was reused.", 409);
+      }
+      throw error;
+    }
+  }
   private async context(sessionId: string, stageWorkspaceId: string, paths: string[], signal: AbortSignal, clean: boolean, exceptJobId?: string): Promise<CandidateContext> {
     const session = this.session(sessionId), snapshot = this.host.snapshot(), projectId = session.projectId!;
-    const sourceProject = this.host.managed.project(session), stageProject = this.host.managed.project({ projectId, workspaceId: stageWorkspaceId });
+    const repository = await this.repository(session, signal), sourceProject = repository.project;
+    this.session(sessionId);
+    const stageProject = this.host.managed.project({ projectId, workspaceId: stageWorkspaceId });
     if (session.workspaceId === stageWorkspaceId || sourceProject.path === stageProject.path) throw new MoguriError("candidate_root", "Select a separate owned candidate worktree, never the source checkout.", 409);
     const configuration = this.host.projects().configuration(projectId), permissionRevision = snapshot.settings.permissionRevision, policyRevision = snapshot.policy.revision;
-    const [sourceIdentity, stageIdentity, sourceGit, stageGit] = await Promise.all([
-      sourceRoot(sourceProject.path), sourceRoot(stageProject.path), readGitBinding(sourceProject.path, signal), readGitBinding(stageProject.path, signal),
+    const [sourceIdentity, stageIdentity, stageGit] = await Promise.all([
+      sourceRoot(sourceProject.path), sourceRoot(stageProject.path), readGitBinding(stageProject.path, signal),
     ]);
-    const source: CandidateRoot = { env: "Local", projectId, workspaceId: session.workspaceId, ...sourceIdentity, ...sourceGit };
+    const source: CandidateRoot = { env: "Local", projectId, workspaceId: session.workspaceId, ...sourceIdentity, ...repository.git };
     const stage: CandidateRoot = { env: "Local", projectId, workspaceId: stageWorkspaceId, ...stageIdentity, ...stageGit };
     if (source.gitCommonDir !== stage.gitCommonDir || source.head !== stage.head || source.device === stage.device && source.inode === stage.inode) throw new MoguriError("candidate_base", "The clean owned candidate worktree must share the exact source repository and HEAD. Create/select it explicitly from this base.", 409);
     const authorityDigest = digest(JSON.stringify({ profileId: snapshot.profileId, sessionId, projectId, workspaceId: session.workspaceId, mode: session.mode,
@@ -118,6 +138,7 @@ export class CandidateRuntime {
     return { session, source, stage, authorityDigest, current, assert };
   }
   private async preview(sessionId: string, stageWorkspaceId: string, value: CandidatePatch, signal: AbortSignal, roleSequenceId?: string, compound?: { workflowId: string; stepId: string }): Promise<{ preview: CandidateStagePreview; context: CandidateContext; roleProposal?: CandidateRoleProposalRead; compoundProposal?: CompoundCandidateProposal }> {
+    this.session(sessionId);
     if (roleSequenceId && compound) throw new MoguriError("candidate_origin", "One exact actual model origin may own a candidate review.", 409);
     const roleProposal = roleSequenceId ? this.host.roleProposal(roleSequenceId) : undefined,
       compoundProposal = compound ? this.host.compoundProposal(compound.workflowId, compound.stepId) : undefined, patch = candidatePatch(value);
@@ -153,6 +174,7 @@ export class CandidateRuntime {
     await context.assert(); return { ...context, files };
   }
   private async applyPreview(id: string, sessionId: string, signal: AbortSignal, exceptJobId?: string): Promise<{ preview: CandidateApplyPreview; context: CandidateContext; document: CandidateDocument }> {
+    this.available(id);
     const record = this.record(id), document = this.document(record);
     if (record.status !== "staged" && !(exceptJobId && record.status === "applying" && record.applyIntent?.jobId === exceptJobId)) throw new MoguriError("candidate_state", "Only an exact completely staged candidate can be reviewed for application. Partial/terminal work is never retried.", 409);
     const context = await this.context(sessionId, record.stage.workspaceId!, record.paths, signal, false, exceptJobId);
@@ -163,6 +185,16 @@ export class CandidateRuntime {
     return { preview: { ...body, digest: digest(JSON.stringify(body)) }, context, document };
   }
   async query(query: CandidateQuery): Promise<CandidateResponse> {
+    if (query.type === "candidate.eligibility") {
+      try {
+        await this.repository(this.session(query.sessionId), AbortSignal.timeout(15_000));
+        this.session(query.sessionId);
+        return { type: query.type, eligible: true, diagnostic: null };
+      } catch (error) {
+        if (!(error instanceof MoguriError)) throw error;
+        return { type: query.type, eligible: false, diagnostic: error.message };
+      }
+    }
     if (query.type === "candidate.role.proposal") return this.host.roleProposal(query.sequenceId);
     if (query.type === "candidate.preview") {
       if (Boolean(query.compoundWorkflowId) !== Boolean(query.compoundStepId)) throw new MoguriError("candidate_origin", "Compound provenance requires both its original workflow and actual model step.", 409);
@@ -206,32 +238,37 @@ export class CandidateRuntime {
   private async files(id: string, phase: "stage" | "apply", sessionId: string, signal: AbortSignal, progress: (text: string) => void, jobId: string): Promise<CandidateOperationResult> {
     signal = AbortSignal.any([signal, AbortSignal.timeout(120_000)]);
     const record = this.record(id), document = this.document(record);
+    this.available(id);
     const context = await this.context(sessionId, record.stage.workspaceId!, record.paths, signal, phase === "stage", jobId);
+    const current = () => { context.current(); this.available(id); };
     if (!sameCandidateRoot(context.source, record.source) || !sameCandidateRoot(context.stage, record.stage) ||
       context.authorityDigest !== (phase === "stage" ? document.authorityDigest : record.acceptance?.authorityDigest)) throw new MoguriError("candidate_stale", "The exact reviewed candidate authority changed before effects.", 409);
     await candidateBases(record.source.root, document.patch);
     if (phase === "apply") await candidateBytes(record.stage.root, document.patch);
     const root = phase === "stage" ? record.stage.root : record.source.root, bases: string[] = [];
     for (const edit of document.patch.edits) bases.push(phase === "stage" ? await candidateFileBase(root, edit.path) : edit.baseDigest);
-    const confirmed: string[] = []; this.observed.set(id, { paths: confirmed, current: context.current });
+    const confirmed: string[] = []; this.observed.set(id, { paths: confirmed, current });
     for (let index = 0; index < document.patch.edits.length; index++) {
       const edit = document.patch.edits[index]!;
-      await context.assert();
+      await context.assert(); current();
       if (phase === "apply" && await candidateFileBase(record.stage.root, edit.path) !== digest(edit.text)) throw new MoguriError("candidate_changed", "The staged proposal changed after review. Existing source changes were preserved.", 409);
       const actual = this.record(id);
       this.update(id, phase === "stage" ? { stageAttemptedPaths: [...(actual.stageAttemptedPaths ?? []), edit.path] } : { attemptedPaths: [...actual.attemptedPaths, edit.path] });
-      await writeProjectFile(root, edit.path, edit.text, bases[index]!, { signal, beforeCommit: context.current, committed: () => { confirmed.push(edit.path); } });
-      const current = this.record(id);
-      this.update(id, phase === "stage" ? { stagedPaths: [...current.stagedPaths, edit.path] } : { appliedPaths: [...current.appliedPaths, edit.path] });
+      await writeProjectFile(root, edit.path, edit.text, bases[index]!, { signal, beforeCommit: current, committed: () => { confirmed.push(edit.path); } });
+      const latest = this.record(id);
+      this.update(id, phase === "stage" ? { stagedPaths: [...latest.stagedPaths, edit.path] } : { appliedPaths: [...latest.appliedPaths, edit.path] });
       progress(`${phase === "stage" ? "Staged" : "Applied"} ${index + 1}/${record.paths.length} exact files.`);
     }
     await context.assert();
-    const files = await candidateBytes(root, document.patch); context.current();
+    const files = await candidateBytes(root, document.patch); current();
     return { version: 1, candidateId: id, phase, source: record.source, stage: record.stage, readback: true, files };
   }
   async execute(command: CandidateCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     const intent = finish.intent;
     if (!intent) throw new MoguriError("candidate_intent", "A canonical user command identity is required before candidate work.", 409);
+    if (this.host.events().some((event) => event.event_type === "artifact.deleted" && event.payload.candidateIntents?.some((owned) => owned.commandId === intent.id))) {
+      throw new MoguriError("candidate_deleted", "This original candidate command was permanently deleted. Its proposal and file effects cannot be recreated or replayed.", 410);
+    }
     const previous = this.host.snapshot().candidates.find((candidate) => [candidate.stageIntent, candidate.applyIntent].some((owned) => owned?.commandId === intent.id));
     if (previous) {
       const owned = previous.applyIntent?.commandId === intent.id ? previous.applyIntent : previous.stageIntent;
@@ -239,6 +276,7 @@ export class CandidateRuntime {
       return finish([], { id: previous.id });
     }
     if (command.type === "candidate.reject") {
+      this.available(command.candidateId);
       const candidate = this.record(command.candidateId);
       if (candidate.revision !== command.expectedRevision || candidate.status !== "staged") throw new MoguriError("candidate_state", "Reload the exact staged candidate before rejecting it.", 409);
       return finish([this.event({ ...candidate, status: "rejected", revision: candidate.revision + 1, updatedAt: new Date().toISOString(), diagnostic: "The actual user rejected this proposal; no source file was applied." })], { id: candidate.id, revision: candidate.revision + 1 });
@@ -262,6 +300,7 @@ export class CandidateRuntime {
       }
       if (roleProposal) sources = [roleProposal.modelSource];
       if (compoundProposal) sources = [compoundProposal.modelSource];
+      context.current();
       const text = JSON.stringify(preview.document), artifact = this.host.artifact(context.session, text, preview.document.patch.summary, preview.document.patch, sources), id = artifact.id;
       const now = new Date().toISOString(); context.current();
       this.host.job("candidate.stage", artifact.projectId!, command.sessionId, command.stageWorkspaceId,

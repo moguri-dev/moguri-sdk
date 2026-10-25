@@ -51,6 +51,7 @@ import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./r
 import { redactSecrets } from "./secret-redactor.ts";
 import { RemoteConsoles } from "./remote-terminals.ts";
 import { CandidateGenerations, candidateGenerationContext } from "./candidate-generations.ts";
+import { CandidateCleanupRuntime, settleCandidateCleanup } from "./candidate-cleanup.ts";
 import { OwnedRoles, OwnedRoleInputSchema, OwnedRoleReviewSchema, type OwnedRoleDocument, type OwnedRoleInput, type OwnedRoleReview } from "./owned-roles.ts";
 import { SandboxRuntime, type NativeChange } from "./sandbox-runtime.ts";
 import { SandboxWorkspaces } from "./sandbox-workspaces.ts";
@@ -134,6 +135,7 @@ export class ControlPlane extends EventEmitter {
   private history: StoredEvent[];
   private projection;
   private readonly runs = new Map<string, Run>();
+  private readonly candidateWorkers = new Map<string, { run: Run; exited: Promise<void> }>();
   private readonly nativeAdmissions = new Map<string, { turnId: string; abort: AbortController; done: Promise<void> }>();
   private readonly nativeDns;
   private readonly paused = new Set<string>();
@@ -143,6 +145,7 @@ export class ControlPlane extends EventEmitter {
   private providerEpoch = 0;
   readonly platform: PlatformRuntime;
   readonly generations: CandidateGenerations;
+  readonly candidateCleanup: CandidateCleanupRuntime;
   readonly ownedRoles: OwnedRoles;
   readonly compound: CompoundWorkflows;
   readonly winddowns: Winddowns;
@@ -260,6 +263,7 @@ export class ControlPlane extends EventEmitter {
         this.paused.delete(session.id);
       },
       closingProject: (id) => this.deletingProjects.has(id),
+      closingSession: (id) => this.removingSession(id),
       contextPreview: (session) => this.previewContext(session),
       compactionQuery: (query) => this.compactionQuery(query),
       compactionCommand: (command, finish) => this.compactionCommand(command, finish),
@@ -396,6 +400,15 @@ export class ControlPlane extends EventEmitter {
       artifact: (session, text) => this.platform.artifacts.decision(session, text),
       usage: (id, request) => this.modelUsage(this.session(id), request),
     });
+    this.candidateCleanup = new CandidateCleanupRuntime({
+      snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events, forget) => this.commit(events, undefined, forget),
+      artifacts: this.platform.artifacts, settle: (ids) => this.settleCandidateWork(ids),
+      managed: this.platform.managed, integrations: this.platform.workspace.integrations, sessionBusy: (id) => this.deletingSessions.has(id),
+      deleteSession: async (id) => {
+        const session = this.projection.sessions.find((session) => session.id === id);
+        if (session) await this.deleteSession(session, (events, result = {}, forget) => { this.commit(events, undefined, forget); return result; });
+      },
+    }, platformOptions.integrations?.prRefreshMs);
     this.on("change", () => this.decisions.invalidate());
     this.provider.onChange = () => {
       this.providerEpoch++;
@@ -408,6 +421,7 @@ export class ControlPlane extends EventEmitter {
     };
   }
   async initialize(): Promise<void> {
+    this.candidateCleanup.migrate();
     const legacyAccounting = this.platform.budgets.legacyEvents();
     if (legacyAccounting.length) this.commit(legacyAccounting);
     const legacyOperations = this.platform.telemetry.legacyEvents();
@@ -477,6 +491,8 @@ export class ControlPlane extends EventEmitter {
     if (unfinishedMcp.length) this.commit(unfinishedMcp.map((call) => this.recoveredMcp(call)));
     await this.provider.refresh();
     await this.sandboxSetup.initialize();
+    await this.candidateCleanup.recover();
+    this.candidateCleanup.start();
   }
   snapshot(): Snapshot {
     const routing = this.routingAvailability();
@@ -554,7 +570,8 @@ export class ControlPlane extends EventEmitter {
       const winddowns = this.winddowns?.derived(next, primary) ?? [];
       const checkpoints = primary.some((event) => event.event_type === "budget.blocked") ? this.platform.artifacts.checkpointEvents(next, primary) : [];
       const proposals = primary.some((event) => event.event_type === "model.completed" && event.payload.usage.role === "draft") ? this.platform.artifacts.generationEvents(next, primary) : [];
-      return [...answers, ...accounting, ...roleSequences, ...winddowns, ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...attentionEvents(next, primary)];
+      const candidateOwners = this.candidateCleanup?.derived(this.snapshot(), next) ?? [];
+      return [...answers, ...accounting, ...roleSequences, ...winddowns, ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
@@ -566,6 +583,7 @@ export class ControlPlane extends EventEmitter {
     this.sandbox.synchronize();
     this.provider.synchronize();
     this.platform?.sessionPrs.changed(appended);
+    this.candidateCleanup?.changed(appended);
     this.platform?.browser.synchronize();
   }
   private commandFinish(id: string, commandDigest: string): WorkspaceFinish {
@@ -1014,6 +1032,37 @@ export class ControlPlane extends EventEmitter {
     }
     return values;
   }
+  private removingSession(id: string): boolean {
+    return this.deletingSessions.has(id) || Boolean(this.candidateCleanup?.sessionDeleting(id));
+  }
+  private async settleCandidateWork(ids: string[]): Promise<void> {
+    const generations = this.projection.candidateGenerations.filter((record) => ids.includes(record.id) && record.status === "running");
+    const relatedCompounds = this.projection.compoundWorkflows.filter((record) => record.validations.some((validation) => validation.candidateId !== null && ids.includes(validation.candidateId)));
+    const compounds = relatedCompounds.filter((record) => ["running", "waiting_validation", "validating"].includes(record.status));
+    const workers = [...this.candidateWorkers.values()].filter(({ run }) => run.generation && ids.includes(run.generation.id) ||
+      run.compound && relatedCompounds.some((record) => record.id === run.compound?.id));
+    for (const generation of generations) {
+      const session = this.projection.sessions.find((session) => session.id === generation.sessionId), run = this.runs.get(generation.sessionId);
+      try {
+        if (!session || session.turnId !== generation.id || run?.generation?.id !== generation.id) throw new MoguriError("candidate_cleanup_pending", "An active generation has no acknowledged original worker. Restart/reconcile it before deleting its proposal grant.", 409);
+        this.commit([...(generation.stopRequested ? [] : [this.generations.event({ ...generation, revision: generation.revision + 1,
+          stopRequested: true, updatedAt: new Date().toISOString() })]), this.event(session, "turn.stop_requested", {})]);
+      } finally { if (run?.generation?.id === generation.id) this.requestWorkerStop(run); }
+    }
+    for (const compound of compounds) await this.compound.execute({ type: "compound.stop", workflowId: compound.id },
+      (events, result = {}) => { this.commit(events); return result; });
+    await this.platform.settleCandidateJobs(ids);
+    const escalation = setTimeout(() => { for (const { run } of workers) run.child.kill("SIGKILL"); }, 5500);
+    try { await settleCandidateCleanup(Promise.all(workers.flatMap(({ run, exited }) => [exited, run.chain]))); }
+    finally { clearTimeout(escalation); }
+    const deadline = Date.now() + 6500;
+    const active = () => [...this.runs.values()].some((run) => run.generation && ids.includes(run.generation.id) || run.compound && compounds.some((record) => record.id === run.compound?.id));
+    while (active() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    if (active() || this.projection.candidateGenerations.some((record) => ids.includes(record.id) && record.status === "running") ||
+      this.projection.compoundWorkflows.some((record) => compounds.some((original) => original.id === record.id) && ["running", "waiting_validation", "validating"].includes(record.status))) {
+      throw new MoguriError("candidate_cleanup_pending", "Exact candidate-owned model work has not settled. Proposal content and unknown budget capacity were preserved.", 409);
+    }
+  }
   private async settleOwned(id: string): Promise<void> {
     const sessions = this.descendants(id);
     this.stop(id);
@@ -1042,27 +1091,38 @@ export class ControlPlane extends EventEmitter {
   }
   private async deleteSession(session: Session, finish: WorkspaceFinish): Promise<CommandResult> {
     if (this.deletingSessions.has(session.id)) throw new MoguriError("session_busy", "This session is already being removed.", 409);
+    const cleanup = this.candidateCleanup.beginSession(session.id);
     const owned = this.descendants(session.id).map((session) => session.id);
     for (const id of owned) this.deletingSessions.add(id);
     try {
-      await this.settleOwned(session.id);
+      if (cleanup) await settleCandidateCleanup(this.settleOwned(session.id)); else await this.settleOwned(session.id);
+      await this.settleCandidateWork(cleanup?.targets ?? []);
       const current = this.session(session.id);
       for (const execution of this.projection.executions.filter((value) => value.sessionId === session.id)) await this.remote.forget(execution);
       const detach = this.projection.sessions.filter((child) => child.parentSessionId === session.id).map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } }));
-      const result = finish([...detach, { event_type: "session.deleted", profile_id: this.profileId, project_id: session.projectId, payload: { deletedSessionId: session.id, usage: current.usage } }], { id: session.id }, { sessions: [session.id] });
+      const completed = cleanup ? this.candidateCleanup.complete(cleanup.id) : { events: [], forget: {} };
+      const result = finish([...detach, ...completed.events,
+        { event_type: "session.deleted", profile_id: this.profileId, project_id: session.projectId, payload: { deletedSessionId: session.id, usage: current.usage } }],
+      { id: session.id }, { ...completed.forget, sessions: [session.id] });
       this.paused.delete(session.id); return result;
-    } finally { for (const id of owned) this.deletingSessions.delete(id); }
+    } catch (error) { if (cleanup) throw this.candidateCleanup.failed(cleanup.id, error); throw error; }
+    finally { for (const id of owned) this.deletingSessions.delete(id); }
   }
   private async removeProject(id: string, finish: WorkspaceFinish, choice?: ProjectArtifactChoice): Promise<CommandResult> {
     if (this.projection.managedWorkspaces.some((workspace) => workspace.projectId === id && workspace.status !== "removed")) throw new MoguriError("managed_workspaces", "Remove each clean owned worktree explicitly before removing the project. Its filesystem/branch was not silently deleted.", 409);
     if (this.deletingProjects.has(id)) throw new MoguriError("project_busy", "This project is already being removed.", 409);
     await this.platform.artifacts.removal(id, choice);
     this.deletingProjects.add(id);
+    const cleanups: import("../../../packages/protocol/src/index.ts").CandidateCleanup[] = [];
     try {
       const revision = this.platform.sessions.projects.configuration(id).revision;
       const sessions = this.projection.sessions.filter((session) => session.projectId === id);
+      for (const session of sessions) {
+        const cleanup = this.candidateCleanup.beginSession(session.id); if (cleanup) cleanups.push(cleanup);
+      }
       await this.platform.cancelProject(id);
       for (const session of sessions) if (this.projection.sessions.some((current) => current.id === session.id)) await this.settleOwned(session.id);
+      await this.settleCandidateWork(cleanups.flatMap((cleanup) => cleanup.targets));
       for (const execution of this.projection.executions.filter((value) => value.projectId === id)) await this.remote.forget(execution);
       this.revision(this.platform.sessions.projects.configuration(id).revision, revision);
       const usage = [...this.projection.sessions.filter((session) => session.projectId === id).flatMap((session) => session.usage),
@@ -1085,7 +1145,15 @@ export class ControlPlane extends EventEmitter {
         throw new MoguriError("project_secrets", "Project credential cleanup is unconfirmed. Unlock the configured secret backend and retry; project records were preserved.", 503);
       }
       const artifacts = await this.platform.artifacts.removal(id, choice);
-      return finish([...artifacts.events, { event_type: "project.removed", profile_id: this.profileId, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }], { id }, { projects: [id], artifacts: artifacts.forget });
+      const completed = cleanups.map((cleanup) => this.candidateCleanup.complete(cleanup.id));
+      const targets = new Set(cleanups.flatMap((cleanup) => cleanup.targets));
+      const ordinaryEvents = artifacts.events.filter((event) => event.event_type === "artifact.revised" ? !targets.has(event.payload.artifact.id) :
+        event.event_type === "artifact.deleted" ? !targets.has(event.payload.artifactId) : event.event_type === "candidate.usage_retained" ? !targets.has(event.payload.generationId) : true);
+      return finish([...ordinaryEvents, ...completed.flatMap((cleanup) => cleanup.events), { event_type: "project.removed", profile_id: this.profileId, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }],
+        { id }, { projects: [id], artifacts: [...new Set([...artifacts.forget, ...completed.flatMap((cleanup) => cleanup.forget.artifacts ?? [])])] });
+    } catch (error) {
+      for (const cleanup of cleanups) this.candidateCleanup.failed(cleanup.id, error);
+      throw error;
     } finally { this.deletingProjects.delete(id); }
   }
   private subagent(parent: Session, prompt: string): string {
@@ -1687,8 +1755,14 @@ export class ControlPlane extends EventEmitter {
     const projectId = "projectId" in command ? command.projectId : "sessionId" in command ? this.projection.sessions.find((session) => session.id === command.sessionId)?.projectId : undefined;
     const browserCleanup = command.type === "browser.host.detach" || command.type === "browser.host.reply" || command.type === "browser.host.control" && !command.enabled;
     if (!browserCleanup && (projectId && this.deletingProjects.has(projectId) || "sessionId" in command && typeof command.sessionId === "string" && this.deletingSessions.has(command.sessionId))) throw new MoguriError("workspace_removing", "Owned work is settling for removal. No new mutation was admitted.", 409);
+    if ("sessionId" in command && typeof command.sessionId === "string" && this.candidateCleanup.sessionDeleting(command.sessionId) &&
+      !["session.delete", "session.stop", "session.resume", "terminal.acknowledge", "terminal.close", "execution.reconcile", "execution.acknowledge"].includes(command.type) && !browserCleanup) {
+      throw new MoguriError("candidate_cleanup_pending", "This session has an unfinished permanent deletion. Retry deletion or reconcile its exact cleanup; no new work was admitted.", 409);
+    }
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
     const finish = this.commandFinish(envelope.id, commandDigest);
+    if (command.type === "session.delete" && !this.projection.sessions.some((session) => session.id === command.sessionId) &&
+      this.candidateCleanup.sessionDeleted(command.sessionId)) return finish([], { id: command.sessionId });
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
@@ -1930,7 +2004,7 @@ export class ControlPlane extends EventEmitter {
   private pumpAll(): void {
     if (this.shuttingDown) return;
     for (const session of this.projection.sessions) {
-      if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.deletingSessions.has(session.id) || session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
+      if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.removingSession(session.id) || session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
       if (session.kind === "subagent" && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
         if (session.lastError !== diagnostic) this.commit([this.event(session, "session.blocked", { diagnostic })]);
@@ -2078,6 +2152,16 @@ export class ControlPlane extends EventEmitter {
           run.granted.add(mcpControl.operation.call.id); run.declaredTools.add("mcp_gateway");
         }
         this.runs.set(current.id, run);
+        if (generation || compound) {
+          const exited = Promise.withResolvers<void>();
+          this.candidateWorkers.set(turnId, { run, exited: exited.promise });
+          child.events.once("exit", () => {
+            exited.resolve();
+            void run.chain.then(() => queueMicrotask(() => {
+              if (run.done && this.runs.get(run.sessionId) !== run) this.candidateWorkers.delete(turnId);
+            }));
+          });
+        }
         if (compound) compound.deadline = setTimeout(() => {
           if (run.done) return;
           try { this.stop(run.sessionId); }
@@ -2897,6 +2981,7 @@ export class ControlPlane extends EventEmitter {
       } else if (!run.compaction && !run.generation) for (const call of calls) run.calls.set(call.id, call);
       this.commit([this.event(session, "model.completed", {
         contextDigest,
+        ...(run.generation ? { candidateGenerationId: run.generation.id } : {}),
         message: {
           id: request.stepId, turnId: run.turnId, role: router || run.compaction || run.generation ? "notice" : "assistant",
           text: run.generation ? generationError ?? "Unaccepted code proposal generated for separate review; no file was staged, applied or committed." : run.compaction ? compactionError ?? "Context compaction proposal generated for review; it has not been applied." : router ? plan ? `kupo Single plan: ${this.provider.state.models.find((model) => model.id === plan.modelId)?.name ?? plan.modelId}.` : routingError ?? "The router returned no usable plan." : message.content.filter((block) => block.type === "text").map((block) => block.text).join(""),
@@ -3319,6 +3404,7 @@ export class ControlPlane extends EventEmitter {
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    const candidateCleanup = this.candidateCleanup.close();
     const admissions = [...this.nativeAdmissions.values()];
     for (const admission of admissions) admission.abort.abort();
     const preparations = this.sandboxWorkspaces.close();
@@ -3326,7 +3412,7 @@ export class ControlPlane extends EventEmitter {
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
     const native = this.sandbox.close();
-    const local = await Promise.allSettled([preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.platform.close(options)]);
+    const local = await Promise.allSettled([candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while ((this.runs.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);

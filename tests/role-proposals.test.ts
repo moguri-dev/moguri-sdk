@@ -43,7 +43,7 @@ test("exact role origin is review-bound, immutable through separate stage/apply 
     await f.sdk.artifacts.delete(created.id, source.revision, true);
     assert.deepEqual((await f.sdk.candidates.read(staged.candidate.id)).candidate.roleOrigin, proposal.document.roleOrigin);
     const copied = JSON.parse((await f.sdk.artifacts.export(staged.candidate.id)).export.text);
-    assert.equal(copied.schemaVersion, 5);
+    assert.equal(copied.schemaVersion, 10);
     const hashes = copied.documents[0].candidate.results.map((result: { digest: string }) => result.digest);
     assert.ok(hashes.includes(proposal.document.roleOrigin.sequenceInputDigest));
     assert.ok(hashes.includes(proposal.document.roleOrigin.roleInputDigest));
@@ -115,7 +115,7 @@ test("candidate role origin cannot be removed, rebound or combined with generati
   } finally { await f.close(); }
 });
 
-test("the independently staged role origin and all three raw inputs/results survive source-role/session deletion and actual reopen", { skip: process.platform !== "darwin" }, async (t) => {
+test("staged role grants survive source-role deletion and session archival, then origin-session deletion removes them without refunding charges", { skip: process.platform !== "darwin" }, async (t) => {
   const f = await ownedSequenceFixture({ replyText: JSON.stringify(patch) }); let reopened: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const generated = await f.start(); await f.settled(generated.id);
@@ -124,7 +124,7 @@ test("the independently staged role origin and all three raw inputs/results surv
     const origin = staged.candidate.roleOrigin!;
     const original = (await f.sdk.artifacts.read(generated.id)).artifact;
     await f.sdk.artifacts.delete(original.id, original.revision, true);
-    await f.sdk.sessions.delete(f.sessionId, true, f.session().revision); await f.service.close();
+    await f.sdk.command({ type: "session.archive", sessionId: f.sessionId }); await f.service.close();
     const root = t.mock.method(ManagedWorkspaces.prototype, "project", () => { throw new Error("A retained role-origin copy cannot probe its deleted source session."); });
     const models = t.mock.method(f.provider, "prepare", async () => { throw new Error("A retained role-origin copy cannot call a model."); });
     reopened = await startService({ stateDir: join(f.directory, "state"), provider: f.provider, retentionKey: f.retentionKey });
@@ -132,11 +132,15 @@ test("the independently staged role origin and all three raw inputs/results surv
     try {
       assert.deepEqual((await sdk.candidates.read(staged.candidate.id)).candidate.roleOrigin, origin);
       const copied = JSON.parse((await sdk.artifacts.export(staged.candidate.id)).export.text);
-      assert.equal(copied.schemaVersion, 5);
+      assert.equal(copied.schemaVersion, 10);
       for (const hash of [origin.sequenceInputDigest, origin.roleInputDigest, origin.resultDigest]) {
         assert.ok(copied.documents[0].candidate.results.some((result: { digest: string; text: string }) => result.digest === hash && result.text.length > 0));
         assert.ok(reopened.store.blob(hash).length > 0);
       }
+      assert.equal((await sdk.budgets.dashboard()).totals.knownReportedTokens, 126);
+      await sdk.sessions.delete(f.sessionId, true);
+      await assert.rejects(() => sdk.candidates.read(staged.candidate.id), { code: "candidate_missing" });
+      for (const hash of [origin.sequenceInputDigest, origin.roleInputDigest, origin.resultDigest]) assert.throws(() => reopened!.store.blob(hash), /Missing or deleted/);
       assert.equal((await sdk.budgets.dashboard()).totals.knownReportedTokens, 126);
       assert.equal(root.mock.callCount(), 0); assert.equal(models.mock.callCount(), 0); assert.equal(f.requests.length, 3);
     } finally { sdk.disconnect(); }

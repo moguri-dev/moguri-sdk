@@ -123,8 +123,13 @@ display name or accept a model's own assertion as the review.
 Add versioned public intent, routing/role bindings, validation reviews,
 candidate selections and outcomes to the existing append-only event stream.
 Use an additive migration with exact ciphertext/receipt/restart tests.
-Reports, raw inputs/results and candidate provenance need independent grants;
-source session deletion is not cancellation or deletion of retained work.
+Reports, raw inputs/results and candidate provenance need separate grants.
+Source-session deletion cancels and settles the actual owning turn. Ordinary
+role/test reports remain independent; protocol 57's
+[session-owned candidate cleanup](candidate-cleanup.md) deletes staged candidate
+copies and proposal grants, without refunding calls or reverting code. First
+exact PR associations never follow session relinks, so an older merge cannot
+cancel a newer unrelated workflow. Archiving alone preserves candidates.
 
 Schema 38 adds `compound.recorded`, public control-turn ownership, validation
 job ownership and independently copied `compoundOrigin` candidate grants.
