@@ -318,6 +318,15 @@ canonical no-paid-replay intent. Staging/application remain separate real-user
 reviews. This is an integrated first model role, not completion of compound
 patterns, finite kupo wind-down, calibrated quality or D11.
 
+Protocol 57 intentionally changes only
+[candidate/proposal retention](candidate-cleanup.md). Permanent deletion of
+the canonical origin session, or fresh policy-allowed verification that the
+exact associated PR merged, erases candidate-owned compartments after exact
+cancellation/settlement. Archiving alone preserves them; ordinary role/compound
+reports and budget accounting remain independent. Repository-free/folder-only
+sessions cannot create candidates. Original provenance and first PR association
+are migrated without guessed ownership, new inference or filesystem effects.
+
 The 0.24 [private owned-role protocol](owned-role-protocol.md) now exercises
 acknowledged candidate-stage continuation in that same actual worker, with
 complete planned-capacity transfer and retained results before another role.

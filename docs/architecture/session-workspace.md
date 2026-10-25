@@ -178,8 +178,12 @@ Protocol/database migration 4 must preserve prior events, receipts, queues,
 capabilities and indexes without asking users to delete state. New payload
 retention compartments keep the typed event log append-only: deletion erases
 authorized session/project payload keys and derived data, not immutable audit
-records. Session artifacts use independent project ownership and survive
-session deletion. Project removal forgets Moguri-owned project artifacts, not
+records. Ordinary session artifacts use independent ownership and survive
+session deletion. [Candidates and generation proposals](candidate-cleanup.md)
+are the explicit exception: permanent origin-session deletion erases their
+proposal compartments after exact owned work settles. Archiving preserves them.
+Project removal follows the reviewed ordinary-artifact choice but cannot retain
+a proposal whose originating session it removes. It does not delete
 repository files or external PRs.
 
 Production retention keys use an explicit OS-keychain master, with its stable
@@ -205,8 +209,9 @@ source identity and current policy. Per-command output does not create
 persistent interactive shell state or a user-input route.
 
 Archived-session cleanup is off by default and requires an explicit user
-retention policy. It preserves independently retained artifacts and never
-closes a PR. Removal and retention must invalidate connected clients' cached
+retention policy. It preserves ordinary independently retained artifacts, deletes
+the expired session's originating candidates/proposals and never closes a PR.
+Removal and retention must invalidate connected clients' cached
 transcripts, drafts, terminal buffers and selections.
 
 ## Acceptance

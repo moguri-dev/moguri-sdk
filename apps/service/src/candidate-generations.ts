@@ -1,6 +1,6 @@
 import type { Message, AssistantMessage } from "@earendil-works/pi-ai";
 import {
-  CandidateDocumentSchema, KUPO_MODEL_ID, modelContextWindows, MoguriError, parse, sameCandidateRoot,
+  candidateDeletionPending, CandidateDocumentSchema, KUPO_MODEL_ID, modelContextWindows, MoguriError, parse, sameCandidateRoot,
   type CandidateDocument, type EventInput, type ModelInfo, type RetainedArtifact, type Session, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 import {
@@ -70,6 +70,7 @@ export class CandidateGenerations {
     const snapshot = this.host.snapshot(), session = snapshot.sessions.find((session) => session.id === sessionId);
     if (!session || !session.projectId || session.controls.env !== "Local" || session.mode !== "agent" || session.kind !== "agent" ||
       session.pendingMode === "read-only" || !snapshot.policy.allowedEnvs.includes("Local")) throw new MoguriError("candidate_generation_scope", "Use an explicitly Local writable project session allowed by current policy. No Remote/Sandbox fallback.", 409);
+    this.host.candidates.assertSession(sessionId);
     const model = snapshot.provider.models.find((model) => model.id === session.controls.modelId);
     if (!model || model.synthetic || model.id === KUPO_MODEL_ID || !model.apiModelId || !model.providerId ||
       !model.environments?.includes("Local") || !Number.isSafeInteger(model.maxTokens) || !model.maxTokens || model.maxTokens < 1) throw new MoguriError("candidate_generation_model", "Select an available fixed model with known actual output bounds. No model, kupo workflow or provider was substituted.", 409);
@@ -96,7 +97,7 @@ export class CandidateGenerations {
     const inputDigest = digest(text), reviewDigest = digest(`moguri-candidate-generation-v1\0${text}`);
     const preview: CandidateGenerationPreview = { digest: reviewDigest, inputDigest, modelId: document.modelId, modelBindingDigest: document.modelBindingDigest,
       source: document.source, stage: document.stage, estimatedInputTokens: document.estimatedInputTokens, maxOutputTokens: document.maxOutputTokens,
-      systemPrompt: document.systemPrompt, warning: "Generation sends only reviewed selected-file snapshots and may spend model budget. Input/results are retained independently until this report is deleted. Estimates are not exact billing. No file is staged, applied, executed or committed." };
+      systemPrompt: document.systemPrompt, warning: "Generation sends only reviewed selected-file snapshots and may spend model budget. Proposal input/results have separate encrypted grants but are permanently deleted with their originating session or after verified exact linked-PR merge. Archiving alone preserves them. Usage/accounting remain. Estimates are not exact billing. No file is staged, applied, executed or committed." };
     return { preview, document, source, text };
   }
   async query(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse> {
@@ -133,6 +134,7 @@ export class CandidateGenerations {
     return this.host.start(record, artifact, prepared.document, finish);
   }
   async check(id: string, signal: AbortSignal) {
+    if (candidateDeletionPending(this.host.snapshot().candidateCleanups, id)) throw new MoguriError("candidate_cleanup_pending", "This original generation is pending deletion. No model preparation, call or continuation was admitted.", 409);
     const record = this.record(id), document = this.document(record), selected = this.selected(record.sessionId);
     if (record.status !== "running" || record.stopRequested || selected.session.turnId !== record.id || selected.binding !== record.modelBindingDigest) throw new MoguriError("candidate_generation_stale", "The exact generation is stopped, settled or no longer owns this model/session. No continuation.", 409);
     const source = await this.host.candidates.generationSource(record.sessionId, record.stage.workspaceId!, { task: document.task, files: document.files.map(({ path, baseDigest }) => ({ path, baseDigest })) }, signal);

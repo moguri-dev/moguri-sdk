@@ -33,7 +33,7 @@ export async function qualifyCandidateGeneration({ sdk, node, cli, directory, st
     assert.equal(await readFile(path, "utf8"), original); assert.equal(await readFile(join(workspace.path, "fixture.txt"), "utf8"), original);
     const calls = (await sdk.budgets.calls({ sessionId: source.id })).calls;
     assert.equal(calls.length, 1); assert.equal(calls[0].role, "draft"); assert.equal(calls[0].reportedTokens, 42); assert.equal(calls[0].status, "settled");
-    assert.equal(JSON.parse((await sdk.artifacts.export(generated.generation.id)).export.text).schemaVersion, 3);
+    assert.equal(JSON.parse((await sdk.artifacts.export(generated.generation.id)).export.text).schemaVersion, Array.isArray(sdk.getState().snapshot.candidateOwners) ? 10 : 3);
     assert.ok((await sdk.artifacts.read(generated.generation.id)).artifact.sources.some((source) => source.actor === "model" && source.modelId === modelId));
     const shared = await sdk.slash(source.id, `/candidate generation ${generated.generation.id}`, "tui");
     assert.equal(shared.kind, "text"); assert.equal(JSON.parse(shared.text).generation.status, "proposed");
@@ -56,6 +56,16 @@ export async function qualifyCandidateGeneration({ sdk, node, cli, directory, st
         assert.equal((await current.command(command, generated.generation.commandId)).id, generated.generation.id);
         assert.equal(await readFile(path, "utf8"), newer); assert.equal(requests.length, before + 1);
         assert.equal((await current.budgets.calls({ sessionId: source.id, role: "draft" })).calls[0].reportedTokens, 42);
+        if (Array.isArray(current.getState().snapshot.candidateOwners)) {
+          await current.sessions.delete(source.id, true);
+          await assert.rejects(() => current.candidates.generation(generated.generation.id), { code: "candidate_generation_missing" });
+          await assert.rejects(() => current.candidates.read(staged.candidate.id), { code: "candidate_missing" });
+          const deleted = new DatabaseSync(join(stateDir, "state.sqlite"));
+          try { deleted.prepare("DELETE FROM receipts WHERE profile_id=? AND id=?").run("default", generated.generation.commandId); } finally { deleted.close(); }
+          await assert.rejects(() => current.command(command, generated.generation.commandId), { code: "candidate_generation_deleted" });
+          assert.equal((await current.budgets.calls({ sessionId: source.id, role: "draft" })).calls[0].reportedTokens, 42);
+          assert.equal(await readFile(path, "utf8"), newer); assert.equal(requests.length, before + 1);
+        }
       },
     };
   } finally { setReply(null); }

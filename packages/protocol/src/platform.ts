@@ -41,6 +41,7 @@ import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type 
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
 import { CandidateCommandSchema, CandidateQuerySchema, type CandidateJobIntent, type CandidateRecord, type CandidateResponse } from "./candidates.ts";
 import { CandidateGenerationCommandSchema, CandidateGenerationQuerySchema, type CandidateGenerationRecord, type CandidateGenerationResponse } from "./candidate-generations.ts";
+import type { CandidateOwner, CandidateCleanup } from "./candidate-retention.ts";
 import { RoleSequenceQuerySchema, type RoleSequenceRecord, type RoleSequenceResponse } from "./role-sequences.ts";
 import { ModelEvidenceQuerySchema, type ModelEvidenceResponse } from "./model-evidence.ts";
 import { RoleContractQuerySchema, type RoleContractRead } from "./role-contracts.ts";
@@ -61,6 +62,7 @@ export * from "./decisions.ts";
 export * from "./compound.ts";
 export * from "./candidates.ts";
 export * from "./candidate-generations.ts";
+export * from "./candidate-retention.ts";
 export * from "./role-sequences.ts";
 export * from "./model-evidence.ts";
 export * from "./role-contracts.ts";
@@ -341,6 +343,8 @@ export interface CapabilityJob {
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot {
   lastModelSelection: ModelSelection | null;
   candidates: CandidateRecord[];
+  candidateOwners: CandidateOwner[];
+  candidateCleanups: CandidateCleanup[];
   remoteMcpCalls: RemoteMcpCall[];
   terminalOwners: TerminalOwner[];
   repositoryObservations: RepositoryObservation[];

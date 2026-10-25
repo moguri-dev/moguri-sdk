@@ -1,5 +1,12 @@
 # Durable reviewed candidates
 
+**Current retention, protocol 57:** [session-owned candidate cleanup](candidate-cleanup.md)
+supersedes this checkpoint's independent source-session retention. Permanent
+origin-session deletion or fresh exact linked-PR merge deletes candidate-owned
+proposal compartments after exact work settles. Archiving alone preserves them;
+ordinary artifacts, role/compound reports and required accounting remain
+independent. The historical qualification below is unchanged.
+
 Status: qualified **0.22.0-alpha.1 / protocol 29** implements the Local
 reviewed-candidate slice. The
 [private transport](compound-routing-primitives.md) and
@@ -20,9 +27,10 @@ The manual slice began with protocol/database **29**. The additive
 missing owner/attempt/stop fields; absence is not fabricated historical
 telemetry. New stage/apply intents bind an explicit Local agent-session owner,
 while record/job/result encryption remains independently artifact-owned.
-Stopping that owning session cancels its job; deleting an old source session
-does not destroy the candidate. A later explicit compatible Local session may
-review/apply the same retained proposal without relabeling its authorship.
+Stopping that owning session cancels its job. Archiving an old source session
+preserves the candidate; permanent deletion now destroys it. While retained,
+another explicitly compatible Local session may review/apply it without
+relabeling canonical originating ownership.
 
 The shared SDK flow is preview, explicit stage into an existing
 clean managed worktree, read/wait, fresh apply review and explicit apply.
@@ -44,7 +52,8 @@ immutable proposed bytes; a settled wait is not necessarily successful.
 `applyPreview(candidateId, explicitSessionId)` freshly checks the same recorded
 source/base and staged bytes. `apply` requires its current revision/digest and
 records actual-user acceptance before source publication. A compatible new
-Local session can own this action after the original session is deleted.
+Local session can own this action while the original session is retained,
+including archived.
 `reject` changes only a fully staged proposal; `stop` requests only the exact
 captured active job. Cancelling an old completed stage job cannot affect a later
 apply phase.
