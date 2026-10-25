@@ -3,6 +3,8 @@
 Agent control uses the existing session Browser pane, not a separate browser
 or a personal system browser. The switch at the top allows disabling and
 re-enabling control at any time.
+It is a pill-shaped sliding button switch, not a checkbox, with native
+Space/Enter interaction, visible keyboard focus and a 44-pixel hit target.
 
 ## Implementation contract
 
