@@ -64,6 +64,40 @@ Releasing the modifier while that request is pending keeps the disabled clock
 visible until acknowledgement or failure. Compact control rows wrap without
 overlap; popovers stay above the complete toolbar, not a newly wrapped row.
 
+### Composer recovery action
+
+Desktop recovery reuses React/Electron (MIT), the existing Play glyph and typed
+`session.resume` command. No dependency, capability, event, schema or migration
+is added; CLI/TUI/SDK resume operations and service policy stay unchanged.
+
+An inactive session with an authoritative blocked-session, exact managed-root,
+or applicable base-project marker exposes **Resume** in the composer's primary
+button, not a separate **Resume after inspection** header action. Failure text
+or a partial status alone cannot invent a recovery boundary. The compact icon,
+accessible name, inspection warning and form guidance distinguish Resume from
+sending a prompt; resuming never claims cleanup succeeded or grants permission.
+An active turn retains Stop and the existing explicit Hold override.
+
+Pointer, plain Enter and native form submission call the same existing Resume
+operation for the actual selected session, without sending, clearing or replacing
+its draft/attachments. No model or nonempty draft is needed merely to acknowledge
+an inspected boundary; actual queued execution still passes service admission.
+Shift+Enter stays newline, Cmd/Ctrl+Enter stays Hold, and slash commands retain
+their explicit action. Existing queued-message controls remain separate.
+
+Resume is single-flight through acknowledgement. Pending work is disabled/
+announced; a refusal remains visible with the boundary and draft intact, and
+only a new explicit action retries. Disconnect/archive/configuration gates
+remain effective. Rendering, reload, typing and changing modifiers cannot
+automatically resume, answer a question, approve an action or replay work.
+
+Fresh prerequisites pass all six available generated groups: cancellation
+32.58 ms; SQLite append p95 0.049 ms/rebuild 0.567 ms; owned PTY cancellation
+152.64 ms with zero survivors; TUI updates 18.05 ms; hidden Electron cold start
+251.34 ms / 439.20 MiB / 8.30 ms per frame; 2,000-file search/Git
+1.235/6.299 ms. Separate live/native/notarized/Linux/quality gates remain
+FAIL/unqualified, not enabled by this desktop presentation change.
+
 Closed terminals disappear from the visible selector, not from retained ownership
 or cleanup evidence. The embedded renderer remains Ghostty. Default shells resolve
 on the actual execution host, including its account login shell when a desktop
