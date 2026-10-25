@@ -886,6 +886,8 @@ its fourth `false` performs configuration without recording a new selection.
 Raw `session.configure` commands opt in with `rememberModelSelection: true`.
 Window-only/autonomy/env changes, session creation and model/role calls do not
 become selections.
+Resetting tuning on a session with no selected model also preserves the
+remembered choice; `sessions.selectModel(sessionId, null)` explicitly clears it.
 
 `snapshot.lastModelSelection` contains only the profile's model/effort pair.
 The independent profile event survives source-session/project deletion and

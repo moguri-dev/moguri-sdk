@@ -87,7 +87,8 @@ export class MoguriSdk extends TransportClient {
     modelOptions: (sessionId: string, modelOptions: ModelOptions, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
       if (!session) throw new ClientError("session_missing", "Choose an existing session.");
-      return this.sessions.configure(sessionId, { ...session.controls, modelOptions }, expectedRevision, rememberModelSelection);
+      return this.sessions.configure(sessionId, { ...session.controls, modelOptions }, expectedRevision,
+        session.controls.modelId === null ? false : rememberModelSelection);
     },
     context: (sessionId: string) => this.query({ type: "session.context", sessionId }),
     organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes, expectedRevision }),

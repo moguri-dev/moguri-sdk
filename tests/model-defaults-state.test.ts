@@ -91,6 +91,10 @@ test("remembered model metadata cannot acquire a foreign, model-authored or forg
     const wrongRoot = structuredClone(events);
     wrongRoot[index]!.project_id = fixture.session().projectId;
     assert.throws(() => projectEvents(wrongRoot), /Remembered model selection/);
+    for (const patch of [{ artifact_id: "generated-wrong-retention-owner" }, { turn_id: "generated-wrong-model-turn" }]) {
+      const changed = structuredClone(events); Object.assign(changed[index]!, patch);
+      assert.throws(() => projectEvents(changed), /Remembered model selection/);
+    }
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });

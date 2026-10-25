@@ -160,7 +160,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!command.argument) return { kind: "text", text: JSON.stringify({ options: session.controls.modelOptions ?? {}, context: (await sdk.sessions.context(session.id)).context }, null, 2) };
       if (command.argument === "reset") {
         const { modelOptions: _, ...controls } = session.controls;
-        await sdk.sessions.configure(session.id, controls, session.revision, true);
+        await sdk.sessions.configure(session.id, controls, session.revision, session.controls.modelId !== null);
       } else {
         const options = parse(ModelOptionsSchema, JSON.parse(command.argument));
         await sdk.sessions.modelOptions(session.id, options, session.revision, Object.hasOwn(options, "thinkingEffort") || undefined);

@@ -68,6 +68,19 @@ test("an explicit no-model session override cannot resurrect a remembered select
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("tuning an unselected session cannot erase the last model choice; only an explicit model clear does", async () => {
+  const fixture = await setupFixture({ reasoning: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, modelId: fixture.modelId, modelOptions: { thinkingEffort: "high" } });
+    const current = await sdk.sessions.create(null, "Generated unselected tuning reset", { modelId: null });
+    await assert.rejects(() => sdk.sessions.modelOptions(current.id!, {}, undefined, true), /Choose an available model/);
+    await sdk.slash(current.id!, "/model-settings reset", "tui");
+    assert.deepEqual(sdk.getState().snapshot!.lastModelSelection, { modelId: fixture.modelId, thinkingEffort: "high" });
+    await sdk.sessions.selectModel(current.id!, null);
+    assert.equal(sdk.getState().snapshot!.lastModelSelection, null); assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
 test("only explicit model/effort selections are remembered; inheritance, window/autonomy changes and ordinary configuration do not count", async () => {
   const fixture = await setupFixture({ reasoning: true, contextWindow: 32768 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

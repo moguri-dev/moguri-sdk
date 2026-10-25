@@ -465,7 +465,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const actual = source ? modelSelection(source.controls) : undefined;
       const retainedSource = removedModelSources.has(event.payload.sourceSessionId) ||
         event.payload.sourceProjectId !== null && removedModelProjects.has(event.payload.sourceProjectId);
-      if (event.project_id !== null || event.session_id !== null || event.payload.actor !== "user" ||
+      if (event.project_id !== null || event.session_id !== null || event.turn_id !== null || event.artifact_id != null || event.payload.actor !== "user" ||
         typeof event.payload.sourceSessionId !== "string" || !event.payload.sourceSessionId || event.payload.sourceSessionId.length > 128 ||
         event.payload.sourceProjectId !== null && typeof event.payload.sourceProjectId !== "string" ||
         !source && !retainedSource || source && source.projectId !== event.payload.sourceProjectId ||
