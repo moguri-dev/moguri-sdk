@@ -4,9 +4,26 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repositoryContext } from "../apps/service/src/project-policy.ts";
-import { defaultProjectSettings } from "../packages/protocol/src/index.ts";
+import { defaultProjectSettings, isRecord } from "../packages/protocol/src/index.ts";
 import { executeTool } from "../apps/service/src/tools.ts";
 import { parseSearchPage } from "../apps/service/src/web-search.ts";
+import { setupFixture } from "./fixture.ts";
+
+test("the actual worker exposes bootstrap schemas first and only discovered native schemas on the next request", async () => {
+  const f = await setupFixture({ toolCall: { name: "discover_tools", args: { query: "read_file" } } });
+  try {
+    await f.configure(); await f.send("Generated actual schema loading."); await f.terminal();
+    const names = (request: Record<string, unknown>) => {
+      assert.ok(Array.isArray(request.tools));
+      return request.tools.map((tool) => isRecord(tool) && isRecord(tool.function) ? tool.function.name : null);
+    };
+    assert.deepEqual(names(f.requests[0]!).sort(), ["ask_user", "discover_tools", "task_progress"]);
+    const loaded = names(f.requests[1]!);
+    assert.ok(loaded.includes("read_file")); assert.ok(loaded.length <= 8);
+    assert.equal(f.requests.length, 2);
+    assert.equal(f.service.controller.events(0).some((event) => event.event_type === "process.started"), false);
+  } finally { await f.close(); }
+});
 
 test("instruction inheritance is complete, scoped and ordered, with moguri.md after AGENTS.md", async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-instructions-"));

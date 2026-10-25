@@ -1,11 +1,36 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executeTool } from "../apps/service/src/tools.ts";
 import { bytesDigest } from "../apps/service/src/files.ts";
 import { extractDocument } from "../apps/service/src/document-extract.ts";
+import { strToU8, unzipSync, zipSync } from "fflate";
+
+test("workbook edits prove complete supported source bytes and retain untouched styles/formula caches", { timeout: 15000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "moguri-workbook-source-"));
+  const run = (name: string, args: Record<string, unknown>) => executeTool(root, { id: "generated-workbook", name, arguments: args }, new AbortController().signal, () => {}, () => {});
+  try {
+    const path = "generated.xlsx";
+    await run("write_document", { path, format: "xlsx", expectedDigest: "absent", sheets: [{ name: "Generated", cells: [
+      { address: "A1", value: "Generated original", bold: true }, { address: "C4", value: 999, formula: "1+2", numberFormat: "0.00" },
+      { address: "F2", value: null, formula: "UNAVAILABLE()" },
+    ] }] });
+    const before = await readFile(join(root, path));
+    await run("edit_document", { path, expectedDigest: bytesDigest(before), sheets: [{ name: "Generated", cells: [{ address: "B3", value: false }] }] });
+    const after = await readFile(join(root, path)), document = await extractDocument(after, "xlsx");
+    assert.equal(document.units.find((unit) => unit.location.cell === "C4")?.formula, "1+2");
+    assert.equal(document.units.find((unit) => unit.location.cell === "C4")?.cachedValue, "999");
+    assert.equal(document.units.find((unit) => unit.location.cell === "F2")?.cachedValue, null);
+    const entries = unzipSync(after), styles = Buffer.from(entries["xl/styles.xml"]!).toString("utf8");
+    assert.match(styles, /<b\/>/); assert.match(styles, /formatCode="0.00"/);
+    entries["xl/sharedStrings.xml"] = strToU8(Buffer.from(entries["xl/sharedStrings.xml"]!).toString("utf8").replace("Generated original", "Generated external change"));
+    const changed = Buffer.from(zipSync(entries, { level: 0 })); await writeFile(join(root, path), changed);
+    await assert.rejects(() => run("edit_document", { path, expectedDigest: bytesDigest(changed), sheets: [{ name: "Generated", cells: [{ address: "A1", value: "Must not discard external source" }] }] }), { code: "document_edit" });
+    assert.deepEqual(await readFile(join(root, path)), changed);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("structured authors create actual parseable formats and make digest-bound edits", { timeout: 30000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-authoring-"));

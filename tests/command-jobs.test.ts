@@ -41,6 +41,7 @@ test("explicit watch jobs survive a completed model turn, expose real logs and c
     await f.terminal();
     const job = await waitFor(() => f.service.controller.snapshot().jobs.find((job) => job.kind === "command.watch"));
     assert.equal(job.status, "running");
+    await waitFor(() => f.service.controller.platform.commandJobRead(f.sessionId, job.id).text?.includes("Generated watch ready"));
     const logs = await f.service.controller.platform.delegate(f.session(), { id: "read", name: "read_command_job", arguments: { jobId: job.id } }, new AbortController().signal);
     assert.match(logs.text, /Generated watch ready/);
     await f.service.controller.dispatch(envelope({ type: "job.cancel", jobId: job.id }));

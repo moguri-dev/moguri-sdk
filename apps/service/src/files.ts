@@ -3,7 +3,7 @@ import { isUtf8 } from "node:buffer";
 import { open, realpath, lstat, stat, readdir, rename, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
-import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/core.ts";
 
 const protectedPart = (part: string) => part === ".git" || part === ".moguri" || part.startsWith(".moguri-dependencies-") || part === "node_modules" ||
   [".ssh", ".aws", ".azure", ".kube", ".docker", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "Moguri"].includes(part) ||

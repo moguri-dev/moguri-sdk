@@ -155,6 +155,14 @@ fixed mutation is sent. An original command ID with a lost response or lost
 receipt returns the retained operation; it never sends a second mutation.
 A changed command with that ID fails.
 
+Protocol 57's Local native `create_issue` adapter admits only `issue.create`
+through the same exact review/intent/result path. It retains `modelSource`
+and `acceptance.actor: tool-grant`, never a forged actual-user acceptance.
+Network-only model issue creation may coexist with its own active model-root
+lease; independent Linear operations still serialize and normal user workflow
+root-busy checks remain unchanged. No other mutation, credential setup,
+ticket acceptance or inspection acknowledgement gains this exception.
+
 Schema 41 adds `linear.operation_recorded` and `linearOperations`, with
 `projectLinearOperation` enforcing immutable ownership, acceptance, input
 digests, monotone dispatch/evidence and terminal lifecycle. Prior schema-40

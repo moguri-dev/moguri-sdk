@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { MoguriError, type Session, type Snapshot, type StoredEvent, type EventInput, type CommandResult, type PublicMessage } from "../../../packages/protocol/src/index.ts";
-import type { CoordinationBinding, CoordinationCommand, CoordinationLink, CoordinationMessage, CoordinationMetadata, CoordinationOrigin, CoordinationQuery, CoordinationRead, CoordinationResponse, SessionContextInput, SessionControlInput } from "../../../packages/protocol/src/coordination.ts";
+import type { CoordinationBinding, CoordinationCommand, CoordinationLink, CoordinationMessage, CoordinationMetadata, CoordinationOrigin, CoordinationQuery, CoordinationRead, CoordinationResponse, CoordinationTaskOrigin, SessionContextInput, SessionControlInput } from "../../../packages/protocol/src/coordination.ts";
 import { textFilePage } from "./files.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import type { TaskPlan } from "../../../packages/protocol/src/progress.ts";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const dataText = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e").replaceAll("&", "\\u0026");
@@ -15,6 +16,7 @@ export function coordinatedMessageContext(message: CoordinationMessage, timestam
 interface Host {
   profileId: string; snapshot(): Snapshot; events(): StoredEvent[]; scope(session: Session): string;
   binding(session: Session): CoordinationBinding;
+  plan(sessionId: string): TaskPlan | null;
   commit(events: EventInput[]): void; stop(id: string): void; blocked(session: Session): boolean; wake(): void;
   validate(session: Session): void;
   spawn(parent: Session, kind: "side" | "agent", title: string | undefined, origin: CoordinationOrigin, finish: WorkspaceFinish): CommandResult;
@@ -45,23 +47,45 @@ export class SessionCoordination {
     return { parent, child };
   }
   access(sourceId: string, targetId: string, control = false) {
-    const source = this.session(sourceId), target = this.session(targetId);
-    if (source.id === target.id && !control) return target;
+    return this.authorize(sourceId, targetId, control).target;
+  }
+  private authorize(sourceId: string, targetId: string, control = false) {
+    const source = this.session(sourceId), target = this.session(targetId), links: CoordinationLink[] = [];
+    if (source.id === target.id && !control) return { source, target, links };
     let cursor = target;
     const visited = new Set<string>();
     while (cursor.createdParentSessionId && !visited.has(cursor.id)) {
       visited.add(cursor.id);
       const parent = this.session(cursor.createdParentSessionId), link = this.link(parent, cursor);
       if (!link) break;
-      this.check(link);
-      if (parent.id === source.id) return target;
+      this.check(link); links.push(link);
+      if (parent.id === source.id) return { source, target, links };
       cursor = parent;
     }
     if (!control && source.createdParentSessionId === target.id) {
       const link = this.link(target, source);
-      if (link) { this.check(link); return target; }
+      if (link) { this.check(link); return { source, target, links: [link] }; }
     }
     throw new MoguriError("coordination_denied", "This session has no actual coordination grant for that target. Reparenting or knowing its ID is not authority.", 403);
+  }
+  private bindingDigest(sourceId: string, targetId: string) {
+    const { source, target, links } = this.authorize(sourceId, targetId);
+    return hash([source.id, target.id, this.host.scope(source), this.host.scope(target), links]);
+  }
+  private deliveryDiagnostic(message: CoordinationMessage): string | null {
+    try {
+      if (!message.bindingDigest || message.bindingDigest !== this.bindingDigest(message.fromSessionId, message.toSessionId)) return "Original coordination/root proof is missing or changed. Retained inbox data was not delivered as fresh model context or work.";
+      return null;
+    } catch (error) {
+      if (!(error instanceof MoguriError)) throw error;
+      return `${error.message} Original message retained; no automatic delivery or task replay.`;
+    }
+  }
+  assertTask(sessionId: string, origin: CoordinationTaskOrigin) {
+    const message = this.host.snapshot().coordinationMessages.find((message) => message.id === origin.messageId && message.kind === "task" &&
+      message.toSessionId === sessionId && message.fromSessionId === origin.fromSessionId && message.fromTurnId === origin.fromTurnId && hash(message.origin) === hash(origin.origin));
+    const diagnostic = message ? this.deliveryDiagnostic(message) : "The original scoped task message is unavailable.";
+    if (diagnostic) throw new MoguriError("coordination_task_stale", `${diagnostic} Review and explicitly dispatch a new task; no paid call was started.`, 409);
   }
   query(query: CoordinationQuery): CoordinationResponse {
     if (query.type === "coordination.preview") {
@@ -86,12 +110,15 @@ export class SessionCoordination {
     }
     if (input.action === "inbox") {
       const messages = snapshot.coordinationMessages.filter((message) => message.toSessionId === source.id), offset = input.offset ?? 0;
-      return { action: "inbox", messages: messages.slice(offset, offset + 20), nextOffset: offset + 20 < messages.length ? offset + 20 : null, limit: 20 };
+      return { action: "inbox", messages: messages.slice(offset, offset + 20).map((message) => {
+        const diagnostic = message.deliveredTo ? null : this.deliveryDiagnostic(message);
+        return { ...message, ...(diagnostic ? { deliveryDiagnostic: diagnostic } : {}) };
+      }), nextOffset: offset + 20 < messages.length ? offset + 20 : null, limit: 20 };
     }
     if (input.action === "snapshot") return { action: "snapshot", ...this.page(this.host.parentSnapshot(source.id), source.id, input) };
     if (!input.targetSessionId) throw new MoguriError("coordination_target", "Select an exact granted target session.");
     const target = this.access(source.id, input.targetSessionId);
-    if (input.action === "inspect") return { action: "inspect", ...this.metadata(target), plan: target.taskPlan ?? null,
+    if (input.action === "inspect") return { action: "inspect", ...this.metadata(target), plan: this.host.plan(target.id),
       question: snapshot.questions.find((question) => question.id === target.pendingQuestionId && question.status === "open") ?? null,
       approval: target.pendingApproval ? { id: target.pendingApproval.id, name: target.pendingApproval.call.name, argumentsDigest: hash(target.pendingApproval.call.arguments) } : null,
       authority: "Observed state and model-authored plan, not acceptance or permission. Actual user questions/approvals must use their original owning APIs." };
@@ -114,7 +141,7 @@ export class SessionCoordination {
     const source = this.session(sourceId), target = this.access(sourceId, targetId);
     if (!text.trim() || !text.isWellFormed() || Buffer.byteLength(text) > 8000) throw new MoguriError("coordination_text", "Send nonempty lossless text up to 8 KiB.");
     const id = hash(["coordination-message", sourceId, targetId, intentId]), previous = this.host.snapshot().coordinationMessages.find((message) => message.id === id);
-    const message: CoordinationMessage = { id, fromSessionId: source.id, toSessionId: target.id, fromTurnId: source.turnId, origin, text, kind, deliveredTo: null };
+    const message: CoordinationMessage = { id, fromSessionId: source.id, toSessionId: target.id, fromTurnId: source.turnId, origin, text, kind, deliveredTo: null, bindingDigest: this.bindingDigest(sourceId, targetId) };
     if (previous && hash({ ...previous, deliveredTo: null }) !== hash(message)) throw new MoguriError("coordination_reused", "This message identity belongs to different original data. No replacement or second delivery was created.", 409);
     if (!previous && this.host.snapshot().coordinationMessages.filter((message) => message.toSessionId === target.id && !message.deliveredTo).length >= 100) throw new MoguriError("coordination_limit", "The target has 100 undelivered messages. Inspect/coalesce them before adding more.");
     return { id, message: previous ?? message, events: previous ? [] : [{ event_type: "coordination.message", profile_id: this.host.profileId, project_id: target.projectId, session_id: target.id, payload: { message } }] };
@@ -191,12 +218,12 @@ export class SessionCoordination {
         count = Math.floor(count / 2);
       } while (count > 0);
       const message: CoordinationMessage = { id, fromSessionId: child.id, toSessionId: parent.id, fromTurnId: terminal.turn_id,
-        origin: { actor: "service" }, kind: "result", text, deliveredTo: null };
+        origin: { actor: "service" }, kind: "result", text, deliveredTo: null, bindingDigest: this.bindingDigest(child.id, parent.id) };
       events.push({ event_type: "coordination.message", profile_id: this.host.profileId, project_id: parent.projectId, session_id: parent.id, payload: { message } });
     }
     return events;
   }
   pending(sessionId: string) {
-    return this.host.snapshot().coordinationMessages.filter((message) => message.toSessionId === sessionId && !message.deliveredTo && message.kind !== "task").slice(0, 2);
+    return this.host.snapshot().coordinationMessages.filter((message) => message.toSessionId === sessionId && !message.deliveredTo && message.kind !== "task" && !this.deliveryDiagnostic(message)).slice(0, 2);
   }
 }

@@ -29,11 +29,29 @@ test("lean edits are exact, atomic, conflict-safe and obey read-only/folder rest
     await writeFile(join(root, "root-ignored.ts"), "Generated ignored source");
     await writeFile(join(root, "scratch-ignored.ts"), "Generated ignored source");
     await writeFile(join(root, "nested", "local-ignored.ts"), "Generated ignored source");
+    await writeFile(join(root, "nested", "root-ignored.ts"), "Generated ancestor-ignored source");
     const found = JSON.parse((await run("find_files", { pattern: "**/*.ts" })).text);
     assert.deepEqual(found.files, ["nested/generated.ts", "sample.ts"]);
     assert.equal(found.complete, true);
+    assert.deepEqual(JSON.parse((await run("find_files", { pattern: "**/*.ts", path: "nested" })).text).files, ["nested/generated.ts"]);
     const searched = JSON.parse((await run("search_files", { pattern: "function", glob: "*.ts", context: 1 })).text);
     assert.equal(searched.matches[0].path, "nested/generated.ts");
     assert.match(searched.matches[0].text, /generated/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("compact search and its original retained source both exclude protected and literal denied paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "moguri-search-policy-"));
+  try {
+    await mkdir(join(root, "private[1]"));
+    await writeFile(join(root, "private[1]", "generated.txt"), "GENERATED_SECRET_MATCH");
+    await writeFile(join(root, ".git"), "GENERATED_SECRET_MATCH");
+    await writeFile(join(root, "generated.txt"), Array.from({ length: 80 }, (_, index) => `GENERATED_VISIBLE_MATCH_${index} ${"a".repeat(900)}\n`).join(""));
+    const result = await executeTool(root, { id: "generated-search", name: "search_files", arguments: { pattern: "GENERATED_", context: 0, limit: 100 } }, new AbortController().signal,
+      () => {}, () => {}, undefined, { mode: "read-only", folders: { denied: ["private[1]"], readOnly: [] } });
+    assert.equal(Buffer.byteLength(result.text) < 14000, true); assert.equal(JSON.parse(result.text).complete, false);
+    assert.ok(result.rawText); assert.equal(result.rawText.includes("GENERATED_SECRET"), false);
+    assert.equal(result.rawText.includes("GENERATED_VISIBLE_MATCH_79"), true);
+    assert.equal(result.rawComplete, true);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

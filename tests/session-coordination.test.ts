@@ -2,6 +2,55 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { envelope } from "../apps/service/src/controller.ts";
+import { mkdir, rename, rmdir } from "node:fs/promises";
+
+test("replacing a bound root inode never substitutes the new tree into a live coordination grant", async () => {
+  const f = await setupFixture(), original = `${f.project}-original`;
+  let moved = false;
+  try {
+    const child = await f.service.controller.dispatch(envelope({ type: "session.spawn", sessionId: f.sessionId, kind: "side" }));
+    await rename(f.project, original); moved = true; await mkdir(f.project);
+    await assert.rejects(() => Promise.resolve().then(() => f.service.controller.coordination.read(f.sessionId, { action: "transcript", targetSessionId: child.id! })), { code: "coordination_changed" });
+    assert.equal(f.requests.length, 0);
+  } finally {
+    if (moved) { await rmdir(f.project); await rename(original, f.project); }
+    await f.close();
+  }
+});
+
+test("revoked or changed grants retain messages but cannot inject them as fresh model context", async () => {
+  const f = await setupFixture({ responseMode: "text" });
+  try {
+    await f.configure();
+    const child = await f.service.controller.dispatch(envelope({ type: "session.spawn", sessionId: f.sessionId, kind: "side" }));
+    await f.service.controller.dispatch(envelope({ type: "coordination.message", sessionId: child.id!, input: { targetSessionId: f.sessionId, text: "GENERATED_REVOKED_ADVISORY" } }));
+    const preview = f.service.controller.coordination.query({ type: "coordination.preview", sessionId: f.sessionId, childId: child.id! });
+    if (preview.type !== "coordination.preview") assert.fail("Missing reviewed grant.");
+    await f.service.controller.dispatch(envelope({ type: "coordination.grant", sessionId: f.sessionId, childId: child.id!, expectedDigest: preview.digest, enabled: false, confirm: true }));
+    await f.send("Generated actual user prompt after grant revocation."); await f.terminal();
+    assert.equal(JSON.stringify(f.requests).includes("GENERATED_REVOKED_ADVISORY"), false);
+    const inbox = f.service.controller.coordination.read(f.sessionId, { action: "inbox" });
+    if (inbox.action !== "inbox") assert.fail("Missing retained inbox.");
+    assert.equal(inbox.messages.length, 1); assert.match(inbox.messages[0]!.deliveryDiagnostic!, /grant|ownership/i);
+    assert.equal(inbox.messages[0]!.deliveredTo, null);
+  } finally { await f.close(); }
+});
+
+test("a task queued under an old coordination grant cannot start a paid child after revocation", { timeout: 12000 }, async () => {
+  const f = await setupFixture({ responseMode: "text" });
+  try {
+    await f.configure();
+    const child = await f.service.controller.dispatch(envelope({ type: "session.spawn", sessionId: f.sessionId, kind: "agent" }));
+    await f.send("generated delayed"); await waitFor(() => f.requests.length === 1);
+    await f.service.controller.dispatch(envelope({ type: "coordination.control", sessionId: f.sessionId, input: { action: "dispatch", targetSessionId: child.id!, text: "Generated original scoped task." } }));
+    const preview = f.service.controller.coordination.query({ type: "coordination.preview", sessionId: f.sessionId, childId: child.id! });
+    if (preview.type !== "coordination.preview") assert.fail("Missing reviewed grant.");
+    await f.service.controller.dispatch(envelope({ type: "coordination.grant", sessionId: f.sessionId, childId: child.id!, expectedDigest: preview.digest, enabled: false, confirm: true }));
+    await f.terminal();
+    const blocked = await waitFor(() => f.service.controller.snapshot().sessions.find((session) => session.id === child.id && session.lastError && /coordination|grant/i.test(session.lastError)));
+    assert.equal(blocked.turnId, null); assert.equal(blocked.queue.length, 1); assert.equal(f.requests.length, 1);
+  } finally { await f.close(); }
+});
 
 test("birth grants support bidirectional messages without inference or navigation-based authority", async () => {
   const f = await setupFixture();

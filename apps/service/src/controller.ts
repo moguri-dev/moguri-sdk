@@ -225,7 +225,8 @@ export class ControlPlane extends EventEmitter {
     });
     this.coordination = new SessionCoordination({
       profileId: this.profileId, snapshot: () => this.snapshot(), events: () => this.events(0),
-      scope: (session) => this.coordinationScope(session), binding: (session) => this.coordinationBinding(session), commit: (events) => this.commit(events),
+      scope: (session) => this.coordinationScope(session), binding: (session) => this.coordinationBinding(session),
+      plan: (sessionId) => this.platform.progress.currentPlan(sessionId) ?? null, commit: (events) => this.commit(events),
       stop: (id) => this.stop(id), blocked: (session) => this.blocked(session), wake: () => this.wake(),
       validate: (session) => this.available(session.controls, true, session),
       spawn: (parent, kind, title, origin, finish) => this.spawnUser(parent, kind, title, finish, origin),
@@ -2088,6 +2089,7 @@ export class ControlPlane extends EventEmitter {
       let item = session.queue.find((item) => item.delivery !== "steer" && !item.held)!;
       try {
         this.assertOrdinaryTurn(session);
+        if (item.origin) this.coordination.assertTask(session.id, item.origin);
         this.available(session.controls, true, session); this.imageModel(session, item.attachments);
         this.fileModel(session, item.attachments, item.text);
         this.attachments(session, item.attachments);

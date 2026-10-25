@@ -6,6 +6,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OwnedDebugRuntime } from "../apps/service/src/owned-debug.ts";
 
+test("cancelling a lost mutation reply stays partial without cancelling the independent disconnect acknowledgement", { timeout: 10000 }, async () => {
+  const runtime = new OwnedDebugRuntime(), abort = new AbortController(), ended: string[] = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await runtime.execute(process.cwd(), { action: "start", adapter: process.execPath, args: [fileURLToPath(new URL("./fixtures/generated-dap-adapter.mjs", import.meta.url)), "attach"] },
+      abort.signal, () => {}, async (_pid, outcome) => { ended.push(outcome); });
+    await runtime.execute(process.cwd(), { action: "request", command: "attach", arguments: { generated: true } }, abort.signal, () => {}, async () => {});
+    const request = runtime.execute(process.cwd(), { action: "request", command: "evaluate", arguments: { expression: "generated never reply" } }, abort.signal, () => {}, async () => {});
+    timer = setTimeout(() => abort.abort(), 30);
+    await assert.rejects(request, { code: "tool_partial" });
+    assert.equal(await runtime.close(), true); assert.deepEqual(ended, ["stopped"]);
+  } finally { clearTimeout(timer); await runtime.close(); }
+});
+
 test("owned DAP uses real framed requests, truthful quiescence and exact process cleanup", { timeout: 10000 }, async () => {
   const ended: number[] = [], runtime = new OwnedDebugRuntime();
   const signal = new AbortController().signal;

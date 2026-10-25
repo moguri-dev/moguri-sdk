@@ -137,8 +137,8 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
     case "find_files": return { text: JSON.stringify(await findProjectFiles(root!, parse(FindFilesSchema, args), safety?.folders ?? { denied: [], readOnly: [] }, signal, started)), isError: false, outcome: "completed" };
     case "search_files": {
       const result = await searchProjectFiles(root!, parse(SearchFilesSchema, args), safety?.folders ?? { denied: [], readOnly: [] }, signal, started);
-      const { rawText, ...view } = result;
-      return { text: JSON.stringify(view), rawText, rawComplete: result.complete, isError: false, outcome: "completed" };
+      const { rawText, rawComplete, ...view } = result;
+      return { text: JSON.stringify(view), rawText, rawComplete, isError: false, outcome: "completed" };
     }
     case "diff_files": {
       let base: string | undefined;

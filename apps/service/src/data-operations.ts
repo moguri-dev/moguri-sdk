@@ -2,10 +2,10 @@ import { DatabaseSync, constants, type SQLInputValue, type StatementSync } from 
 import { lstat, open } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { parse, MoguriError } from "../../../packages/protocol/src/core.ts";
-import { SqliteQuerySchema, SqliteTransactionSchema, WriteDocumentSchema, EditDocumentSchema, type WriteDocumentInput, type EditDocumentInput } from "../../../packages/protocol/src/tooling.ts";
+import { SqliteQuerySchema, SqliteTransactionSchema, WriteDocumentSchema, EditDocumentSchema, type EditDocumentInput } from "../../../packages/protocol/src/tooling.ts";
 import { readRegularFile } from "./files.ts";
 import { archive, extractDocument } from "./document-extract.ts";
-import { cellCoordinates } from "../../../packages/protocol/src/documents.ts";
+import { authorWorkbook, editWorkbook } from "./workbook-tools.ts";
 
 const marker = "Moguri structured tooling v1";
 const encode = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
@@ -89,37 +89,11 @@ export async function projectSql(kind: "sqlite_query" | "sqlite_transaction", in
   } finally { try { db.close(); } catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ERR_INVALID_STATE")) throw error; } }
 }
 
-function validateCells(sheets: NonNullable<WriteDocumentInput["sheets"]>) {
-  if (new Set(sheets.map((sheet) => sheet.name.toLowerCase())).size !== sheets.length) throw new MoguriError("document_sheet", "Sheet names must be unique.");
-  let total = 0;
-  for (const sheet of sheets) {
-    if (/[\\/*?:[\]]/.test(sheet.name) || !sheet.name.trim()) throw new MoguriError("document_sheet", "Use valid nonempty spreadsheet sheet names.");
-    const cells = new Set<string>();
-    for (const cell of sheet.cells) {
-      if (++total > 10000 || !cellCoordinates(cell.address) || cells.has(cell.address)) throw new MoguriError("document_cells", "Use at most 10,000 unique valid A1 cells across sheets.");
-      cells.add(cell.address);
-      if (typeof cell.value === "number" && !Number.isFinite(cell.value)) throw new MoguriError("document_number", "Spreadsheet numbers must be finite.");
-      if (cell.formula && cell.value !== null && typeof cell.value !== "number" && typeof cell.value !== "string" && typeof cell.value !== "boolean") throw new MoguriError("document_formula", "A formula cache must be an explicit scalar or null; no formula is calculated.");
-    }
-  }
-}
 export async function authorDocument(input: unknown): Promise<Buffer> {
   const args = parse(WriteDocumentSchema, input);
   if (args.format === "xlsx") {
     if (!args.sheets?.length || args.paragraphs || args.tables) throw new MoguriError("document_input", "XLSX needs named sheets, not paragraph/table report inputs.");
-    validateCells(args.sheets);
-    const { default: ExcelJS } = await import("exceljs"), book = new ExcelJS.Workbook();
-    book.creator = "Moguri"; book.lastModifiedBy = marker;
-    for (const sheet of args.sheets) {
-      const target = book.addWorksheet(sheet.name);
-      for (const input of sheet.cells) {
-        const cell = target.getCell(input.address);
-        cell.value = input.formula ? { formula: input.formula, ...(input.value !== null ? { result: input.value } : {}) } : input.value;
-        if (input.bold !== undefined) cell.font = { bold: input.bold };
-        if (input.numberFormat) cell.numFmt = input.numberFormat;
-      }
-    }
-    return Buffer.from(await book.xlsx.writeBuffer());
+    return authorWorkbook(args.sheets);
   }
   if (args.sheets || !args.paragraphs?.length && !args.tables?.length) throw new MoguriError("document_input", "Reports need paragraphs/tables, not spreadsheet sheets.");
   if (args.format === "docx") {
@@ -172,24 +146,5 @@ export async function editDocument(input: unknown, source: Buffer): Promise<Buff
     entries["word/document.xml"] = strToU8(body);
     return Buffer.from(zipSync(entries));
   }
-  if (!args.sheets?.length || args.replacements) throw new MoguriError("document_edit", "XLSX edits need explicit named-sheet cells.");
-  validateCells(args.sheets);
-  if (!parts.get("docProps/core.xml")?.toString("utf8").includes(marker) ||
-    [...parts].some(([path, bytes]) => !/^(?:\[Content_Types\]\.xml|_rels\/\.rels|docProps\/(?:app|core)\.xml|xl\/(?:workbook\.xml|_rels\/workbook\.xml\.rels|styles\.xml|sharedStrings\.xml|theme\/theme1\.xml|worksheets\/sheet\d+\.xml))$/.test(path) ||
-      path.startsWith("xl/worksheets/") && /<(?:\w+:)?(?:extLst|drawing|legacyDrawing|conditionalFormatting|dataValidations|mergeCells|tableParts|sheetProtection|controls|oleObjects|hyperlinks)\b/.test(bytes.toString("utf8")))) {
-    throw new MoguriError("document_edit", "Cell edits currently support Moguri-generated structured XLSX files only. Unsupported content was not silently rewritten.");
-  }
-  const { default: ExcelJS } = await import("exceljs"), book = new ExcelJS.Workbook();
-  await book.xlsx.load(new Uint8Array(source).buffer);
-  for (const sheet of args.sheets) {
-    const target = book.getWorksheet(sheet.name);
-    if (!target) throw new MoguriError("document_sheet", "Select an existing exact sheet name. No replacement sheet was inferred.");
-    for (const value of sheet.cells) {
-      const cell = target.getCell(value.address);
-      cell.value = value.formula ? { formula: value.formula, ...(value.value !== null ? { result: value.value } : {}) } : value.value;
-      if (value.bold !== undefined) cell.font = { ...cell.font, bold: value.bold };
-      if (value.numberFormat) cell.numFmt = value.numberFormat;
-    }
-  }
-  return Buffer.from(await book.xlsx.writeBuffer());
+  return editWorkbook(args, source);
 }

@@ -113,11 +113,11 @@ export async function readFileSelection(root: string, args: Record<string, unkno
 }
 function searchExclusions(policy: FolderPolicy): string[] {
   const literal = (folder: string) => normalize(folder).replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "").replace(/[?*[\]{}!]/g, "\\$&");
-  return ["**/{.git,.moguri,node_modules,.ssh,.aws,.azure,.kube,.docker,Moguri}/**", "**/.moguri-dependencies-*/**",
+  return ["**/{.git,.moguri,node_modules,.ssh,.aws,.azure,.kube,.docker,Moguri}", "**/{.git,.moguri,node_modules,.ssh,.aws,.azure,.kube,.docker,Moguri}/**", "**/.moguri-dependencies-*", "**/.moguri-dependencies-*/**",
     "**/{.npmrc,.pypirc,.netrc,.git-credentials}", "**/.env*", "**/*.{pem,key,p12,pfx}", "**/{credentials,id_rsa,id_ed25519}{,.*}",
-    ...policy.denied.map((folder) => `${literal(folder)}/**`)].flatMap((pattern) => ["--iglob", `!${pattern}`]);
+    ...policy.denied.flatMap((folder) => [literal(folder), `${literal(folder)}/**`])].flatMap((pattern) => ["--iglob", `!${pattern}`]);
 }
-const ignoreFlags = ["--hidden", "--no-follow", "--no-ignore-global", "--no-ignore-parent", "--no-require-git"];
+const ignoreFlags = ["--hidden", "--no-follow", "--no-ignore-global", "--no-require-git"];
 export async function findProjectFiles(root: string, args: { pattern: string; path?: string; offset?: number; limit?: number }, policy: FolderPolicy, signal: AbortSignal, started: (pid: number) => void = () => {}) {
   root = await realpath(root);
   await assertFolderAccess(root, args.path ?? ".", false, policy);
@@ -137,14 +137,16 @@ export async function findProjectFiles(root: string, args: { pattern: string; pa
   files.sort();
   const offset = args.offset ?? 0, limit = args.limit ?? 100;
   if (offset > files.length) throw new MoguriError("file_cursor", "This offset is outside the observed file inventory. Start again.");
-  return { files: files.slice(offset, offset + limit), nextOffset: offset + limit < files.length ? offset + limit : null,
-    complete, observedMatches: files.length, visited: Math.min(observed.length, 10000), omitted: Math.max(0, files.length - offset - limit),
-    observation: "Bounded ripgrep inventory honoring nested .gitignore/.ignore/.rgignore; no personal/global/ancestor ignore configuration or atomic filesystem snapshot." };
+  const page: string[] = [];
+  for (const name of files.slice(offset, offset + limit)) { if (Buffer.byteLength(JSON.stringify([...page, name])) > 12000) break; page.push(name); }
+  return { files: page, nextOffset: offset + page.length < files.length ? offset + page.length : null,
+    complete, observedMatches: files.length, visited: Math.min(observed.length, 10000), omitted: Math.max(0, files.length - offset - page.length),
+    observation: "Bounded ripgrep inventory honoring applicable ancestor/nested .gitignore/.ignore/.rgignore metadata. No global ignore/config injection or atomic filesystem snapshot." };
 }
 export async function searchProjectFiles(root: string, args: { pattern: string; path?: string; glob?: string; literal?: boolean; ignoreCase?: boolean; context?: number; limit?: number }, policy: FolderPolicy, signal: AbortSignal, started: (pid: number) => void) {
   const path = args.path ?? ".";
   await assertFolderAccess(root, path, false, policy);
-  const flags = ["--json", ...ignoreFlags, "--max-count", String(args.limit ?? 50), "--context", String(args.context ?? 2)];
+  const flags = ["--json", ...ignoreFlags, "--context", String(args.context ?? 2)];
   if (args.literal) flags.push("--fixed-strings");
   if (args.ignoreCase) flags.push("--ignore-case");
   if (args.glob) flags.push("--glob", args.glob);
@@ -152,20 +154,24 @@ export async function searchProjectFiles(root: string, args: { pattern: string; 
   const result = await boundedProgram(root, "rg", [...flags, "--", args.pattern, path], signal, { started });
   if (!result.clipped && !result.timedOut || !result.cleanup) programSucceeded(result, [0, 1]);
   const matches: { path: string; line: number; text: string; context: boolean; clipped: boolean }[] = [];
+  const raw: string[] = []; let omitted = 0, unsupportedRecords = 0;
   for (const line of result.stdout.split("\n").filter(Boolean)) {
     let value: unknown;
     try { value = JSON.parse(line); }
     catch { if (result.clipped) continue; throw new MoguriError("search_output", "ripgrep returned malformed JSON; no complete result was inferred."); }
     if (!isRecord(value) || !["match", "context"].includes(String(value.type)) || !isRecord(value.data)) continue;
     const data = value.data;
-    if (!isRecord(data.path) || typeof data.path.text !== "string" || !isRecord(data.lines) || typeof data.lines.text !== "string" || typeof data.line_number !== "number") continue;
+    if (!isRecord(data.path) || typeof data.path.text !== "string" || !isRecord(data.lines) || typeof data.lines.text !== "string" || typeof data.line_number !== "number") { unsupportedRecords++; continue; }
     const name = data.path.text.replace(/^\.\//, "");
     if (isProtectedProjectPath(name) || matchesFolder(name, policy.denied)) continue;
-    if (matches.length >= (args.limit ?? 50)) break;
-    matches.push({ path: name, line: data.line_number, text: data.lines.text.slice(0, 1000), context: value.type === "context", clipped: data.lines.text.length > 1000 });
+    raw.push(line);
+    const row = { path: name, line: data.line_number, text: Array.from(data.lines.text).slice(0, 1000).join(""), context: value.type === "context", clipped: Array.from(data.lines.text).length > 1000 };
+    if (matches.length >= (args.limit ?? 50) || Buffer.byteLength(JSON.stringify([...matches, row])) > 12000) { omitted++; continue; }
+    matches.push(row);
   }
-  return { matches, complete: !result.clipped && !result.timedOut && matches.length < (args.limit ?? 50), elapsedMs: result.elapsedMs,
-    boundedAt: args.limit ?? 50, rawText: result.stdout, diagnostic: "Search is bounded per file and globally. Narrow path/glob/pattern to recover additional matches." };
+  return { matches, complete: !result.clipped && !result.timedOut && !omitted && !unsupportedRecords && matches.every((match) => !match.clipped), elapsedMs: result.elapsedMs,
+    boundedAt: args.limit ?? 50, omittedRows: omitted, unsupportedRecords, rawText: raw.join("\n"), rawComplete: !result.clipped && !result.timedOut && !unsupportedRecords,
+    diagnostic: "The view is bounded by rows and UTF-8 bytes. Only permitted UTF-8 match/context records enter retained source; unsupported binary descriptors are counted, never complete coverage. Narrow path/glob/pattern or page that exact source." };
 }
 export async function queryProjectData(root: string, args: { path: string; format?: "json" | "yaml"; expression: string }, signal: AbortSignal, started: (pid: number) => void) {
   const file = await readProjectFile(root, args.path);

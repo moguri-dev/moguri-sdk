@@ -112,6 +112,13 @@ before dispatch, including solver, side, subagent, routing, critic, revision,
 decision and retry roles. Model-created children charge their owning session;
 different roles or envs never reset a cumulative ledger.
 
+Protocol 57 coordinated children also retain the immutable original task owner
+and an accounting scope path. The root owner is charged once while stricter
+child/intermediate caps and prospective holds remain enforceable. Reparenting,
+source deletion or a changed navigation tree cannot reassign ownership or
+refund unknown work. This funding edge is separate from the root-bound live
+coordination grant and cannot be created by editing sidebar parents.
+
 Retain profile-scoped accounting independently of session/project payload
 retention. Migration 13 preserves old IDs, receipts and grants. Imported
 historical metering is labeled; missing totals, prices or attribution are not

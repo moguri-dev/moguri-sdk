@@ -14,6 +14,7 @@ export const CoordinationOriginSchema = Type.Union([
 export const CoordinationLinkSchema = object({ parentId: id, childId: id, parentScope: hash, childScope: hash, enabled: Type.Boolean(), revision: Type.Integer({ minimum: 0 }), origin: CoordinationOriginSchema });
 export const CoordinationMessageSchema = object({
   id, fromSessionId: id, toSessionId: id, fromTurnId: Type.Union([id, Type.Null()]), origin: CoordinationOriginSchema,
+  bindingDigest: Type.Optional(hash),
   text: Type.String({ minLength: 1, maxLength: 8000 }), kind: Type.Union([Type.Literal("message"), Type.Literal("task"), Type.Literal("result")]),
   deliveredTo: Type.Union([object({ turnId: id, stepId: id }), Type.Null()]),
 });
@@ -25,6 +26,7 @@ export interface CoordinationMessage {
   id: string; fromSessionId: string; toSessionId: string; fromTurnId: string | null;
   origin: CoordinationOrigin; text: string; kind: "message" | "task" | "result";
   deliveredTo: { turnId: string; stepId: string } | null;
+  bindingDigest?: string;
 }
 export interface CoordinationTaskOrigin { messageId: string; fromSessionId: string; fromTurnId: string | null; origin: CoordinationOrigin }
 export const SessionContextSchema = object({
@@ -62,7 +64,7 @@ export type CoordinationBinding = {
   { env: "Remote"; root: string | null; host: string; port: number; user: string; hostKey: string; workerDigest: string });
 export type CoordinationRead =
   | { action: "list"; links: (CoordinationLink & ({ parent: CoordinationMetadata; child: CoordinationMetadata } | { unavailable: string }))[]; nextOffset: number | null; authority: string }
-  | { action: "inbox"; messages: CoordinationMessage[]; nextOffset: number | null; limit: number }
+  | { action: "inbox"; messages: (CoordinationMessage & { deliveryDiagnostic?: string })[]; nextOffset: number | null; limit: number }
   | (CoordinationMetadata & { action: "inspect"; plan: TaskPlan | null; question: UserQuestion | null; approval: { id: string; name: string; argumentsDigest: string } | null; authority: string })
   | { action: "snapshot" | "transcript"; text: string; bytes: number; offset: number; nextOffset: number | null; eof: boolean; digest: string; sourceSessionId: string; authority: string };
 export type CoordinationResponse =

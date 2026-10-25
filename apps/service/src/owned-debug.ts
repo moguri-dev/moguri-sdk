@@ -86,7 +86,12 @@ export class OwnedDebugRuntime {
       try { this.write({ seq: id, type: "request", command, arguments: args }); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
-    const cancel = () => this.rejectPending("Debugger request was cancelled. Actual target effects may already have occurred.");
+    const cancel = () => {
+      const pending = this.pending.get(id);
+      if (!pending) return;
+      clearTimeout(pending.timer); this.pending.delete(id);
+      pending.reject(new MoguriError(mutates(command) ? "tool_partial" : "dap_cancelled", "Debugger request was cancelled. Actual target effects may already have occurred."));
+    };
     signal.addEventListener("abort", cancel, { once: true });
     return result.finally(() => signal.removeEventListener("abort", cancel));
   }
