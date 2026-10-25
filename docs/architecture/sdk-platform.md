@@ -229,6 +229,34 @@ Fresh prerequisites passed all six available groups: provider cancellation
 0.926/6.423 ms. Separate baseline live/native/notarized/Linux/quality gates
 remain FAIL/unqualified, not enabled by a pane toggle.
 
+### Right-pane toggle qualification
+
+Source `7a65a99` preserves the existing show-only programmatic action and adds
+the click-again hide branch only to rail buttons. The before-fix native Browser
+case fails because its pane stays visible. Native terminal review also exposed
+focus trapping while a confirmed action ran before dialog settlement; closing
+the dialog first and separating confirmed close from cancellation fixes that
+without a timer or changing terminal authority.
+
+| Exact check | Result |
+| --- | --- |
+| Type checks/build/fresh audit | PASS; zero vulnerabilities |
+| Focused toggles, native dialog/terminal, workspace and session interactions | 25 passed, zero failures / 42.8 seconds |
+| All direct toggle/terminal/dirty-editor cases | 3 passed / 4.3 seconds |
+| Complete hidden Electron suite | 132 passed, 2 physical-native skips, zero failures; 134 total / 4.9 minutes |
+| Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
+| Actual packaged hidden app | All toggle cases plus navigation and unread ownership: 8 passed / 10.6 seconds |
+| Actual bundle/native distribution/update/DMG | PASS; protocol 54 / SendBox 0.2.4; 740,545,116-byte ZIP/manifest / 99,152.81 ms; exact native installer layout and unchanged signed app verified |
+
+The latest DMG is 754,146,553 bytes, SHA-256
+`541ff15c39717357a6c8d779fb76509840bdfac5ba111f986f3e947842733216`.
+Older installer hashes remain historical. No service/SDK/CLI/TUI/protocol source
+changed from the preserved complete 1,294-pass Node baseline, and that run is
+not relabeled as another one. All terminal/plan data and app windows are generated
+or hidden; no personal UI/account/microphone, paid inference, native administrator
+install or automatic user-app/browser opening was used. Existing development
+signing, FFI/chunk/optional-icon and physical-native limitations remain.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
