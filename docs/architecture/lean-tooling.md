@@ -84,6 +84,14 @@ Generated integration, concurrency, cancellation, migration/restart and packed
 consumer checks must cover the implemented surfaces. Live task/cache/quality
 non-regression still needs a separately authorized representative evaluation.
 
+The final expanded source catalogue was reprobed in **5.78 ms**. Its eager
+45-tool surface serialized **39,579 bytes / 11,314 estimated input tokens**;
+bootstrap was **3 tools / 3,484 bytes / 1,001 estimated tokens**; the selected
+file task was **5 / 5,184 / 1,487**; and the generic gateway remained
+**1 / 240 / 74**. This compares the same final capabilities, not a claim that
+the old 19-tool checkpoint included the new functions. The labels and live
+evaluation limits above still apply.
+
 ## Product boundary
 
 Lowercase `/review`, `/security`, `/performance` and `/debug` accept optional
