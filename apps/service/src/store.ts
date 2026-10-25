@@ -265,6 +265,12 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_indicators_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid retained session indicator schema marker. State was preserved.");
       }
+      if (version < 55) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('model_defaults_schema','1');
+        PRAGMA user_version=55; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_defaults_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid retained model default schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateDesktopMerge(version: number): void {

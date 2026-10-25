@@ -59,6 +59,7 @@ try {
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
     ${installedProtocol >= 54 ? 'import {sessionIndicator,sessionIndicatorColors,sessionPrScope,sessionPullRequest,sessionPullRequestUrl,type SessionPrObservation} from "moguri";' : ""}
+    ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     async function typedConsumer() {
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
@@ -70,6 +71,11 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 55 ? `
+      const remembered:ModelSelection|null=sdk.getState().snapshot?.lastModelSelection??null;void remembered?.thinkingEffort;
+      await sdk.sessions.selectModel("generated-id",null);
+      await sdk.sessions.modelOptions("generated-id",{thinkingEffort:"low"},undefined,true);
+      ` : ""}
       ${installedProtocol >= 54 ? `
       const statusView=(session:Session,state:Snapshot)=>{
         const observed:SessionPrObservation|null|undefined=session.prObservation;void observed?.scope.root;void observed?.pullRequest.draft;
@@ -1166,6 +1172,10 @@ try {
   if (installedProtocol >= 44) {
     const { qualifyWorkspaceEntry } = await import("./qualify-workspace-entry.mjs");
     console.log(await qualifyWorkspaceEntry({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-entry") }));
+  }
+  if (installedProtocol >= 55 && process.platform === "darwin") {
+    const { qualifyModelDefaults } = await import("./qualify-model-defaults.mjs");
+    console.log(await qualifyModelDefaults({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-model-defaults") }));
   }
   if (installedProtocol >= 40 && process.platform === "darwin") {
     const { qualifyDecisions } = await import("./qualify-decisions.mjs");

@@ -33,6 +33,48 @@ eligible as an anchor. Output is capped against the same estimate and headroom.
 This preserves finite-budget/context admission with stable source timestamps;
 it does not change actual usage, prices or billed-cost provenance.
 
+## New-session model defaults
+
+Reuse React, TypeBox, the existing SDK, model-option qualification and append-only
+encrypted store (MIT components); no dependency or provider transport is added.
+The global settings picker writes the existing shared-global control defaults.
+A fixed global model/effort applies to new sessions subject to the established
+profile, project and explicit session overrides. Existing sessions are never
+rewritten by saving a default.
+
+With no explicit model default, new independent sessions use the last model
+and thinking effort the user explicitly selected in the actual current profile.
+The user chose selection, not last inference or last sent prompt. Navigating,
+running a model/role, inheriting startup/parent controls, changing unrelated
+settings and failed selections cannot update this preference. An explicit
+no-model override remains no-model. Working-window settings are not copied
+from the remembered session; explicit higher-priority model settings remain
+authoritative.
+
+Protocol/database 55 adds a profile-owned model-selection preference and strict
+`model_defaults_schema` migration marker. A root-scoped
+`model.selection_remembered` event is committed atomically with the successful
+selection, outside session/project retention. It retains only the model/effort
+pair, actual-user/source identity and event provenance, never conversation,
+credentials, permissions or a model decision. Source-session deletion/restart
+cannot erase the preference or authorize another model call. Legacy state starts
+without an invented remembered choice; existing fixed defaults, ciphertext,
+keys, receipts and independent artifacts remain unchanged.
+
+The SDK, CLI/TUI selectors and desktop share explicit selection intent. Default
+resolution stays service-owned across Start, project-free/project/worktree/work
+entrypoints and unparented settings chats. Existing explicit parent/session
+inheritance and policy still win. An unavailable saved model/effort remains
+visible and blocked at the existing admission checks; no provider, environment
+or option is silently substituted and no discovery/inference is added.
+
+Fresh prerequisite probes pass all six generated groups: cancellation
+31.95 ms; SQLite append p95 0.044 ms/rebuild 0.521 ms; owned PTY cancellation
+152.79 ms with zero survivors; TUI updates 17.52 ms; hidden Electron cold start
+174.90 ms / 442.36 MiB / 8.22 ms per frame; 2,000-file search/Git
+0.882/5.860 ms. Separate live/native/notarized/Linux/quality gates remain
+FAIL/unqualified, not enabled by these preferences.
+
 ## Per-response output and reasoning
 
 Ordinary requests use the prepared model's declared output maximum, bounded by

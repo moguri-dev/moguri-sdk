@@ -63,7 +63,19 @@ export class MoguriSdk extends TransportClient {
   readonly sessions = {
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
-    configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.configure", sessionId, controls, expectedRevision }),
+    configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
+      const current = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.controls;
+      const changed = controls.modelId !== null && Boolean(current && (controls.modelId !== current.modelId ||
+        controls.modelOptions?.thinkingEffort !== current.modelOptions?.thinkingEffort));
+      return this.command({ type: "session.configure", sessionId, controls, expectedRevision,
+        ...((rememberModelSelection ?? changed) ? { rememberModelSelection: true } : {}) });
+    },
+    selectModel: (sessionId: string, modelId: string | null, expectedRevision = this.sessionRevision(sessionId)) => {
+      const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
+      if (!session) throw new ClientError("session_missing", "Choose an existing model-selection session.");
+      const { modelOptions: _, ...controls } = session.controls;
+      return this.sessions.configure(sessionId, { ...controls, modelId }, expectedRevision, true);
+    },
     env: (sessionId: string, env: Controls["env"], expectedRevision = this.sessionRevision(sessionId)) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((value) => value.id === sessionId);
       if (!snapshot || !session) throw new ClientError("session_missing", "Choose an existing session.");
@@ -72,10 +84,10 @@ export class MoguriSdk extends TransportClient {
       const { modelOptions: _, ...controls } = session.controls;
       return this.command({ type: "session.configure", sessionId, expectedRevision, controls: { ...(keep ? session.controls : controls), env, modelId: keep ? session.controls.modelId : null } });
     },
-    modelOptions: (sessionId: string, modelOptions: ModelOptions, expectedRevision = this.sessionRevision(sessionId)) => {
+    modelOptions: (sessionId: string, modelOptions: ModelOptions, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
       if (!session) throw new ClientError("session_missing", "Choose an existing session.");
-      return this.command({ type: "session.configure", sessionId, controls: { ...session.controls, modelOptions }, expectedRevision });
+      return this.sessions.configure(sessionId, { ...session.controls, modelOptions }, expectedRevision, rememberModelSelection);
     },
     context: (sessionId: string) => this.query({ type: "session.context", sessionId }),
     organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes, expectedRevision }),

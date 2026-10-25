@@ -160,8 +160,11 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!command.argument) return { kind: "text", text: JSON.stringify({ options: session.controls.modelOptions ?? {}, context: (await sdk.sessions.context(session.id)).context }, null, 2) };
       if (command.argument === "reset") {
         const { modelOptions: _, ...controls } = session.controls;
-        await sdk.sessions.configure(session.id, controls, session.revision);
-      } else await sdk.sessions.modelOptions(session.id, parse(ModelOptionsSchema, JSON.parse(command.argument)), session.revision);
+        await sdk.sessions.configure(session.id, controls, session.revision, true);
+      } else {
+        const options = parse(ModelOptionsSchema, JSON.parse(command.argument));
+        await sdk.sessions.modelOptions(session.id, options, session.revision, Object.hasOwn(options, "thinkingEffort") || undefined);
+      }
       return { kind: "ok", message: "Model tuning saved. Supported windows are rechecked before dispatch; history was not truncated." };
     }
     case "model-evidence": {
@@ -242,8 +245,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (command.name === "models" || !command.argument) return client === "cli" ? { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.provider.models, null, 2) } : { kind: "panel", panel: "Models" };
       const model = sdk.getState().snapshot!.provider.models.find((model) => model.id === command.argument && (!model.environments || model.environments.includes(session.controls.env)));
       if (!model) throw new ClientError("model_unavailable", "Choose an exact available model ID for this env. Inspect /models and /kupo status; no provider or policy fallback was used.");
-      const { modelOptions: _, ...controls } = session.controls;
-      await sdk.sessions.configure(session.id, { ...controls, modelId: model.id }, session.revision);
+      await sdk.sessions.selectModel(session.id, model.id, session.revision);
       return { kind: "ok", message: model.synthetic ? `kupo ${sdk.routing.policy()?.workflow === "compound" ? "Compound" : "Single"} selected. Actual roles are metered separately; no inference started and no permission changed.` : `${model.name} selected explicitly. Previous model-specific options were cleared; no inference started.` };
     }
     case "roles": {

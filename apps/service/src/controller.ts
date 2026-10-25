@@ -11,7 +11,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema, AgentTerminalReadSchema,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
-  CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
+  CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
@@ -948,7 +948,7 @@ export class ControlPlane extends EventEmitter {
       { source: "profile", values: settings.values.startup.profile },
       { source: "project", values: configuration?.values.defaults ?? {} },
       { source: "session", values: overrides },
-    ], { settingsRevision: settings.revision, projectRevision: configuration?.revision ?? null });
+    ], { settingsRevision: settings.revision, projectRevision: configuration?.revision ?? null }, this.projection.lastModelSelection);
   }
   private session(id: string): Session {
     const session = this.projection.sessions.find((session) => session.id === id);
@@ -1733,11 +1733,15 @@ export class ControlPlane extends EventEmitter {
     const session = this.session(command.sessionId);
     if (session.status === "archived" && command.type !== "session.restore") throw new MoguriError("archived", "Restore this session before editing or resuming it.", 409);
     switch (command.type) {
-      case "session.configure":
+      case "session.configure": {
         if (session.turnId) throw new MoguriError("turn_active", "Stop the current turn before changing its controls.", 409);
         this.revision(session.revision, command.expectedRevision);
         this.available(command.controls, false, session);
-        return finish([this.event(session, "session.configured", { controls: command.controls })], { revision: session.revision + 1 });
+        return finish([this.event(session, "session.configured", { controls: command.controls }),
+          ...(command.rememberModelSelection ? [{ event_type: "model.selection_remembered" as const, profile_id: this.profileId,
+            payload: { selection: modelSelection(command.controls), sourceSessionId: session.id, sourceProjectId: session.projectId, actor: "user" as const } }] : [])],
+        { revision: session.revision + 1 });
+      }
       case "session.archive": {
         await this.settleOwned(session.id);
         const current = this.session(session.id);

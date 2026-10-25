@@ -7,6 +7,7 @@ import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type Sessio
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
+import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
@@ -334,6 +335,7 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot {
+  lastModelSelection: ModelSelection | null;
   candidates: CandidateRecord[];
   remoteMcpCalls: RemoteMcpCall[];
   terminalOwners: TerminalOwner[];

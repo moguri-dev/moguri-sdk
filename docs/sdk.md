@@ -870,6 +870,30 @@ and observed revisions. Existing sessions do not inherit later changes. These
 preferences do not weaken policy. Global preferences are intentionally shared;
 profile/project/session values remain isolated.
 
+Protocol/database 55 adds a last-selected fallback when no model default is
+explicitly set. In **Settings / Startup defaults**, **Global default model**
+chooses a fixed model/effort shared across profiles, the last explicitly selected
+model/effort within each profile, or no selected model. Omitted `modelId` permits
+the remembered fallback; `modelId: null` explicitly prevents it. Higher-priority
+profile/project/session model settings still win, and existing chats are not
+rewritten.
+
+`sessions.selectModel(sessionId, modelId, revision?)` records an explicit choice
+and clears old model-specific options. `sessions.modelOptions` records actual
+effort changes; its optional fourth `true` also marks an explicit same-value
+effort selection. `sessions.configure` normally remembers model/effort deltas;
+its fourth `false` performs configuration without recording a new selection.
+Raw `session.configure` commands opt in with `rememberModelSelection: true`.
+Window-only/autonomy/env changes, session creation and model/role calls do not
+become selections.
+
+`snapshot.lastModelSelection` contains only the profile's model/effort pair.
+The independent profile event survives source-session/project deletion and
+restart. Startup provenance labels the fallback `last-used`. Working-window
+settings are not copied from the source session; explicit model-option defaults
+remain authoritative. An unavailable saved model/effort stays visible and
+fails normal admission rather than substituting a provider or dropping context.
+
 ### Immutable profiles
 
 ```ts

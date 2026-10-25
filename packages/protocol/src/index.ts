@@ -6,6 +6,7 @@ import { PlatformCommandSchema, defaultSettings, normalizeSettings, type Applica
 export * from "./platform.ts";
 export * from "./model.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
+import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
 import { defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
@@ -49,7 +50,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 54;
+export const PROTOCOL_VERSION = 55;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -65,7 +66,7 @@ export const CommandSchema = object({
   command: Type.Union([
     object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }), name: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Za-z0-9_-]+$" })) }),
     object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
-    object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema }),
+    object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
     object({ type: Type.Literal("session.archive"), ...sessionId }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
     object({ type: Type.Literal("session.resume"), ...sessionId }),
@@ -246,6 +247,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
   "session.configured": { controls: Controls };
+  "model.selection_remembered": { selection: ModelSelection | null; sourceSessionId: string; sourceProjectId: string | null; actor: "user" };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
   "session.resumed": Record<string, never>;
@@ -370,7 +372,7 @@ export type StoredEvent = EventInput & {
   artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
-  "project.added", "session.created", "session.configured", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "project.added", "session.created", "session.configured", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
@@ -396,6 +398,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const projects = new Map<string, Project>();
   const sessions = new Map<string, Session>();
   let nextSessionOrder = 0;
+  let lastModelSelection: ModelSelection | null = null;
   let policy: Policy = { revision: 0, allowedEnvs: ["Local", "Sandbox", "Remote"] };
   const blockedProjects = new Set<string>();
   const blockedSessions = new Set<string>();
@@ -450,8 +453,29 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const sandboxPublications = new Map<string, SandboxPublication>();
   const managedWorkspaces = new Map<string, ManagedWorkspace>();
   const changeSets = new Map<string, ChangeSet>();
+  const removedModelSources = new Set<string>(), removedModelProjects = new Set<string>();
+  for (const event of events) if (event.profile_id === profileId) {
+    if (event.event_type === "session.deleted") removedModelSources.add(event.payload.deletedSessionId);
+    if (event.event_type === "project.removed") removedModelProjects.add(event.payload.deletedProjectId);
+  }
   for (const event of events) {
     if (event.profile_id !== profileId) continue;
+    if (event.event_type === "model.selection_remembered") {
+      const selection = event.payload.selection, source = sessions.get(event.payload.sourceSessionId);
+      const actual = source ? modelSelection(source.controls) : undefined;
+      const retainedSource = removedModelSources.has(event.payload.sourceSessionId) ||
+        event.payload.sourceProjectId !== null && removedModelProjects.has(event.payload.sourceProjectId);
+      if (event.project_id !== null || event.session_id !== null || event.payload.actor !== "user" ||
+        typeof event.payload.sourceSessionId !== "string" || !event.payload.sourceSessionId || event.payload.sourceSessionId.length > 128 ||
+        event.payload.sourceProjectId !== null && typeof event.payload.sourceProjectId !== "string" ||
+        !source && !retainedSource || source && source.projectId !== event.payload.sourceProjectId ||
+        selection !== null && !Value.Check(ModelSelectionSchema, selection) ||
+        source && (selection?.modelId !== actual?.modelId || selection?.thinkingEffort !== actual?.thinkingEffort)) {
+        throw new MoguriError("model_preference_corrupt", "Remembered model selection lost its exact profile/user/source controls. No inferred choice or model fallback was used.", 409);
+      }
+      lastModelSelection = selection ? structuredClone(selection) : null;
+      continue;
+    }
     if (event.event_type === "knowledge.saved") {
       const record = event.payload.record;
       if (record.profileId !== profileId || event.artifact_id !== `knowledge/${record.id}` || record.projectId !== (event.project_id ?? null) || record.sessionId !== (event.session_id ?? null)) throw new MoguriError("knowledge_corrupt", "Knowledge event scope disagrees with its original owner.", 409);
@@ -1130,7 +1154,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       control.payload.promptDigest !== sequence.inputDigest || control.payload.controls.env !== sequence.env) throw new MoguriError("role_sequence_corrupt", "Role metadata lost its exact original owning control turn. No model or root authority was adopted.", 409);
   }
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
-    settings, notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
+    settings, lastModelSelection, notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],

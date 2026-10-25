@@ -25,6 +25,15 @@ export const ModelOptionsSchema = Type.Object({
   thinkingEffort: Type.Optional(ThinkingEffortSchema),
 }, { additionalProperties: false });
 export type ModelOptions = Static<typeof ModelOptionsSchema>;
+export const ModelSelectionSchema = Type.Object({
+  modelId: Type.String({ minLength: 1, maxLength: 128 }),
+  thinkingEffort: Type.Optional(ThinkingEffortSchema),
+}, { additionalProperties: false });
+export type ModelSelection = Static<typeof ModelSelectionSchema>;
+export function modelSelection(controls: { modelId: string | null; modelOptions?: ModelOptions }): ModelSelection | null {
+  return controls.modelId === null ? null : { modelId: controls.modelId,
+    ...(controls.modelOptions?.thinkingEffort !== undefined ? { thinkingEffort: controls.modelOptions.thinkingEffort } : {}) };
+}
 export const ModelStreamObservationSchema = Type.Object({
   firstOutputMs: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
   streamMs: Type.Union([Type.Number({ exclusiveMinimum: 0 }), Type.Null()]),
