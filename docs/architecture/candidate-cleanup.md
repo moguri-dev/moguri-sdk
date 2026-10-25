@@ -239,3 +239,20 @@ blocked. The actual shared DraftEditor and hidden sidebar deletion flow pass,
 with **27/27** session-interaction/retention cases and **21/21** draft/retention
 cases. Installed SDK generation cleanup, deleted paid-intent rejection and
 independent actual usage retention also pass against the rebuilt package.
+
+### Complete final gates
+
+The final code passes **1,375 Node/worker/CLI/TUI cases, zero failures and 14
+physical-native skips out of 1,389 in 1,268.02 s**. The complete hidden desktop
+gate passes **176 cases, zero failures and three physical-native skips out of
+179 in 5.8 min**, including failed-cleanup draft preservation/sidebar retry and
+both directions of the actual SSH terminal resize acknowledgement.
+
+Both TypeScript checks/build and zero-vulnerability audits pass. The exact
+rebuilt packed SDK independently installs with explicit script approval/rebuild,
+passes all four external entrypoint types, retained actual generation usage
+after origin deletion, deleted paid-intent replay refusal, installed CLI/runtime
+restart workflows and **12/12** private worker probes. Existing renderer
+chunk-size and transitive install deprecation notices remain disclosed above.
+No frozen prior SDK/native archive was repacked, and physical SendBox,
+notarization and live-account release gates were not claimed by these fixtures.
