@@ -11,8 +11,8 @@ version-1 format and never relabeling an existing Local process.
 
 Protocol/migration 44 adds one independently owned **Global Local terminal**
 per profile, with real null session/project identities rather than a synthetic
-conversation. The user explicitly opens the disclosed canonical home root or
-another explicit SDK/CLI root. Project-free Local session consoles likewise need
+conversation. The user explicitly opens the disclosed canonical Moguri data root
+or another explicit SDK/CLI root. Project-free Local session consoles likewise need
 an explicit root; neither grants workspace authority to its model. The same
 broker and launch digests bind null scopes, exact root/inode and actual profile.
 Remote still requires non-null session/project/peer ownership. Global intent
@@ -167,8 +167,13 @@ project, previous session or SSH mapping supplies a fallback root.
 
 The desktop starts an eligible console on explicit pane opening, including
 Global Terminal with no selected session. It waits for actual Remote readiness
-for project consoles rather than using Local. A restored pane or selected
-session change is not new launch intent. Hiding a running terminal pane asks
+for project consoles rather than using Local. Explicitly selecting another
+session/project or starting a chat while the Terminal pane is open carries a
+new one-shot intent for that actual selected session. It reuses an existing
+console or opens the exact qualified root, including a disclosed data root for
+project-free Local chats. Passive initial selection, profile restoration,
+Settings/tab remounts, hidden project selection, or reselecting the same
+already-visible X-closed session do not create intent. Hiding a running terminal pane asks
 for confirmation by default, then detaches without terminating. The explicit
 profile preference suppresses only that dialog. The console's X button closes
 the exact console without confirmation, and does not itself trigger another
@@ -177,6 +182,15 @@ canonical command, not replay of the closed intent.
 The shell consumes each opening intent when an existing console is shown or a
 new launch is requested. A User/Agent tab remount, Settings round trip or X
 termination cannot renew that intent or reopen a closed console.
+Only the terminal's own admission/action gate disables its plus control.
+Unrelated pending session metadata, read acknowledgement or other UI work
+cannot prevent a qualified user console from opening. The automatic and manual
+open paths claim the same one-shot intent before requesting a launch; actual
+pending work prevents duplicates, and a definite failure stays visible without
+automatically retrying. Plus can explicitly request a new admitted console.
+Remote probing settles its local action gate before consuming pending open
+intent. Environment/policy/root/owner checks remain authoritative; unsupported
+Sandbox user consoles are labelled unavailable, not replaced by a Local shell.
 Navigation through left resources, session selection, Start, native Settings
 and profile switching uses the same hide review. Cancelling Start's hide review
 creates no chat and leaves the original console and Start chooser intact.

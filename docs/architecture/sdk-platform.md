@@ -257,6 +257,44 @@ or hidden; no personal UI/account/microphone, paid inference, native administrat
 install or automatic user-app/browser opening was used. Existing development
 signing, FFI/chunk/optional-icon and physical-native limitations remain.
 
+## Explicit session-terminal admission
+
+This follow-up reuses React, Ghostty and Node-PTY (MIT), existing SDK admissions
+and authenticated owner/root checks. No library, SDK operation, durable event,
+setting, schema or migration is added.
+CLI/TUI/SDK callers retain their existing explicit open/reconcile operations;
+only desktop entry routing and its local pending-state presentation change.
+
+Explicitly navigating to another session/project or starting a chat while
+Terminal is open creates one entry intent for that actual selected session.
+An existing console is reused; otherwise an eligible transport opens its exact
+root. Project-free Local requests disclose/use the data root, never the previous
+project. Passive initial selection, profile restoration, Settings/tab remounts,
+hidden project selection and reselecting the same visible X-closed chat cannot
+manufacture launch intent.
+
+The private console's own action/admission gate, not the shell's general busy
+state, controls startup and +. A delayed read acknowledgement or other UI request
+cannot disable an independent user console. Both automatic entry and explicit
+plus claim the intent before dispatch; actual pending terminal work stays
+serialized, a definite refusal remains diagnostic, and only an explicit later
+action can retry. Remote probe completion settles that same local gate before
+consuming pending entry intent. Existing one-global/four-per-session/sixteen-per-
+profile bounds and all service rechecks remain unchanged.
+
+No environment fallback or owner adoption is added. Local/qualified Remote
+admissions stay bound to actual profile/session/root/peer; unqualified Sandbox
+user consoles explain their boundary rather than starting a Local shell.
+Read-only/stale views and Agent command output remain separate; queued input
+still cannot cross attachment generations or become model context.
+
+Fresh pre-change probes pass all six available generated groups: cancellation
+32.13 ms; SQLite append p95 0.050 ms/rebuild 0.546 ms; PTY cancellation
+151.82 ms with zero survivors; TUI updates 17.21 ms; hidden Electron cold start
+259.17 ms / 442.38 MiB / 8.12 ms per frame; 2,000-file search/Git
+1.197/6.768 ms. Separate live/native/notarized/Linux/quality gates remain
+FAIL/unqualified, not newly enabled.
+
 ## Desktop interaction maintenance, 2026-10-23
 
 Reuse React (MIT), existing native keyboard/pointer events, the shared revisioned
