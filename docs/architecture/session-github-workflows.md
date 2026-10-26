@@ -109,3 +109,35 @@ project item ownership, original write receipts and source-bound session
 creation. Hidden Electron checks exercise repository/item dropdowns, retained
 approvals, PR/issue details and creation. SDK packaging verifies browser-safe
 entry points and an independently installed consumer.
+
+## Integrated qualification
+
+Runtime, SDK and native-client source is `9a1054e`, including main's workspace
+and navigation changes. The generated private-CLI fixture correction is
+`babe876`; the desktop fixture now exercises Max's actual technical-answer
+layer in `7c291c2`, not the intentionally removed new-mode tool-review gate.
+No production source changed during these final runs.
+
+| Check | Result |
+| --- | --- |
+| Type checks and production build | PASS |
+| Complete Node/service/worker/CLI/native-TUI suite | 1,482 passed, 14 platform/native skips, zero failures; 1,496 total / 1,161,821.57 ms |
+| Complete hidden Electron suite | 196 passed, three packaged/physical-native skips, zero failures; 199 total / 6.2 minutes |
+| Independently packed external SDK | All entrypoints/declarations, approved installation, runtime/client flows and all 12 installed-worker continuation probes pass |
+| Root and independently installed consumer audits | Zero vulnerabilities |
+
+Coverage includes exact account/root replacement rejection, real GitHub
+publication receipts using generated responses, concurrent approval answers,
+Local/SSH MCP grants and revocation, uninterrupted routed-solver continuation,
+actual service restart, both schema-59 lineages, interrupted migration rollback,
+preserved publication edits and quiesced HTTP shutdown. Tests use generated
+data, owned loopback servers and hidden windows, never personal authorization,
+real GitHub mutations, a personal terminal or paid model access.
+
+Known non-blocking notices remain: experimental OpenTUI FFI, the lazy Ghostty
+bundle-size warning, and deprecated transitive `whatwg-encoding` and
+`node-domexception` packages in the packed consumer. The install-script notice
+is followed by explicit archive approval and rebuild; no unapproved lifecycle
+script runs. These results do not qualify dedicated Jev, Remote/native Max,
+external Linux hosts, physical SendBox containment or notarized release
+artifacts. CI remains main-push-only; no PR or working-branch trigger was added.
