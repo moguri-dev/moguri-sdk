@@ -12,6 +12,10 @@ import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 import { RememberedApprovalSchema } from "./permissions.ts";
+import { KanbanCommandSchema, KanbanQuerySchema, type KanbanResponse, type KanbanSnapshot } from "./kanban.ts";
+export * from "./kanban.ts";
+import { PricingCommandSchema, PricingQuerySchema, type PricingResponse, type PricingSnapshot } from "./pricing.ts";
+export * from "./pricing.ts";
 export * from "./permissions.ts";
 import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
@@ -183,7 +187,7 @@ export const defaultSettings = (): UserSettings => ({
   sandboxManagement: defaultSandboxManagement(),
   retention: { deleteArchived: false, afterDays: 7, archiveCompleted: false, archiveAfterDays: 7, confirmArchive: true, confirmDelete: true },
   artifacts: { retainAnswers: true },
-  budgets: { rates: [], maxPriceAgeDays: 30 },
+  budgets: { rates: [], maxPriceAgeDays: 30, providerEstimates: true, useProviderRatesForLimits: false },
   kupo: defaultKupoSettings(),
   winddown: defaultWinddownSettings(),
   decisions: defaultDecisionSettings(),
@@ -218,6 +222,8 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  PricingCommandSchema,
+  KanbanCommandSchema,
   WorkflowCommandSchema,
   CoordinationCommandSchema,
   ToolingCommandSchema,
@@ -277,6 +283,8 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  PricingQuerySchema,
+  KanbanQuerySchema,
   SkillGatewayQuerySchema,
   DashboardQuerySchema,
   CoordinationQuerySchema,
@@ -366,7 +374,7 @@ export interface CapabilityJob {
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
-export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot {
+export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot {
   coordinationLinks: CoordinationLink[];
   coordinationMessages: CoordinationMessage[];
   lastModelSelection: ModelSelection | null;
@@ -411,6 +419,8 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse
+  | PricingResponse
+  | KanbanResponse
   | SkillGatewayResponse
   | DashboardResponse
   | CoordinationResponse

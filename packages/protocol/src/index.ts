@@ -48,13 +48,15 @@ import type { TaskPlan, TaskProgressReport } from "./progress.ts";
 import { SessionPrObservationSchema, sameSessionPrScope, sessionPrScope, type SessionPrObservation } from "./session-status.ts";
 import { CoordinationLinkSchema, CoordinationMessageSchema, type CoordinationLink, type CoordinationMessage, type CoordinationTaskOrigin } from "./coordination.ts";
 import type { WorkflowKind } from "./workflows.ts";
+import { projectWorkRecord, type KanbanEventPayloads, type ProjectWorkRun } from "./kanban.ts";
+import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 61;
+export const PROTOCOL_VERSION = 62;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -188,6 +190,7 @@ export interface Session {
   mode: SessionMode;
   pendingMode: SessionMode | null;
   kind: SessionKind;
+  purpose?: "kanban";
   pinned: boolean;
   order?: number;
   taskPlan?: TaskPlan;
@@ -241,9 +244,9 @@ export interface Connection {
   pid: number;
 }
 
-export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads {
+export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; workItemUrl?: string | null; githubSource?: GithubSessionOrigin; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
+  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; purpose?: "kanban"; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; workItemUrl?: string | null; githubSource?: GithubSessionOrigin; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "coordination.linked": { link: CoordinationLink };
   "coordination.message": { message: CoordinationMessage };
   "coordination.delivered": { messageId: string; turnId: string; stepId: string };
@@ -412,6 +415,8 @@ export const eventTypes: readonly EventType[] = [
   "candidate.saved", "candidate.generation_recorded", "candidate.owner_bound", "candidate.cleanup_recorded", "candidate.usage_retained", "role.sequence_recorded", "compound.recorded", "winddown.recorded", "decision.recorded",
   "knowledge.saved", "knowledge.forgotten",
   "github.operation_recorded", "linear.operation_recorded", "cache.registry.saved", "cache.registry.removed",
+  "project.work_recorded",
+  "pricing.catalog_recorded",
 ];
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[] } & PlatformSnapshot {
@@ -430,6 +435,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const coordinationLinks = new Map<string, CoordinationLink>();
   const coordinationMessages = new Map<string, CoordinationMessage>();
   const githubOperations = new Map<string, GithubOperation>();
+  const projectWorkRuns = new Map<string, ProjectWorkRun>();
+  let providerPriceCatalogs: ProviderPriceCatalog[] = [], providerPriceRevision = 0;
   const linearOperations = new Map<string, LinearOperation>();
   const dependencyRegistries = new Map<string, DependencyRegistry>();
   const jobs = new Map<string, CapabilityJob>();
@@ -519,6 +526,24 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const operation = event.payload.operation;
       if (operation.profileId !== profileId || operation.projectId !== event.project_id || (event.session_id ?? null) !== operation.originSessionId || event.artifact_id !== operation.id) throw new MoguriError("github_corrupt", "Git/GitHub operation lost its exact independent profile/root retention owner.", 409);
       githubOperations.set(operation.id, projectGithubOperation(githubOperations.get(operation.id), operation));
+    }
+    if (event.event_type === "project.work_recorded") {
+      const run = event.payload.run;
+      if (run.profileId !== profileId || event.project_id !== run.projectId || event.session_id || event.artifact_id !== `project-work/${run.id}`) {
+        throw new MoguriError("project_work_corrupt", "Project work lost its independent profile/source retention owner.", 409);
+      }
+      projectWorkRuns.set(run.id, projectWorkRecord(projectWorkRuns.get(run.id), run));
+    }
+    if (event.event_type === "pricing.catalog_recorded") {
+      const next = event.payload;
+      if (event.project_id || event.session_id || event.artifact_id || next.actor !== "user" || next.revision !== providerPriceRevision + 1 ||
+        !Value.Check(Type.Array(ProviderPriceCatalogSchema, { minItems: 1, maxItems: 4 }), next.catalogs) ||
+        new Set(next.catalogs.map((catalog) => catalog.provider)).size !== next.catalogs.length ||
+        next.catalogs.some((catalog) => catalog.sourceUrl !== PROVIDER_PRICE_SOURCES[catalog.provider] ||
+          !Number.isFinite(Date.parse(catalog.observedAt)) || new Set(catalog.prices.map((price) => price.modelId)).size !== catalog.prices.length)) {
+        throw new MoguriError("pricing_corrupt", "Provider prices lost their exact official source, date or revision. Historical rates were preserved.", 409);
+      }
+      providerPriceCatalogs = structuredClone(next.catalogs); providerPriceRevision = next.revision;
     }
     if (event.event_type === "linear.operation_recorded") {
       const operation = event.payload.operation;
@@ -982,6 +1007,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "session.created") {
       if (!event.session_id) throw new Error("Invalid session.created event scope.");
+      if (event.payload.purpose && (event.payload.purpose !== "kanban" || !event.project_id ||
+        event.payload.workspaceId || event.payload.kind && event.payload.kind !== "agent" ||
+        [...sessions.values()].some((session) => session.projectId === event.project_id && session.purpose === "kanban"))) {
+        throw new MoguriError("kanban_chat_corrupt", "A project Kanban chat must have one exact project owner, not a different workspace or duplicate chat.", 409);
+      }
       const origin = event.payload.githubSource;
       if (origin) {
         if (!Value.Check(GithubSessionOriginSchema, origin) || !event.project_id ||
@@ -1001,6 +1031,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         parentSessionId: event.payload.parentSessionId, createdParentSessionId: event.payload.parentSessionId, coordinationParentId: event.payload.coordinationParentId, parentSnapshotDigest: event.payload.parentSnapshotDigest, readOnly: event.payload.readOnly,
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
         kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, order: nextSessionOrder++, unread: false, groupId: null, archivedAt: null,
+        ...(event.payload.purpose ? { purpose: event.payload.purpose } : {}),
         prUrl: event.payload.prUrl ?? null, prObservation: null, workItemId: event.payload.workItemId ?? null, workItemUrl: event.payload.workItemUrl ?? null,
         ...(origin ? { githubSource: structuredClone(origin) } : {}), browserUrl: null,
         suggestionSources: event.payload.suggestionSources,
@@ -1076,6 +1107,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           if (changes.workItemUrl !== session.workItemUrl && session.githubSource?.source.kind === "issue") delete session.githubSource;
           session.workItemUrl = changes.workItemUrl;
         }
+        if (changes.workItemId !== undefined) session.workItemId = changes.workItemId;
         session.revision++; break;
       }
       case "task.plan_updated": {
@@ -1273,7 +1305,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
-    boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()],
+    boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()], projectWorkRuns: [...projectWorkRuns.values()],
+    providerPriceCatalogs, providerPriceRevision,
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
     sandboxPublications: [...sandboxPublications.values()].filter((publication) => artifacts.has(publication.id)),
     compoundWorkflows: [...compoundWorkflows.values()].filter((workflow) => artifacts.has(workflow.id)),

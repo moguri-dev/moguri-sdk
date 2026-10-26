@@ -304,6 +304,9 @@ export class SessionWorkspace {
           pullRequestLink(command.changes.prUrl);
         }
         if (command.changes.workItemUrl && githubItemIdentity(command.changes.workItemUrl).kind !== "issue") throw new MoguriError("work_item", "Choose a GitHub issue for the Work item binding.");
+        if (command.changes.workItemId && !this.snapshot().issues.some((issue) => issue.id === command.changes.workItemId && issue.projectId === session.projectId)) {
+          throw new MoguriError("work_item", "Choose a Kanban card from this session's own project. No cross-project card was linked.", 403);
+        }
         return finish([this.event(session, { event_type: "session.organized", profile_id: this.snapshot().profileId, payload: { changes: command.changes } })], { revision: session.revision + 1 });
       }
       case "session.mode": {

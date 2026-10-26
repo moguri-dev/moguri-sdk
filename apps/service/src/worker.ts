@@ -204,7 +204,7 @@ async function run(start: WorkerStart): Promise<void> {
           await finish("completed", null);
           return;
         }
-        for (const call of calls) {
+        for (const [callIndex, call] of calls.entries()) {
           abort.signal.throwIfAborted();
           const approval = await request({ kind: "approval", requestId: randomUUID(), stepId, call });
           let result: DelegatedResult;
@@ -246,6 +246,18 @@ async function run(start: WorkerStart): Promise<void> {
           if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The original tool result was not durably acknowledged; no continuation was authorized.");
           context.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: result.text }], isError: result.isError, timestamp: Date.now() });
           if (incompleteCleanup) throw new Error("Tool side effects are partial or cleanup is unconfirmed. Inspect the partial tool result before continuing.");
+          if (result.endTurn) {
+            if (call.name !== "project_work" || call.arguments.action !== "publish" || result.isError || result.outcome !== "completed") throw new Error("Only an acknowledged project-work publication can end this turn.");
+            for (const skipped of calls.slice(callIndex + 1)) {
+              const retained = await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call: skipped,
+                text: "Not executed: the user-delegated task reached its verified PR endpoint. No remaining tool was approved or run.",
+                isError: true, outcome: "denied" });
+              if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error("Unexecuted post-publication tool results were not retained.");
+            }
+            await lifecycle("turn.end");
+            await finish("completed", null);
+            return;
+          }
         }
       } finally { clearInterval(timer); flush(); }
     }

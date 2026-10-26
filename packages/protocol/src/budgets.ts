@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import type { ModelStreamObservation } from "./model.ts";
 import { RepositoryFiltersSchema, type RepositoryAttribution, type RepositoryDiagnostic, type RepositoryCoverage } from "./repositories.ts";
 import type { BudgetPlan } from "./budget-plans.ts";
+import { ProviderRateSourceSchema } from "./pricing.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -21,14 +22,19 @@ export const SessionBudgetSchema = Type.Union([
   object({ kind: Type.Literal("unlimited") }),
   object({ kind: Type.Literal("limited"), ...limits, basis: Type.Optional(Type.Literal("estimate")) }),
 ]);
-export const BudgetRateSchema = object({
+const rateFields = {
   modelId: id, inputUsdPerMillion: Type.Number({ minimum: 0, maximum: 1_000_000 }), outputUsdPerMillion: Type.Number({ minimum: 0, maximum: 1_000_000 }),
-  effectiveAt: Type.String({ minLength: 10, maxLength: 32 }), source: Type.Literal("user-estimate"),
-});
+  effectiveAt: Type.String({ minLength: 10, maxLength: 32 }),
+};
+export const UserBudgetRateSchema = object({ ...rateFields, source: Type.Literal("user-estimate") });
+export const BudgetRateSchema = Type.Union([UserBudgetRateSchema,
+  object({ ...rateFields, source: Type.Literal("provider-api-equivalent"), pricing: ProviderRateSourceSchema })]);
 export type BudgetRate = Static<typeof BudgetRateSchema>;
 export const sameBudgetRate = (a: BudgetRate | null, b: BudgetRate | null): boolean => a === null || b === null ? a === b :
-  (["modelId", "inputUsdPerMillion", "outputUsdPerMillion", "effectiveAt", "source"] as const).every((key) => a[key] === b[key]);
-export const BudgetSettingsSchema = object({ rates: Type.Array(BudgetRateSchema, { maxItems: 100 }), maxPriceAgeDays: Type.Integer({ minimum: 1, maximum: 365 }) });
+  (["modelId", "inputUsdPerMillion", "outputUsdPerMillion", "effectiveAt", "source"] as const).every((key) => a[key] === b[key]) &&
+  (a.source !== "provider-api-equivalent" || b.source === "provider-api-equivalent" && JSON.stringify(a.pricing) === JSON.stringify(b.pricing));
+export const BudgetSettingsSchema = object({ rates: Type.Array(UserBudgetRateSchema, { maxItems: 100 }), maxPriceAgeDays: Type.Integer({ minimum: 1, maximum: 365 }),
+  providerEstimates: Type.Optional(Type.Boolean()), useProviderRatesForLimits: Type.Optional(Type.Boolean()) });
 export interface BudgetEntry {
   id: string; sessionId: string | null; ownerSessionId: string | null; projectId: string | null; folderId: string | null;
   planId?: string;

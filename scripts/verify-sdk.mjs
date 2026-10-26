@@ -74,6 +74,17 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 62 ? `
+      const kanbanChat=await sdk.kanban.open("generated-project");
+      const cards=await sdk.kanban.items("generated-project","github-issues",1,kanbanChat.id);
+      void cards.github[0]?.headRepository;
+      const task=await sdk.kanban.continue("generated-session","generated-card");
+      const report=await sdk.kanban.work(task.id!);void report.run.source.contentDigest;
+      await sdk.kanban.wait(task.id!);await sdk.kanban.cancel(task.id!);await sdk.kanban.inspect(task.id!,report.run.revision,true);
+      const providerPrices=await sdk.prices.catalog();void providerPrices.catalogs[0]?.sourceDigest;
+      await sdk.prices.refresh(["anthropic"],providerPrices.revision);
+      await sdk.sessions.organize("generated-session",{workItemId:"generated-card",workItemUrl:null});
+      ` : ""}
       ${installedProtocol >= 61 ? `
       await sdk.approvals.respond("generated-session","generated-approval",true,{scope:"project",match:"family"});
       void sdk.approvals.list()[0]?.target.kind;
@@ -544,6 +555,27 @@ try {
       }` : ""}
       let operationSessionId;
       assert.equal(sdk.getState().snapshot.protocolVersion,PROTOCOL_VERSION);
+      ${installedProtocol >= 62 ? `
+      {
+      const prices=await sdk.prices.catalog();assert.equal(prices.revision,0);
+      assert.equal(prices.catalogs.find(value=>value.provider==="anthropic").prices.find(value=>value.modelId==="claude-opus-5.5").inputUsdPerMillion,4);
+      const boardRoot=join(root,"generated-installed-kanban");await mkdir(boardRoot);
+      const project=await sdk.projects.add(boardRoot,"generated_installed_kanban"),opened=await sdk.kanban.open(project.id);
+      assert.equal((await sdk.kanban.open(project.id)).id,opened.id);
+      const board=(await sdk.issues.board(project.id)).board;
+      const card=await sdk.issues.create(project.id,{title:"Generated installed card",body:"Generated installed board source.",kind:"feature",phaseId:"backlog",pullRequestUrl:null});
+      await sdk.issues.configure(project.id,{...board,kanban:{visible:false,source:"kanban",phaseIds:["backlog"]}},board.revision);
+      await sdk.sessions.organize(opened.id,{workItemId:card.id,workItemUrl:null});
+      assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).purpose,"kanban");
+      assert.equal((await sdk.kanban.items(project.id,"kanban",1,opened.id)).local[0].body,"Generated installed board source.");
+      await sdk.slash(opened.id,"/kanban show","tui");
+      assert.equal((await sdk.issues.board(project.id)).board.kanban.visible,true);
+      assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).workItemId,card.id);
+      assert.equal(sdk.getState().snapshot.projectWorkRuns.length,0);
+      assert.equal(sdk.getState().snapshot.settings.values.budgets.useProviderRatesForLimits,false);
+      console.log("Installed protocol-62 SDK/runtime exposes one Kanban chat, shared visibility/card bindings and public API-equivalent references without hidden inference or finite-limit consent.");
+      }
+      ` : ""}
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);

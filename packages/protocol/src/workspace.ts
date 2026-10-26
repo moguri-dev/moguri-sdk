@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import type { GitHubConnection, LinearConnection } from "./preferences.ts";
 import { Value } from "typebox/value";
+import { KanbanPreferencesSchema } from "./kanban.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -33,6 +34,7 @@ export const BoardConfigSchema = object({
   mergedColumnId: id, autoRefreshPrs: Type.Boolean(),
   githubAccess: Type.Union([Type.Literal("public"), Type.Literal("gh-cli")]),
   linear: object({ enabled: Type.Boolean(), teamId: Type.String({ maxLength: 128 }) }),
+  kanban: Type.Optional(KanbanPreferencesSchema),
 });
 export type BoardConfig = Static<typeof BoardConfigSchema>;
 export interface IssueBoard extends BoardConfig { projectId: string; revision: number }

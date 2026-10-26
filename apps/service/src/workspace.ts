@@ -143,6 +143,9 @@ export class WorkspaceRuntime {
         const config: BoardConfig = structuredClone(command.config);
         const ids = config.columns.map((column) => column.id);
         if (new Set(ids).size !== ids.length || !ids.includes(config.mergedColumnId) || config.columns.some((column) => !column.name.trim())) throw new MoguriError("board_columns", "Use unique phase IDs, non-empty names and an existing merged-PR destination.");
+        if (config.kanban?.phaseIds.some((id) => !ids.includes(id) || id === config.mergedColumnId)) {
+          throw new MoguriError("kanban_phases", "Continue work may select only existing non-final Kanban phases.");
+        }
         if (this.host.snapshot().issues.some((issue) => issue.projectId === board.projectId && !ids.includes(issue.phaseId))) throw new MoguriError("board_occupied", "Move all tickets, including archived ones, before removing an occupied phase.", 409);
         if (config.linear.enabled && !/^[A-Za-z0-9-]{1,128}$/.test(config.linear.teamId)) throw new MoguriError("linear_team", "Choose the exact Linear team UUID before enabling import.");
         this.linear.get(board.projectId)?.abort();

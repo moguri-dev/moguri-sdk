@@ -34,6 +34,8 @@ import { CommandJobReadSchema, type ToolingQuery, type ToolingResponse } from ".
 import { SessionCoordination, coordinatedMessageContext } from "./session-coordination.ts";
 import { SessionStateSql } from "./session-state-sql.ts";
 import { IssueTools } from "./issue-tools.ts";
+import { ProjectWorkRuntime } from "./project-work.ts";
+import { isContinueWork, isKanbanCommand } from "../../../packages/protocol/src/kanban.ts";
 import { workflowGuidance, type WorkflowKind } from "../../../packages/protocol/src/workflows.ts";
 import { SessionContextSchema, SessionControlSchema, SessionMessageSchema, WaitSessionSchema, type CoordinationOrigin } from "../../../packages/protocol/src/coordination.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
@@ -155,6 +157,7 @@ export class ControlPlane extends EventEmitter {
   readonly coordination: SessionCoordination;
   readonly stateSql: SessionStateSql;
   readonly issueTools: IssueTools;
+  readonly projectWork: ProjectWorkRuntime;
   readonly generations: CandidateGenerations;
   readonly candidateCleanup: CandidateCleanupRuntime;
   readonly ownedRoles: OwnedRoles;
@@ -290,6 +293,8 @@ export class ControlPlane extends EventEmitter {
       compactionCommand: (command, finish) => this.compactionCommand(command, finish),
       generationQuery: (query) => this.generations.query(query),
       toolingQuery: (query) => this.toolingQuery(query),
+      kanbanQuery: (query) => this.projectWork.query(query),
+      kanbanCommand: (command, finish) => this.projectWork.execute(command, finish),
       coordinationQuery: (query) => this.coordination.query(query),
       generationCommand: (command, finish) => this.generations.execute(command, finish),
       roleProposal: (id) => this.ownedRoles.proposal(id),
@@ -338,13 +343,20 @@ export class ControlPlane extends EventEmitter {
       remoteConsoles: new RemoteConsoles(this.remote),
       globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
       foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
-      localRootBusy: (root, exceptJobId, permitRebaseRecovery) => this.ownedWriteRoots(undefined, exceptJobId, permitRebaseRecovery).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
+      localRootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => this.ownedWriteRoots(ownerSessionId, exceptJobId, permitRebaseRecovery).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
       cloneRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).some((owned) => localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
       sharedGlobals: Boolean(this.profileHooks),
     }, platformOptions);
     this.stateSql = new SessionStateSql(store, { snapshot: () => this.snapshot(), scope: (session) => this.coordinationScope(session),
       commit: (events) => this.commit(events), progress: this.platform.progress, knowledge: this.platform.knowledge });
     this.issueTools = new IssueTools(this.platform.github, this.platform.linear);
+    this.projectWork = new ProjectWorkRuntime(this.store, this.platform, {
+      snapshot: () => this.snapshot(), commit: (events) => this.commit(events), finish: (id, hash) => this.commandFinish(id, hash),
+      startup: (projectId) => this.startup(projectId),
+      validate: (session) => { this.assertOrdinaryTurn(session); this.available(session.controls, true, session); if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and resume the original workspace before starting project work.", 409); },
+      wake: () => this.wake(), stop: (id) => this.stop(id),
+      closing: (sessionId, projectId) => this.shuttingDown || this.deletingSessions.has(sessionId) || this.deletingProjects.has(projectId),
+    });
     this.sandboxWorkspaces = new SandboxWorkspaces(store, platformOptions.stateDir ?? dirname(store.path), this.sandbox, {
       snapshot: () => this.snapshot(), project: (session) => this.platform.managed.project(session),
       settings: (projectId) => ({ revision: projectId ? this.platform.sessions.projects.configuration(projectId).revision : 0, values: this.platform.sessions.projects.values(projectId) }),
@@ -461,6 +473,7 @@ export class ControlPlane extends EventEmitter {
     const interruptedDecisions = this.decisions.recover();
     if (interruptedDecisions.length) this.commit(interruptedDecisions);
     await this.platform.recover();
+    this.projectWork.recover();
     const interruptedStages = this.sandboxWorkspaces.recover();
     if (interruptedStages.length) this.commit(interruptedStages);
     const interruptedNative = (this.projection.sandboxExecutions ?? []).filter((execution) => ["launching", "running", "stopping"].includes(execution.status));
@@ -611,6 +624,7 @@ export class ControlPlane extends EventEmitter {
     this.platform?.sessionPrs.changed(appended);
     this.candidateCleanup?.changed(appended);
     this.platform?.browser.synchronize();
+    this.projectWork?.changed(appended);
   }
   private commandFinish(id: string, commandDigest: string): WorkspaceFinish {
     return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {
@@ -1917,7 +1931,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "tooling.execute") {
       const session = this.session(command.sessionId);
       if (session.controls.env !== "Local") throw new MoguriError("tool_env", "Standalone tool jobs are qualified only for Local. Remote/Sandbox use their owned model worker; no controller fallback was used.", 409);
-      if (["ask_user", "task_progress", "run_subagent", "debug", "discover_tools", "query_state", "mutate_state", "create_issue", "session_context", "session_message", "session_control", "wait_session"].includes(command.name) || command.name.startsWith("propose_")) {
+      if (["ask_user", "task_progress", "run_subagent", "debug", "discover_tools", "query_state", "mutate_state", "create_issue", "project_work", "session_context", "session_message", "session_control", "wait_session"].includes(command.name) || command.name.startsWith("propose_")) {
         throw new MoguriError("tool_owner", "This tool needs its owning model turn, not a standalone user job.", 403);
       }
       const declared = this.nativeCatalog(session).find((tool) => tool.name === command.name);
@@ -1941,6 +1955,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "session.delete" && !this.projection.sessions.some((session) => session.id === command.sessionId) &&
       this.candidateCleanup.sessionDeleted(command.sessionId)) return finish([], { id: command.sessionId });
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
+    if (isKanbanCommand(command)) return this.projectWork.execute(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
     switch (command.type) {
@@ -2056,6 +2071,9 @@ export class ControlPlane extends EventEmitter {
       case "message.send": {
         this.revision(session.draft.revision, command.expectedRevision);
         this.platform.inputs.assertDraftReady(session.id);
+        if (!command.held && command.delivery === "queue" && session.projectId && isContinueWork(session.draft.text)) {
+          return this.projectWork.start(session, finish, { consumeDraft: { expectedRevision: command.expectedRevision } });
+        }
         return this.enqueuePrompt(session, session.draft, command.delivery, Boolean(command.held), true, finish);
       }
       case "queue.edit":
@@ -2445,7 +2463,8 @@ export class ControlPlane extends EventEmitter {
       Boolean(this.writerReservations.has(key) && this.writerReservations.get(key) !== session.id);
   }
   private async assertCurrentTool(session: Session, call: ToolCall, modelOwned = true): Promise<void> {
-    if (this.runs.get(session.id)?.yieldedTo && !readTools.has(call.name) && call.name !== "session_control") throw new MoguriError("coordination_yielded", "This coordinator yielded its writer lease to an owned child. Only read/coordination observations are available until the child settles.", 403);
+    if (this.runs.get(session.id)?.yieldedTo && (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read") &&
+      call.name !== "session_control") throw new MoguriError("coordination_yielded", "This coordinator yielded its writer lease to an owned child. Only read/coordination observations are available until the child settles.", 403);
     const current = this.session(session.id);
     const hook = this.runs.get(current.id)?.hooks?.calls.get(call.id);
     if (hook) this.platform.extensions.assertHook(current, hook);
@@ -2906,6 +2925,10 @@ export class ControlPlane extends EventEmitter {
     }
     if (request.kind === "boundary") {
       if (run.abort.signal.aborted) { this.reply(run, { kind: "reply", requestId: request.requestId, error: "Turn stopping." }); return; }
+      if (this.projection.projectWorkRuns.some((task) => task.sessionId === session.id && task.turnId === run.turnId && task.status === "completed")) {
+        this.reply(run, { kind: "reply", requestId: request.requestId, error: "This task reached its verified PR endpoint. No additional paid call or next card is delegated.", halt: true });
+        return;
+      }
       try {
         if (run.hooks?.bindings.some((hook) => hook.definition.trigger === "turn.start" && !run.hooks?.done.has(hook.id))) throw new MoguriError("hook_required", "Complete the actual user-configured turn-start hooks before model admission. No model reservation or request was started.", 409);
         if (run.winddown?.pending) { await this.winddownBoundary(run, request); return; }
@@ -3232,6 +3255,20 @@ export class ControlPlane extends EventEmitter {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
+      if (request.call.name === "project_work") {
+        try {
+          await this.assertCurrentTool(session, request.call);
+          if (this.authorization(session, request.call, null).decision === "deny") throw new MoguriError("tool_denied", "Current hard policy denies this project-work operation.", 403);
+          const result = await this.projectWork.tool(session, request.call.arguments, this.modelAdviceSource(session, request), run.abort.signal);
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: result });
+        } catch (error) {
+          console.error("Project-work tool failed:", error instanceof MoguriError ? error.code : "project_work_failed");
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message :
+            "Project work failed without a confirmed result. Inspect its original retained task; no retry was performed.", isError: true,
+            outcome: run.abort.signal.aborted ? "stopped" : "failed" } });
+        }
+        return;
+      }
       if (request.call.name === "create_issue") {
         const id = frameDigest(["model-tool-intent", run.turnId, request.stepId, request.call.id]), hash = frameDigest(request.call.arguments);
         let admissionAttempted = false;
@@ -3430,6 +3467,7 @@ export class ControlPlane extends EventEmitter {
     }
   }
   private stop(sessionId: string, holdQueue = true): void {
+    this.projectWork.stopOrigin(sessionId);
     try { this.decisions.cancelSession(sessionId); } catch (error) { console.error("Decision cancellation persistence failed; actual owned abort was still requested:", error instanceof MoguriError ? error.code : "decision_stop"); }
     for (const session of this.projection.sessions) if (session.createdParentSessionId === sessionId) this.stop(session.id);
     this.sandboxWorkspaces.cancel(sessionId);

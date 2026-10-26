@@ -6,6 +6,8 @@ import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
 import { RememberApprovalSchema } from "../../protocol/src/permissions.ts";
 import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol/src/application-updates.ts";
+import { KanbanSourceSchema, kanbanPreferences } from "../../protocol/src/kanban.ts";
+import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -23,7 +25,10 @@ export type SlashResult =
 export const slashCommands = [
   { name: "approve", description: "Approve the current action once or remember its exact session/project/global scope", argument: "[once|session|project|global] [exact|family]" },
   { name: "approvals", description: "Inspect or revoke this profile's remembered approvals", argument: "[revoke ID]" },
-  { name: "work-item", description: "Open the project's GitHub issues and linked work item" },
+  { name: "work-item", description: "Pick a project Kanban card or GitHub issue", argument: "[kanban|CARD_ID|clear]" },
+  { name: "kanban", description: "Open this project's special board chat or change shared visibility/source", argument: "[show|hide|source kanban|github-issues|github-prs|items [SOURCE] [PAGE]|work RUN|stop RUN|inspect RUN REV confirm-inspected]" },
+  { name: "continue-work", description: "Run one actual-user delegated card in an isolated Local checkout, stopping at its draft PR", argument: "[CARD_ID]" },
+  { name: "prices", description: "Inspect provider API-equivalent references, or explicitly refresh public pricing without inference", argument: "[refresh [anthropic|openai|google|xai]]" },
   { name: "review", description: "Investigate and fix current changes, or the project when clean, within existing policy", argument: "[PROMPT]" },
   { name: "security", description: "Investigate and fix reachable security weaknesses within existing authority", argument: "[PROMPT]" },
   { name: "performance", description: "Measure and improve current-code performance without changing outcomes", argument: "[PROMPT]" },
@@ -134,6 +139,13 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "prices": {
+      if (!command.argument) return { kind: "text", text: JSON.stringify(await sdk.prices.catalog(), null, 2) };
+      const [action, provider, extra] = command.argument.trim().split(/\s+/);
+      if (action !== "refresh" || extra) throw new ClientError("pricing_input", "Use /prices or /prices refresh [anthropic|openai|google|xai].");
+      const started = await sdk.prices.refresh(provider ? [parse(PriceProviderSchema, provider)] : undefined);
+      return { kind: "text", text: JSON.stringify({ jobId: started.id, diagnostic: "Original public-price refresh started, not claimed complete. Inspect the shared capability job; old catalogs and historical costs stay intact on failure." }, null, 2) };
+    }
     case "approve": {
       const [scope = "once", match = "exact", extra] = command.argument.trim().split(/\s+/).filter(Boolean);
       if (!session.pendingApproval || extra || !["once", "session", "project", "global"].includes(scope) || !["exact", "family"].includes(match) || scope === "once" && match !== "exact") throw new ClientError("approval_input", "Use /approve once, session|project|global [exact|family] for the actual pending action.");
@@ -146,7 +158,35 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action !== "revoke" || !id || extra) throw new ClientError("approval_input", "Use /approvals or /approvals revoke ID.");
       await sdk.approvals.revoke(id); return { kind: "ok", message: "Remembered approval revoked. Pending approvals were invalidated." };
     }
-    case "work-item": return { kind: "panel", panel: "Work item" };
+    case "work-item": {
+      if (!command.argument || command.argument === "kanban") return { kind: "panel", panel: "Work item" };
+      await sdk.sessions.organize(session.id, { workItemId: command.argument === "clear" ? null : command.argument,
+        ...(command.argument === "clear" ? {} : { workItemUrl: null }) });
+      return { kind: "ok", message: command.argument === "clear" ? "Kanban work item cleared." : "Linked this project's Kanban card without running it." };
+    }
+    case "continue-work": {
+      if (command.argument && /\s/.test(command.argument)) throw new ClientError("project_work_input", "Use /continue-work or one exact Kanban card ID.");
+      const started = await sdk.kanban.continue(session.id, command.argument || undefined), task = await sdk.kanban.wait(started.id!);
+      if (!task.sessionId || ["failed", "cancelled", "partial"].includes(task.status)) throw new ClientError("project_work_preparation", task.diagnostic ?? "The original task did not admit a model. Inspect its retained intent.");
+      return { kind: "session", sessionId: task.sessionId, side: false };
+    }
+    case "kanban": {
+      if (!session.projectId) throw new ClientError("project_required", "Choose this board's actual project. No previous project was reused.");
+      const [action, value, page, confirmation, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!action) { const opened = await sdk.kanban.open(session.projectId); return { kind: "session", sessionId: opened.id!, side: false }; }
+      if (action === "work" && value && !page) return { kind: "text", text: JSON.stringify(await sdk.kanban.work(value), null, 2) };
+      if (action === "stop" && value && !page) { await sdk.kanban.cancel(value); return { kind: "ok", message: "Stop requested for the original task. Inspect its actual retained outcome." }; }
+      if (action === "inspect" && value && page && /^\d+$/.test(page) && confirmation === "confirm-inspected" && !extra) {
+        await sdk.kanban.inspect(value, Number(page), true); return { kind: "ok", message: "Inspection recorded. Original work was not replayed or deleted." };
+      }
+      if (action === "items" && !confirmation && !extra) return { kind: "text", text: JSON.stringify(await sdk.kanban.items(session.projectId,
+        parse(KanbanSourceSchema, value ?? "kanban"), page && /^\d+$/.test(page) ? Number(page) : page ? Number.NaN : 1), null, 2) };
+      const board = (await sdk.issues.board(session.projectId)).board, current = kanbanPreferences(board);
+      if ((action === "show" || action === "hide") && !value) await sdk.issues.configure(session.projectId, { ...board, kanban: { ...current, visible: action === "show" } }, board.revision);
+      else if (action === "source" && value && !page) await sdk.issues.configure(session.projectId, { ...board, kanban: { ...current, source: parse(KanbanSourceSchema, value) } }, board.revision);
+      else throw new ClientError("kanban_input", "Use /kanban [show|hide|source SOURCE|items [SOURCE] [PAGE]|work RUN|stop RUN|inspect RUN REV confirm-inspected].");
+      return { kind: "ok", message: "Shared project Kanban preference saved. No model, sync or scheduled work was started." };
+    }
     case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
       return toolingSlash(sdk, session.id, command.name, command.argument);
     case "review": case "security": case "performance": case "debug": {

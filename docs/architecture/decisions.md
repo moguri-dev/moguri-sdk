@@ -77,6 +77,14 @@ The protocol-60 session-navigation follow-up keeps the same stack and owner
 lifecycle, removes Global Terminal surfaces and the session grip, and adds
 revision-bound child-detachment review with a profile-owned opt-out.
 
+The owner-requested [protocol-62 project Kanban/pricing follow-up](project-kanban.md)
+reuses those primitives for a project board chat, one explicitly delegated
+Local item through its draft PR, native project context menus/reordering and
+originating-provider API-equivalent estimates. It adds no agent framework,
+scheduler, credential forwarding or inferred billed costs. The contract
+records prerequisite measurements, cancellation/no-replay boundaries and the
+separate actual-user consent required for finite USD reference-rate admission.
+
 ## D01. Build from zero with borrowed libraries
 
 **Decision.** Moguri owns its domain model, event store, protocol, local service and clients. It does not fork OpenCode or Pi. Maintained libraries supply providers, MCP, PTYs, terminal rendering, diffs, SQLite and UI toolkits.

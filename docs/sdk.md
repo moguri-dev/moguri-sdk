@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **61**, including
+Current source uses protocol **62**, including
+[project Kanban continuation and provider-equivalent prices](architecture/project-kanban.md),
 [remembered approvals and repository-aware GitHub workflows](architecture/session-github-workflows.md),
 [skill gateway and graphic workspace dashboards](architecture/workspace-experience.md),
 [lean tools and coordinated sessions](architecture/lean-tooling.md),
@@ -879,6 +880,8 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `jobs` | Wait or explicitly cancel. A wait timeout/disconnection does not cancel or retry the service's job. |
 | `sandbox` | Truthful readiness/configuration diagnostics. Configuration is not proof of a qualified SendBox transport. |
 | `issues` | Local feature/bug/misc board, create/update/move/archive, revision-checked phases and read-only linked-PR refresh. |
+| `kanban` | One special project chat, shared source/visibility preferences, paged local/GitHub work, one actual-user delegated Local task to its PR, retained read/wait/cancel and exact settled-task inspection. |
+| `prices` | Originating-provider API-equivalent references, exact model/name matches and explicit official public refresh; no inference, authentication, historical repricing or billed-cost claim. |
 | `cache` | Local plan inspection, explicit metadata-sharing consent, integrity-verified archive preparation and script-free managed install. |
 | `linear` | Optional team-scoped read-only page import, status and user-only OS-keychain credential setup. |
 | `sessions` | Revisioned controls/modelOptions, local context preview, rename/mode/pin/unread/group/attach/delete, explicit side/agent children and work-item/verified-PR context. Side sessions cannot acquire write authority. |
@@ -1497,12 +1500,25 @@ effective session/profile caps and unavailable-unit diagnostics.
 `budgets.policy(limitOrNull, observedRevision, true)` is a separate explicit
 profile-policy action; settings/default resets never lift it.
 
-USD admission requires a fresh model-specific
+USD admission requires either a fresh model-specific
 `settings.values.budgets.rates` entry with canonical `modelId`,
 `inputUsdPerMillion`, `outputUsdPerMillion`, UTC `effectiveAt` date and
-`source:"user-estimate"`. Default rates are empty, not Copilot zero prices.
-The configured conservative input rate includes cache categories; provider
-totals are never increased by adding those categories twice.
+`source:"user-estimate"`, or explicit
+`settings.values.budgets.useProviderRatesForLimits: true` consent for fresh
+originating-provider references. `providerEstimates` defaults on; finite-limit
+consent defaults off. An existing stale manual override is not replaced.
+`prices.catalog()` exposes reference dates, canonical source/digest, model
+matches and unknown-price diagnostics. `prices.refresh(providers?, revision?)`
+returns an original `pricing.refresh` job. Wait/cancel through `jobs`; failed
+refresh preserves the prior catalog. Calls capture their historical
+`provider-api-equivalent` or `user-estimate` rate. Unknowns remain unpriced;
+`providerReportedUsd` and `billedUsd` remain separate/null.
+
+Reference prices deliberately assume the named originating model's API cost
+through Copilot/resellers, not their invoices. Known cache subsets are priced
+once, long-context thresholds are explicit, and unspecified write TTL uses the
+maximum listed write rate. The manual conservative input override still covers
+every input category. No provider total is inflated by adding cache twice.
 
 Reservation and `model.started` commit before the real worker is authorized.
 The actual reduced output limit reaches maintained pi-ai. Complete reports
@@ -1978,6 +1994,28 @@ while Moguri runs, unless the board disables it. Choose the public API or an
 explicit signed-in GitHub CLI account. A verified merge advances to
 `mergedColumnId`; closed/unknown/failed checks and stale responses never do.
 
+Protocol 62 adds optional
+`kanban: {visible, source:"kanban"|"github-issues"|"github-prs", phaseIds}`.
+Old boards default visible with in-progress/backlog eligible.
+`kanban.open(projectId)` opens/returns the one special idle chat, without
+inference. `sessions.organize(id,{workItemId}, revision?)` links only a card from
+that same project; set `workItemUrl:null` when replacing a GitHub item.
+
+`kanban.continue(originSessionId, issueId?, expectedDraftRevision?)` is explicit
+actual-user delegation for one Local task, isolated worktree, branch push and
+draft PR. Optional draft consumption accepts only the exact continuation text
+and revision, never unrelated edits/attachments. `kanban.work(runId)` reads the
+independent source/report; `kanban.wait(runId)` waits only for preparation to
+settle, not for the PR. `kanban.cancel(runId)` requests actual owned stop.
+`kanban.inspect(runId,revision,true)` releases a terminal interrupted source
+claim only after jobs/turns settle; it neither resumes nor deletes work.
+Model/owner/caps, numeric account and source/root bindings are retained. An
+exact `continue work` user submission uses this same path; held/recovered or
+model-authored text cannot acquire it. Failed/restarted work never replays.
+The model-only `project_work` tool reads paged board sources and publishes only
+its already retained exact task. Publication ends the turn without another
+paid call or executing remaining same-response tools.
+
 Linear is off by default. Enable one team in the board, store the user's
 personal API key with `linear.setToken` and explicitly call `linear.import`.
 Each page imports at most 50 tickets, preserves provenance and existing local
@@ -1992,6 +2030,14 @@ moguri issues list PROJECT_ID
 moguri issues create PROJECT_ID issue.json
 moguri issues move ISSUE_ID in-progress --revision 0
 moguri issues configure PROJECT_ID board.json --revision 0
+moguri kanban open PROJECT_ID
+moguri kanban items PROJECT_ID github-issues 1
+moguri kanban continue ORIGIN_SESSION_ID
+moguri kanban work RUN_ID
+moguri kanban stop RUN_ID
+moguri kanban inspect RUN_ID --revision N --confirm-review
+moguri prices
+moguri prices refresh anthropic
 moguri cache inspect PROJECT_ID npm
 moguri cache prepare PROJECT_ID npm PLAN_SHA256 --accept-dependency-metadata
 moguri cache install PROJECT_ID npm PLAN_SHA256 --accept-dependency-metadata
@@ -2000,7 +2046,8 @@ moguri linear import PROJECT_ID
 
 `issue.json` has exactly `title`, `body`, `kind`, `phaseId` and nullable
 `pullRequestUrl`. `board.json` has `columns`, `mergedColumnId`, `autoRefreshPrs`,
-`githubAccess` and `linear: { enabled, teamId }`. Update/move/archive/configure
+`githubAccess`, `linear: { enabled, teamId }` and optional `kanban`.
+Update/move/archive/configure
 require the observed `--revision`. `linear token` reads piped stdin instead of
 shell arguments; TUI `/linear token` uses a dedicated masked editor.
 

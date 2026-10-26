@@ -51,10 +51,12 @@ export class ManagedWorkspaces {
     try { return this.host.job(kind, projectId, execute, start, () => { this.active.delete(id); this.host.wake(); }, id); }
     catch (error) { this.active.delete(id); throw error; }
   }
-  private git(project: Project, args: string[], signal: AbortSignal, extra: string[] = []) {
+  private git(project: Project, args: string[], signal: AbortSignal, extra: string[] = [], network = false) {
     return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false", ...extra, "--literal-pathspecs", ...args], {
       cwd: project.path, signal, timeoutMs: 30_000, maxBytes: 512 * 1024, label: "Managed workspace Git operation",
-      env: { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_LFS_SKIP_SMUDGE: "1", GIT_TERMINAL_PROMPT: "0" },
+      env: { ...(!network ? { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } : {}),
+        ...(network && process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
+        GIT_LFS_SKIP_SMUDGE: "1", GIT_TERMINAL_PROMPT: "0" },
     });
   }
   private async filters(project: Project, signal: AbortSignal): Promise<string[]> {
@@ -163,7 +165,8 @@ export class ManagedWorkspaces {
     if (query.type === "session.files") return { type: query.type, path: query.path, entries: (await listProjectFiles(project.path, query.path)).filter((entry) => !matchesFolder(entry, settings.deniedFolders)) };
     return { type: query.type, ...await readProjectFile(project.path, query.path) };
   }
-  async execute(command: ManagedWorkspaceCommand, finish: WorkspaceFinish): Promise<CommandResult> {
+  async execute(command: ManagedWorkspaceCommand, finish: WorkspaceFinish,
+    taskBase?: { remote: string; ref: string; commit: string; sourceWorkspaceId: string | null; expectedUrl: string }): Promise<CommandResult> {
     if (command.type === "session.workspace") {
       const session = this.session(command.sessionId);
       if (session.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "Session changed. Reload before binding a workspace.", 409);
@@ -174,17 +177,25 @@ export class ManagedWorkspaces {
     }
     if (!this.host.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("workspace_env", "Local Git workspace maintenance is excluded by allowed-env policy. No protected-environment fallback.", 403);
     if (command.type === "workspace.create") {
-      const project = this.host.project(command.projectId), settings = this.settings().configuration(project.id);
+      const currentProject = () => taskBase ? this.project({ projectId: command.projectId, workspaceId: taskBase.sourceWorkspaceId }) : this.host.project(command.projectId);
+      const project = currentProject(), settings = this.settings().configuration(project.id);
       if (command.branch === settings.values.repo.mainBranch || ["main", "master"].includes(command.branch)) throw new MoguriError("workspace_branch", "Use a new non-protected work branch. Managed creation does not replace main/master.");
       const signal = AbortSignal.timeout(15_000);
       await this.git(project, ["check-ref-format", "--branch", command.branch], signal);
-      const baseCommit = (await this.git(project, ["rev-parse", "--verify", "--end-of-options", `${command.baseRef ?? settings.values.repo.mainBranch}^{commit}`], signal)).trim();
+      if (taskBase && (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(taskBase.remote) ||
+        !/^refs\/(?:heads\/[A-Za-z0-9][A-Za-z0-9._/-]{0,239}|pull\/[1-9][0-9]*\/head)$/.test(taskBase.ref) ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(taskBase.commit) || taskBase.commit !== command.baseRef)) {
+        throw new MoguriError("workspace_task_base", "The owned task needs one exact captured remote ref/commit, not an arbitrary fetch or root.", 403);
+      }
+      const baseCommit = taskBase?.commit ?? (await this.git(project, ["rev-parse", "--verify", "--end-of-options", `${command.baseRef ?? settings.values.repo.mainBranch}^{commit}`], signal)).trim();
+      const remoteUrl = taskBase ? (await this.git(project, ["remote", "get-url", "--", taskBase.remote], signal, [], true)).trim() : null;
+      if (taskBase && remoteUrl !== taskBase.expectedUrl) throw new MoguriError("workspace_task_base", "The captured source fetch destination changed before intent. No different repository was fetched.", 409);
       const common = await realpath((await this.git(project, ["rev-parse", "--path-format=absolute", "--git-common-dir"], signal)).trim());
       const disabledFilters = await this.filters(project, signal);
-      if (this.settings().configuration(project.id).revision !== settings.revision || this.host.project(project.id).path !== project.path) throw new MoguriError("workspace_changed", "Project configuration/root changed during worktree planning. Nothing was created.", 409);
+      if (this.settings().configuration(project.id).revision !== settings.revision || currentProject().path !== project.path) throw new MoguriError("workspace_changed", "Project configuration/root changed during worktree planning. Nothing was created.", 409);
       if (command.issueId && !this.host.snapshot().issues.some((issue) => issue.id === command.issueId && issue.projectId === project.id)) throw new MoguriError("workspace_issue", "Choose an existing ticket from this project.");
       const id = randomUUID(), changeSetId = randomUUID(), parent = await this.parent(project.id);
-      if (!this.host.snapshot().policy.allowedEnvs.includes("Local") || this.settings().configuration(project.id).revision !== settings.revision || this.host.project(project.id).path !== project.path) throw new MoguriError("workspace_changed", "Project/policy changed during preparation. No Git mutation was admitted.", 409);
+      if (!this.host.snapshot().policy.allowedEnvs.includes("Local") || this.settings().configuration(project.id).revision !== settings.revision || currentProject().path !== project.path) throw new MoguriError("workspace_changed", "Project/policy changed during preparation. No Git mutation was admitted.", 409);
       const prUrl = command.prUrl ? pullRequestLink(command.prUrl).url : null;
       let workspace: ManagedWorkspace = { id, projectId: project.id, path: join(parent, id), branch: command.branch, baseCommit, gitCommonDir: common, status: "creating", revision: 0, createdAt: new Date().toISOString(), jobId: null, diagnostic: null, identity: null, changeSetId };
       this.job(id, "workspace.create", project.id, async (signal, progress) => {
@@ -192,6 +203,20 @@ export class ManagedWorkspaces {
         try {
           progress("Creating an owned isolated checkout; hooks, filters and submodule fetching stay disabled.");
           started = true;
+          if (taskBase) {
+            const currentRemote = (await this.git(project, ["remote", "get-url", "--", taskBase.remote], signal, [], true)).trim();
+            if (currentRemote !== remoteUrl || currentProject().path !== project.path || this.settings().configuration(project.id).revision !== settings.revision ||
+              !this.host.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("workspace_task_base", "The captured task remote/root or policy changed before fetch.", 409);
+            const expected = `${taskBase.commit}\t${taskBase.ref}`;
+            if ((await this.git(project, ["ls-remote", "--refs", "--", taskBase.remote, taskBase.ref], signal, disabledFilters, true)).trim() !== expected) {
+              throw new MoguriError("workspace_task_base", "The exact remote source ref changed before capture. No replacement commit or account was inferred.", 409);
+            }
+            await this.git(project, ["fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--", taskBase.remote, taskBase.ref], signal, disabledFilters, true);
+            await this.git(project, ["cat-file", "-e", `${taskBase.commit}^{commit}`], signal, disabledFilters);
+            if ((await this.git(project, ["ls-remote", "--refs", "--", taskBase.remote, taskBase.ref], signal, disabledFilters, true)).trim() !== expected) {
+              throw new MoguriError("workspace_task_base", "The remote source moved during capture. Objects and intent were retained; no task or fetch was replayed.", 409);
+            }
+          }
           await this.git(project, ["worktree", "add", "--no-checkout", "--lock", "--reason", `Moguri ${id}`, "-b", workspace.branch, workspace.path, baseCommit], signal, disabledFilters);
           const target = { ...project, path: workspace.path };
           await this.git(target, ["read-tree", baseCommit], signal, disabledFilters);

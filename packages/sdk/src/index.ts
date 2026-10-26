@@ -13,6 +13,8 @@ import { createGithubApi } from "./github.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
 import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
 import type { RememberApproval } from "../../protocol/src/permissions.ts";
+import type { KanbanSource } from "../../protocol/src/kanban.ts";
+import { PRICE_PROVIDERS, type PriceProvider } from "../../protocol/src/pricing.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
@@ -37,6 +39,32 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly github = createGithubApi(this);
+  readonly prices = {
+    catalog: () => this.query({ type: "pricing.catalog" }),
+    refresh: (providers: PriceProvider[] = [...PRICE_PROVIDERS], expectedRevision = this.getState().snapshot?.providerPriceRevision) => {
+      if (expectedRevision === undefined) throw new ClientError("pricing_missing", "Connect before refreshing this profile's provider references.");
+      return this.command({ type: "pricing.refresh", providers, expectedRevision });
+    },
+  };
+  readonly kanban = {
+    open: (projectId: string) => this.command({ type: "kanban.open", projectId }),
+    items: (projectId: string, source: KanbanSource = "kanban", page = 1, sessionId?: string) => this.query({ type: "kanban.items", projectId, source, page, ...(sessionId ? { sessionId } : {}) }),
+    continue: (sessionId: string, issueId?: string, expectedDraftRevision?: number) => this.command({ type: "project.work.start", sessionId,
+      ...(issueId ? { issueId } : {}), ...(expectedDraftRevision !== undefined ? { consumeDraft: { expectedRevision: expectedDraftRevision } } : {}) }),
+    work: (runId: string) => this.query({ type: "project.work.read", runId }),
+    wait: async (runId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
+      const deadline = Date.now() + (options.timeoutMs ?? 120000);
+      for (;;) {
+        options.signal?.throwIfAborted();
+        const { run } = await this.kanban.work(runId);
+        if (run.status !== "preparing") return run;
+        if (Date.now() >= deadline) throw new ClientError("project_work_wait", `The original task ${runId} is still preparing. Inspect it; do not start a replacement.`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    },
+    cancel: (runId: string) => this.command({ type: "project.work.cancel", runId }),
+    inspect: (runId: string, expectedRevision: number, confirmInspection: true) => this.command({ type: "project.work.inspect", runId, expectedRevision, confirmInspection }),
+  };
   readonly approvals = {
     respond: (sessionId: string, approvalId: string, allow: boolean, remember?: RememberApproval) =>
       this.command({ type: "approval.respond", sessionId, approvalId, allow, ...(remember ? { remember } : {}) }),
@@ -730,7 +758,8 @@ export class MoguriSdk extends TransportClient {
   readonly issues = {
     board: (projectId: string) => this.query({ type: "board.get", projectId }),
     configure: (projectId: string, config: BoardConfig, expectedRevision: number) => this.command({ type: "board.save", projectId,
-      config: { columns: config.columns, mergedColumnId: config.mergedColumnId, autoRefreshPrs: config.autoRefreshPrs, githubAccess: config.githubAccess, linear: config.linear }, expectedRevision }),
+      config: { columns: config.columns, mergedColumnId: config.mergedColumnId, autoRefreshPrs: config.autoRefreshPrs, githubAccess: config.githubAccess, linear: config.linear,
+        ...(config.kanban ? { kanban: config.kanban } : {}) }, expectedRevision }),
     create: (projectId: string, fields: IssueInput) => this.command({ type: "issue.create", projectId, ...fields }),
     update: (issueId: string, fields: IssueInput, expectedRevision: number) => this.command({ type: "issue.update", issueId, ...fields, expectedRevision }),
     move: (issueId: string, phaseId: string, expectedRevision: number) => this.command({ type: "issue.move", issueId, phaseId, expectedRevision }),

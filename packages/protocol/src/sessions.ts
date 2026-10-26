@@ -67,6 +67,7 @@ export const SessionChangesSchema = object({
   order: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
   groupId: Type.Optional(nullableId), parentSessionId: Type.Optional(nullableId), prUrl: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()])),
   workItemUrl: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()])),
+  workItemId: Type.Optional(nullableId),
 });
 export type SessionChanges = Static<typeof SessionChangesSchema>;
 export const SessionWorkspaceCommandSchema = Type.Union([

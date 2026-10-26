@@ -15,6 +15,7 @@ import { performance } from "node:perf_hooks";
 import { executeDataTool } from "./data-tools.ts";
 import { searchWeb } from "./web-search.ts";
 import type { OwnedDebugRuntime, DebugProcessOutcome } from "./owned-debug.ts";
+import { ProjectWorkReadSchema } from "../../../packages/protocol/src/kanban.ts";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 export const tools: Tool[] = [
@@ -63,7 +64,7 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
   if (readOnly) return [];
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
     .filter((tool) => tool.name !== "fetch_page" || scope.env === "Sandbox")
-    .filter((tool) => !["command_job", "create_issue"].includes(tool.name) || scope.env === "Local")
+    .filter((tool) => !["command_job", "create_issue", "project_work"].includes(tool.name) || scope.env === "Local")
     .filter((tool) => tool.name !== "diff_files" || scope.env !== "Sandbox")
     .filter((tool) => !isDocumentTool(tool.name) || scope.documents)
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
@@ -71,6 +72,7 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
     .filter((tool) => !scope.metachat || tool.name === "moguri_config" || tool.name === "ask_user")
     .filter((tool) => scope.env !== "Sandbox" || ["discover_tools", "read_tool_result", "clock", "web_search", "web_fetch", "fetch_page", "ask_user", "task_progress", "list_documents", "read_document", "search_document", ...fileTools, "run_command", "read_agent_terminal"].includes(tool.name))
     .filter((tool) => mode !== "read-only" || readTools.has(tool.name) || scope.coordinator && tool.name === "session_control")
+    .map((tool) => tool.name === "project_work" && mode === "read-only" ? { ...tool, parameters: ProjectWorkReadSchema } : tool)
     .filter((tool) => !folders || !folders.denied.length && !folders.readOnly.length || !["run_command", "command_job", "mcp_gateway", "debug", "diff_files"].includes(tool.name))
     .filter((tool) => tool.name !== "run_subagent" || settings.subagents.enabled)
     .filter((tool) => !tool.name.startsWith("propose_") || settings.evolution.enabled)
@@ -97,8 +99,8 @@ export function validateTool(call: ToolCall): void {
     if (Buffer.byteLength(JSON.stringify(call.arguments)) > (call.name === "create_issue" ? 512 : 256) * 1024) throw new MoguriError("tool_input_limit", "Structured arguments exceed their complete byte bound. Use a smaller explicit operation.");
   }
 }
-export async function executeTool(root: string | null, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall) => Promise<{ text: string; isError: boolean; outcome: string }>, safety?: { mode: SessionMode; folders: FolderPolicy; env?: Controls["env"] }, catalog?: Tool[],
-  debuggerOwner?: { runtime: OwnedDebugRuntime; ended(pid: number, outcome: DebugProcessOutcome): Promise<void> }): Promise<{ text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean }> {
+export async function executeTool(root: string | null, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall) => Promise<{ text: string; isError: boolean; outcome: string; endTurn?: true }>, safety?: { mode: SessionMode; folders: FolderPolicy; env?: Controls["env"] }, catalog?: Tool[],
+  debuggerOwner?: { runtime: OwnedDebugRuntime; ended(pid: number, outcome: DebugProcessOutcome): Promise<void> }): Promise<{ text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean; endTurn?: true }> {
   signal.throwIfAborted();
   validateTool(call);
   if (safety?.mode === "read-only" && !readTools.has(call.name) && call.name !== "session_control") throw new MoguriError("read_only", "Edit and execution tools are disabled for this read-only session.", 403);

@@ -32,6 +32,7 @@ const artifactIdentity = (input: EventInput): string | null => input.event_type 
   input.event_type === "notification.sound_saved" ? `notification-sound/${input.payload.sound.id}` :
   input.event_type === "github.operation_recorded" || input.event_type === "linear.operation_recorded" ? input.payload.operation.id :
   input.event_type === "knowledge.saved" ? `knowledge/${input.payload.record.id}` :
+  input.event_type === "project.work_recorded" ? `project-work/${input.payload.run.id}` :
   input.event_type === "sandbox.execution_recorded" ? input.payload.execution.id :
   input.event_type === "sandbox.frame_recorded" ? input.payload.executionId :
   input.event_type === "sandbox.publication_recorded" ? input.payload.publication.id :
@@ -62,6 +63,7 @@ function references(input: EventInput): string[] {
     case "github.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.reviewDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "linear.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "knowledge.saved": return [input.payload.record.contentDigest];
+    case "project.work_recorded": return [input.payload.run.source.contentDigest];
     case "sandbox.workspace_recorded": return [input.payload.workspace.inputDigest];
     case "sandbox.execution_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((hash): hash is string => hash !== null);
     case "sandbox.publication_recorded": return [input.payload.publication.inputDigest, input.payload.publication.resultDigest,
@@ -123,6 +125,10 @@ export class EventStore {
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
+      if (version < 62 && this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get() &&
+        this.db.prepare("SELECT value FROM retention_metadata WHERE id='project_kanban_schema'").get()) {
+        throw new Error("Invalid pre-62 project Kanban lineage marker. State was preserved.");
+      }
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON");
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -341,6 +347,16 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_workflows_schema'").get()?.value !== "1" ||
         this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_convergence_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid session/GitHub workflow schema marker. State was preserved.");
+      }
+      const kanbanMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='project_kanban_schema'").get();
+      if (version < 62) {
+        if (kanbanMarker) throw new Error("Invalid pre-62 project Kanban lineage marker. State was preserved.");
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('project_kanban_schema','1');
+          PRAGMA user_version=62; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='project_kanban_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid project Kanban schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }

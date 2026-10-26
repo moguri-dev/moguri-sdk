@@ -80,6 +80,9 @@ import { parse } from "../../../packages/protocol/src/core.ts";
 import { GitHubWorkflows, type GitHubWorkflowOptions } from "./github-workflows.ts";
 import { LinearWorkflows, type LinearWorkflowOptions } from "./linear-workflows.ts";
 import { isGithubCommand, isGithubQuery } from "../../../packages/protocol/src/github-workflows.ts";
+import { isKanbanCommand, isKanbanQuery, type KanbanCommand, type KanbanQuery, type KanbanResponse } from "../../../packages/protocol/src/kanban.ts";
+import { isPricingCommand, isPricingQuery } from "../../../packages/protocol/src/pricing.ts";
+import { effectivePriceCatalogs, fetchProviderPrices, pricingCatalog, type PricingOptions } from "./provider-pricing.ts";
 import { isLinearCommand, isLinearQuery } from "../../../packages/protocol/src/linear-workflows.ts";
 import type { WorkflowHost } from "./workflow-host.ts";
 import { TaskProgressRuntime } from "./task-progress.ts";
@@ -132,6 +135,8 @@ export interface PlatformHost {
   compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult;
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
   toolingQuery?(query: ToolingQuery): ToolingResponse | Promise<ToolingResponse>;
+  kanbanQuery(query: KanbanQuery): Promise<KanbanResponse>;
+  kanbanCommand(command: KanbanCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   coordinationQuery?(query: CoordinationQuery): CoordinationResponse;
   generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleProposal(id: string): import("../../../packages/protocol/src/index.ts").CandidateRoleProposalRead;
@@ -163,11 +168,11 @@ export interface PlatformHost {
   remoteMcpTools(session: Session, server: McpServerConfig | null): Promise<McpToolInfo[]>;
   globalBudget?: () => import("../../../packages/protocol/src/index.ts").GlobalBudgetCapacity;
   foreignRootBusy(root: string): boolean;
-  localRootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean): boolean;
+  localRootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean, ownerSessionId?: string): boolean;
   cloneRootBusy(root: string, exceptJobId?: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions }
 export class PlatformRuntime {
   readonly browser: BrowserBroker;
   readonly knowledge: TieredKnowledge;
@@ -322,7 +327,7 @@ export class PlatformRuntime {
       assertRoot: async (projectId, workspaceId, signal) => {
         signal.throwIfAborted(); await this.managed.assert({ projectId, workspaceId: workspaceId ?? null }); signal.throwIfAborted();
       },
-      rootBusy: (root, exceptJobId, permitRebaseRecovery) => host.localRootBusy(root, exceptJobId, permitRebaseRecovery) || this.snapshot().terminals.some((terminal) =>
+      rootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => host.localRootBusy(root, exceptJobId, permitRebaseRecovery, ownerSessionId) || this.snapshot().terminals.some((terminal) =>
         terminal.env === "Local" && terminal.binding?.root === root && !["closed", "failed", "acknowledged"].includes(terminal.status)),
       closing: host.closingProject, commit: host.commit,
       job: (kind, projectId, workspaceId, execute, start, settled, lifecycle, sessionId) =>
@@ -590,6 +595,13 @@ TUI source setup, from an authorized checkout of that repository: Node.js >=26.4
 TUI keys: Enter sends, Shift+Enter inserts a newline, Cmd/Ctrl+Enter holds without running, Shift+Cmd/Ctrl+Enter sends now. Ctrl+L starts explicit Copilot sign-in; Ctrl+M selects a model. Configured local models are a separate option. Setup facts are not authorization to authenticate or run installation.
 Use these known first-party facts for Moguri setup questions instead of asking the user for Moguri's repository or installation guide. Distinguish this known setup from an unobserved installed version, account entitlement or terminal capability. These facts grant no execution, permission or policy change.
 </moguri-product-context>
+${session?.purpose === "kanban" ? `
+<moguri-kanban-context>
+This is this project's special Kanban chat. The authoritative board and explicit Linear imports are service-owned, not repository Markdown or a filesystem database.
+Discover project_work and use action read to see actual cards or explicitly selected open GitHub sources. Respect disclosed pagination and inspect retained full output when clipped.
+An actual-user Continue work action creates one visible delegated task in an isolated Local checkout and stops at its draft PR. This board chat is not that task; it cannot manufacture the task's publication grant.
+Do not interpret a recovered or formerly held continuation prompt as a new autonomous task. Explain how to use Continue work or /continue-work instead of editing this original checkout, inventing cards or claiming a PR exists.
+</moguri-kanban-context>` : ""}
 
 <moguri-execution-contract>
 Project: ${project ? session?.controls.env === "Remote" ? this.sessions.projects.configuration(project.id).values.remotePath ?? "(remote workspace not configured)" : project.path : "(no active project)"}
@@ -658,6 +670,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }));
   }
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
+    if (isPricingQuery(query)) return pricingCatalog(this.snapshot(), this.options.pricing?.now?.());
+    if (isKanbanQuery(query)) return this.host.kanbanQuery(query);
     if (query.type === "dashboard.overview") return dashboardOverview(this.snapshot(), this.host.events(), this.budgets, query);
     if (isSkillGatewayQuery(query)) return this.skills.query(query, signal);
     if (query.type === "coordination.preview" || query.type === "coordination.read") {
@@ -985,6 +999,22 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     return { id: request.id, token: lease.token };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isPricingCommand(command)) {
+      const revision = this.snapshot().providerPriceRevision;
+      if (command.expectedRevision !== revision) throw new MoguriError("pricing_conflict", "Provider references changed. Reload before another exact refresh.", 409);
+      const id = this.job("pricing.refresh", null, null, async (signal, progress) => {
+        progress("Reading only the selected official public price pages, without accounts, tokens or model requests.");
+        const refreshed = await Promise.all(command.providers.map((provider) => fetchProviderPrices(provider, signal, this.options.pricing)));
+        signal.throwIfAborted();
+        if (this.snapshot().providerPriceRevision !== revision) throw new MoguriError("pricing_conflict", "Another client refreshed prices. Its catalog was preserved; no partial overwrite.", 409);
+        const catalogs = effectivePriceCatalogs(this.snapshot()).map((catalog) => refreshed.find((fresh) => fresh.provider === catalog.provider) ?? catalog);
+        this.host.commit([{ event_type: "pricing.catalog_recorded", profile_id: this.snapshot().profileId,
+          payload: { actor: "user", revision: revision + 1, catalogs } }]);
+        return { providers: command.providers, revision: revision + 1, diagnostic: "Official numerical reference data refreshed. Historical calls were not repriced; subscription/billed costs remain separate." };
+      });
+      return finish([], { id });
+    }
+    if (isKanbanCommand(command)) return this.host.kanbanCommand(command, finish);
     if (command.type === "workflow.start") throw new MoguriError("workflow_authority", "Workflows use the shared session admission/receipt path.", 403);
     if (command.type === "coordination.grant" || command.type === "coordination.message" || command.type === "coordination.control") throw new MoguriError("coordination_authority", "Coordination needs the canonical service command/receipt authority.", 403);
     if (command.type === "tooling.execute" || command.type === "tooling.command.acknowledge") throw new MoguriError("tooling_authority", "Tool jobs require the canonical service command/receipt authority.", 403);
