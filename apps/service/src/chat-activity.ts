@@ -109,6 +109,9 @@ export class ChatActivity {
         modelEnds.set(event.payload.message.id, event);
         if (!messageOrder.has(event.payload.message.id)) messageOrder.set(event.payload.message.id, event.seq);
       }
+      if (event.event_type === "routing.response_selected") {
+        messageOrder.set(event.payload.sourceStepId, event.seq); modelUpdates.set(event.payload.sourceStepId, event.seq);
+      }
       if (event.step_id && ["model.started", "assistant.delta", "model.completed", "model.late_usage"].includes(event.event_type)) modelUpdates.set(event.step_id, event.seq);
       if (event.event_type === "turn.finished") messageOrder.set(event.id, event.seq);
       if (event.event_type === "tool.requested" || event.event_type === "tool.started" || event.event_type === "tool.completed") {
@@ -149,7 +152,8 @@ export class ChatActivity {
     const ordinary = new Set(["solver", "side", "subagent", "revision", "escalation"]);
     for (const message of session.messages.filter((message) => message.role === "assistant")) {
       const start = modelStarts.get(message.id), end = modelEnds.get(message.id), usage = session.usage.find((usage) => usage.stepId === message.id);
-      if (!start || !usage || !ordinary.has(usage.role)) continue;
+      if (!start || !usage || !ordinary.has(usage.role) && !snapshot.routings.some((routing) => routing.sessionId === session.id &&
+        routing.turnId === message.turnId && routing.selectedStepIds?.includes(message.id))) continue;
       const reasoning = message.reasoning || null, output = reasoning ?? (message.text || null), complete = Boolean(end);
       const entry: ActivityEntry = {
         id: digest(json(["public-model-activity", profileId, session.id, message.turnId, message.id])), sessionId: session.id, turnId: message.turnId,

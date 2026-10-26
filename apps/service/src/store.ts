@@ -79,6 +79,7 @@ function references(input: EventInput): string[] {
     case "skill.used": return [input.payload.contentDigest];
     case "steer.applied": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "model.completed": return [input.payload.contextDigest];
+    case "routing.response_selected": return [input.payload.contextDigest];
     case "capability.saved": return [input.payload.entry.contentDigest];
     case "capability.proposed": return [input.payload.proposal.contentDigest];
     case "artifact.saved": return [input.payload.artifact.contentDigest];
@@ -302,6 +303,18 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_schema'").get()?.value !== "1" ||
         this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_convergence_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid lean tooling/convergence schema marker. State was preserved.");
+      }
+      if (version < 59) {
+        if (this.events().some((event) => event.event_type === "routing.response_selected" ||
+          event.event_type === "routing.started" && event.payload.routing.policy.workflow === "auto" ||
+          event.event_type === "model.started" && event.payload.kupoPhase ||
+          event.event_type === "model.completed" && event.payload.kupo)) throw new Error("Automatic Kupo history cannot be relabelled as a pre-59 schema. Original state was preserved.");
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('automatic_kupo_schema','1');
+          PRAGMA user_version=59; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='automatic_kupo_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid automatic Kupo schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }

@@ -371,7 +371,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 59 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
@@ -934,7 +934,7 @@ try {
       const guidedArtifact=beta.getState().snapshot.artifacts.find(value=>value.questionId===pending.id);
       assert.match((await beta.artifacts.read(guidedArtifact.id)).text,/Model recommendation \\(not a user answer\\)/);
       assert.deepEqual(beta.routing.policy(),defaultKupoSettings());
-      await beta.routing.configure({...defaultKupoSettings(),enabled:true,classifierModelId:generatedModel.id,approvedModelIds:[generatedModel.id],allowHosted:true},beta.settings.get().revision);
+      await beta.routing.configure({...${installedProtocol >= 59 ? "defaultSingleKupoSettings()" : "defaultKupoSettings()"},enabled:true,classifierModelId:generatedModel.id,approvedModelIds:[generatedModel.id],allowHosted:true},beta.settings.get().revision);
       const routed=await beta.sessions.create(null,"Generated installed Single");
       const installedSelection=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"slash","/model kupo","--session",routed.id,"--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
       assert.equal(JSON.parse(installedSelection.stdout).kind,"ok");
@@ -1037,6 +1037,24 @@ try {
         await invoke("/compact restore "+proposal.id+" "+active.sourceDigest+" confirm-restore");
         const restored=await beta.compactions.state(compact.id);assert.equal(restored.activeId,null);assert.equal(restored.estimatedTokens,restored.originalEstimatedTokens);
         assert.equal(generatedRequests.length,10);
+      }
+      if(PROTOCOL_VERSION>=59){
+        const previousPolicy=beta.routing.policy(),before=generatedRequests.length;
+        await beta.routing.configure(defaultKupoSettings(),beta.settings.get().revision);
+        assert.equal(beta.routing.policy().workflow,"auto");
+        assert.equal(beta.routing.capabilities("Local").length,1);
+        assert.equal(beta.routing.capabilities("Local")[0].modelId,generatedModel.id);
+        const automatic=await beta.sessions.create(null,"Generated installed automatic Kupo",{modelId:KUPO_MODEL_ID,autonomy:"Manual"});
+        await beta.command({type:"draft.save",sessionId:automatic.id,expectedRevision:0,text:"Generated installed automatic Kupo response.",attachments:[]});
+        await beta.command({type:"message.send",sessionId:automatic.id,expectedRevision:1,delivery:"queue"});
+        for(let n=0;n<400&&!["completed","partial","failed","stopped"].includes(beta.getState().snapshot.sessions.find(value=>value.id===automatic.id).status);n++)await new Promise(resolve=>setTimeout(resolve,20));
+        const settled=beta.getState().snapshot.sessions.find(value=>value.id===automatic.id);
+        assert.equal(settled.status,"completed");assert.equal(generatedRequests.length,before+1);
+        assert.deepEqual(settled.usage.map(value=>value.role),["solver"]);
+        assert.equal(beta.routing.history(automatic.id)[0].classifierStepId,null);
+        assert.equal(beta.routing.history(automatic.id)[0].plan.basis,"only-model");
+        await beta.routing.configure(previousPolicy,beta.settings.get().revision);
+        console.log("Installed protocol-59 Kupo catalogue, automatic default and capability inventory use the exact sole model through the real delivered worker without a classifier or extra permission.");
       }
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
       await sdk.profiles.globalBudget({basis:"estimate",tokens:rootCharges},0,true);

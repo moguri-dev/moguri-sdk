@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { MoguriSdk, KUPO_MODEL_ID, defaultKupoSettings, type BudgetEntry, type RoutingTurn } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, KUPO_MODEL_ID, defaultKupoSettings, defaultSingleKupoSettings, type BudgetEntry, type RoutingTurn } from "../packages/sdk/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
-test("schema 15 preserves both profiles' ciphertexts, receipts and retained grants while routing starts disabled", async () => {
+test("schema 15 preserves both profiles' ciphertexts, receipts and grants while adding visible automatic Kupo without inference", async () => {
   const fixture = await profileFixture();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
@@ -40,7 +40,7 @@ test("schema 15 preserves both profiles' ciphertexts, receipts and retained gran
       assert.equal(current.getState().snapshot!.sessions[0]?.id, first.id); assert.equal(scoped.getState().snapshot!.sessions[0]?.id, second.id);
       for (const client of [current, scoped]) {
         assert.deepEqual(client.routing.policy(), defaultKupoSettings()); assert.deepEqual(client.getState().snapshot!.routings, []);
-        assert.equal(client.getState().snapshot!.provider.models.some((model) => model.synthetic), false);
+        assert.equal(client.getState().snapshot!.provider.models.some((model) => model.id === KUPO_MODEL_ID), true);
       }
       assert.equal((await scoped.artifacts.read(artifact.id!)).text, "Generated unchanged retained routing bytes.");
       assert.equal(fixture.providers.reduce((sum, provider) => sum + provider.requests.length, 0), 0);
@@ -79,7 +79,7 @@ test("restart marks interrupted router/solver receipts partial, holds their rese
     const fixture = await setupFixture({ maxOutputTokens: 128 });
     let restarted: Awaited<ReturnType<typeof startService>> | undefined;
     try {
-      const policy = { ...defaultKupoSettings(), enabled: true, classifierModelId: fixture.modelId, approvedModelIds: [fixture.modelId], allowHosted: true };
+      const policy = { ...defaultSingleKupoSettings(), enabled: true, classifierModelId: fixture.modelId, approvedModelIds: [fixture.modelId], allowHosted: true };
       const settings = structuredClone(fixture.service.controller.snapshot().settings.values); settings.kupo = policy;
       const current = fixture.session(), controls = { ...current.controls, modelId: KUPO_MODEL_ID }, turnId = randomUUID(), stepId = randomUUID();
       const scope = { profile_id: "default", project_id: current.projectId, session_id: current.id, turn_id: turnId };

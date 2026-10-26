@@ -37,7 +37,7 @@ import { QuestionCommandSchema, type UserQuestion } from "./questions.ts";
 import { BudgetCommandSchema, BudgetQuerySchema, BudgetSettingsSchema, type BudgetResponse, type BudgetEntry, type BudgetLimit } from "./budgets.ts";
 import type { BudgetPlan } from "./budget-plans.ts";
 import { ProfileCommandSchema, ProfileQuerySchema, type ProfileResponse } from "./profiles.ts";
-import { KupoSettingsSchema, defaultKupoSettings, type RoutingTurn } from "./routing.ts";
+import { KupoSettingsSchema, defaultKupoSettings, type KupoCapability, type RoutingTurn } from "./routing.ts";
 import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
 import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type RemotePlanSave } from "./plan-saves.ts";
 import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
@@ -368,6 +368,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   planSaves: RemotePlanSave[];
   compactions: ContextCompaction[];
   routings: RoutingTurn[];
+  routingCapabilities?: KupoCapability[];
   questions: UserQuestion[];
   budgetEntries: BudgetEntry[];
   budgetPlans: BudgetPlan[];

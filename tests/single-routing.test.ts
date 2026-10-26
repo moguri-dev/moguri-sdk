@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
-import { MoguriSdk, KUPO_MODEL_ID, defaultKupoSettings, executeSlash } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, KUPO_MODEL_ID, defaultKupoSettings, defaultSingleKupoSettings, executeSlash } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
@@ -28,7 +28,7 @@ test("configured provider labels never substitute for an actual loopback boundar
   assert.equal(modelEndpointBoundary("http://[::1]:4321/v1"), "loopback");
   assert.equal(modelEndpointBoundary("https://generated-model.invalid/v1"), "network");
   const network = { id: "generated-network", name: "Generated nominally local provider", contextWindow: 8192, maxTokens: 128, imageInput: false, source: "local" as const, endpointBoundary: "network" as const };
-  const policy = { ...defaultKupoSettings(), enabled: true, classifierModelId: network.id, approvedModelIds: [network.id] };
+  const policy = { ...defaultSingleKupoSettings(), enabled: true, classifierModelId: network.id, approvedModelIds: [network.id] };
   assert.throws(() => kupoPool(policy, [network], "Local"), /classifier|hosted-data/i);
   assert.throws(() => kupoPool(policy, [{ ...network, endpointBoundary: undefined }], "Local"), /classifier|hosted-data/i);
   assert.equal(kupoPool({ ...policy, allowHosted: true }, [network], "Local").classifier.id, network.id);
@@ -62,15 +62,15 @@ test("a configured classifier cannot redirect private task data to another desti
   } finally { await fixture.close(); }
 });
 
-test("routing policy starts disabled, stays profile-scoped and needs an observed settings revision without selecting a model", async () => {
+test("automatic routing defaults stay profile-scoped and legacy Single needs an observed settings revision without selecting a model", async () => {
   const fixture = await profileFixture();
   try {
     const { client: beta } = await fixture.create("Generated explicit routing Beta"), first = await fixture.sdk.sessions.create(), second = await beta.sessions.create();
     assert.deepEqual(fixture.sdk.routing.policy(), defaultKupoSettings()); assert.deepEqual(beta.routing.policy(), defaultKupoSettings());
     const revision = fixture.sdk.settings.get()!.revision;
-    await fixture.sdk.routing.configure({ ...defaultKupoSettings(), enabled: true, classifierModelId: fixture.providers[0]!.modelId, approvedModelIds: [fixture.providers[0]!.modelId], allowHosted: true }, revision);
+    await fixture.sdk.routing.configure({ ...defaultSingleKupoSettings(), enabled: true, classifierModelId: fixture.providers[0]!.modelId, approvedModelIds: [fixture.providers[0]!.modelId], allowHosted: true }, revision);
     assert.equal(fixture.sdk.getState().snapshot!.provider.models.some((model) => model.synthetic), true);
-    await beta.refresh(); assert.equal(beta.getState().snapshot!.provider.models.some((model) => model.synthetic), false);
+    await beta.refresh(); assert.equal(beta.getState().snapshot!.provider.models.some((model) => model.id === KUPO_MODEL_ID), true);
     assert.deepEqual(beta.routing.policy(), defaultKupoSettings());
     assert.equal(fixture.session(fixture.sdk, first.id!).controls.modelId, null); assert.equal(fixture.session(beta, second.id!).controls.modelId, null);
     assert.throws(() => fixture.sdk.routing.history(second.id!), /profile|existing session/);
@@ -85,7 +85,7 @@ test("shared slash configuration and model selection use the same scoped SDK wit
   const fixture = await setupFixture({ maxOutputTokens: 128, contextWindow: 32768 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await fixture.configure(); await sdk.refresh(); await sdk.sessions.modelOptions(fixture.sessionId, { contextWindow: 16384 });
-    const policy = { ...defaultKupoSettings(), enabled: true, classifierModelId: fixture.modelId, approvedModelIds: [fixture.modelId], allowHosted: true };
+    const policy = { ...defaultSingleKupoSettings(), enabled: true, classifierModelId: fixture.modelId, approvedModelIds: [fixture.modelId], allowHosted: true };
     await executeSlash(sdk, fixture.sessionId, `/kupo set ${JSON.stringify(policy)}`, "cli");
     const selected = await executeSlash(sdk, fixture.sessionId, "/model kupo", "cli");
     assert.equal(selected.kind, "ok"); assert.equal(fixture.session().controls.modelId, KUPO_MODEL_ID);
