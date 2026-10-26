@@ -47,7 +47,9 @@ test("actual controller SIGKILL keeps the source, isolated root and unknown mode
     const card = await sdk.issues.create(fixture.projectId, { title: "Generated durable task", body: "generated slow crash task", kind: "feature", phaseId: "backlog", pullRequestUrl: null });
     const started = await sdk.kanban.continue(origin.id, card.id!);
     await waitFor(() => provider.requests.length === 1, 15000);
-    const before = (await sdk.kanban.work(started.id!)).run, held = sdk.getState().snapshot!.budgetEntries[0]!.reservedTokens;
+    const before = (await sdk.kanban.work(started.id!)).run;
+    const reservation = await waitFor(() => sdk.getState().snapshot?.budgetEntries.find((entry) => entry.sessionId === before.sessionId &&
+      entry.modelId === provider.modelId && entry.status === "reserved" && entry.reservedTokens !== null && entry.reservedTokens > 0), 15000);
     await child.stop(); sdk.disconnect();
     restarted = await startService({ stateDir: fixture.stateDir, provider: provider.provider, retentionKey: GENERATED_RETENTION_KEY,
       platform: { github: { runProgram: async () => { throw new Error("Generated restart forbids new Git/GitHub execution."); } } } });
@@ -58,8 +60,10 @@ test("actual controller SIGKILL keeps the source, isolated root and unknown mode
       assert.equal(read.run.workspaceId, before.workspaceId);
       assert.equal(read.run.sessionId, before.sessionId);
       assert.match(read.text, /generated slow crash task/);
-      assert.equal(peer.getState().snapshot!.budgetEntries[0]!.status, "unknown");
-      assert.equal(peer.getState().snapshot!.budgetEntries[0]!.reservedTokens, held);
+      const recovered = peer.getState().snapshot!.budgetEntries.find((entry) => entry.id === reservation.id);
+      assert.ok(recovered);
+      assert.equal(recovered.status, "unknown");
+      assert.equal(recovered.reservedTokens, reservation.reservedTokens);
       assert.equal(provider.requests.length, 1);
       restarted.store.db.prepare("DELETE FROM receipts WHERE id=?").run(before.commandId);
       await assert.rejects(() => restarted!.controller.dispatch({ id: before.commandId, profileId: "default",
