@@ -119,9 +119,16 @@ Malformed/future formats fail explicitly and retain the prior catalog.
 
 ## Durability and acceptance
 
-Protocol/schema 62 extends 61 additively. Old boards and settings keep valid
-defaults; migration preserves prior approvals, source provenance, retained
-events and capacity. New independent workflow/source grants participate in the
+Protocol/schema 63 converges the original automatic-Kupo schema 61, the private
+session/GitHub schema 61 and the Kanban/pricing schema 62 by their exact markers.
+The earlier private approval-only schema 59 also has an explicit convergence
+path. All required markers and version changes are transactional; interruption
+retains a recognized, reopenable source lineage. Current missing/corrupt markers,
+premature markers and new history relabelled without its original marker are
+rejected, never silently repaired. No consent, original selected response,
+encrypted event/blob, receipt, unknown usage hold or routing preference is
+rewritten. Older bounded Autopilot remains bounded until explicit reselection.
+Old boards and settings keep valid defaults. New independent workflow/source grants participate in the
 event-store retention transaction. Browser-safe SDK, Node, React and MCP
 entrypoints expose the same typed domain.
 
@@ -132,7 +139,7 @@ native context menus, project dragging, exact/ambiguous price aliases, cache and
 long-context arithmetic, price expiry and unchanged hard-budget admission.
 Generated fixtures must not use personal credentials, repositories or invoices.
 
-## Local qualification, 2026-10-26
+## Pre-integration local qualification, 2026-10-26
 
 Type checks and the production build pass. The complete Node/service/worker/
 CLI/native-TUI run has **1,504 passes and 14 platform/native skips**, zero
@@ -172,3 +179,6 @@ personal authentication or live inference. No real GitHub/Linear task mutation,
 personal shell/microphone, model-weight download, physical SendBox, fork-head
 publication, Remote/Sandbox continuation or notarized/Linux release
 qualification is claimed. CI remains restricted to `main` pushes.
+
+These measurements precede integration of automatic Kupo and contextual project
+colors from `main`; they are not qualification of that integrated tree.

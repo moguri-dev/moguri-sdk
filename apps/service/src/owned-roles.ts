@@ -91,6 +91,8 @@ export class OwnedRoles {
       !Number.isSafeInteger(model.maxTokens) || !model.maxTokens || model.maxTokens < 1 ||
       !Number.isSafeInteger(model.contextWindow) || model.contextWindow < 8192) throw new MoguriError("owned_role_model", "Every role needs its exact available Local concrete model and positive capacity. No model or endpoint was substituted.", 409);
     if (model.id !== selected.model.id) {
+      if (snapshot.settings.values.kupo.workflow === "auto") throw new MoguriError("routing_disabled",
+        "Automatic composer routing does not approve alternate models for private owned roles. Keep the selected fixed model or configure a separately explicit reviewed pool; no model call was authorized.", 409);
       const pool = kupoPool(snapshot.settings.values.kupo, snapshot.provider.models, "Local");
       if (!(role === "router" ? pool.classifier.id === model.id : pool.candidates.some((entry) => entry.id === model.id))) throw new MoguriError("owned_role_pool", "An alternate role is outside the already approved privacy-eligible pool. No model call was authorized.", 409);
     }

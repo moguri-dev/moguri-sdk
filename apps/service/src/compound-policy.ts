@@ -16,6 +16,12 @@ function currentLineageSource(review: CompoundLineageReview): boolean {
   catch (error) { if (error instanceof TypeError) return false; throw error; }
   return source.protocol === "https:" && !source.username && !source.password;
 }
+export function reviewedModelPair(review: CompoundLineageReview, draft: ModelInfo, critic: ModelInfo): boolean {
+  return review.draftBindingDigest === compoundModelBinding(draft) && review.criticBindingDigest === compoundModelBinding(critic) &&
+    review.draftLineage.trim().normalize("NFC").toLowerCase() !== review.criticLineage.trim().normalize("NFC").toLowerCase() &&
+    Boolean(review.sourceText.trim()) && review.sourceText.isWellFormed() && digest(review.sourceText) === review.sourceDigest &&
+    Boolean(review.limitations.trim()) && review.limitations.isWellFormed() && currentLineageSource(review);
+}
 export function compoundPool(value: unknown, models: ModelInfo[], env: Controls["env"], estimatedTokens = 0) {
   const policy = parse(CompoundSettingsSchema, value);
   if (env !== "Local") throw new MoguriError("compound_env", "Public compound staging/validation needs exact owned Local candidate worktrees. Unqualified Remote/native combinations never use a Local fallback.", 409);
@@ -38,9 +44,7 @@ export function compoundPool(value: unknown, models: ModelInfo[], env: Controls[
     }
     if (route.pattern === "critique") {
       const review = policy.lineageReviews.find((review) => review.id === route.lineageReviewId);
-      if (!review || review.draftBindingDigest !== compoundModelBinding(draft) || review.criticBindingDigest !== compoundModelBinding(other) ||
-        review.draftLineage === review.criticLineage || !review.sourceText.trim() || !review.sourceText.isWellFormed() ||
-        digest(review.sourceText) !== review.sourceDigest || !review.limitations.trim() || !review.limitations.isWellFormed() || !currentLineageSource(review)) {
+      if (!review || !reviewedModelPair(review, draft, other)) {
         diagnostics.push({ routeId: route.id, code: "compound_lineage", message: "Independent critique has no exact actual-user-reviewed source claim for these model bindings. Provider families, aliases and output contracts remain unknown eligibility, not proof." });
         continue;
       }

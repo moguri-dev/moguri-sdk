@@ -94,7 +94,7 @@ export const slashCommands = [
   { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
   { name: "profiles", description: "Choose or manage isolated profiles" },
   { name: "profile", description: "Explicit profile navigation and metadata", argument: "[use ID|create NAME|rename ID REV NAME|retry ID REV confirm-review|stop ID]" },
-  { name: "kupo", description: "Inspect or explicitly configure experimental Single routing", argument: "[status|history|set POLICY_JSON]" },
+  { name: "kupo", description: "Inspect or configure automatic Kupo routing and model capabilities", argument: "[status|history|set POLICY_JSON]" },
   { name: "project-removal", description: "Review artifact retention, repository copies and explicit project removal", argument: "[preview|export PATH|materialize-preview [WORKSPACE|-] [NEW_BRANCH]|materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write|materialization JOB|materialize-delete SET_SHA JOB confirm-remove|retain/delete SET_SHA confirm-remove|export-delete SET_SHA EXPORT_SHA confirm-remove]" },
   { name: "insights", description: "Inspect session metadata and usage" },
   { name: "pr", description: "Open the connected pull request" },
@@ -107,7 +107,7 @@ export const slashCommands = [
   { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
   { name: "models", description: "Choose an available model" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
-  { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
+  { name: "model", description: "Explicitly select an available fixed model or Kupo", argument: "[EXACT_MODEL_ID]" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
   { name: "sandbox", description: "Review bundled setup, automatic workspaces, public runtime updates and exact retained native work", argument: "[setup [VERSION]|enable VERSION DIGEST REV confirm-setup|updates|prepare-version VERSION confirm-download|status|result ID|publication ID]" },
   { name: "mcp-remote", description: "Review exact Remote MCP grants and retained calls; never authenticate or approve a tool", argument: "[servers|preview SERVER|grant SERVER SHA256 REV confirm-reviewed [forward-access]|revoke SERVER REV confirm-revoke|calls|inspect OPERATION_ID]" },
@@ -324,7 +324,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const model = sdk.getState().snapshot!.provider.models.find((model) => model.id === command.argument && (!model.environments || model.environments.includes(session.controls.env)));
       if (!model) throw new ClientError("model_unavailable", "Choose an exact available model ID for this env. Inspect /models and /kupo status; no provider or policy fallback was used.");
       await sdk.sessions.selectModel(session.id, model.id, session.revision);
-      return { kind: "ok", message: model.synthetic ? `kupo ${sdk.routing.policy()?.workflow === "compound" ? "Compound" : "Single"} selected. Actual roles are metered separately; no inference started and no permission changed.` : `${model.name} selected explicitly. Previous model-specific options were cleared; no inference started.` };
+      return { kind: "ok", message: model.synthetic ? `Kupo ${sdk.routing.policy()?.workflow === "auto" ? "Automatic" : sdk.routing.policy()?.workflow === "compound" ? "Compound" : "Single"} selected. Actual roles are metered separately; no inference started and no permission changed.` : `${model.name} selected explicitly. Previous model-specific options were cleared; no inference started.` };
     }
     case "roles": {
       if (!command.argument) return { kind: "text", text: JSON.stringify(sdk.roleSequences.list(), null, 2) };
@@ -420,7 +420,9 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       throw new ClientError("compound_command", "Use /compound preview INPUT_JSON, start SHA confirm-cost INPUT_JSON, read ID, validation ID, review ID VALIDATION REV SHA confirm-stage-and-test, deny ID VALIDATION REV SHA confirm-deny, or stop ID confirm-stop.");
     }
     case "kupo": {
-      if (!command.argument || command.argument === "status") return { kind: "text", text: JSON.stringify({ policy: sdk.routing.policy(), models: sdk.getState().snapshot!.provider.models, diagnostics: sdk.getState().snapshot!.routingDiagnostics, warning: sdk.routing.policy()?.workflow === "compound" ?
+      if (!command.argument || command.argument === "status") return { kind: "text", text: JSON.stringify({ policy: sdk.routing.policy(), models: sdk.getState().snapshot!.provider.models,
+        capabilities: sdk.routing.capabilities(), diagnostics: sdk.getState().snapshot!.routingDiagnostics, warning: sdk.routing.policy()?.workflow === "auto" ?
+        "Automatic Kupo uses configured models by default. Zero eligible models blocks inference; one runs directly without a classifier. Multiple models use Single, gated Cascade or source-reviewed independent Critique with one revision. Only selected responses reach normal permissions. Every role is metered; finite automatic budgets, images and Sandbox remain unavailable." : sdk.routing.policy()?.workflow === "compound" ?
         "Reviewed Local Cascade/Critique requires exact source/stages/test input through /compound and actual-user source application. Lineage and quality remain limited claims, not permission. Finite Local turns additionally require explicit reserved wind-down; inspect /winddown status." :
         "Experimental Single only in this saved policy, explicit hosted-data consent, no automatic fallback. Finite Local turns require explicit reserved wind-down; inspect /winddown status. Compound uses its separately reviewed policy; images remain unavailable." }, null, 2) };
       if (command.argument === "history") return { kind: "text", text: JSON.stringify(sdk.routing.history(session.id), null, 2) };
@@ -428,7 +430,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         await sdk.routing.configure(parse(KupoSettingsSchema, JSON.parse(command.argument.slice(4))), sdk.settings.get()!.revision);
         return { kind: "ok", message: "Explicit scoped routing policy saved. No model or inference was selected/started. Hosted data and concrete compound routes need their explicit review; policy cannot lift hard budgets." };
       }
-      throw new ClientError("routing_command", "Use /kupo status, history or set POLICY_JSON. Configure the actual scoped pool before explicitly selecting /model kupo.");
+      throw new ClientError("routing_command", "Use /kupo status, history or set POLICY_JSON. Select /model kupo to use the configured eligible model pool.");
     }
     case "notification-sounds": {
       const [action = "list", id, digest, confirmation, ...extra] = command.argument.split(/\s+/).filter(Boolean);

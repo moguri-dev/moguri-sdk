@@ -214,6 +214,49 @@ test("a successful publication denies remaining same-response calls without anot
   } finally { await fixture.close(); await provider.close(); }
 });
 
+test("automatic Kupo publishes only its selected original task response and stops before remaining tools or another model call", { skip: process.platform !== "darwin", timeout: 60000 }, async () => {
+  let solverId = "";
+  const router = await fixtureProvider({ maxOutputTokens: 128, respond: (_request, index) => ({ text: JSON.stringify(index === 1 ?
+    { pattern: "cascade", modelId: solverId, escalationId: router.modelId, complexity: "moderate", confidence: 0.95, reason: "Generated task route, not publication authority." } :
+    { verdict: "pass", reason: "Generated response review, not user approval." }) }) });
+  const solver = await fixtureProvider({ exposeModels: true, maxOutputTokens: 128, toolBatches: [
+    [{ name: "run_command", args: { command: "printf 'generated routed task\\n' > routed-task.txt && git add -- routed-task.txt && git -c commit.gpgsign=false commit --no-gpg-sign -m 'Generated routed task'", timeoutMs: 15000 } }],
+    [{ name: "project_work", args: { action: "publish", title: "Generated routed task PR", body: "Generated routed task details." } },
+      { name: "run_command", args: { command: "printf 'must not execute' > forbidden-routed-publication.txt", timeoutMs: 15000 } }],
+  ] });
+  const fixture = await githubApplicationFixture({ provider: router.provider, ownedNetwork: true });
+  try {
+    const settings = structuredClone(fixture.sdk.settings.get()!.values);
+    settings.localModels = [{ id: "generated-kanban-solver", name: "Generated Kanban solver", enabled: true, baseUrl: `${solver.baseUrl}/v1`, auth: "none",
+      models: [{ id: solver.modelId, name: "Generated Kanban solver", contextWindow: 16384, maxTokens: 128, imageInput: false }] }];
+    await fixture.sdk.settings.update(settings, fixture.sdk.settings.get()!.revision); await fixture.sdk.models.refresh();
+    const model = fixture.sdk.getState().snapshot!.provider.models.find((model) => model.source === "local");
+    assert.ok(model); solverId = model.id;
+    await fixture.sdk.sessions.selectModel(fixture.sessionId, "kupo");
+    const card = await fixture.sdk.issues.create(fixture.projectId, { title: "Generated selected Kupo task", body: "", kind: "feature", phaseId: "backlog", pullRequestUrl: null });
+    const start = await fixture.sdk.kanban.continue(fixture.sessionId, card.id!);
+    const run = await waitFor(() => fixture.service.controller.snapshot().projectWorkRuns.find((run) => run.id === start.id &&
+      ["completed", "failed", "partial"].includes(run.status)), 50000);
+    assert.equal(run.status, "completed", run.diagnostic ?? "The selected original response did not publish.");
+    await waitFor(() => fixture.service.controller.snapshot().sessions.find((session) => session.id === run.sessionId)?.status === "completed");
+    const snapshot = fixture.service.controller.snapshot(), events = fixture.service.controller.events(0).filter((event) => event.session_id === run.sessionId);
+    const selected = events.filter((event) => event.event_type === "routing.response_selected");
+    assert.equal(selected.length, 2);
+    for (const event of events.filter((event) => event.event_type === "tool.completed")) assert.ok(selected.some((source) => source.step_id === event.step_id));
+    assert.equal(events.filter((event) => event.event_type === "tool.completed" && event.payload.outcome === "denied").length, 1);
+    const task = snapshot.sessions.find((session) => session.id === run.sessionId)!;
+    assert.deepEqual(task.usage.map((entry) => entry.role), ["router", "draft", "critic", "draft", "critic"]);
+    assert.equal(task.pendingApproval, null);
+    assert.equal(snapshot.budgetEntries.length, 5);
+    assert.ok(snapshot.budgetEntries.every((entry) => entry.ownerSessionId === fixture.sessionId));
+    assert.equal(router.requests.length, 3); assert.equal(solver.requests.length, 2);
+    assert.equal(fixture.writes().pulls, 1);
+    const workspace = snapshot.managedWorkspaces.find((workspace) => workspace.id === run.workspaceId)!;
+    await assert.rejects(() => stat(join(workspace.path, "forbidden-routed-publication.txt")), { code: "ENOENT" });
+    assert.equal(fixture.session().controls.autonomy, "Manual");
+  } finally { await fixture.close(); await solver.close(); await router.close(); }
+});
+
 test("a changed same-repository push URL cannot inherit the original autonomous publication grant", { skip: process.platform !== "darwin" }, async () => {
   const provider = await fixtureProvider({ toolCalls: [
     { name: "run_command", args: { command: "printf 'generated destination task\\n' > destination.txt && git add -- destination.txt && git -c commit.gpgsign=false commit --no-gpg-sign -m 'Generated destination task' && git remote set-url --push origin https://github.com/generated-owner/fixture.git", timeoutMs: 15000 } },

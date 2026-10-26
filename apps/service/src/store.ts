@@ -81,6 +81,7 @@ function references(input: EventInput): string[] {
     case "skill.used": return [input.payload.contentDigest];
     case "steer.applied": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "model.completed": return [input.payload.contextDigest];
+    case "routing.response_selected": return [input.payload.contextDigest];
     case "capability.saved": return [input.payload.entry.contentDigest];
     case "capability.proposed": return [input.payload.proposal.contentDigest];
     case "artifact.saved": return [input.payload.artifact.contentDigest];
@@ -125,7 +126,14 @@ export class EventStore {
     try {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
-      if (version < 62 && this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get() &&
+      const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version < 63 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_kupo_kanban_schema'").get()) {
+        throw new Error("Invalid pre-63 session/Kupo/Kanban lineage marker. State was preserved.");
+      }
+      if (version < 61 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='automatic_kupo_schema'").get()) {
+        throw new Error("Invalid pre-61 automatic Kupo lineage marker. State was preserved.");
+      }
+      if (version < 62 && retentionTable &&
         this.db.prepare("SELECT value FROM retention_metadata WHERE id='project_kanban_schema'").get()) {
         throw new Error("Invalid pre-62 project Kanban lineage marker. State was preserved.");
       }
@@ -309,56 +317,80 @@ export class EventStore {
         this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_convergence_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid lean tooling/convergence schema marker. State was preserved.");
       }
-      const workflowMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_workflows_schema'").get();
-      const workspaceMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='workspace_experience_schema'").get();
-      const navigationMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_navigation_schema'").get();
-      const workflowConvergence = this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_convergence_schema'").get();
-      const workflow59 = version === 59 && workflowMarker?.value === "1" && !workspaceMarker && !navigationMarker && !workflowConvergence;
-      if (workflow59) this.db.exec(`BEGIN IMMEDIATE;
+      this.migrateWorkflowFeatures(version);
+    } catch (error) { this.db.close(); throw error; }
+  }
+  private migrateWorkflowFeatures(version: number): void {
+    const marker = (id: string) => this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value;
+    const workflow = marker("session_github_workflows_schema"), convergence = marker("session_github_convergence_schema");
+    const automatic = marker("automatic_kupo_schema"), kanban = marker("project_kanban_schema");
+    const workflow59 = version === 59 && workflow === "1" && convergence === undefined &&
+      marker("workspace_experience_schema") === undefined && marker("session_navigation_schema") === undefined;
+    const required = [
+      ["workspace_experience_schema", "workspace experience"],
+      ["session_navigation_schema", "session navigation"],
+      ["session_github_workflows_schema", "session/GitHub workflow"],
+      ["session_github_convergence_schema", "session/GitHub workflow"],
+      ["automatic_kupo_schema", "automatic Kupo"],
+      ["project_kanban_schema", "project Kanban"],
+      ["session_kupo_kanban_schema", "session/Kupo/Kanban convergence"],
+    ] as const;
+    const validate = () => {
+      for (const [id, label] of required) if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. State was preserved.`);
+    };
+    if (version >= 63) { validate(); return; }
+    if (version < 61 && (workflow !== undefined || convergence !== undefined) && !workflow59) throw new Error("Invalid pre-61 session/GitHub workflow lineage markers. State was preserved.");
+    if ((workflow === undefined) !== (convergence === undefined) && !workflow59 ||
+      workflow !== undefined && workflow !== "1" || convergence !== undefined && convergence !== "1") {
+      throw new Error("Missing or invalid session/GitHub workflow schema marker. State was preserved.");
+    }
+    if (automatic !== undefined && automatic !== "1") throw new Error("Missing or invalid automatic Kupo schema marker. State was preserved.");
+    if (kanban !== undefined && kanban !== "1" || version === 62 && kanban !== "1") throw new Error("Missing or invalid project Kanban schema marker. State was preserved.");
+    if (version >= 61 && workflow === undefined && automatic === undefined) throw new Error("Missing session/GitHub workflow and automatic Kupo lineage markers. State was preserved.");
+    if (version === 62 && (workflow !== "1" || convergence !== "1")) throw new Error("Invalid schema-62 session/GitHub/Kanban lineage markers. State was preserved.");
+    const events = this.events();
+    if (automatic === undefined && events.some((event) => event.event_type === "routing.response_selected" ||
+      event.event_type === "routing.started" && event.payload.routing.policy.workflow === "auto" ||
+      event.event_type === "model.started" && event.payload.kupoPhase || event.event_type === "model.completed" && event.payload.kupo)) {
+      throw new Error("Automatic Kupo history cannot be relabelled without its original schema marker. Original state was preserved.");
+    }
+    if (workflow === undefined && events.some((event) =>
+      (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.automaticApprovals !== undefined ||
+      event.event_type === "session.created" && (event.payload.workItemUrl || event.payload.githubSource) ||
+      event.event_type === "session.organized" && event.payload.changes.workItemUrl !== undefined ||
+      event.event_type === "tool.decided" && event.payload.actor === "autonomy" ||
+      event.event_type === "settings.updated" && event.payload.settings.permissions.remembered?.length)) {
+      throw new Error("Session/GitHub workflow history lost its original schema marker. Original state was preserved.");
+    }
+    if (kanban === undefined && events.some((event) => event.event_type === "project.work_recorded" || event.event_type === "pricing.catalog_recorded" ||
+      event.event_type === "session.created" && event.payload.purpose ||
+      event.event_type === "session.organized" && event.payload.changes.workItemId !== undefined ||
+      event.event_type === "board.saved" && event.payload.board.kanban ||
+      event.event_type === "budget.recorded" && event.payload.entry.rate?.source === "provider-api-equivalent" ||
+      event.event_type === "settings.updated" && event.payload.settings.budgets.useProviderRatesForLimits)) {
+      throw new Error("Project Kanban history lost its original schema marker. Original state was preserved.");
+    }
+    if (!workflow59) {
+      if (version < 59) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('workspace_experience_schema','1');
+        PRAGMA user_version=59; COMMIT;`);
+      if (marker("workspace_experience_schema") !== "1") throw new Error("Missing or invalid workspace experience schema marker. State was preserved.");
+      if (version < 60) this.db.exec(`BEGIN IMMEDIATE;
         INSERT INTO retention_metadata(id,value) VALUES ('session_navigation_schema','1');
+        PRAGMA user_version=60; COMMIT;`);
+      if (marker("session_navigation_schema") !== "1") throw new Error("Missing or invalid session navigation schema marker. State was preserved.");
+      if (version < 61) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('automatic_kupo_schema','1');
+        INSERT INTO retention_metadata(id,value) VALUES ('session_github_workflows_schema','1');
         INSERT INTO retention_metadata(id,value) VALUES ('session_github_convergence_schema','1');
         PRAGMA user_version=61; COMMIT;`);
-      else {
-        if (version < 61 && (workflowMarker || workflowConvergence)) throw new Error("Invalid pre-61 session/GitHub workflow lineage markers. State was preserved.");
-        if (version < 59) this.db.exec(`BEGIN IMMEDIATE;
-          INSERT INTO retention_metadata(id,value) VALUES ('workspace_experience_schema','1');
-          PRAGMA user_version=59; COMMIT;`);
-        if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='workspace_experience_schema'").get()?.value !== "1") {
-          throw new Error("Missing or invalid workspace experience schema marker. State was preserved.");
-        }
-        if (version < 60) this.db.exec(`BEGIN IMMEDIATE;
-          INSERT INTO retention_metadata(id,value) VALUES ('session_navigation_schema','1');
-          PRAGMA user_version=60; COMMIT;`);
-        if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_navigation_schema'").get()?.value !== "1") {
-          throw new Error("Missing or invalid session navigation schema marker. State was preserved.");
-        }
-        if (version < 61) this.db.exec(`BEGIN IMMEDIATE;
-          INSERT INTO retention_metadata(id,value) VALUES ('session_github_workflows_schema','1');
-          INSERT INTO retention_metadata(id,value) VALUES ('session_github_convergence_schema','1');
-          PRAGMA user_version=61; COMMIT;`);
-      }
-      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='workspace_experience_schema'").get()?.value !== "1") {
-        throw new Error("Missing or invalid workspace experience schema marker. State was preserved.");
-      }
-      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_navigation_schema'").get()?.value !== "1") {
-        throw new Error("Missing or invalid session navigation schema marker. State was preserved.");
-      }
-      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_workflows_schema'").get()?.value !== "1" ||
-        this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_convergence_schema'").get()?.value !== "1") {
-        throw new Error("Missing or invalid session/GitHub workflow schema marker. State was preserved.");
-      }
-      const kanbanMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='project_kanban_schema'").get();
-      if (version < 62) {
-        if (kanbanMarker) throw new Error("Invalid pre-62 project Kanban lineage marker. State was preserved.");
-        this.db.exec(`BEGIN IMMEDIATE;
-          INSERT INTO retention_metadata(id,value) VALUES ('project_kanban_schema','1');
-          PRAGMA user_version=62; COMMIT;`);
-      }
-      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='project_kanban_schema'").get()?.value !== "1") {
-        throw new Error("Missing or invalid project Kanban schema marker. State was preserved.");
-      }
-    } catch (error) { this.db.close(); throw error; }
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const [id] of required) if (marker(id) === undefined) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+      this.db.exec("PRAGMA user_version=63; COMMIT;");
+    } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+    validate();
   }
   private migrateDesktopMerge(version: number): void {
     const markers = [

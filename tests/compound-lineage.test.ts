@@ -16,7 +16,9 @@ test("the browser-safe SDK prepares only an unpersisted exact-model/source linea
     assert.equal(value.review.criticBindingDigest, compoundModelBinding(models.find((model) => model.id === f.ids[3])!));
     assert.equal(value.review.sourceDigest, digest(sourceText));
     assert.match(value.warning, /not.*persisted|unpersisted/i);
-    assert.equal(f.sdk.routing.policy()?.workflow, "single");
+    const policy = f.sdk.routing.policy();
+    assert.equal(policy?.workflow, "auto");
+    assert.deepEqual(policy?.workflow === "auto" ? policy.lineageReviews : null, []);
     assert.equal(f.requests.length, 0); assert.ok(f.providers.every((provider) => provider.requests.length === 0));
   } finally { await f.close(); }
 });

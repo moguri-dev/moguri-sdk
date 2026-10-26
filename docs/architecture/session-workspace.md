@@ -179,6 +179,33 @@ instruction/MCP source paths. Repository content cannot grant its own
 permissions. Uncontained shell/MCP execution is blocked when folder policy
 cannot be enforced.
 
+Project icon colors live in the shared project context menu, opened through
+right-click, Shift+F10 or Project actions. It reuses the existing React (MIT)
+portal/keyboard menu and SDK `projects.organize` command. Seven named rainbow
+presets, default reset and a separately confirmed custom preview preserve the
+existing stored color format. No dependency, SDK shape, durable event or schema
+migration changes. TUI/other clients keep reading the same project configuration.
+Each save preserves folder/order and project settings under the existing
+revision check. Pending picks cannot dispatch another color; failures remain
+visible and stale writes require explicit retry rather than overwriting a newer
+project move. Custom Cancel makes no mutation. Focus returns to the original
+project trigger after the native dialog unmounts.
+
+The desktop prerequisite run before this change passed all six generated core
+spikes: Electron cold start 192.40 ms, 443.92 MiB and 8.30 ms scrolling frames;
+SQLite append p95 0.0526 ms; known PTY cancellation 151.43 ms with zero survivors.
+The runner's separately unavailable live/native/release gates remain unqualified.
+Generated hidden desktop coverage checks all seven presets, at least 3:1
+contrast against factory light/dark sidebar and menu surfaces, saved-color
+reload, custom Save/Cancel, reset, keyboard navigation, exact target-project
+ownership, pending requests and stale-revision preservation.
+The completed color/menu change passes eight project-settings domain checks,
+all 200 hidden desktop cases with three physical/packaged skips, both type
+checks and the production build. Fresh packed-SDK installation and all 12
+installed worker continuation probes pass; root and consumer audits report zero
+vulnerabilities. Existing FFI, renderer-size and transitive-deprecation advisories
+remain unchanged.
+
 Missing AGENTS.md/mcp.json are surfaced for explicit initialization. Creating
 and publishing defaults is an explicit user action on a non-protected branch,
 not a hidden consequence of opening a folder or reading settings. Preserve
