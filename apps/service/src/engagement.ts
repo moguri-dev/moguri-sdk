@@ -41,9 +41,10 @@ export class Engagement {
   private project(session: ScopeSession) {
     return this.host.workspaceProject(session);
   }
-  preview(session: Session, allProjects: boolean): SuggestionPreview {
-    if (allProjects && session.projectId !== null) throw new MoguriError("suggestion_scope", "Cross-project analysis is available only from an explicitly project-free chat.");
-    const candidates = this.snapshot().sessions.filter((source) => source.id !== session.id && ["agent", "side"].includes(source.kind) && (allProjects || source.projectId === session.projectId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 12);
+  preview(session: Session | null, allProjects: boolean): SuggestionPreview {
+    if (!session && !allProjects || allProjects && session && session.projectId !== null) throw new MoguriError("suggestion_scope", "Cross-project analysis requires the global profile preview or an explicitly project-free chat.");
+    const snapshot = this.snapshot();
+    const candidates = snapshot.sessions.filter((source) => source.id !== session?.id && ["agent", "side"].includes(source.kind) && (allProjects || source.projectId === session?.projectId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 12);
     const sources: SuggestionSource[] = [];
     let remaining = 32 * 1024;
     for (const source of candidates) for (const message of source.messages.filter((message) => message.role === "user").slice(-8)) {
@@ -65,8 +66,22 @@ export class Engagement {
       phrase.ids.add(source.messageId); phrase.sessions.add(source.sessionId); phrases.set(key, phrase);
     }
     const repeated = [...phrases.values()].filter((phrase) => phrase.sessions.size >= 2).sort((a, b) => b.sessions.size - a.sessions.size).slice(0, 12).map((phrase) => ({ text: phrase.text, count: phrase.sessions.size, messageIds: [...phrase.ids].slice(0, 20) }));
-    const scope = allProjects ? "all-projects" : session.projectId ? "project" : "project-free";
-    return { scope, sources, repeated, digest: digest(JSON.stringify({ scope, sources })), diagnostic: allProjects ? "Explicit cross-project analysis copies these approved excerpts into a profile-owned settings chat. Review scope before generation." : "Only prior user prompts in this scope are included. Preview is local and makes no model call." };
+    const gaps: SuggestionPreview["gaps"] = [];
+    if (!snapshot.registry.some((entry) => entry.kind === "skill" && entry.enabled) && !snapshot.settings.values.skillSources?.some((source) => source.enabled)) {
+      gaps.push({ id: "skills", title: "Find reusable skills", detail: "No enabled skills or skill sources in this profile. Connect a folder or repository in Settings / Skill gateway to discover guidance without granting tools." });
+    }
+    if (!snapshot.settings.values.instructions.trim() && !Object.values(snapshot.settings.values.guidance ?? {}).some((value) => value.trim())) {
+      gaps.push({ id: "guidance", title: "Keep preferences out of repeated prompts", detail: "User guidance is empty. Save reviewed, non-sensitive workflow preferences in Settings / User guidance instead of repeating them in every chat." });
+    }
+    if (snapshot.projects.length && !snapshot.settings.values.memory.enabled) {
+      gaps.push({ id: "memory", title: "Reuse project context deliberately", detail: "Repository memory is off. If repeated project discovery slows your work, review the optional indexing and context controls in Settings / Repository memory." });
+    }
+    if (snapshot.budgetEntries.some((entry) => entry.estimatedUsdMicros === null)) {
+      gaps.push({ id: "cost", title: "Make cost estimates useful", detail: "Some model calls have no price estimate. Configure explicit model rates in Settings / Budgets; missing prices are not free usage or invoices." });
+    }
+    const controls = session?.controls ?? this.host.startup(null).controls;
+    const scope = allProjects ? "all-projects" : session?.projectId ? "project" : "project-free";
+    return { scope, sources, repeated, gaps, modelId: controls.modelId, digest: digest(JSON.stringify({ scope, sources, gaps, modelId: controls.modelId, env: controls.env })), diagnostic: allProjects ? "Profile-wide usage gaps and bounded prior prompts. Review these exact excerpts before sending anything to the selected model." : "Only prior user prompts in this scope are included. Preview is local and makes no model call." };
   }
   private async target(session: ScopeSession, spec: ConfigurationSpec, legacy = false): Promise<Target> {
     const snapshot = this.snapshot();
@@ -152,7 +167,7 @@ export class Engagement {
     const result = finish(events, { id }); if (run) this.host.wake(); return result;
   }
   async query(query: EngagementQuery): Promise<EngagementResponse> {
-    if (query.type === "suggestions.preview") return { type: query.type, preview: this.preview(this.session(query.sessionId), query.allProjects) };
+    if (query.type === "suggestions.preview") return { type: query.type, preview: this.preview(query.sessionId === null ? null : this.session(query.sessionId), query.allProjects) };
     const proposal = this.snapshot().configurationProposals.find((proposal) => proposal.id === query.proposalId);
     if (!proposal) throw new MoguriError("configuration_missing", "This proposal is outside the active profile.", 404);
     const spec = parse(ConfigurationSpecSchema, JSON.parse(this.store.blob(proposal.contentDigest)));
@@ -161,10 +176,10 @@ export class Engagement {
   async execute(command: EngagementCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     if (command.type === "metachat.create") return this.create(command.projectId, command.parentSessionId ? this.session(command.parentSessionId) : undefined, command.prompt ?? "", undefined, false, finish);
     if (command.type === "suggestions.generate") {
-      const session = this.session(command.sessionId); const preview = this.preview(session, command.allProjects);
+      const session = command.sessionId === null ? null : this.session(command.sessionId); const preview = this.preview(session, command.allProjects);
       if (preview.digest !== command.expectedDigest) throw new MoguriError("suggestion_stale", "Source conversations changed after preview. Review the current scope before generation.", 409);
-      if (!preview.sources.length) throw new MoguriError("suggestion_empty", "No earlier user prompts exist in this scope. Nothing was sent.");
-      return this.create(session.projectId, session, "Suggest concrete ways to use Moguri better based on the approved prior prompt excerpts. Identify repeated user guidance that belongs in instructions, useful disabled skills, or configuration changes. Use moguri_config to read non-secret settings and create exact proposals, citing the relevant source message IDs as evidence. Never apply or enable a change yourself.", `<untrusted-prior-user-prompts scope="${preview.scope}" digest="${preview.digest}">\n${JSON.stringify(preview.sources)}\n</untrusted-prior-user-prompts>`, true, finish, preview.sources);
+      if (!preview.sources.length && !preview.gaps.length) throw new MoguriError("suggestion_empty", "No earlier prompts or observed usage gaps exist in this scope. Nothing was sent.");
+      return this.create(session?.projectId ?? null, session ?? undefined, "Suggest concrete ways to use Moguri better based on the approved usage gaps and prior prompt excerpts. Identify repeated user guidance that belongs in instructions, useful skills, or configuration changes. Use moguri_config to read non-secret settings and create exact proposals, citing relevant source message IDs when making history-based claims. Never invent productivity gains, apply or enable a change yourself.", `<untrusted-usage-gaps>\n${JSON.stringify(preview.gaps)}\n</untrusted-usage-gaps>\n<untrusted-prior-user-prompts scope="${preview.scope}" digest="${preview.digest}">\n${JSON.stringify(preview.sources)}\n</untrusted-prior-user-prompts>`, true, finish, preview.sources);
     }
     if (command.type === "configuration.propose") return this.propose(this.session(command.sessionId), command.proposal, "user", finish);
     if (command.type === "attention.acknowledge") {

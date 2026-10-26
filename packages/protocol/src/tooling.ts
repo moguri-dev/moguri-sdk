@@ -81,7 +81,8 @@ export const CreateIssueSchema = Type.Union([
     confirmations: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { maxItems: 8 })) }),
   object({ service: Type.Literal("linear"), action: issueAction, input: LinearIssueCreateInputSchema, expectedDigest: Type.Optional(hash) }),
 ]);
-export const SkillToolSchema = object({ action: Type.Union([Type.Literal("find"), Type.Literal("load")]), query: Type.Optional(Type.String({ maxLength: 200 })), offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000 })), id: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), expectedDigest: Type.Optional(hash) });
+export const SkillToolSchema = object({ action: Type.Union([Type.Literal("find"), Type.Literal("load")]), query: Type.Optional(Type.String({ maxLength: 200 })), offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000 })), id: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), expectedDigest: Type.Optional(hash),
+  sourceId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), expectedCatalogDigest: Type.Optional(hash) });
 export const DebugToolSchema = object({
   action: Type.Union([Type.Literal("start"), Type.Literal("request"), Type.Literal("stop")]),
   adapter: Type.Optional(path), args: Type.Optional(Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 30 })),

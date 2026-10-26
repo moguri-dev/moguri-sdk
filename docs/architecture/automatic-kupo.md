@@ -78,7 +78,7 @@ back or replayed. Their ordinary partial-effect and cleanup rules still apply.
 
 ## Persistence and clients
 
-Protocol/schema 59 adds the automatic policy, exact capability/model snapshots
+Protocol/schema 61 adds the automatic policy, exact capability/model snapshots
 and selected-response events to the existing append-only authority. Every
 actual call still uses atomic reservation plus `model.started` and its original
 `model.completed` receipt. A selected response references the original retained

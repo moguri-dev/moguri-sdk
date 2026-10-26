@@ -161,6 +161,22 @@ test("default Kupo uses its only configured model in Single without a classifier
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("context filtering down to one eligible model still skips the classifier and preserves the full task", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+  const fixture = await routedFixture({ configured: false });
+  try {
+    fixture.options.respond = (request) => ({ text: JSON.stringify(request).includes("Choose the least complex eligible Kupo workflow") ? JSON.stringify({
+      pattern: "single", modelId: fixture.modelId, complexity: "simple", confidence: 0.95, reason: "Generated exact-capacity route.",
+    }) : "Generated full-capacity direct answer." });
+    const task = "Generated capacity. ".repeat(3000);
+    await fixture.select(); await fixture.send(task); await fixture.terminal(); await fixture.sdk.refresh();
+    assert.equal(fixture.session().status, "completed");
+    assert.deepEqual(fixture.session().usage.map((entry) => entry.role), ["solver"]);
+    assert.equal(fixture.requests.length, 1); assert.equal(fixture.solver.requests.length, 0);
+    assert.equal(fixture.sdk.routing.history(fixture.sessionId)[0]?.classifierStepId, null);
+    assert.ok(JSON.stringify(fixture.requests[0]).includes(task));
+  } finally { await fixture.close(); }
+});
+
 test("losing the only configured model blocks Kupo without consuming a saved draft or substituting a provider", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -170,6 +186,19 @@ test("losing the only configured model blocks Kupo without consuming a saved dra
     assert.equal(fixture.session().draft.text, "Generated preserved unavailable Kupo draft.");
     assert.equal(fixture.requests.length, 0);
     assert.ok(sdk.getState().snapshot!.provider.models.some((model) => model.id === KUPO_MODEL_ID));
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("an Unlimited automatic Kupo session cannot lift a finite profile policy or spend its held draft", async () => {
+  const fixture = await setupFixture({ maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
+    await sdk.budgets.policy({ basis: "estimate", tokens: 50_000 }, sdk.getState().snapshot!.budgetPolicy.revision, true);
+    await assert.rejects(() => fixture.send("Generated finite-policy automatic Kupo draft."), /finite reservations|hard cap/i);
+    assert.equal(fixture.session().draft.text, "Generated finite-policy automatic Kupo draft.");
+    assert.equal(fixture.requests.length, 0);
+    assert.equal(fixture.service.controller.snapshot().budgetPolicy.limit?.tokens, 50_000);
+    assert.equal(fixture.service.controller.snapshot().budgetEntries.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

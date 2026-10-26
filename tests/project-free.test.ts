@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { writeFile } from "node:fs/promises";
+import { realpath, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { BROWSER_MCP_TOOLS, DraftEditor, MoguriSdk, type Session } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
@@ -11,7 +12,7 @@ async function send(sdk: MoguriSdk, session: Session, text: string) {
   const editor = new DraftEditor(sdk, session.id, session.draft);
   try { editor.edit(text); await editor.send("queue"); } finally { editor.dispose(); }
 }
-test("a genuinely project-free chat has model context but no inherited root, attachments, workspace tools or internal workspace catalog", mac, async () => {
+test("a project-free chat keeps its model workspace root-less even when its private user console starts in HOME", mac, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await writeFile(join(fixture.project, "AGENTS.md"), "Generated bound-project-only instructions.");
@@ -21,7 +22,10 @@ test("a genuinely project-free chat has model context but no inherited root, att
     assert.equal(sdk.getState().snapshot!.projects.length, 1);
     await sdk.command({ type: "session.configure", sessionId: session.id, expectedRevision: session.revision, controls: { ...session.controls, modelId: fixture.modelId } });
     await assert.rejects(() => sdk.command({ type: "attachment.add", sessionId: session.id, path: "fixture.txt", expectedRevision: 0 }), /Select a project/);
-    await assert.rejects(() => sdk.terminal.open(session.id), /Select a project/);
+    const opened = await sdk.terminal.open(session.id), terminal = (await sdk.terminal.read(opened.id!)).terminal;
+    assert.equal(terminal.sessionId, session.id); assert.equal(terminal.projectId, null);
+    assert.equal(terminal.binding?.root, await realpath(homedir()));
+    await sdk.terminal.close(opened.id!);
     await assert.rejects(() => sdk.plans.read(session.id), /Select a project/);
     await assert.rejects(() => sdk.slash(session.id, "/diff", "tui"), /Select a project/);
     await assert.rejects(() => executeTool(null, { id: "generated-no-root", name: "run_command", arguments: { command: "pwd", timeoutMs: 1000 } }, new AbortController().signal, () => {}, () => {}), /no workspace/);

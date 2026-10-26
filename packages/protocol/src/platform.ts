@@ -11,6 +11,10 @@ import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
+import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
+import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
+export * from "./skill-gateway.ts";
+export * from "./dashboard.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
 import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "./tooling.ts";
@@ -98,6 +102,8 @@ const path = Type.String({ minLength: 1, maxLength: 4096 });
 const revision = Type.Integer({ minimum: 0 });
 const decision = Type.Union([Type.Literal("ask"), Type.Literal("allow"), Type.Literal("deny")]);
 const notificationSound = object({ enabled: Type.Boolean(), id: Type.String({ minLength: 1, maxLength: 128 }) });
+export const QUERY_ID_PATTERN = "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$";
+export const QueryCancellationSchema = object({ requestId: Type.String({ pattern: QUERY_ID_PATTERN, maxLength: 36 }) });
 
 export const DEFAULT_SYSTEM_PROMPT = `You are Moguri, a practical software engineering agent.
 
@@ -113,7 +119,7 @@ Finish with the outcome and any real blocker. Do not claim access to hidden reas
 
 export const SettingsSchema = object({
   appearance: AppearanceSchema,
-  interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean() }),
+  interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),
@@ -126,6 +132,7 @@ export const SettingsSchema = object({
   subagents: object({ enabled: Type.Boolean(), maxParallel: Type.Integer({ minimum: 1, maximum: 2 }) }),
   evolution: object({ enabled: Type.Boolean() }),
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }),
+  skillSources: Type.Optional(Type.Array(SkillSourceSchema, { maxItems: 16 })),
   voice: object({
     language: Type.String({ minLength: 1, maxLength: 16 }),
     backend: Type.Union([Type.Literal("auto"), Type.Literal("cpu"), Type.Literal("metal")]),
@@ -161,10 +168,10 @@ export const SettingsSchema = object({
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
-  appearance: { theme: "dark", palette: "moguri", custom: {} }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
+  appearance: { theme: "dark", palette: "moguri", custom: {} }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true, confirmSessionDetach: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
   permissions: { defaultDecision: "ask", tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
-  subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [],
+  subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [], skillSources: [],
   voice: { language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
   shortcuts: { commands: "Primary+KeyK", terminalCopy: "Primary+Shift+KeyC" },
   lifecycle: { keepAwake: false, tailMinutes: 5 },
@@ -186,6 +193,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
   const defaults = defaultSettings();
   return { ...defaults, ...settings,
     appearance: { ...defaults.appearance, ...settings.appearance },
+    interactions: { ...defaults.interactions, ...settings.interactions },
     permissions: { ...defaults.permissions, ...settings.permissions },
     voice: { ...defaults.voice, ...settings.voice },
     retention: { ...defaults.retention, ...settings.retention },
@@ -196,7 +204,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("interactions"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
-  Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"),
+  Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("skillSources"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("startup"),
@@ -266,6 +274,8 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  SkillGatewayQuerySchema,
+  DashboardQuerySchema,
   CoordinationQuerySchema,
   ToolingQuerySchema,
   BrowserQuerySchema,
@@ -399,6 +409,8 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse
+  | SkillGatewayResponse
+  | DashboardResponse
   | CoordinationResponse
   | ToolingResponse
   | BrowserResponse

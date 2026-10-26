@@ -33,14 +33,17 @@ cleanup still blocks deletion. Independent artifacts and repository files surviv
 
 This desktop repair reuses React/Electron (MIT), the existing typed SDK,
 `compareSessions`/`sessionOrderScope`, native drag events and owned SVG glyphs.
-No dependency, API, event, setting, schema or migration is added.
+The original reorder repair added no dependency or durable schema. The
+[protocol-60 follow-up](workspace-experience.md#session-navigation-follow-up)
+adds the shared detach acknowledgement/preference and its metadata migration.
 
-The existing session-action control is also a visible grip, making reorder-only
-dragging explicit without taking more title space or adding a duplicate button.
-Its top/bottom target halves insert before/after a sibling, never nest the source.
-Alt+Up/Down on the focused grip/link and existing context-menu actions share the
-same order path. Whole-row edge reorder and middle-to-attach remain;
-project/Chats headers still explicitly detach within the original project.
+Whole rows are draggable, with no grip or extra action button. Top/bottom target
+halves insert before/after a sibling, including children, never nest the source.
+Alt+Up/Down on the focused name and context-menu Move up/down share the same
+order path. Attach to session remains an explicit menu action. Root rows and
+project/Chats/group headers or backgrounds accept child detachment within the
+original project, using one organization command rather than a partial
+detach-plus-reorder sequence.
 Pin priority, archive, parent/group and profile boundaries are preserved.
 Leaving a target removes its insertion cue; invalid targets show no accepted
 move cue. Unpin uses a crossed-out pin; Pin and pinned-state markers stay pins.
@@ -59,6 +62,17 @@ revision before appending any order event. Unknown/network/non-revision errors
 never retry, and a second failure remains explicit. Attachment/detachment does
 not inherit this metadata-only retry or change its existing authority checks.
 
+Drag, Detach and choosing None in the parent dialog share the same default-on
+review. It binds the exact original session revision and destination group.
+Cancel preserves hierarchy/order and settings; source or destination changes
+invalidate review. The remembered opt-out uses profile-owned interactions
+settings and can be restored in Settings / Confirmations. The service still
+requires explicit acknowledgement when that preference is on, and never
+permits model-owned subagents or active work to detach. A failed preference
+save prevents the action; a concurrent hierarchy change after saving is checked
+again before the final revision-bound command. Ownership and tool policy do
+not change.
+
 Fresh prerequisites pass all six available generated groups: cancellation
 31.94 ms; SQLite append p95 0.048 ms/rebuild 0.501 ms; owned PTY cancellation
 152.72 ms with zero survivors; TUI updates 17.69 ms; hidden Electron cold start
@@ -72,10 +86,10 @@ Source `287f887` fixes a reproduced native failure: an ordinary unread update
 during a real mouse drag changed the full session revision and cancelled the
 move. Exact structural intent now survives that unrelated activity, while a
 concurrent pin change still refuses the captured move without an order-event
-prefix. Unknown/non-revision failures do not retry. Grip drags use insertion
-halves rather than the whole row's attachment center, and old hover cues clear.
-The existing action control supplies the grip without reducing title space;
-the 6-pixel point, 15-pixel status glyph and narrow captions remain unchanged.
+prefix. Unknown/non-revision failures do not retry, and old hover cues clear.
+That historical pass used an action-control grip; protocol 60 removes it and
+uses the same insertion halves for whole rows. The 6-pixel point, 15-pixel
+status glyph and narrow captions remain unchanged.
 
 The first full run also exposed an old keyboard-readiness race: `connect()`
 can seed a snapshot before its event channel authenticates. `39e02cd` waits for

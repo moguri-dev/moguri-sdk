@@ -1,0 +1,247 @@
+# Workspace experience and skill gateway
+
+## Change contract
+
+This slice simplifies the existing macOS alpha, not the wider release roadmap.
+The control plane remains authoritative for skill discovery, suggestion sources,
+accounting and work observations. Clients share typed SDK queries and slash
+commands. Automations is an empty left-sidebar destination. Code change and
+Work item are right-rail, per-session panels, not global resources or new
+provider-write capabilities. Code change preserves an already-linked PR;
+Work item remains a placeholder for issue links.
+
+Reuse React, TypeBox, the maintained MCP SDK, YAML and yauzl under their existing
+MIT licenses, Node's filesystem/crypto primitives, and the existing budget,
+event, terminal-owner and settings mechanisms. No new runtime dependency,
+charting framework, agent loop, credential backend or terminal renderer is needed.
+
+Protocol/schema 59 adds profile-owned optional skill-source settings and typed
+read-only gateway/dashboard queries. A transactional metadata migration preserves
+schema-58 events, receipts, encrypted grants and profiles. Existing settings
+normalize to no configured sources. No new durable event kind is required.
+User-selected source configuration uses the existing settings event and revision
+check. Reading a skill cannot install it, enable a capability or grant tools.
+
+The gateway accepts explicitly configured local folders, GitHub repository URLs
+or HTTPS ZIP archives. Each find/read refreshes and validates the source; no stale
+body is returned after failure. Local recursion rejects links and escaping paths.
+Archives are bounded and validated without extraction or execution. Loading binds
+the selected source/path and exact SHA-256 body. Sources are control-plane Local
+reads, not an implicit SSH/Sandbox filesystem transport. Revocation, changed
+configuration and cancellation must invalidate pending results.
+Cancellation uses an authenticated, exact-profile query ID and explicit
+`/v1/query-cancel` message as well as transport abort. Electron's custom-protocol
+Request signal alone does not propagate renderer cancellation reliably. The
+native proxy forwards the query ID and cancel route; the service aborts that
+original source read, rather than only hiding its reply. A cancelled lookup
+releases the settings navigation guard. A 30-second, bounded ephemeral marker
+also rejects cancellation-before-admission races. IDs never identify commands,
+model calls, permission grants or durable work; cancellation cannot replay or
+refund any of those. Missing acknowledgement is an explicit client error.
+
+Global suggestions preview profile-wide usage gaps and bounded prior prompts
+without creating a hidden chat or calling a model. Selecting a chat narrows the
+scope. Sending excerpts still requires review of the exact source digest.
+Generated advice cannot apply configuration or authenticate anything.
+
+Dashboard pages are My work, Usage, Cost and Velocity. Seven UTC days is the
+initial range; 30/60/90-day presets and a custom range are available. Custom starts
+at the trailing year. All-role model accounting keeps estimates, missing usage,
+held capacity and invoices distinct. Velocity shows observed completions,
+completion time and user interventions; these are not a causal productivity or
+time-saved claim. External MCP/tool-control turns and private subagent turns
+are excluded from completion/intervention velocity, not relabeled as user
+tasks. Their operations and all-role costs remain in their own accounting.
+Date filtering never changes cumulative budget admission.
+
+New Local user consoles default to configured HOME, never the state directory.
+Project consoles still bind the actual Moguri worktree. Existing owners retain
+their original root and input is never replayed. Missing roots fail explicitly.
+
+Settings use hover/focus copy controls for non-secret text fields and information
+tooltips for explanations. Errors, live status and consequential safety warnings
+stay visible. Icon-only navigation keeps accessible names and keyboard focus.
+The footer contains profile name, Ask Moguri and Settings in one row. Copilot
+connection status is shown only in Settings / Models / Providers, not the left
+sidebar. Both new right-rail panels follow the actual selected session.
+
+## Visual direction
+
+Keep the factory theme: midnight `#11161e`, canvas `#141922`, surface `#191f29`,
+mint `#a8d7bc`, slate `#a2afc0`, and text `#e1e8f0`, resolved through existing
+theme variables. Native system type carries headings and controls; monospaced
+figures distinguish measured data. Avoid a new marketing-style hero or fonts.
+
+The dashboard's signature is a work pulse: a compact time-series plot and
+project/model breakdowns first, with exact records behind disclosure controls.
+The surrounding navigation and settings stay quiet. Graphs include accessible
+text/data alternatives and do not depend on color alone.
+
+## Prerequisite measurements
+
+Fresh macOS arm64 run before feature integration, 2026-10-25:
+
+| Primitive | Result | Measurement |
+| --- | --- | --- |
+| Generated provider streaming/cancellation | PASS | 6 requests; cancellation 31.77 ms |
+| SQLite WAL/crash/rebuild | PASS | 1,000 events; append p95 0.050 ms; rebuild 0.51 ms |
+| Known PTY process-group cancellation | PASS | 152.45 ms; zero fixture survivors |
+| OpenTUI React timeline | PASS | 60 updates; mean 17.27 ms |
+| Hidden Electron timeline | PASS | cold start 193.29 ms; 445.53 MiB; frame 12.11 ms |
+| Generated filesystem/Git baseline | PASS | 2,000 files; search 0.96 ms; Git 5.98 ms |
+| Independent encrypted compartments | PASS | 500 events / 250 artifacts in 114.80 ms |
+| Hidden Ghostty WASM | PASS | 423,045 bytes; input/108x24 grid in 23.50 ms |
+| Model-control forwarding and sizing | PASS | 56.06 ms; unsupported effort not forwarded |
+| Official MCP OAuth/refresh | PASS | 17.50 ms; one refresh |
+| Vector/graph and official MCP discovery/call/result | PASS | 500 rows in 6.59 ms; MCP round trip passed |
+
+`npm ci` restored missing dependencies and reported zero vulnerabilities.
+The expected OpenTUI experimental FFI warning remains. The base spike still
+labels live inference, Rust/Linux, signed packaging, native SendBox, multi-model
+quality, live decisions and personal SSH qualification FAIL/unavailable. Its
+historical full-attachment/default/budget limitation is not a new regression.
+Nothing here claims those physical/live gates passed or enables a fallback.
+
+## Verification boundaries
+
+Generated tests cover HOME/worktree roots, exact skill freshness and scope,
+malformed/escaping archives, changed and removed sources, bounded pagination,
+MCP discovery/read, profile isolation, schema-58 restart migration, global
+suggestion consent, dated accounting and truthful velocity samples. Hidden
+Electron checks cover navigation, all four dashboard pages, field copying,
+secret exclusion, keyboard tooltips and preserved edits. Build/type checks and
+an independently packed SDK consumer remain required.
+
+## Integrated qualification
+
+This subsection records the protocol-59 checkpoint.
+
+The final generated macOS arm64 runs pass **1,446 Node/worker/CLI/TUI cases**
+with **14 platform/native skips**, and **183 hidden desktop cases** with
+**three packaged/physical-native skips**. No tests remain failed or cancelled.
+Type checks and the production build pass. `npm ci`, the independently installed
+packed SDK consumer, all **12 installed worker continuation probes**, and
+moderate-level root/consumer audits pass with **zero vulnerabilities**.
+The SDK consumer explicitly checks fresh skill lookup/read, changed-body
+rejection, global previews, seven-day dashboard data and private HOME consoles.
+These generated providers/SSH endpoints are not live entitlement or physical
+SendBox/release qualification.
+
+The desktop pass also exposed a real Ghostty integration race: the host widened
+from 219 to 267 pixels while its canvas stayed at 200 pixels and the remote grid
+stayed at 25 columns. FitAddon's 50 ms resize guard discarded the single resize
+notification. Both User and Agent surfaces now debounce host observation before
+calling the existing FitAddon, and dispose pending fits before their terminal.
+The actual remote-grid/Agent cases pass **18 repeated checks**, without
+weakening the grid acknowledgement or adding a terminal parser.
+
+Detailed accounting stays mounted across background chart refreshes, preserving
+reservation controls and exact repository reviews. Copy announcements use a
+polite live region without impersonating each section's operational status.
+Capability limitations and errors stay visible; language/transport explanations
+remain keyboard-accessible information tooltips.
+
+Known advisories remain: OpenTUI's experimental FFI warning, Ghostty's lazy
+bundle-size warning, and deprecated transitive `whatwg-encoding` /
+`node-domexception` packages in the external consumer. Its existing install
+script review is explicitly approved and rebuilt by the verification harness.
+None is an audit vulnerability or a qualification of the skipped physical gates.
+
+## Session navigation follow-up
+
+The desktop no longer offers a Global Terminal, global scope picker or a hidden
+project console. Project actions open an existing session's private console at
+its bound worktree; project-free sessions use configured HOME. Without an
+existing session, the action asks the user to create/select one rather than
+creating a hidden chat. CLI/slash entrypoints stop offering global creation.
+Low-level SDK compatibility and authenticated inspection, reconciliation and
+close of retained null-session consoles remain available. Removing navigation
+never kills, retargets or replays an existing owner.
+
+Reuse React (MIT), the existing native dialog, scoped reorder API, settings
+events and Ghostty/PTY lifecycle. No dependency or terminal implementation is
+added. Whole session rows use their upper/lower halves to reorder siblings,
+including children. The grip is removed, not replaced with another button.
+Context menus, Shift+F10 and Alt+Up/Down remain keyboard alternatives; attaching
+to a parent remains an explicit context-menu action.
+
+Dropping a child on a root row, its project/Chats/group header or a root-list
+background requests detachment into that root group. Its original project,
+workspace, Env and cancellation owner do not change. A root-row drop is a
+detachment destination, not a promise of an additional reorder transaction.
+Only a single organization command is committed. Sibling reordering retains
+complete structural-intent checks, fresh revision CAS and the one safe retry
+for a revision-only conflict.
+
+Protocol/schema 60 adds default-on `interactions.confirmSessionDetach` and an
+explicit optional detach acknowledgement on `session.organize`. An additive
+metadata migration preserves old settings, events, receipts, profiles and
+console owners; nested settings normalize the missing preference to true.
+The preference is profile-owned and resettable in Settings / Confirmations.
+Remembering a choice cannot bypass service hierarchy, active-work, model-owned
+subagent, profile or revision checks, and never grants tool permissions.
+
+Drag and menu detach use the same native review. Cancel changes neither
+settings nor hierarchy. Confirmation rechecks the captured source hierarchy,
+workspace/Env and root destination after any draft/preference save. Structural
+changes invalidate review; active work and service failures remain explicit.
+No failed or partial detach is labeled successful.
+
+Fresh prerequisite measurements before this follow-up, macOS arm64:
+
+| Primitive | Result | Measurement |
+| --- | --- | --- |
+| Generated provider streaming/cancellation | PASS | 6 requests; cancellation 32.04 ms |
+| SQLite WAL/crash/rebuild | PASS | 1,000 events; append p95 0.044 ms; rebuild 0.52 ms |
+| Known PTY process-group cancellation | PASS | 152.17 ms; zero survivors |
+| OpenTUI React timeline | PASS | 60 updates; mean 17.30 ms |
+| Hidden Electron timeline | PASS | cold start 184.54 ms; 443.77 MiB; frame 8.26 ms |
+| Generated filesystem/Git baseline | PASS | 2,000 files; search 1.04 ms; Git 5.55 ms |
+| Independent encrypted compartments | PASS | 500 events / 250 artifacts in 109.26 ms |
+| Hidden Ghostty WASM | PASS | 423,045 bytes; input/108x24 grid in 25.40 ms |
+
+The base spike's live inference, Rust/Linux, signed packaging, physical SendBox,
+multi-model quality, decisions, personal SSH and historical complete-feature
+gates remain FAIL/unavailable, not newly qualified by this UI work.
+Generated checks must prove whole-row child ordering, cancel/confirm,
+remembered and reset preferences across restart/profile boundaries, stale
+review refusal, unchanged authority, removed global entrypoints and retained
+private-console lifecycle. Packed-consumer, build and migration checks remain
+required.
+
+Native checks also exposed focus loss after successful detachment: a
+microtask could focus the old child row before React replaced it in the root
+list. Session actions now restore focus in a layout effect only after the
+rendered snapshot reaches the committed SDK sequence. Cancel, remembered
+detachment, parent-selector review, archive and delete dialogs pass twelve
+repeated checks without weakening focus assertions.
+
+The first full desktop run also found a browser fixture sending its keyboard
+command before the authenticated command gate was ready. It now waits for
+the actual Run command button, not merely an editable textarea; no timeout or
+dialog-dismissal assertion was weakened. That exact case passes ten repeated
+checks under concurrent complete-Node-suite load.
+
+## Protocol-60 integrated qualification
+
+The final macOS arm64 runs pass **1,455 Node/worker/CLI/TUI checks** with
+**14 platform/native skips** in 21.2 minutes, and **192 hidden desktop checks**
+with **three packaged/physical-native skips** in 6.4 minutes. No checks remain
+failed or cancelled. Type checks and the committed production build pass.
+The independently installed packed SDK passes every entrypoint, the explicit
+detach acknowledgement/preference/reset checks and all **12 installed worker
+continuation probes**. Root and independently installed consumer audits report
+**zero vulnerabilities**.
+
+Coverage includes both child-list scopes, root/group/header destinations,
+cancel and restored focus, keyboard/parent-selector alternatives, stale source
+and destination refusal, preference-save failures and concurrent hierarchy
+changes. Genuine model-owned subagents and active work remain non-detachable.
+Profile isolation, reset, encrypted restart recovery and schema-59 migration
+rollback preserve original identities, payloads, receipts and legacy consoles.
+Project terminal actions use the selected actual managed worktree; empty
+projects create neither a global console nor a hidden chat.
+
+The same non-blocking FFI, lazy Ghostty bundle-size and transitive-deprecation
+advisories above remain. Generated success does not qualify physical SendBox,
+personal provider/SSH access, signed release artifacts or deferred features.

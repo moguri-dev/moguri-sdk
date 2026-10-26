@@ -74,7 +74,7 @@ function seedGeneration(store: EventStore) {
   return { id, resultDigest, inputDigest, entry };
 }
 function downgrade(store: EventStore): void {
-  store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('candidate_retention_schema','lean_tooling_schema','lean_tooling_convergence_schema'); PRAGMA user_version=56; COMMIT;");
+  store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('automatic_kupo_schema','session_navigation_schema','workspace_experience_schema','candidate_retention_schema','lean_tooling_schema','lean_tooling_convergence_schema'); PRAGMA user_version=56; COMMIT;");
 }
 
 test("schema-56 rollback preserves ciphertext, keys and accounting; successful replay binds original provenance, never the latest link or an unknown owner", async () => {

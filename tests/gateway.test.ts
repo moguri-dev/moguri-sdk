@@ -57,7 +57,9 @@ test("the single outward MCP exposes discovery/call/result but no user-only sett
   try {
     await server.connect(remote); await caller.connect(local);
     const tools = await caller.listTools();
-    assert.equal(tools.tools.length, 5);
+    assert.equal(tools.tools.length, 7);
+    assert.ok(tools.tools.some((tool) => tool.name === "moguri_find_skills"));
+    assert.ok(tools.tools.some((tool) => tool.name === "moguri_read_skill"));
     assert.equal(tools.tools.some((tool) => /approve|settings|set_token/.test(tool.name)), false);
     const discovery = await caller.callTool({ name: "moguri_find_tools", arguments: { serverId: "builtin", query: "grep" } });
     const discovered = CallToolResultSchema.parse(discovery).content.find((content) => content.type === "text");

@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **58**, including
+Current source uses protocol **59**, including the
+[skill gateway and graphic workspace dashboards](architecture/workspace-experience.md),
 [lean tools and coordinated sessions](architecture/lean-tooling.md),
 [session-owned candidate cleanup](architecture/candidate-cleanup.md),
 shared-global/last-selected model defaults and
@@ -15,6 +16,9 @@ accounting; the earlier schema-55 model-default upgrade is metadata-only.
 Schema 58 strictly converges the candidate-retention and earlier development
 lean-tooling lineages using their actual markers, preserving both guarantees.
 Older running services require reviewed restart.
+Schema 59 adds an independent transactional metadata marker. Older source
+settings normalize to no configured skill sources; ciphertext, receipts,
+identities and existing accounting are unchanged.
 It retains protocol-54 exact-scoped session PR observations
 and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
 [the separate Agent terminal](architecture/agent-terminal.md),
@@ -77,6 +81,40 @@ unknown; project-free scope cannot inherit a root or authenticated account.
 The schema-54 marker upgrades transactionally without rewriting ciphertext.
 
 ## Lean tools and session coordination
+
+`skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
+refreshes enabled registered skills and explicit `settings.skillSources` folders
+or HTTPS archives. It returns eight bounded metadata entries, source/path,
+SHA-256, `catalogDigest` and `nextOffset`. Supply the catalog digest for later
+pages. `skills.read(id, expectedDigest, sessionId?, signal?)` refreshes again and returns
+the whole checked body only when it still matches. Configuration changes,
+removal, source failure and changed bytes never return a cached substitute.
+The optional session binds actual profile/project/Local scope; omitting it is
+an explicit user control-plane preview, not an inherited project. Configured
+source discovery on Remote/Sandbox agents remains unqualified.
+
+The `moguri/mcp` entrypoint adds `moguri_find_skills` and `moguri_read_skill` to
+the existing single stdio gateway. It binds its own session, rejects foreign
+authority fields and exposes no source-configuration or self-approval tools.
+SDK/MCP cancellation propagates through the authenticated request into the
+source download and discards the pending reply. Downloads also have a
+15-second deadline and abort on shutdown. No source lookup creates durable
+capabilities or model calls.
+
+`dashboard.overview({ range?, projectId? })` returns all four pages' shared
+projection: `work`, `days`, `projects`, `models`, `totals` and `velocity`. The
+default is seven UTC calendar days. Use the existing `BudgetRange` presets or
+inclusive custom dates; all-time remains in detailed budget accounting.
+Unknown dated reports and cost estimates preserve existing provenance.
+`velocity.productivityIncrease` remains null: only retained normal agent-turn
+outcomes, valid timing and actual user approval/answer events are measured.
+Control/role turns and stopped/partial work cannot become successful tasks.
+
+`suggestions.preview(null, true)` is a global local-only preview, including
+deterministic `gaps` and the actual generation `modelId`, without session
+creation. `suggestions.generate(null, digest, true, true)` creates a settings
+chat only after exact source/model review and ordinary model admission.
+Non-null session IDs retain explicit scoped behavior.
 
 `tools.catalog(sessionId, query, offset)` returns scoped native schemas and
 digests. Normal model solver turns use the same catalogue through
@@ -225,17 +263,29 @@ retention. Files are UTF-8 only, up to 128 KiB. The review digest binds actual
 access provenance as well as source content and destination. This is a disclosed
 client-attachment boundary, not a substitute for pinned-SSH metadata reads.
 
-`terminal.openGlobal(cols?, rows?)` explicitly opens a Local console in the
-runtime's canonical Moguri data directory. Its binding has null session,
+The low-level compatibility method `terminal.openGlobal(cols?, rows?)` opens a
+Local console in configured canonical HOME. Its binding has null session,
 project and workspace IDs and the active profile's authenticated Local owner.
 It neither inherits a selected project's root nor depends on its retention.
-CLI `terminal global`, `/terminals global`, and `/terminal global` expose it.
-`terminal.openGlobal(root, cols?, rows?)` and CLI `terminal open-global ROOT`
-retain main's explicit independent-root form. The console displays that actual
+Protocol 60 retires Global Terminal UI and CLI/slash creation with an explicit
+error. Existing null-session consoles remain in `terminal list` and
+`/terminals list` for exact inspection/reconciliation/close.
+`terminal.openGlobal(root, cols?, rows?)` retains the explicit-root SDK
+compatibility overload. Its binding retains the actual
 captured root; it does not substitute a project, session or configured SSH root.
 Existing `terminal.open(sessionId)` keeps its exact project/worktree/SSH root.
 Closing/hiding the desktop pane detaches; `terminal.close(id)` terminates.
 Reconnection/restoration never creates a replacement or replays input.
+
+`sessions.organize(id, changes, expectedRevision?, confirmDetach?)` requires
+the final `true` acknowledgement when removing an existing parent and this
+profile's `interactions.confirmSessionDetach` is not false. It does not bypass
+revision, same-project, active-work, cycle or model-owned-subagent guards.
+Desktop drag/menu/parent-selector detachment uses the same native review;
+remembered opt-out is a profile-owned settings edit, not an approval grant.
+Missing legacy preferences normalize to true and reset with
+`settings.reset("interactions", revision)`. Schema 60 adds the transactional
+`session_navigation_schema` marker without rewriting retained payloads.
 
 The original desktop schema-44 marker is additive; legacy confirmations default to asking,
 legacy session order derives from creation, and historical data/grants retain
@@ -1784,9 +1834,13 @@ node bin/moguri.mjs mcp --session SESSION_ID
 
 Configure that command as a stdio MCP in another client. It exposes only
 `moguri_discover_mcps`, `moguri_find_tools`, `moguri_auth_status`,
-`moguri_call_tool` and `moguri_read_result`. It cannot change settings,
+`moguri_call_tool`, `moguri_read_result`, `moguri_find_skills` and
+`moguri_read_skill`. It cannot change settings,
 credentials, permissions or answer its own approval. Calls wait for the human
 in the bound idle session, then retain a paged result.
+Skill discovery/read instead uses freshly checked configured sources, without
+a model call or new capability installation. Skill text is untrusted guidance,
+not approval for its instructions or bundled scripts.
 
 Protocol-24 development also exposes `mcp.servers(sessionId?)` as authoritative,
 non-connecting metadata for the model gateway, outward MCP, CLI and clients.

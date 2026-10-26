@@ -38,7 +38,7 @@ import { workflowGuidance, type WorkflowKind } from "../../../packages/protocol/
 import { SessionContextSchema, SessionControlSchema, SessionMessageSchema, WaitSessionSchema, type CoordinationOrigin } from "../../../packages/protocol/src/coordination.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
 import { authorizeTool, validateSettings } from "./permissions.ts";
-import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
+import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type BoundaryReply, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext, readTools } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateModelOptions, validateContextSize } from "./model-controls.ts";
@@ -539,6 +539,8 @@ export class ControlPlane extends EventEmitter {
     };
   }
   private routingAvailability() {
+    if (this.shuttingDown) return { ...kupoAvailability({ ...this.projection.settings.values.kupo, enabled: false }, [], false),
+      diagnostics: ["Kupo is unavailable because this control plane is stopping or closed. Retained history does not authorize inference."] };
     const enabled = this.projection.settings.values.kupo.enabled;
     const hard = enabled && Boolean(this.projection.budgetPolicy.limit || this.profileHooks?.globalBudget().limit);
     let qualified = false;
@@ -2989,21 +2991,21 @@ export class ControlPlane extends EventEmitter {
         }
         const routingPolicy = this.projection.settings.values.kupo;
         const automatic = synthetic && routingPolicy.workflow === "auto" ? automaticPool(routingPolicy, this.provider.state.models, session.controls.env) : null;
-        const soleModel = automatic?.candidates.length === 1 ? automatic.candidates[0] : undefined;
+        let soleModel = automatic?.candidates.length === 1 ? automatic.candidates[0] : undefined;
         if (automatic && route?.plan && route.plan.pattern !== "single") {
           run.kupo ??= { phase: "draft", contextDigest: this.routingContextDigest(session) };
           if (run.kupo.contextDigest !== this.routingContextDigest(session)) throw new MoguriError("routing_stale", "Task history changed during Kupo response review. Unselected tools were discarded; no paid reclassification or replay.", 409);
         }
         const kupoPhase = run.kupo?.phase;
-        const phase = kupoPhase ? `kupo-${kupoPhase}` as const : synthetic && !route?.plan && !soleModel ? "router" : "solver";
+        let phase: NonNullable<BoundaryReply["phase"]> = kupoPhase ? `kupo-${kupoPhase}` : synthetic && !route?.plan && !soleModel ? "router" : "solver";
         const responseModelId = route?.plan?.pattern === "cascade" && (kupoPhase === "gate" || kupoPhase === "escalation") ? route.plan.escalationId :
           route?.plan?.pattern === "critique" && kupoPhase === "critic" ? route.plan.criticId : route?.plan?.modelId;
-        const modelId = synthetic ? responseModelId ?? soleModel?.id ?? automatic?.classifier?.id ??
+        let modelId = synthetic ? responseModelId ?? soleModel?.id ?? automatic?.classifier?.id ??
           kupoPool(routingPolicy, this.provider.state.models, session.controls.env).classifier.id : session.controls.modelId!;
         if (run.executionId && !modelId.startsWith("remote.") && !this.projection.settings.values.remote?.allowCopilot) throw new MoguriError("remote_credential", "Explicitly allow scoped Copilot access on this verified host before dispatching it.", 403);
         if (run.nativeProviderEpoch !== undefined && run.nativeProviderEpoch !== this.providerEpoch) run.nativePrepared?.clear();
         const cached = run.nativePrepared?.get(modelId); run.nativePrepared?.delete(modelId);
-        const prepared = cached ?? await this.provider.prepare(modelId, run.abort.signal);
+        let prepared = cached ?? await this.provider.prepare(modelId, run.abort.signal);
         if (run.sandboxExecutionId) {
           const native = this.sandboxExecution(run.sandboxExecutionId);
           this.assertNativePolicy(native);
@@ -3034,29 +3036,28 @@ export class ControlPlane extends EventEmitter {
         run.granted.clear();
         run.scopedReadPolicies.clear();
         const project = this.projection.projects.find((project) => project.id === current.projectId);
-        if (phase !== "router" && this.hasDocuments(current) && this.snapshot().provider.models.find((model) => model.id === modelId)?.toolInput === false) throw new MoguriError("model_documents", "The selected actual solver has document tools disabled. Original attachments remain retained; no other model or complete-document expansion was substituted.", 409);
         const projectSettings = this.platform.sessions.projects.values(project?.id);
         const effectiveMode = run.yieldedTo ? "read-only" : current.mode;
         const solverTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", effectiveMode, folderPolicy(projectSettings), { project: Boolean(project), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current), coordinator: Boolean(run.yieldedTo && current.mode === "agent" && current.pendingMode !== "read-only") });
         const selectedTools = (request.loadedTools ?? []).filter((name) => solverTools.some((tool) => tool.name === name));
         const solverInterface = solverTools.length ? catalogForModel(solverTools, selectedTools) : [];
-        const tools = phase === "router" || kupoPhase === "gate" || kupoPhase === "critic" ? [] : solverInterface;
+        let tools = phase === "router" || kupoPhase === "gate" || kupoPhase === "critic" ? [] : solverInterface;
         run.declaredTools = new Set(phase === "router" ? [] : solverTools.map((tool) => tool.name));
         const started = this.history.find((event) => event.event_type === "turn.started" && event.turn_id === run.turnId);
         const prompt = started?.event_type === "turn.started" && started.payload.promptDigest ? this.store.blob(started.payload.promptDigest) : this.platform.prompt(current);
         run.repositoryContext = await this.repositoryContext(current);
         const solverPrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext, run.abort.signal) + this.platform.progress.reminder(current.id) +
           (run.yieldedTo ? "\nThis coordinator yielded its writer lease to an owned child. Native file/command writes are unavailable until that work settles; scoped messages, observations and child controls do not transfer the lease." : "");
-        const effectivePrompt = phase === "router" ? automatic ? AUTOMATIC_ROUTER_PROMPT : ROUTER_PROMPT : kupoPhase === "gate" ? AUTOMATIC_GATE_PROMPT :
+        let effectivePrompt = phase === "router" ? automatic ? AUTOMATIC_ROUTER_PROMPT : ROUTER_PROMPT : kupoPhase === "gate" ? AUTOMATIC_GATE_PROMPT :
           kupoPhase === "critic" ? AUTOMATIC_CRITIC_PROMPT : solverPrompt;
         if (run.done || run.abort.signal.aborted) return;
         if (synthetic && (policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || permissionRevision !== this.projection.settings.permissionRevision ||
           policyRevision !== this.projection.policy.revision || contextAtPrepare !== this.routingContextDigest(this.session(run.sessionId)))) throw new MoguriError("routing_stale", "Routing authority or task changed before dispatch. No stale classifier/solver input was sent.", 409);
-        const incoming = phase === "router" ? [] : this.coordination.pending(current.id);
-        const incomingContext = incoming.map((message) => coordinatedMessageContext(message));
+        let incoming = phase === "router" ? [] : this.coordination.pending(current.id);
+        let incomingContext = incoming.map((message) => coordinatedMessageContext(message));
         const taskMessage = started?.event_type === "turn.started" && started.payload.item.origin ?
           this.projection.coordinationMessages.find((message) => message.id === started.payload.item.origin?.messageId && !message.deliveredTo) : undefined;
-        const canonicalContext = [...this.context(current.id), ...steers.map((item) => this.contextItem(item)), ...incomingContext];
+        let canonicalContext = [...this.context(current.id), ...steers.map((item) => this.contextItem(item)), ...incomingContext];
         let routing: RoutingTurn | undefined, routedContext: Message[] | undefined;
         if (synthetic) {
           this.requireKupo(current.controls, current);
@@ -3065,6 +3066,23 @@ export class ControlPlane extends EventEmitter {
           const estimatedTokens = estimateModelContext({ systemPrompt: solverPrompt, messages: canonicalContext, tools: solverInterface });
           const pool = singlePolicy.workflow === "auto" ? automaticPool(singlePolicy, this.provider.state.models, current.controls.env, estimatedTokens) :
             kupoPool(singlePolicy, this.provider.state.models, current.controls.env, estimatedTokens);
+          const automaticSnapshot = "capabilities" in pool ? pool : null;
+          if (!route && automaticSnapshot && pool.candidates.length === 1 && !soleModel) {
+            soleModel = pool.candidates[0]!;
+            if (modelId !== soleModel.id) {
+              modelId = soleModel.id;
+              prepared = await this.provider.prepare(modelId, run.abort.signal);
+              if (run.executionId && !modelId.startsWith("remote.")) {
+                if (!this.projection.settings.values.remote?.allowCopilot) throw new MoguriError("remote_credential", "Scoped Copilot access is not approved on this pinned host. No request or Local fallback.", 403);
+                await this.remote.verifyCopilot(prepared, run.abort.signal);
+              }
+              if (run.done || run.abort.signal.aborted) return;
+            }
+            phase = "solver"; tools = solverInterface; effectivePrompt = solverPrompt;
+            run.declaredTools = new Set(solverTools.map((tool) => tool.name));
+            incoming = this.coordination.pending(current.id); incomingContext = incoming.map((message) => coordinatedMessageContext(message));
+            canonicalContext = [...this.context(current.id), ...steers.map((item) => this.contextItem(item)), ...incomingContext];
+          }
           if (route) {
             this.checkRoutingSnapshot(current, route);
             if (route.plan && !pool.candidates.some((model) => model.id === route.plan!.modelId)) throw new MoguriError("routing_model", "The chosen solver is no longer eligible for the current context. No fallback or truncation.", 409);
@@ -3072,13 +3090,13 @@ export class ControlPlane extends EventEmitter {
             routing = { id: run.turnId, sessionId: current.id, projectId: current.projectId, turnId: run.turnId, env: current.controls.env, createdAt: new Date().toISOString(),
               settingsRevision: this.projection.settings.revision, permissionRevision: this.projection.settings.permissionRevision, policyRevision: this.projection.policy.revision,
               policyDigest, contextDigest: this.routingContextDigest(current), classifierModelId: pool.classifier?.id ?? null, candidateModelIds: pool.candidates.map((model) => model.id),
-              ...(singlePolicy.workflow === "auto" ? { modelSnapshots: structuredClone(pool.candidates), capabilities: automatic?.capabilities, critiquePairs: automatic?.critiquePairs } : {}),
+              ...(automaticSnapshot ? { modelSnapshots: structuredClone(pool.candidates), capabilities: automaticSnapshot.capabilities, critiquePairs: automaticSnapshot.critiquePairs } : {}),
               policy: structuredClone(singlePolicy), status: soleModel ? "ready" : "planning", classifierStepId: soleModel ? null : request.stepId,
               plan: soleModel ? { pattern: "single", modelId: soleModel.id, basis: "only-model", complexity: null, confidence: null,
                 reason: "The only eligible configured model runs directly, without a classifier call." } : null, diagnostic: null };
           }
           if (phase === "router") routedContext = [{ role: "user", content: JSON.stringify({ state: canonicalContext.map((message) => ({ ...message, timestamp: 0 })), candidates: pool.candidates.map((model) => ({ id: model.id, name: model.name, source: model.source, endpointBoundary: model.endpointBoundary ?? "network", contextWindow: modelContextWindows(model).values[0], maxTokens: model.maxTokens })),
-            ...(automatic ? { capabilities: automatic.capabilities, eligibleCritiquePairs: automatic.critiquePairs } : {}) }), timestamp: Date.now() }];
+            ...(automaticSnapshot ? { capabilities: automaticSnapshot.capabilities, eligibleCritiquePairs: automaticSnapshot.critiquePairs } : {}) }), timestamp: Date.now() }];
         }
         if (kupoPhase === "gate" || kupoPhase === "critic" || kupoPhase === "revision") {
           if (!run.kupo?.draft) throw new MoguriError("routing_response", "The exact original Kupo draft is missing. No gate or tool request was authorized.", 409);
@@ -3092,6 +3110,7 @@ export class ControlPlane extends EventEmitter {
           } else routedContext = [{ role: "user", timestamp: Date.now(), content: JSON.stringify({ task: canonicalContext, instructions: solverPrompt, tools: solverInterface, proposedResponse }) }];
         }
         const metadata = this.provider.state.models.find((model) => model.id === modelId);
+        if (phase !== "router" && kupoPhase !== "critic" && kupoPhase !== "gate" && this.hasDocuments(current) && metadata?.toolInput === false) throw new MoguriError("model_documents", "The selected actual solver has document tools disabled. Original attachments remain retained; no other model or complete-document expansion was substituted.", 409);
         if (synthetic && (!metadata || prepared.model.id !== metadata.apiModelId ||
           prepared.model.maxTokens !== metadata.maxTokens || metadata.imageInput && !prepared.model.input.includes("image"))) {
           throw new MoguriError("routing_model", "The prepared API model or output/input capability no longer matches its exact discovered Kupo binding. Refresh models; no request or substitute was dispatched.", 409);
@@ -3106,6 +3125,7 @@ export class ControlPlane extends EventEmitter {
         const capturedRepository = await this.platform.repositories.capture(current, run.abort.signal);
         if (run.done || run.abort.signal.aborted) return;
         current = this.session(run.sessionId);
+        if (routing?.policy.workflow === "auto") this.checkRoutingSnapshot(current, routing);
         if (admissionScope !== this.admissionSignature(current)) throw new MoguriError(synthetic ? "routing_stale" : "model_scope_changed", "Model root, controls or authority changed during repository attribution. No stale request was admitted.", 409);
         if (synthetic && (policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || permissionRevision !== this.projection.settings.permissionRevision || policyRevision !== this.projection.policy.revision || contextAtPrepare !== this.routingContextDigest(current))) throw new MoguriError("routing_stale", "Routing authority or input changed during repository attribution. No stale request was admitted.", 409);
         const reservation = this.platform.budgets.reserve(current, {

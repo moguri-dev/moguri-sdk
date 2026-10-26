@@ -304,14 +304,26 @@ export class EventStore {
         this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_convergence_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid lean tooling/convergence schema marker. State was preserved.");
       }
-      if (version < 59) {
+      if (version < 59) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('workspace_experience_schema','1');
+        PRAGMA user_version=59; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='workspace_experience_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid workspace experience schema marker. State was preserved.");
+      }
+      if (version < 60) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('session_navigation_schema','1');
+        PRAGMA user_version=60; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_navigation_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid session navigation schema marker. State was preserved.");
+      }
+      if (version < 61) {
         if (this.events().some((event) => event.event_type === "routing.response_selected" ||
           event.event_type === "routing.started" && event.payload.routing.policy.workflow === "auto" ||
           event.event_type === "model.started" && event.payload.kupoPhase ||
-          event.event_type === "model.completed" && event.payload.kupo)) throw new Error("Automatic Kupo history cannot be relabelled as a pre-59 schema. Original state was preserved.");
+          event.event_type === "model.completed" && event.payload.kupo)) throw new Error("Automatic Kupo history cannot be relabelled as a pre-61 schema. Original state was preserved.");
         this.db.exec(`BEGIN IMMEDIATE;
           INSERT INTO retention_metadata(id,value) VALUES ('automatic_kupo_schema','1');
-          PRAGMA user_version=59; COMMIT;`);
+          PRAGMA user_version=61; COMMIT;`);
       }
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='automatic_kupo_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid automatic Kupo schema marker. State was preserved.");
