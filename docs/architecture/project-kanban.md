@@ -131,3 +131,44 @@ checkout/index preservation, cross-client board preferences, work item picking,
 native context menus, project dragging, exact/ambiguous price aliases, cache and
 long-context arithmetic, price expiry and unchanged hard-budget admission.
 Generated fixtures must not use personal credentials, repositories or invoices.
+
+## Local qualification, 2026-10-26
+
+Type checks and the production build pass. The complete Node/service/worker/
+CLI/native-TUI run has **1,504 passes and 14 platform/native skips**, zero
+failures, across 1,518 cases in **1,220,495.93 ms**. This includes actual
+controller SIGKILL, competing source claims, acknowledged stop with unknown
+charges held, source-independent retention, both GitHub source modes,
+read-only board schemas, exact fetch/push destination changes and publication
+that denies remaining same-response tools without another paid step.
+
+The complete hidden Electron run has **199 passes and three packaged/physical
+native skips**, zero failures, across 202 flows in **6.4 minutes**. It exercises
+secondary-click/keyboard project menus, durable project dragging, shared
+visibility, Kanban work-item selection, actual composer `continue work` through
+the generated PR endpoint, full PR body display and explicit API-price consent.
+
+The independently packed external consumer installs with explicit local-package
+script approval and audits cleanly. Root, Node, React and MCP imports/types,
+protocol-62 board/preferences/work-item/pricing calls, existing installed
+runtime/CLI/SSH scenarios and all **12 actual installed-worker continuation
+probes** pass. Both source and external-consumer audits report **zero
+vulnerabilities**. No root-only dependency override is needed.
+
+The broad runs exposed older fixture assumptions, not accepted false positives:
+legacy schema encoders now remove the future Kanban marker while preserving
+strict corrupt-lineage refusal; native menu checks use actual menuitem roles;
+ordinary-session assertions exclude the reserved board row and target a real
+lower-half drop rather than its rounding-sensitive boundary. The updater check
+waits for its hidden-launch suppression acknowledgement, not the preceding
+intermediate `installed` journal entry. The final complete runs include these
+corrections; failed-run logs remain separate qualification evidence.
+
+Known notices remain the experimental OpenTUI FFI warning, the existing lazy
+Ghostty chunk-size warning, and deprecated transitive `whatwg-encoding`/
+`node-domexception` packages. Tests use generated roots, credentials, provider
+responses, loopback Git and hidden windows. Public pricing-page reads are not
+personal authentication or live inference. No real GitHub/Linear task mutation,
+personal shell/microphone, model-weight download, physical SendBox, fork-head
+publication, Remote/Sandbox continuation or notarized/Linux release
+qualification is claimed. CI remains restricted to `main` pushes.
