@@ -42,7 +42,9 @@ project.
 Project preferences select Kanban, open GitHub issues or open GitHub PRs as the
 continuation source. Kanban uses explicitly eligible non-final phases, with
 in-progress work before backlog. A user action or an exact actual-user
-`continue work` submission selects one unclaimed item. Quoted text, model
+`continue work` submission first asks whether to use Kanban or send the exact
+prompt normally. Only the actual Kanban choice selects one unclaimed item.
+The route is requested every time, never saved as a preference. Quoted text, model
 messages, held prompts and recovered queues cannot start this workflow.
 
 The retained request binds the actual profile, source revision/digest, account,
@@ -68,8 +70,73 @@ propagates to actual owned work, preserving requested and acknowledged outcomes.
 Interrupted preparation/publication is partial, never successful or replayed.
 Restart does not resume a task, create another worktree or repeat a paid call.
 Partial claims require exact actual-user inspection before release. A verified
-PR can move a card to review; only the existing verified merge observation can
-move it to the configured merged phase.
+PR updates the linked status; a synchronized draft belongs in progress and a
+ready open PR belongs in review. An actual closed issue, completed or won't do,
+belongs in done. Read-only observations never create, draft, close or merge
+GitHub resources.
+
+## Column interaction and read-only GitHub synchronization
+
+The board has per-column creation instead of a global New button, and native
+HTML drag/drop instead of a phase-only workflow. Card moves bind complete
+structural source/destination intent and the actual source revision, commit
+all changed orders atomically, and retain unrelated columns and text. Keyboard
+Alt+Up/Down and Alt+Left/Right use the same SDK command. A failed append leaves
+no moved prefix or receipt. Ordinary source signatures retain their original
+encoding; presentation-only order never becomes task or approval authority.
+
+The user explicitly selected **GitHub to Kanban only**. The Sync with GitHub
+toggle retains shared read-only observation policy, and optional open-issue
+import starts off. Imported cards retain exact repository/issue identifiers,
+original source digests and the captured profile/root/upstream/account binding.
+The current numeric account and binding are checked before replacement-repo
+reads; GraphQL also verifies the actual viewer and repository identity within
+each complete response. No credential, public-account or alternate-root
+fallback is allowed. Disabling sync aborts the original owned read; an ignored
+abort or late response cannot publish a card after revocation.
+
+The official public GraphQL schema at
+<https://docs.github.com/public/fpt/schema.docs.graphql> confirms that
+`Issue.closedByPullRequestsReferences` returns open links, including manually
+linked PRs by default. Reads use that typed relationship and actual `isDraft`,
+not body keyword heuristics, cross-reference mentions or inferred model advice.
+The maintained `gh api graphql` adapter sends bounded literal queries only.
+GraphQL HTTP POST is a read, not a mutation. Partial errors, foreign viewers,
+incomplete linked-PR collections and duplicate paging identities fail explicitly.
+
+Open issue/no active PR maps to backlog; an active draft maps to in progress,
+a ready open PR maps to review, and closed issue maps to done regardless of
+completed/not-planned reason. Issue closure takes precedence over PR state.
+The four meanings map to explicitly configured columns. Synchronized cards keep
+their GitHub-owned column and can still be reordered inside it. Sync off permits
+local phase changes but never writes GitHub. Imported title/body fields follow
+source changes only while their retained digests still match local text;
+explicit local overrides and archive choices survive.
+
+Imports page through complete staged collections and atomically publish within
+the existing 500-retained-card alpha bound. Exceeding it publishes no partial
+prefix. Automatic import scans are at most every five minutes; linked reads
+remain periodic while the service runs. Failed reads leave retained facts
+unchanged and show job diagnostics. Restart preserves source ownership and
+uses new read-job identities, not replayed jobs or duplicate imported cards.
+The Local CLI-account boundary remains disclosed; Remote/Sandbox execution
+does not acquire controller credentials.
+
+This follow-up reuses Node (MIT), TypeBox (MIT), React/OpenTUI (MIT), maintained
+Git/GitHub CLI and native browser drag/drop; no new dependency is introduced.
+Protocol/schema **64** adds a transactional metadata marker and required SDK
+surfaces. Required current metadata is validated, older genuine histories
+upgrade without ciphertext/key/receipt rewrites, and future choices, imports
+and ordering cannot be relabelled as older consent. Native desktop, TUI,
+CLI and external SDK consumers share route and ordering commands.
+
+The repeated generated prerequisites measured OAuth/stream/cancellation
+1,121.77 ms, SQLite crash/replay 60.33 ms, owned PTY cancellation 159.67 ms,
+OpenTUI streaming 1,094.80 ms, hidden Electron 771.82 ms,
+filesystem/Git baseline 91.25 ms and verified workspace artifact reuse
+569.99 ms. No personal authentication, paid inference, real GitHub mutation,
+model weights or user processes were used. The earlier unavailable native,
+live-model, Linux-host and release gates remain unavailable.
 
 ## Navigation
 

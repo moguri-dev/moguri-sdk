@@ -48,7 +48,8 @@ import type { TaskPlan, TaskProgressReport } from "./progress.ts";
 import { SessionPrObservationSchema, sameSessionPrScope, sessionPrScope, type SessionPrObservation } from "./session-status.ts";
 import { CoordinationLinkSchema, CoordinationMessageSchema, type CoordinationLink, type CoordinationMessage, type CoordinationTaskOrigin } from "./coordination.ts";
 import type { WorkflowKind } from "./workflows.ts";
-import { projectWorkRecord, type KanbanEventPayloads, type ProjectWorkRun } from "./kanban.ts";
+import { GithubBoardSourceSchema, isContinueWork, projectWorkRecord, type KanbanEventPayloads, type ProjectWorkRun } from "./kanban.ts";
+import { BoardConfigSchema, GithubIssueLinkSchema } from "./workspace.ts";
 import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";
 export * from "./inputs.ts";
@@ -56,7 +57,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 63;
+export const PROTOCOL_VERSION = 64;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -80,7 +81,8 @@ export const CommandSchema = object({
     object({ type: Type.Literal("draft.paste"), ...sessionId, expectedRevision: revision, text, attachments, pastedText: text,
       start: Type.Integer({ minimum: 0, maximum: MAX_TEXT }), end: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }),
     object({ type: Type.Literal("attachment.add"), ...sessionId, expectedRevision: revision, path: Type.String({ minLength: 1, maxLength: 4096 }) }),
-    object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]), held: Type.Optional(Type.Boolean()) }),
+    object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]), held: Type.Optional(Type.Boolean()),
+      continueWorkChoice: Type.Optional(Type.Union([Type.Literal("kanban"), Type.Literal("prompt")])) }),
     object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text }),
     object({ type: Type.Literal("queue.remove"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.make-turn"), ...sessionId, messageId: id, expectedRevision: revision }),
@@ -266,6 +268,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
   "session.configured": { controls: Controls };
+  "session.continue_work_chosen": { choice: "kanban" | "prompt"; draftRevision: number; actor: "user" };
   "model.selection_remembered": { selection: ModelSelection | null; sourceSessionId: string; sourceProjectId: string | null; actor: "user" };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
@@ -396,7 +399,7 @@ export type StoredEvent = EventInput & {
 };
 export const eventTypes: readonly EventType[] = [
   "coordination.linked", "coordination.message", "coordination.delivered", "command.inspected", "process.ended",
-  "project.added", "session.created", "session.configured", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "project.added", "session.created", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
@@ -854,8 +857,23 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const execution = executions.get(event.payload.executionId);
       if (execution) execution.lastSequence = Math.max(execution.lastSequence, event.payload.sequence);
     }
-    if (event.event_type === "board.saved") boards.set(event.payload.board.projectId, structuredClone(event.payload.board));
-    if (event.event_type === "issue.saved") issues.set(event.payload.issue.id, structuredClone(event.payload.issue));
+    if (event.event_type === "board.saved") {
+      const { projectId, revision, githubSource: source, ...config } = event.payload.board;
+      if (!Value.Check(BoardConfigSchema, config) || !projectId || !Number.isSafeInteger(revision) || revision < 0 ||
+        event.project_id !== projectId) throw new MoguriError("github_sync_corrupt", "The retained board configuration lost its exact project or schema. State was preserved.", 409);
+      if (source && (!Value.Check(GithubBoardSourceSchema, source) || source.binding.projectId !== event.payload.board.projectId ||
+        source.binding.profileId !== event.profile_id || source.binding.workspaceId !== null)) throw new MoguriError("github_sync_corrupt", "The retained GitHub board source lost its exact profile/root ownership. State was preserved.", 409);
+      boards.set(event.payload.board.projectId, structuredClone(event.payload.board));
+    }
+    if (event.event_type === "issue.saved") {
+      const issue = event.payload.issue, link = issue.github;
+      if (issue.order !== undefined && (!Number.isSafeInteger(issue.order) || issue.order < 0) || link &&
+        (!Value.Check(GithubIssueLinkSchema, link) || link.url !== `https://github.com/${link.repo}/issues/${link.number}` ||
+          !Number.isFinite(Date.parse(link.checkedAt)) || !Number.isFinite(Date.parse(link.updatedAt)))) {
+        throw new MoguriError("github_sync_corrupt", "The retained card lost its exact order or GitHub source identity. State was preserved.", 409);
+      }
+      issues.set(issue.id, structuredClone(issue));
+    }
     if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.workspaceId ?? "base"}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
     if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: normalizeSettings(event.payload.settings) };
     if (event.event_type === "notification.sound_saved") notificationSounds.set(event.payload.sound.id, structuredClone(event.payload.sound));
@@ -1089,6 +1107,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         if (session.pendingQuestionId === event.payload.questionId) {
           session.pendingQuestionId = null;
           if (session.turnId && session.status === "waiting_input") session.status = "running";
+        }
+        break;
+      case "session.continue_work_chosen":
+        if (event.payload.actor !== "user" || !["kanban", "prompt"].includes(event.payload.choice) ||
+          event.payload.draftRevision !== session.draft.revision || !session.projectId || !isContinueWork(session.draft.text)) {
+          throw new MoguriError("continue_work_corrupt", "The continuation choice lost its exact actual-user draft and owner. No route or permission was reconstructed.", 409);
         }
         break;
       case "session.configured":

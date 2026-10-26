@@ -1,5 +1,6 @@
 import type { Attachment, CommandResult, Session } from "../../protocol/src/index.ts";
 import { ClientError, type MoguriClient } from "./index.ts";
+import { isContinueWork, type ContinueWorkChoice, type ContinueWorkReview } from "../../protocol/src/kanban.ts";
 
 export interface DraftState {
   text: string;
@@ -124,6 +125,23 @@ export class DraftEditor {
     await this.flush();
     if (this.state.dirty || this.state.conflict) throw new Error("Save or resolve the draft before sending.");
     const result = await this.client.command({ type: "message.send", sessionId: this.sessionId, expectedRevision: this.revision, delivery, ...(held ? { held: true } : {}) });
+    const saved = this.client.getState().snapshot?.sessions.find((session) => session.id === this.sessionId)?.draft;
+    if (saved) this.receive(saved);
+    return result;
+  }
+  async reviewContinueWork(): Promise<ContinueWorkReview> {
+    await this.flush();
+    if (this.state.dirty || this.state.conflict || !isContinueWork(this.state.text)) throw new ClientError("continue_work_draft", "Review the exact saved continue-work draft before choosing its route.");
+    return { profileId: this.client.profileId, sessionId: this.sessionId, expectedRevision: this.revision, text: this.state.text };
+  }
+  async chooseContinueWork(review: ContinueWorkReview, choice: ContinueWorkChoice): Promise<CommandResult> {
+    await this.flush();
+    if (review.profileId !== this.client.profileId || review.sessionId !== this.sessionId || review.expectedRevision !== this.revision ||
+      review.text !== this.state.text || this.state.dirty || this.state.conflict) {
+      throw new ClientError("continue_work_stale", "The draft or owning profile changed while choosing. Your text was preserved; review this request again.");
+    }
+    const result = await this.client.command({ type: "message.send", sessionId: this.sessionId, expectedRevision: review.expectedRevision,
+      delivery: "queue", continueWorkChoice: choice });
     const saved = this.client.getState().snapshot?.sessions.find((session) => session.id === this.sessionId)?.draft;
     if (saved) this.receive(saved);
     return result;

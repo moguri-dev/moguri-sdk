@@ -6,7 +6,7 @@ import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
 import { RememberApprovalSchema } from "../../protocol/src/permissions.ts";
 import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol/src/application-updates.ts";
-import { KanbanSourceSchema, kanbanPreferences } from "../../protocol/src/kanban.ts";
+import { continueWorkInput, KanbanSourceSchema, kanbanPreferences, type ContinueWorkReview } from "../../protocol/src/kanban.ts";
 import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
@@ -17,6 +17,7 @@ export type SlashResult =
   | { kind: "session"; sessionId: string; side: boolean }
   | { kind: "panel"; panel: SessionPanel | "Settings" | "Models" | "Queue"; url?: string; path?: string; text?: string; allProjects?: boolean; planEditor?: PlanEditorRequest }
   | { kind: "text"; text: string }
+  | { kind: "continue-work"; review: ContinueWorkReview; choices: ["kanban", "prompt"] }
   | { kind: "copy"; text: string }
   | { kind: "artifact-editor"; artifact: ArtifactEditorRequest }
   | { kind: "profiles" }
@@ -27,7 +28,7 @@ export const slashCommands = [
   { name: "approvals", description: "Inspect or revoke this profile's remembered approvals", argument: "[revoke ID]" },
   { name: "work-item", description: "Pick a project Kanban card or GitHub issue", argument: "[kanban|CARD_ID|clear]" },
   { name: "kanban", description: "Open this project's special board chat or change shared visibility/source", argument: "[show|hide|source kanban|github-issues|github-prs|items [SOURCE] [PAGE]|work RUN|stop RUN|inspect RUN REV confirm-inspected]" },
-  { name: "continue-work", description: "Run one actual-user delegated card in an isolated Local checkout, stopping at its draft PR", argument: "[CARD_ID]" },
+  { name: "continue-work", description: "Choose for this request: work from Kanban or send the exact prompt to the model", argument: "[CARD_ID]" },
   { name: "prices", description: "Inspect provider API-equivalent references, or explicitly refresh public pricing without inference", argument: "[refresh [anthropic|openai|google|xai]]" },
   { name: "review", description: "Investigate and fix current changes, or the project when clean, within existing policy", argument: "[PROMPT]" },
   { name: "security", description: "Investigate and fix reachable security weaknesses within existing authority", argument: "[PROMPT]" },
@@ -165,10 +166,15 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "ok", message: command.argument === "clear" ? "Kanban work item cleared." : "Linked this project's Kanban card without running it." };
     }
     case "continue-work": {
-      if (command.argument && /\s/.test(command.argument)) throw new ClientError("project_work_input", "Use /continue-work or one exact Kanban card ID.");
-      const started = await sdk.kanban.continue(session.id, command.argument || undefined), task = await sdk.kanban.wait(started.id!);
-      if (!task.sessionId || ["failed", "cancelled", "partial"].includes(task.status)) throw new ClientError("project_work_preparation", task.diagnostic ?? "The original task did not admit a model. Inspect its retained intent.");
-      return { kind: "session", sessionId: task.sessionId, side: false };
+      if (!session.projectId || !continueWorkInput(text)) throw new ClientError("project_work_input", "Use /continue-work or one exact Kanban card ID in an actual project chat.");
+      if (session.draft.text && session.draft.text !== text) throw new ClientError("continue_work_draft", "Another draft is saved. Keep or send it before reviewing this separate continuation request.");
+      let expectedRevision = session.draft.revision;
+      if (!session.draft.text) {
+        const saved = await sdk.command({ type: "draft.save", sessionId: session.id, expectedRevision, text, attachments: session.draft.attachments });
+        if (saved.revision === undefined) throw new ClientError("continue_work_draft", "The continuation draft was not acknowledged. No request was dispatched.");
+        expectedRevision = saved.revision;
+      }
+      return { kind: "continue-work", review: { profileId: sdk.profileId, sessionId: session.id, expectedRevision, text }, choices: ["kanban", "prompt"] };
     }
     case "kanban": {
       if (!session.projectId) throw new ClientError("project_required", "Choose this board's actual project. No previous project was reused.");

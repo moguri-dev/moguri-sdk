@@ -252,6 +252,15 @@ export class PlatformRuntime {
       },
       onLinearCredentialsChanged: () => { for (const project of this.snapshot().projects) this.linear?.invalidateProject(project.id); },
       onLinearBoardChanged: (projectId) => this.linear?.invalidateProject(projectId),
+      githubProject: async (projectId, signal, source) => {
+        signal.throwIfAborted();
+        const value = await this.github.projectContext({ env: "Local", projectId },
+          source ? { account: source.account, accountId: source.accountId } : undefined,
+          source ? { repository: source.repository, name: source.remote.name, fetchUrl: source.remote.fetchUrl } : undefined, source?.binding, signal);
+        signal.throwIfAborted();
+        if (value.type !== "github.project") throw new MoguriError("github_sync_source", "The exact GitHub project response changed type.");
+        return value;
+      },
       publicationBusy: (projectId, workspaceId) => this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId ?? null) || this.nativePublications.isBusy(projectId, workspaceId ?? null) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path) || host.localRootBusy(this.managed.project({ projectId, workspaceId: workspaceId ?? null }).path),
     }, store, stateDir, options);
     this.sessions = new SessionWorkspace({

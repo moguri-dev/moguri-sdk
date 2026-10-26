@@ -30,7 +30,7 @@ for (const lineage of ["automatic-61", "workflows-61", "kanban-62"] as const) {
       const raw = new DatabaseSync(path), version = lineage === "kanban-62" ? 62 : 61;
       let markers: Record<string, SQLOutputValue>[];
       try {
-        const removed = [mergedMarker, ...(lineage === "automatic-61" ? workflowMarkers : ["automatic_kupo_schema"]),
+        const removed = ["kanban_interactions_schema", mergedMarker, ...(lineage === "automatic-61" ? workflowMarkers : ["automatic_kupo_schema"]),
           ...(lineage === "kanban-62" ? [] : ["project_kanban_schema"])];
         for (const id of removed) raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(id);
         raw.exec(`PRAGMA user_version=${version}`);
@@ -94,7 +94,7 @@ test("schema 62 cannot manufacture a missing workflow lineage from the unrelated
     await fixture.service.close();
     const raw = new DatabaseSync(path);
     try {
-      for (const id of [mergedMarker, ...workflowMarkers]) raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(id);
+      for (const id of ["kanban_interactions_schema", mergedMarker, ...workflowMarkers]) raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(id);
       raw.exec("PRAGMA user_version=62");
     } finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Invalid schema-62.*lineage/);
@@ -118,7 +118,10 @@ test("current convergence markers cannot be silently repaired or relabelled as e
       await fixture.service.close();
       const raw = new DatabaseSync(path);
       let rows: ReturnType<typeof retainedCiphertextRows>;
-      try { raw.exec(sql); rows = retainedCiphertextRows(raw); } finally { raw.close(); }
+      try {
+        if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id='kanban_interactions_schema'");
+        raw.exec(sql); rows = retainedCiphertextRows(raw);
+      } finally { raw.close(); }
       assert.throws(() => new EventStore(path, fixture.retentionKey), /session\/Kupo\/Kanban.*(marker|lineage)|pre-63/);
       const preserved = new DatabaseSync(path);
       try { assert.deepEqual(retainedCiphertextRows(preserved), rows); } finally { preserved.close(); }

@@ -127,6 +127,9 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version < 64 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='kanban_interactions_schema'").get()) {
+        throw new Error("Invalid pre-64 Kanban interactions lineage marker. State was preserved.");
+      }
       if (version < 63 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_kupo_kanban_schema'").get()) {
         throw new Error("Invalid pre-63 session/Kupo/Kanban lineage marker. State was preserved.");
       }
@@ -318,6 +321,19 @@ export class EventStore {
         throw new Error("Missing or invalid lean tooling/convergence schema marker. State was preserved.");
       }
       this.migrateWorkflowFeatures(version);
+      if (version < 64) {
+        if (this.events().some((event) => event.event_type === "session.continue_work_chosen" ||
+          event.event_type === "issue.saved" && (event.payload.issue.order !== undefined || event.payload.issue.github) ||
+          event.event_type === "board.saved" && (event.payload.board.githubSync || event.payload.board.githubSource))) {
+          throw new Error("Kanban interaction history cannot be relabelled without its original schema marker. State was preserved.");
+        }
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('kanban_interactions_schema','1');
+          PRAGMA user_version=64; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='kanban_interactions_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid Kanban interactions schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {

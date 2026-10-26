@@ -2,6 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import type { GitHubConnection, LinearConnection } from "./preferences.ts";
 import { Value } from "typebox/value";
 import { KanbanPreferencesSchema } from "./kanban.ts";
+import type { GithubSourceBinding } from "./github-workflows.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -35,9 +36,17 @@ export const BoardConfigSchema = object({
   githubAccess: Type.Union([Type.Literal("public"), Type.Literal("gh-cli")]),
   linear: object({ enabled: Type.Boolean(), teamId: Type.String({ maxLength: 128 }) }),
   kanban: Type.Optional(KanbanPreferencesSchema),
+  githubSync: Type.Optional(object({
+    importIssues: Type.Boolean(),
+    phases: object({ backlog: id, inProgress: id, review: id, done: id }),
+  })),
 });
 export type BoardConfig = Static<typeof BoardConfigSchema>;
-export interface IssueBoard extends BoardConfig { projectId: string; revision: number }
+export interface GithubBoardSource {
+  repository: string; repositoryId: number; account: string; accountId: string; binding: GithubSourceBinding;
+  remote: { name: string; fetchUrl: string };
+}
+export interface IssueBoard extends BoardConfig { projectId: string; revision: number; githubSource?: GithubBoardSource }
 export const defaultBoard = (projectId: string): IssueBoard => ({
   projectId, revision: 0, columns: [{ id: "backlog", name: "Backlog" }, { id: "in-progress", name: "In progress" }, { id: "review", name: "Review" }, { id: "done", name: "Done" }],
   mergedColumnId: "done", autoRefreshPrs: true, githubAccess: "public", linear: { enabled: false, teamId: "" },
@@ -55,15 +64,36 @@ export const PullRequestLinkSchema = object({
   checkedAt: Type.Union([Type.String({ maxLength: 40 }), Type.Null()]),
   diagnostic: Type.Union([Type.String({ maxLength: 4000 }), Type.Null()]),
 });
+export const GithubIssueLinkSchema = object({
+  nodeId: Type.String({ pattern: "^[A-Za-z0-9_+/=-]{1,256}$" }), databaseId: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  repo: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }), number: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  url: Type.String({ minLength: 1, maxLength: 2048 }),
+  state: Type.Union([Type.Literal("open"), Type.Literal("closed")]),
+  stateReason: Type.Union([Type.Literal("completed"), Type.Literal("not_planned"), Type.Literal("duplicate"), Type.Null()]),
+  updatedAt: Type.String({ minLength: 1, maxLength: 40 }), checkedAt: Type.String({ minLength: 1, maxLength: 40 }),
+  diagnostic: Type.Union([Type.String({ minLength: 1, maxLength: 4000 }), Type.Null()]),
+  sourceDigest: hash, titleDigest: hash, bodyDigest: hash,
+  pullRequests: Type.Array(PullRequestLinkSchema, { maxItems: 100 }),
+});
 export interface LocalIssue {
   id: string; projectId: string; number: number; title: string; body: string; kind: IssueKind;
   phaseId: string; revision: number; archived: boolean; createdAt: string; updatedAt: string;
+  order?: number;
   pullRequest: PullRequestLink | null;
   linear: { id: string; identifier: string; url: string; updatedAt: string } | null;
+  github?: GithubIssueLink | null;
 }
+export interface GithubIssueLink {
+  nodeId: string; databaseId: number; repo: string; number: number; url: string;
+  state: "open" | "closed"; stateReason: "completed" | "not_planned" | "duplicate" | null;
+  updatedAt: string; checkedAt: string; diagnostic: string | null;
+  sourceDigest: string; titleDigest: string; bodyDigest: string;
+  pullRequests: PullRequestLink[];
+}
+export interface IssuePosition { issueId: string; phaseId: string; order: number }
 export type IssueInput = Pick<LocalIssue, "title" | "body" | "kind" | "phaseId"> & { pullRequestUrl: string | null };
 const issueFields = {
-  title: Type.String({ minLength: 1, maxLength: 160 }), body: Type.String({ maxLength: 64 * 1024 }), kind: IssueKindSchema,
+  title: Type.String({ minLength: 1, maxLength: 256 }), body: Type.String({ maxLength: 64 * 1024 }), kind: IssueKindSchema,
   phaseId: id, pullRequestUrl: Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()]),
 };
 export const IssueInputSchema = object(issueFields);
@@ -72,6 +102,9 @@ export const WorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("issue.create"), projectId: id, ...issueFields }),
   object({ type: Type.Literal("issue.update"), issueId: id, expectedRevision: revision, ...issueFields }),
   object({ type: Type.Literal("issue.move"), issueId: id, expectedRevision: revision, phaseId: id }),
+  object({ type: Type.Literal("issue.reorder"), issueId: id, expectedRevision: revision, phaseId: id,
+    beforeIssueId: Type.Union([id, Type.Null()]),
+    expectedOrder: Type.Array(object({ issueId: id, phaseId: id, order: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }) }), { minItems: 1, maxItems: 500 }) }),
   object({ type: Type.Literal("issue.archive"), issueId: id, expectedRevision: revision, archived: Type.Boolean() }),
   object({ type: Type.Literal("issues.refresh"), projectId: id }),
   object({ type: Type.Literal("cache.prepare"), projectId: id, workspaceId: Type.Optional(id), manager: PackageManagerSchema, expectedDigest: hash, acceptMetadataSharing: Type.Literal(true) }),

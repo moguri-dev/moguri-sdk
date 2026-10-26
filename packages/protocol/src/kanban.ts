@@ -3,7 +3,7 @@ import { Value } from "typebox/value";
 import { ControlsSchema } from "./controls.ts";
 import { MoguriError } from "./core.ts";
 import { GithubSourceBindingSchema, GithubWorkSourceSchema, type GithubItem } from "./github-workflows.ts";
-import type { BoardConfig, LocalIssue } from "./workspace.ts";
+import type { BoardConfig, IssuePosition, LocalIssue } from "./workspace.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -19,6 +19,36 @@ export const KanbanPreferencesSchema = object({
   phaseIds: Type.Array(id, { maxItems: 12, uniqueItems: true }),
 });
 export type KanbanPreferences = Static<typeof KanbanPreferencesSchema>;
+export const GithubBoardSourceSchema = object({
+  repository: Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }),
+  repositoryId: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  account: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$" }),
+  accountId: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" }),
+  binding: GithubSourceBindingSchema,
+  remote: object({ name: Type.String({ minLength: 1, maxLength: 100 }), fetchUrl: Type.String({ minLength: 1, maxLength: 4096 }) }),
+});
+export const issuePosition = (issue: LocalIssue): IssuePosition => ({ issueId: issue.id, phaseId: issue.phaseId, order: issue.order ?? issue.number });
+export const compareIssues = (a: LocalIssue, b: LocalIssue): number => (a.order ?? a.number) - (b.order ?? b.number) || a.number - b.number || a.id.localeCompare(b.id);
+export function githubSyncSettings(board: BoardConfig): NonNullable<BoardConfig["githubSync"]> {
+  return board.githubSync ?? { importIssues: false, phases: { backlog: "backlog", inProgress: "in-progress", review: "review", done: board.mergedColumnId } };
+}
+export const githubManagedIssue = (board: BoardConfig, issue: LocalIssue): boolean => board.autoRefreshPrs && Boolean(issue.github || issue.pullRequest);
+export function githubIssuePhase(board: BoardConfig, issue: LocalIssue): string | null {
+  const phases = githubSyncSettings(board).phases, requests = [...issue.github?.pullRequests ?? [], ...issue.pullRequest ? [issue.pullRequest] : []];
+  let meaning: keyof typeof phases;
+  if (issue.github?.state === "closed") meaning = "done";
+  else {
+    if (requests.some((request) => request.diagnostic || request.state === "unknown" || request.state === "open" && typeof request.draft !== "boolean")) return null;
+    if (requests.some((request) => request.state === "open" && request.draft === false)) meaning = "review";
+    else if (requests.some((request) => request.state === "open" && request.draft === true)) meaning = "inProgress";
+    else if (issue.github?.state === "open") meaning = "backlog";
+    else if (requests.some((request) => request.state === "merged" || request.state === "closed")) meaning = "done";
+    else return null;
+  }
+  const phase = phases[meaning];
+  if (!board.columns.some((column) => column.id === phase)) throw new MoguriError("github_sync_phases", "Configure the GitHub status-to-column mapping for this board. No phase was invented.", 409);
+  return phase;
+}
 export function kanbanPreferences(board: BoardConfig): KanbanPreferences {
   return board.kanban ?? { visible: true, source: "kanban",
     phaseIds: ["in-progress", "backlog"].filter((id) => board.columns.some((column) => column.id === id) && id !== board.mergedColumnId) };
@@ -26,12 +56,23 @@ export function kanbanPreferences(board: BoardConfig): KanbanPreferences {
 export function eligibleKanbanIssues(board: BoardConfig & { projectId: string }, issues: LocalIssue[], claims: ReadonlySet<string>): LocalIssue[] {
   const phases = kanbanPreferences(board).phaseIds;
   return issues.filter((issue) => issue.projectId === board.projectId && !issue.archived && issue.phaseId !== board.mergedColumnId &&
-    phases.includes(issue.phaseId) && !claims.has(`kanban:${issue.id}`) && issue.pullRequest?.state !== "merged")
-    .sort((a, b) => phases.indexOf(a.phaseId) - phases.indexOf(b.phaseId) || a.number - b.number);
+    phases.includes(issue.phaseId) && !claims.has(`kanban:${issue.id}`) && issue.github?.state !== "closed" &&
+    (issue.github || !["merged", "closed"].includes(issue.pullRequest?.state ?? "unknown")))
+    .sort((a, b) => phases.indexOf(a.phaseId) - phases.indexOf(b.phaseId) || compareIssues(a, b));
 }
-export const isContinueWork = (text: string): boolean => /^(?:continue work[.!]?|\/continue-work)$/i.test(text.trim());
-export const kanbanIssueSignature = (issue: LocalIssue): string => JSON.stringify([issue.id, issue.projectId, issue.title, issue.body, issue.kind,
-  issue.phaseId, issue.archived, issue.pullRequest?.url ?? null, issue.linear]);
+export type ContinueWorkChoice = "kanban" | "prompt";
+export interface ContinueWorkReview { profileId: string; sessionId: string; expectedRevision: number; text: string }
+export function continueWorkInput(text: string): { issueId?: string } | null {
+  const value = text.trim();
+  if (/^continue work[.!]?$/i.test(value)) return {};
+  const match = value.match(/^\/continue-work(?:[ \t]+([A-Za-z0-9_-]{1,128}))?$/i);
+  return match ? match[1] ? { issueId: match[1] } : {} : null;
+}
+export const isContinueWork = (text: string): boolean => continueWorkInput(text) !== null;
+export const kanbanIssueSignature = (issue: LocalIssue): string => {
+  const original = [issue.id, issue.projectId, issue.title, issue.body, issue.kind, issue.phaseId, issue.archived, issue.pullRequest?.url ?? null, issue.linear];
+  return JSON.stringify(issue.github ? [...original, [issue.github.repo, issue.github.number, issue.github.sourceDigest, issue.github.state]] : original);
+};
 const sourceFields = { key: Type.String({ minLength: 1, maxLength: 300 }), title: Type.String({ minLength: 1, maxLength: 2048 }), contentDigest: hash, digest: hash };
 export const ProjectWorkSourceSchema = Type.Union([
   object({ kind: Type.Literal("kanban"), ...sourceFields, issueId: id, revision }),

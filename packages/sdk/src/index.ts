@@ -48,6 +48,10 @@ export class MoguriSdk extends TransportClient {
   };
   readonly kanban = {
     open: (projectId: string) => this.command({ type: "kanban.open", projectId }),
+    choose: (review: import("../../protocol/src/kanban.ts").ContinueWorkReview, choice: import("../../protocol/src/kanban.ts").ContinueWorkChoice) => {
+      if (review.profileId !== this.profileId) throw new ClientError("continue_work_stale", "The continuation review belongs to another profile. No prompt or task was dispatched.");
+      return this.command({ type: "message.send", sessionId: review.sessionId, expectedRevision: review.expectedRevision, delivery: "queue", continueWorkChoice: choice });
+    },
     items: (projectId: string, source: KanbanSource = "kanban", page = 1, sessionId?: string) => this.query({ type: "kanban.items", projectId, source, page, ...(sessionId ? { sessionId } : {}) }),
     continue: (sessionId: string, issueId?: string, expectedDraftRevision?: number) => this.command({ type: "project.work.start", sessionId,
       ...(issueId ? { issueId } : {}), ...(expectedDraftRevision !== undefined ? { consumeDraft: { expectedRevision: expectedDraftRevision } } : {}) }),
@@ -761,10 +765,12 @@ export class MoguriSdk extends TransportClient {
     board: (projectId: string) => this.query({ type: "board.get", projectId }),
     configure: (projectId: string, config: BoardConfig, expectedRevision: number) => this.command({ type: "board.save", projectId,
       config: { columns: config.columns, mergedColumnId: config.mergedColumnId, autoRefreshPrs: config.autoRefreshPrs, githubAccess: config.githubAccess, linear: config.linear,
-        ...(config.kanban ? { kanban: config.kanban } : {}) }, expectedRevision }),
+        ...(config.kanban ? { kanban: config.kanban } : {}), ...(config.githubSync ? { githubSync: config.githubSync } : {}) }, expectedRevision }),
     create: (projectId: string, fields: IssueInput) => this.command({ type: "issue.create", projectId, ...fields }),
     update: (issueId: string, fields: IssueInput, expectedRevision: number) => this.command({ type: "issue.update", issueId, ...fields, expectedRevision }),
     move: (issueId: string, phaseId: string, expectedRevision: number) => this.command({ type: "issue.move", issueId, phaseId, expectedRevision }),
+    reorder: (issueId: string, phaseId: string, beforeIssueId: string | null, expectedOrder: import("../../protocol/src/workspace.ts").IssuePosition[], expectedRevision: number) =>
+      this.command({ type: "issue.reorder", issueId, phaseId, beforeIssueId, expectedOrder, expectedRevision }),
     archive: (issueId: string, archived: boolean, expectedRevision: number) => this.command({ type: "issue.archive", issueId, archived, expectedRevision }),
     refresh: (projectId: string) => this.command({ type: "issues.refresh", projectId }),
   };

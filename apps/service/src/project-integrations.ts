@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { isRecord, MoguriError, type GitHubConnection, type LinearConnection, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError, type GitHubConnection, type GithubBoardSource, type LinearConnection, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
 import { boundedBody, fetchJson } from "./network.ts";
 import { runProgram } from "./program.ts";
 import type { SecretVault } from "./gateway.ts";
@@ -9,6 +9,51 @@ import { redactSecrets } from "./secret-redactor.ts";
 export interface IntegrationOptions {
   fetch?: typeof fetch; vault?: SecretVault; prRefreshMs?: number; program?: typeof runProgram;
   githubCliRead?: (endpoint: string, root: string, signal: AbortSignal) => Promise<unknown>;
+  githubGraphqlRead?: (query: string, variables: Record<string, string | null>, root: string, signal: AbortSignal) => Promise<unknown>;
+}
+export interface GithubBoardIssue {
+  nodeId: string; databaseId: number; repo: string; number: number; url: string; title: string; body: string;
+  state: "open" | "closed"; stateReason: "completed" | "not_planned" | "duplicate" | null; updatedAt: string; pullRequests: PullRequestLink[];
+}
+const githubBoardFragment = `fragment MoguriKanbanCard on Issue {
+  id databaseId number url title body state stateReason updatedAt repository { nameWithOwner }
+  closedByPullRequestsReferences(first: 100, includeClosedPrs: false) {
+    nodes { number url state isDraft mergedAt repository { nameWithOwner } }
+    pageInfo { hasNextPage endCursor }
+  }
+}`;
+function githubBoardIssue(value: unknown, repository: string, expectedNumber?: number): GithubBoardIssue {
+  if (!isRecord(value) || typeof value.id !== "string" || !/^[A-Za-z0-9_+/=-]{1,256}$/.test(value.id) ||
+    !Number.isSafeInteger(value.databaseId) || Number(value.databaseId) < 1 || !Number.isSafeInteger(value.number) || Number(value.number) < 1 ||
+    expectedNumber !== undefined && value.number !== expectedNumber || value.url !== `https://github.com/${repository}/issues/${value.number}` ||
+    !isRecord(value.repository) || value.repository.nameWithOwner !== repository || typeof value.title !== "string" || !value.title.trim() ||
+    value.title.length > 256 || typeof value.body !== "string" || value.body.length > 64 * 1024 ||
+    !["OPEN", "CLOSED"].includes(String(value.state)) || value.stateReason !== null && !["COMPLETED", "NOT_PLANNED", "DUPLICATE", "REOPENED"].some((reason) => reason === value.stateReason) ||
+    typeof value.updatedAt !== "string" || !Number.isFinite(Date.parse(value.updatedAt))) {
+    throw new MoguriError("github_sync_issue", "GitHub did not return this exact complete bounded issue. Original cards were preserved.", 502);
+  }
+  const links = value.closedByPullRequestsReferences;
+  if (!isRecord(links) || !Array.isArray(links.nodes) || links.nodes.length > 100 ||
+    !isRecord(links.pageInfo) || links.pageInfo.hasNextPage !== false) {
+    throw new MoguriError("github_sync_links", "GitHub's actual linked-PR collection is incomplete or exceeds its bound. No mention was inferred to be an attachment.", 502);
+  }
+  const urls = new Set<string>(), checkedAt = new Date().toISOString();
+  const pullRequests: PullRequestLink[] = links.nodes.map((request: unknown) => {
+    if (!isRecord(request) || !Number.isSafeInteger(request.number) || Number(request.number) < 1 || typeof request.isDraft !== "boolean" ||
+      !["OPEN", "CLOSED", "MERGED"].includes(String(request.state)) || !isRecord(request.repository) || typeof request.repository.nameWithOwner !== "string" ||
+      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(request.repository.nameWithOwner)) throw new MoguriError("github_sync_links", "GitHub returned an invalid linked PR. No phase was changed.", 502);
+    const repo = request.repository.nameWithOwner, number = Number(request.number), url = `https://github.com/${repo}/pull/${number}`;
+    if (request.url !== url || urls.has(url) || request.state === "MERGED" && (typeof request.mergedAt !== "string" || !Number.isFinite(Date.parse(request.mergedAt)))) {
+      throw new MoguriError("github_sync_links", "A linked PR lost its exact source or merged evidence. No phase was changed.", 502);
+    }
+    urls.add(url);
+    return { url, repo, number, state: request.state === "MERGED" ? "merged" : request.state === "CLOSED" ? "closed" : "open",
+      draft: request.isDraft, checkedAt, diagnostic: null };
+  });
+  return { nodeId: value.id, databaseId: Number(value.databaseId), repo: repository, number: Number(value.number), url: String(value.url),
+    title: value.title, body: value.body, state: value.state === "CLOSED" ? "closed" : "open",
+    stateReason: value.stateReason === "NOT_PLANNED" ? "not_planned" : value.stateReason === "COMPLETED" ? "completed" : value.stateReason === "DUPLICATE" ? "duplicate" : null,
+    updatedAt: value.updatedAt, pullRequests };
 }
 export interface LinearAccess {
   readonly generation: string;
@@ -43,6 +88,65 @@ export class ProjectIntegrations {
   private linearChanging = false;
   private readonly linearProjects = new Map<string, AbortController>();
   constructor(readonly vault: SecretVault, private readonly options: IntegrationOptions = {}) {}
+  private async boardGraphql(repository: string, accountId: string, root: string, fields: string, cursor: string | null, signal: AbortSignal) {
+    const [owner, name, extra] = repository.split("/");
+    if (extra || !owner || !name || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(name)) throw new MoguriError("github_sync_repository", "Use the exact reviewed GitHub repository.");
+    const query = `query MoguriKanban($owner: String!, $name: String!${fields.includes("$cursor") ? ", $cursor: String" : ""}) {
+      viewer { login databaseId } repository(owner: $owner, name: $name) { databaseId nameWithOwner url ${fields} }
+    }${fields.includes("MoguriKanbanCard") ? githubBoardFragment : ""}`;
+    const variables: Record<string, string | null> = { owner, name, ...(fields.includes("$cursor") ? { cursor } : {}) };
+    let response: unknown;
+    if (this.options.githubGraphqlRead) response = await this.options.githubGraphqlRead(query, variables, root, signal);
+    else {
+      const args = ["api", "--hostname", "github.com", "--method", "POST", "graphql", "--raw-field", `query=${query}`,
+        ...Object.entries(variables).flatMap(([key, value]) => value === null ? [] : ["--raw-field", `${key}=${value}`])];
+      let output: string;
+      try {
+        output = await (this.options.program ?? runProgram)("gh", args, { cwd: root, signal, timeoutMs: 20000, maxBytes: 8 * 1024 * 1024,
+          label: "Read synchronized GitHub board", env: { GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" } });
+      } catch {
+        signal.throwIfAborted();
+        throw new MoguriError("github_sync_read", "The captured GitHub account could not read issue and linked-PR status. No public, account or credential fallback was used.", 403);
+      }
+      try { response = JSON.parse(output); } catch { throw new MoguriError("github_sync_response", "GitHub returned invalid board JSON. No observation was applied.", 502); }
+    }
+    signal.throwIfAborted();
+    if (!isRecord(response) || response.errors !== undefined && (!Array.isArray(response.errors) || response.errors.length > 0) || !isRecord(response.data) ||
+      !isRecord(response.data.viewer) || typeof response.data.viewer.login !== "string" || !Number.isSafeInteger(response.data.viewer.databaseId) ||
+      `${response.data.viewer.login}:${response.data.viewer.databaseId}` !== accountId || !isRecord(response.data.repository)) {
+      throw new MoguriError("github_sync_account", "The complete GitHub response did not verify the captured account. Partial or foreign observations were preserved as errors.", 409);
+    }
+    const result = response.data.repository;
+    if (!Number.isSafeInteger(result.databaseId) || Number(result.databaseId) < 1 || result.nameWithOwner !== repository || result.url !== `https://github.com/${repository}`) {
+      throw new MoguriError("github_sync_repository", "The response did not verify this exact repository identity. No source was substituted.", 409);
+    }
+    return result;
+  }
+  async githubBoardIdentity(repository: string, accountId: string, root: string, signal: AbortSignal): Promise<number> {
+    return Number((await this.boardGraphql(repository, accountId, root, "", null, signal)).databaseId);
+  }
+  async githubBoardPage(source: GithubBoardSource, cursor: string | null, signal: AbortSignal): Promise<{ items: GithubBoardIssue[]; nextCursor: string | null }> {
+    if (cursor !== null && (!cursor || cursor.length > 512 || /[\u0000-\u001f]/.test(cursor))) throw new MoguriError("github_sync_cursor", "The original GitHub cursor is invalid.");
+    const repository = await this.boardGraphql(source.repository, source.accountId, source.binding.root.root,
+      "issues(first: 20, states: [OPEN], after: $cursor, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...MoguriKanbanCard } pageInfo { hasNextPage endCursor } }", cursor, signal);
+    if (repository.databaseId !== source.repositoryId || !isRecord(repository.issues) || !Array.isArray(repository.issues.nodes) || repository.issues.nodes.length > 20 ||
+      !isRecord(repository.issues.pageInfo) || typeof repository.issues.pageInfo.hasNextPage !== "boolean") {
+      throw new MoguriError("github_sync_page", "The complete issue page lost its captured repository or bounds. Nothing was imported.", 502);
+    }
+    const page = repository.issues.pageInfo, next = page.hasNextPage ? page.endCursor : null;
+    if (next !== null && (typeof next !== "string" || !next || next.length > 512 || next === cursor)) throw new MoguriError("github_sync_cursor", "GitHub pagination did not advance. Nothing was silently truncated.", 502);
+    const items = repository.issues.nodes.map((item) => githubBoardIssue(item, source.repository));
+    if (items.some((item) => item.state !== "open") || new Set(items.map((item) => item.nodeId)).size !== items.length) throw new MoguriError("github_sync_page", "The open-issue page contains a duplicate or contradictory source.", 502);
+    return { items, nextCursor: typeof next === "string" ? next : null };
+  }
+  async githubBoardIssues(source: GithubBoardSource, numbers: number[], signal: AbortSignal): Promise<GithubBoardIssue[]> {
+    if (!numbers.length) return [];
+    if (numbers.length > 20 || numbers.some((number) => !Number.isSafeInteger(number) || number < 1) || new Set(numbers).size !== numbers.length) throw new MoguriError("github_sync_batch", "Inspect at most 20 exact unique issue identities per read.");
+    const fields = numbers.map((number, index) => `card${index}: issue(number: ${number}) { ...MoguriKanbanCard }`).join("\n");
+    const repository = await this.boardGraphql(source.repository, source.accountId, source.binding.root.root, fields, null, signal);
+    if (repository.databaseId !== source.repositoryId) throw new MoguriError("github_sync_repository", "The captured GitHub repository changed identity. Original links were preserved.", 409);
+    return numbers.map((number, index) => githubBoardIssue(repository[`card${index}`], source.repository, number));
+  }
   async githubConnection(root: string, signal: AbortSignal): Promise<GitHubConnection> {
     const result = await this.githubRequest("user", "gh-cli", root, signal);
     if (!isRecord(result) || typeof result.login !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(result.login) ||

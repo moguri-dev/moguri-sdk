@@ -354,11 +354,15 @@ export class GitHubWorkflows {
       configurationRevision: this.host.configuration(scope.projectId).revision, policyRevision: state.policy.revision,
       permissionRevision: state.settings.permissionRevision };
   }
-  private async projectContext(scope: GithubScope, expectedAccount?: Pick<GithubWorkSource, "account" | "accountId">,
-    expectedRemote?: { repository: string; fetchUrl: string; pushUrl: string }): Promise<Extract<GithubResponse, { type: "github.project" }>> {
+  async projectContext(scope: GithubScope, expectedAccount?: Pick<GithubWorkSource, "account" | "accountId">,
+    expectedRemote?: { repository: string; fetchUrl: string; pushUrl?: string; name?: string }, expectedBinding?: GithubSourceBinding,
+    requested?: AbortSignal): Promise<Extract<GithubResponse, { type: "github.project" }>> {
     this.discoveryPolicy();
-    const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]);
+    const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]);
     const context = await this.context(scope, undefined, signal), root = context.root.root, configuration = this.host.configuration(scope.projectId);
+    if (expectedBinding && stable(this.sourceBinding(scope, context.root)) !== stable(expectedBinding)) {
+      throw new MoguriError("github_source", "The captured root, profile or policy changed. No GitHub metadata was requested through a replacement binding.", 409);
+    }
     const gitPolicy = { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders };
     const git = await readWorkspaceGit(root, gitPolicy, false, signal);
     if (!git.repository) throw new MoguriError("github_repository", "This project's configured upstream is not a supported GitHub repository. Set its Git remote in Project settings; no repository URL was guessed.", 409);
@@ -366,7 +370,10 @@ export class GitHubWorkflows {
     const fetchUrl = validateGithubRemoteUrl((await this.git(root, ["remote", "get-url", configuration.values.repo.upstream], signal)).trim());
     const pushUrls = (await this.git(root, ["remote", "get-url", "--push", "--all", configuration.values.repo.upstream], signal)).trim().split("\n").map(validateGithubRemoteUrl);
     if (expectedRemote && (repository !== expectedRemote.repository || fetchUrl !== expectedRemote.fetchUrl ||
-      pushUrls.length !== 1 || pushUrls[0] !== expectedRemote.pushUrl)) throw new MoguriError("github_work_remote", "The captured task's exact repository/fetch/push destination changed. No replacement private repository or publication was accessed.", 409);
+      expectedRemote.name !== undefined && configuration.values.repo.upstream !== expectedRemote.name ||
+      expectedRemote.pushUrl !== undefined && (pushUrls.length !== 1 || pushUrls[0] !== expectedRemote.pushUrl))) {
+      throw new MoguriError("github_work_remote", "The captured task's exact repository/fetch/push destination changed. No replacement private repository or publication was accessed.", 409);
+    }
     const identity = await this.discoveryAccount(root, expectedAccount?.account, signal);
     if (expectedAccount?.accountId && identity.accountId !== expectedAccount.accountId) throw new MoguriError("github_source", "The original numeric GitHub account changed. No repository metadata was requested using its replacement.", 409);
     const data = record((await this.api(root, `repos/${repository}`, signal)).data);

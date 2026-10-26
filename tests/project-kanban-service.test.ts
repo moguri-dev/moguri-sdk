@@ -99,7 +99,7 @@ for (const mergedColumnId of ["done", "review"] as const) test(`one captured car
     assert.equal(task.coordinationParentId, fixture.sessionId);
     assert.equal(task.workItemId, card.id);
     assert.equal(task.prUrl, run.prUrl);
-    assert.equal(snapshot.issues.find((issue) => issue.id === card.id)?.phaseId, mergedColumnId === "done" ? "review" : "backlog");
+    assert.equal(snapshot.issues.find((issue) => issue.id === card.id)?.phaseId, "backlog", "Sync-off publication keeps the user's local phase.");
     assert.ok(snapshot.githubOperations.filter((operation) => run.operationIds.includes(operation.id)).every((operation) => operation.actor === "model" && operation.projectWorkId === run.id));
     assert.ok(snapshot.budgetEntries.every((entry) => entry.ownerSessionId === fixture.sessionId));
     const retained = (await fixture.sdk.kanban.work(run.id)).text, workspace = snapshot.managedWorkspaces.find((workspace) => workspace.id === run.workspaceId)!;
@@ -183,7 +183,7 @@ test("actual-user continue work starts a task, while a held prompt stays inert a
     const queue = fixture.session();
     await fixture.sdk.command({ type: "queue.remove", sessionId: queue.id, messageId: queue.queue[0]!.id, expectedRevision: queue.queueRevision });
     await fixture.sdk.command({ type: "draft.save", sessionId: queue.id, expectedRevision: fixture.session().draft.revision, text: "continue work", attachments: [] });
-    await fixture.sdk.command({ type: "message.send", sessionId: queue.id, expectedRevision: fixture.session().draft.revision, delivery: "queue" });
+    await fixture.sdk.command({ type: "message.send", sessionId: queue.id, expectedRevision: fixture.session().draft.revision, delivery: "queue", continueWorkChoice: "kanban" });
     await waitFor(() => fixture.service.controller.snapshot().projectWorkRuns[0]?.status === "failed", 15000);
     assert.equal(provider.requests.length, 1);
     assert.equal(fixture.writes().pulls, 0);

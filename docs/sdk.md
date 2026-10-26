@@ -5,7 +5,7 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **63**, including
+Current source uses protocol **64**, including
 [automatic Kupo and its shared capability inventory](architecture/automatic-kupo.md),
 [project Kanban continuation and provider-equivalent prices](architecture/project-kanban.md),
 [remembered approvals and repository-aware GitHub workflows](architecture/session-github-workflows.md),
@@ -27,6 +27,13 @@ approval/GitHub metadata without rewriting encrypted history. The exact private
 approval-development schema-59 lineage also converges by its own retained
 marker, atomically adding the workspace/navigation markers. Missing or
 ambiguous provenance is rejected rather than guessed.
+Schema 64 adds card ordering, per-request continuation choices and captured
+read-only GitHub board sources. `issues.reorder` binds the complete source and
+destination structure; `kanban.choose` binds the actual profile and exact saved
+draft revision. `/continue-work` returns a typed route review before dispatch.
+`BoardConfig.githubSync` controls optional issue import and explicit column
+mapping, while `IssueBoard.githubSource` is service-owned provenance, never
+client-supplied authority. Older encrypted history and consent remain intact.
 Schema 63 explicitly converges the independent automatic-Kupo schema 61 and
 session/GitHub schema 61, plus Kanban/pricing schema 62. Exact original markers,
 approvals, selected responses, encrypted history, receipts and held accounting

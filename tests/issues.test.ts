@@ -34,7 +34,7 @@ test("local project boards share feature/bug/misc tickets and reject conflicting
   } finally { sdk.disconnect(); other.disconnect(); await fixture.close(); }
 });
 
-test("only a verified merged PR advances a customizable phase and stale observations preserve concurrent edits", async () => {
+test("verified GitHub closure maps to the configured done phase and stale observations preserve concurrent local edits", async () => {
   let merged = false; let state = "closed"; let hold: (() => void) | undefined; let started = false;
   const fixture = await setupFixture({ platform: { integrations: { fetch: async (url) => {
     assert.equal(url, "https://api.github.com/repos/generated/project/pulls/7");
@@ -50,7 +50,7 @@ test("only a verified merged PR advances a customizable phase and stale observat
     assert.equal((await sdk.jobs.wait(job.id!)).status, "completed");
     let issue = sdk.getState().snapshot!.issues.find((issue) => issue.id === created.id)!;
     assert.equal(issue.pullRequest?.state, "closed");
-    assert.equal(issue.phaseId, "backlog");
+    assert.equal(issue.phaseId, "shipped");
     merged = true; hold = () => {}; job = await sdk.issues.refresh(projectId);
     await waitFor(() => started);
     await sdk.issues.update(issue.id, { ...fields("Generated concurrent local edit"), pullRequestUrl: issue.pullRequest!.url }, issue.revision);

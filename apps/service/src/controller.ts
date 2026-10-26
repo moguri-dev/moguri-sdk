@@ -35,7 +35,7 @@ import { SessionCoordination, coordinatedMessageContext } from "./session-coordi
 import { SessionStateSql } from "./session-state-sql.ts";
 import { IssueTools } from "./issue-tools.ts";
 import { ProjectWorkRuntime } from "./project-work.ts";
-import { isContinueWork, isKanbanCommand } from "../../../packages/protocol/src/kanban.ts";
+import { continueWorkInput, isKanbanCommand } from "../../../packages/protocol/src/kanban.ts";
 import { workflowGuidance, type WorkflowKind } from "../../../packages/protocol/src/workflows.ts";
 import { SessionContextSchema, SessionControlSchema, SessionMessageSchema, WaitSessionSchema, type CoordinationOrigin } from "../../../packages/protocol/src/coordination.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
@@ -2091,8 +2091,17 @@ export class ControlPlane extends EventEmitter {
       case "message.send": {
         this.revision(session.draft.revision, command.expectedRevision);
         this.platform.inputs.assertDraftReady(session.id);
-        if (!command.held && command.delivery === "queue" && session.projectId && isContinueWork(session.draft.text)) {
-          return this.projectWork.start(session, finish, { consumeDraft: { expectedRevision: command.expectedRevision } });
+        const continuation = !command.held && command.delivery === "queue" && session.projectId ? continueWorkInput(session.draft.text) : null;
+        if (command.continueWorkChoice && !continuation) throw new MoguriError("continue_work_choice_scope", "A continuation choice belongs only to this exact new project draft. Held, interrupted or unrelated prompts cannot acquire it.", 409);
+        if (continuation) {
+          if (!command.continueWorkChoice) throw new MoguriError("continue_work_choice_required", "Choose whether to work from Kanban or send this exact prompt to the model. Your draft is preserved; this choice is required each time.", 409);
+          const chosen = this.event(session, "session.continue_work_chosen", { choice: command.continueWorkChoice, draftRevision: command.expectedRevision, actor: "user" });
+          const selected: typeof finish = (events, result, forget) => finish([chosen, ...events], result, forget);
+          selected.intent = finish.intent;
+          if (command.continueWorkChoice === "kanban") return this.projectWork.start(session, selected, {
+            ...(continuation.issueId ? { issueId: continuation.issueId } : {}), consumeDraft: { expectedRevision: command.expectedRevision },
+          });
+          return this.enqueuePrompt(session, session.draft, command.delivery, false, true, selected);
         }
         return this.enqueuePrompt(session, session.draft, command.delivery, Boolean(command.held), true, finish);
       }

@@ -85,6 +85,12 @@ try {
       await sdk.prices.refresh(["anthropic"],providerPrices.revision);
       await sdk.sessions.organize("generated-session",{workItemId:"generated-card",workItemUrl:null});
       ` : ""}
+      ${installedProtocol >= 64 ? `
+      await sdk.issues.reorder("generated-card","review",null,[{issueId:"generated-card",phaseId:"backlog",order:1}],0);
+      await sdk.kanban.choose({profileId:sdk.profileId,sessionId:"generated-session",expectedRevision:0,text:"continue work"},"prompt");
+      const continued=await sdk.slash("generated-session","/continue-work","cli");
+      if(continued.kind==="continue-work"){void continued.review.expectedRevision;void continued.choices;}
+      ` : ""}
       ${installedProtocol >= 61 ? `
       await sdk.approvals.respond("generated-session","generated-approval",true,{scope:"project",match:"family"});
       void sdk.approvals.list()[0]?.target.kind;
@@ -573,7 +579,21 @@ try {
       assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).workItemId,card.id);
       assert.equal(sdk.getState().snapshot.projectWorkRuns.length,0);
       assert.equal(sdk.getState().snapshot.settings.values.budgets.useProviderRatesForLimits,false);
-      console.log("Installed protocol-63 SDK/runtime exposes one Kanban chat, shared visibility/card bindings and public API-equivalent references without hidden inference or finite-limit consent.");
+      if(PROTOCOL_VERSION>=64){
+        const second=await sdk.issues.create(project.id,{title:"Generated installed ordered card",body:"",kind:"misc",phaseId:"backlog",pullRequestUrl:null});
+        const current=(await sdk.issues.board(project.id)).issues;
+        const source=current.find(value=>value.id===second.id);
+        await sdk.issues.reorder(second.id,"backlog",card.id,current.map(value=>({issueId:value.id,phaseId:value.phaseId,order:value.order??value.number})),source.revision);
+        const ordered=(await sdk.issues.board(project.id)).issues.sort((a,b)=>(a.order??a.number)-(b.order??b.number));
+        assert.deepEqual(ordered.map(value=>value.id),[second.id,card.id]);
+        const reviewed=await sdk.slash(opened.id,"/continue-work","cli");
+        assert.equal(reviewed.kind,"continue-work");assert.deepEqual(reviewed.choices,["kanban","prompt"]);
+        assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).draft.text,"/continue-work");
+        assert.equal(sdk.getState().snapshot.projectWorkRuns.length,0);
+        await sdk.command({type:"draft.save",sessionId:opened.id,expectedRevision:reviewed.review.expectedRevision,text:"",attachments:[]});
+        console.log("Installed protocol-64 SDK/runtime preserves structural card order and returns an exact per-request continuation review without a model call.");
+      }
+      console.log("Installed Kanban SDK/runtime exposes one board chat, shared visibility/card bindings and public API-equivalent references without hidden inference or finite-limit consent.");
       }
       ` : ""}
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");

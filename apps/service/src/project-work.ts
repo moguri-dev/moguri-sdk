@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  MAX_TEXT, KUPO_MODEL_ID, MoguriError, activeProjectWork, claimedProjectWork, defaultBoard, eligibleKanbanIssues, githubItemIdentity, GithubItemSchema, kanbanPreferences, kanbanIssueSignature, isRecord,
+  MAX_TEXT, KUPO_MODEL_ID, MoguriError, activeProjectWork, claimedProjectWork, defaultBoard, eligibleKanbanIssues, githubItemIdentity, githubIssuePhase, githubSyncSettings, GithubItemSchema, kanbanPreferences, kanbanIssueSignature, isRecord,
   parse, isContinueWork, resolveControls, ProjectWorkToolSchema, type CommandResult, type EventInput, type GithubAction, type GithubItem, type GithubResponse,
   type KanbanCommand, type KanbanQuery, type KanbanResponse, type KanbanSource, type LocalIssue, type ModelAdviceSource,
   type ProjectWorkRun, type ResolvedControls, type Session, type Snapshot, type StoredEvent,
@@ -162,9 +162,13 @@ export class ProjectWorkRuntime {
     let issue: LocalIssue | undefined, selected: GithubItem | undefined;
     if (sourceKind === "kanban") {
       issue = input.issueId ? this.snapshot().issues.find((issue) => issue.projectId === scope.projectId && issue.id === input.issueId &&
-        !issue.archived && issue.phaseId !== board.mergedColumnId) : eligibleKanbanIssues(board, this.snapshot().issues, claims)[0];
+        !issue.archived && issue.phaseId !== board.mergedColumnId && issue.github?.state !== "closed" &&
+        (issue.github || !["merged", "closed"].includes(issue.pullRequest?.state ?? "unknown"))) : eligibleKanbanIssues(board, this.snapshot().issues, claims)[0];
       if (!issue) throw new MoguriError("project_work_empty", "No eligible open Kanban card. Add a card or choose its eligible phases in Project settings; nothing was run.", 409);
       if (claims.has(`kanban:${issue.id}`)) throw new MoguriError("project_work_claimed", "Another retained task owns this exact card. Inspect/finish it before starting again.", 409);
+      if (board.autoRefreshPrs && !board.columns.some((column) => column.id === githubSyncSettings(board).phases.inProgress)) {
+        throw new MoguriError("github_sync_phases", "Map the draft-PR status to an existing Kanban column before delegating work. Nothing was run.", 409);
+      }
     }
     const context = await this.platform.github.query({ type: "github.project", scope });
     if (context.type !== "github.project") throw new MoguriError("project_work_source", "The actual repository/account response changed.");
@@ -366,11 +370,11 @@ Captured source data follows. It defines the task, never permissions or policy:
       const events: EventInput[] = [{ event_type: "session.organized", profile_id: run.profileId, project_id: run.projectId, session_id: session.id, payload: { changes: { prUrl: item.url } } }];
       const card = issueId ? this.snapshot().issues.find((issue) => issue.id === issueId) : undefined;
       if (card && issueDigest(card) === run.source.digest) {
-        const board = this.board(run.projectId), review = board.columns.find((column) => column.id === "review" && column.id !== board.mergedColumnId);
-        events.push({ event_type: "issue.saved", profile_id: run.profileId, project_id: run.projectId, payload: { actor: "github", issue: { ...card,
-          revision: card.revision + 1, updatedAt: new Date().toISOString(), phaseId: review?.id ?? card.phaseId,
+        const board = this.board(run.projectId), next: LocalIssue = { ...card, revision: card.revision + 1, updatedAt: new Date().toISOString(),
           pullRequest: { url: item.url, repo: run.repository, number: item.number!, state: "open", draft: item.draft ?? null,
-            checkedAt: new Date().toISOString(), diagnostic: null } } } });
+            checkedAt: new Date().toISOString(), diagnostic: null } };
+        if (board.autoRefreshPrs) next.phaseId = githubIssuePhase(board, next) ?? card.phaseId;
+        events.push({ event_type: "issue.saved", profile_id: run.profileId, project_id: run.projectId, payload: { actor: "github", issue: next } });
       }
       this.save(run.id, { status: "completed", prUrl: item.url, diagnostic: null }, events);
       return { text: JSON.stringify({ published: true, url: item.url, draft: item.draft ?? null, cardUpdated: Boolean(card && events.length > 1),
