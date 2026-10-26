@@ -1,7 +1,7 @@
 import type { MoguriSdk } from "./index.ts";
 import { ClientError } from "../../client/src/index.ts";
 import type {
-  GithubAction, GithubBrowse, GithubCommand, GithubPreview, GithubQuery, GithubScope,
+  GithubAction, GithubBrowse, GithubCommand, GithubPreview, GithubQuery, GithubScope, GithubWorkSource,
 } from "../../protocol/src/github-workflows.ts";
 
 type WithoutPage<T> = T extends unknown ? Omit<T, "page" | "perPage"> & { page?: number; perPage?: number } : never;
@@ -19,6 +19,14 @@ export function createGithubApi(sdk: MoguriSdk) {
   };
   return {
     preview, browse, read, execute,
+    repositories: (input: { source?: "account" | "public"; query?: string; account?: string; accountId?: string; page?: number; perPage?: number } = {}) =>
+      sdk.query({ type: "github.repositories", source: input.source ?? "account", query: input.query ?? "", page: input.page ?? 1,
+        perPage: input.perPage ?? 30, ...(input.account ? { account: input.account } : {}), ...(input.accountId ? { accountId: input.accountId } : {}) }),
+    project: (scope: GithubScope) => sdk.query({ type: "github.project", scope }),
+    source: (scope: GithubScope, source: GithubWorkSource) => sdk.query({ type: "github.source", scope, source }),
+    startSession: (scope: GithubScope, source: GithubWorkSource, expectedDigest: string) =>
+      sdk.command({ type: "session.from-work", projectId: scope.projectId, ...(scope.workspaceId ? { workspaceId: scope.workspaceId } : {}),
+        github: { ...source, expectedDigest } }),
     acknowledge: (operationId: string, expectedRevision: number, expectedInputDigest: string, confirm: true, commandId?: string) =>
       sdk.command({ type: "github.acknowledge", operationId, expectedRevision, expectedInputDigest, confirm }, commandId),
     history: (filters: Omit<Extract<GithubQuery, { type: "github.history" }>, "type" | "offset" | "limit"> & { offset?: number; limit?: number } = {}) =>

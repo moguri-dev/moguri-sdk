@@ -1,7 +1,7 @@
 import { ClientError } from "../../client/src/index.ts";
 import {
   GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, LinearCatalogResourceSchema, LinearWorkflowInputSchema,
-  isRecord, parse, type GithubScope, type Session,
+  isRecord, parse, type GithubScope, type GithubWorkSource, type Session,
 } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 import type { SlashResult } from "./slash.ts";
@@ -15,6 +15,7 @@ function object(text: string) {
 export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "github" | "linear", argument: string): Promise<SlashResult> {
   const match = argument.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/), action = match?.[1] ?? "history", tail = match?.[2] ?? "";
   if (name === "github") {
+    if (action === "repos") return result(await sdk.github.repositories(tail.startsWith("public ") ? { source: "public", query: tail.slice(7) } : { query: tail }));
     if (action === "history" && !tail) return result(await sdk.github.history({ ...(session.projectId ? { projectId: session.projectId } : {}) }));
     if (action === "read" && tail) return result(await sdk.github.read(tail));
     if (action === "wait" && tail) return result(await sdk.github.wait(tail));
@@ -23,6 +24,22 @@ export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "
     if (action === "acknowledge" && inspection) return result(await sdk.github.acknowledge(inspection[1]!, Number(inspection[2]), inspection[3]!, true));
     if (!session.projectId || session.controls.env !== "Local") throw new ClientError("github_scope", "This operation needs the actual Local project/worktree. Remote/Sandbox cannot borrow a Local source checkout. Independently retained reads/history remain available.");
     const scope: GithubScope = { env: "Local", projectId: session.projectId, sessionId: session.id, ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}) };
+    if (action === "project" && !tail) return result(await sdk.github.project(scope));
+    if ((action === "issues" || action === "pulls") && !tail) {
+      const project = await sdk.github.project(scope);
+      return result(await sdk.github.browse(scope, { resource: action, repository: project.repository, account: project.account }));
+    }
+    if (action === "source" || action === "start") {
+      const [kind, number, hash, extra] = tail.split(/\s+/);
+      if ((kind !== "issue" && kind !== "pull") || !number || !/^[1-9]\d*$/.test(number) || !Number.isSafeInteger(Number(number)) ||
+        extra || action === "source" && hash || action === "start" && (!hash || !/^[a-f0-9]{64}$/.test(hash))) {
+        throw new ClientError("github_source", "Use /github source issue|pull NUMBER to review the full source, then /github start issue|pull NUMBER SHA using that exact digest.");
+      }
+      const project = await sdk.github.project(scope), source: GithubWorkSource = { kind, number: Number(number), repository: project.repository, account: project.account, accountId: project.accountId };
+      if (action === "source") return result(await sdk.github.source(scope, source));
+      const started = await sdk.github.startSession(scope, source, hash!);
+      return { kind: "session", sessionId: started.id!, side: false };
+    }
     if (action === "preview") return result(await sdk.github.preview(scope, parse(GithubActionSchema, JSON.parse(tail))));
     if (action === "browse") {
       const input = object(tail);

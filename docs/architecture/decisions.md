@@ -382,14 +382,23 @@ candidate origin and independent raw-copy history.
 
 ## D12. System One decisions and autonomy levels
 
-**Decision.** Add a typed decision-provider interface with an optional **Jev by TypeSafe AI** adapter. It supports kupo routing and can be enabled with a fixed model for decisions and steering. **Autonomy level** offers **Manual** (default), **Guided** (current generative model recommends; human confirms), **Autopilot** (current model acts within delegated policy, asking sparingly), and **Autopilot Max** (a configured decision model decides and steers within that policy). None implicitly selects kupo or changes Env or Budget.
+**Decision, amended by the owner's protocol-59 request.** Keep the typed
+decision-provider interface and optional **Jev by TypeSafe AI** adapter.
+**Manual** remains default and **Guided** still requires human confirmation.
+Explicitly selecting **Autopilot** now delegates automatic tool/command
+approvals for all subsequent session turns. **Autopilot Max** has the same
+unattended approvals and adds a qualified System One-compatible decision layer
+for delegated technical choices and steering. Neither changes model, Env,
+Budget, hard denials, root ownership or user-only settings. Existing bounded
+selections retain their old behavior until explicitly reselected. See the
+[protocol-59 contract](session-github-workflows.md).
 
 **Provider contract.** Jev is a structured decision model, not a code/chat generator. Its documented hosted API evaluates state against typed Noul (yes/no probability), Choice, and Score questions; some types include a separate confidence value. Use a dedicated adapter to `POST https://api.typesafe.ai/v1/systemone`, not an invented OpenAI-compatible endpoint or assumed `pi-ai` integration. Other local or hosted providers must declare and satisfy equivalent capabilities. [J1], [J2]
 
 **Rules.**
 
-- Represent tool approvals, structured user questions, and steering as bounded typed decisions. Offer explicit alternatives, including escalation to the user. For open-ended questions or missing user-only facts, request clarification rather than invent an answer. The current model may frame alternatives; it cannot set its own permission limits.
-- Autopilot Max can answer instead of prompting the user, approve or deny delegated tool requests, and steer at safe loop boundaries. It needs an explicitly configured compatible decision provider; no silent fallback to generative self-approval. Steering cannot change a pinned model, expand the user's goal or workspace, or grant new permissions.
+- Represent structured user questions and steering as bounded typed decisions with explicit alternatives and escalation. Legacy bounded-Max tool decisions remain attributable to their original policy. Missing user-only facts still require clarification; models cannot set their own permission limits.
+- Current Autopilot Max automatically approves tools under actual user-selected autonomy, not model advice. Its decision provider can answer qualified technical alternatives and steer at safe boundaries. It needs an explicitly configured compatible provider, without fallback; steering cannot change a pinned model, expand the task/workspace or grant permissions.
 - The control plane's deterministic authorizer remains final. User-delegated scope may permit automatic decisions, but a high confidence score cannot override a hard denial, lift a budget, expose a secret, widen allowed envs, or change another user-only security setting. Git and other consequential writes still need explicit user action or policy.
 - Validate question/answer types, option membership, numeric bounds, and confidence semantics. Treat input content as data, not instructions. Evaluate decision thresholds on generated fixtures; vendor calibration, speed, or cost claims are not permission or a reliability guarantee. Probability and confidence are not interchangeable. [J2]
 - Bind each decision to the exact pending request, arguments/context, delegation, and policy revision. Recheck before tool execution, applying an answer, or admitting a steer. User intervention, revoked delegation, changed input, or cancellation invalidates stale results. Persist the actual model actor, rubric, and available evidence references, never a fake user-authored response or reasoning the provider did not return. Automated answers cannot become user-only Core instructions.
@@ -429,6 +438,16 @@ the required output bound; it never silently substitutes this alternative.
 The final generated full/packed/native sweep passes without changing factory
 defaults or qualified archives. Remote/native Max and live
 reliability/calibration remain distinct gates.
+
+**Protocol-59 source slice.** Remembered approvals reuse `settings.updated`;
+actual user answers and scoped grants are one transaction. A metadata-only
+schema marker preserves encrypted history and legacy autonomy behavior.
+Automatic approvals record an `autonomy` actor bound to the explicit consent
+marker. New Max does not wait for legacy tool review, while the existing
+bounded question/steering worker, ledger and failure rules stay unchanged.
+The same slice adds controller-account repository discovery, exact reviewed
+GitHub source starts, native client pickers and existing reviewed PR/issue
+publication. It adds no dependency or Jev/Remote/native qualification.
 
 ## D13. Remote SSH execution
 

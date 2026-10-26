@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **58**, including
+Current source uses protocol **59**, including
+[remembered approvals and repository-aware GitHub workflows](architecture/session-github-workflows.md),
 [lean tools and coordinated sessions](architecture/lean-tooling.md),
 [session-owned candidate cleanup](architecture/candidate-cleanup.md),
 shared-global/last-selected model defaults and
@@ -75,6 +76,61 @@ unread state or lifecycle. Metadata is not a user answer, PR-write permission
 or evidence that the session's work succeeded. Legacy missing draft remains
 unknown; project-free scope cannot inherit a root or authenticated account.
 The schema-54 marker upgrades transactionally without rewriting ciphertext.
+
+## Remembered approvals and GitHub entry points
+
+`approvals.respond(sessionId, approvalId, allow, remember?)` atomically records
+the actual pending answer and optional `{ scope: "session" | "project" | "global",
+match: "exact" | "family" }` grant. Global means all projects in this profile,
+not another profile or execution environment. `approvals.list()` and
+`approvals.revoke(id, expectedSettingsRevision?)` share settings revisions.
+Family grants accept only conservative simple commands; MCP grants bind the
+actual server configuration and schema. Callers cannot replace the pending
+command or supply a different grant target.
+
+`sessions.autonomy(id, "Autopilot")` explicitly sets
+`controls.automaticApprovals: true`; Max does the same while requiring its
+qualified decision provider. The marker is optional only for retained legacy
+history. Old bounded settings stay unchanged until an explicit selection.
+Manual/Guided never gain automatic approval through an inherited marker.
+
+```ts
+await sdk.approvals.respond(session.id, approval.id, true, {
+  scope: "project", match: "family",
+});
+const repositories = await sdk.github.repositories();
+const next = repositories.nextPage && await sdk.github.repositories({
+  account: repositories.account, accountId: repositories.accountId,
+  page: repositories.nextPage,
+});
+const scope = { env: "Local" as const, projectId: session.projectId!, sessionId: session.id };
+const project = await sdk.github.project(scope);
+const source = {
+  kind: "issue" as const, repository: project.repository,
+  account: project.account, accountId: project.accountId, number: 7,
+};
+const reviewed = await sdk.github.source(scope, source);
+// Display reviewed.item in full and obtain the user's explicit start action.
+const created = await sdk.github.startSession(scope, source, reviewed.digest);
+```
+
+`github.repositories({ source: "public", query })` explicitly searches public
+repositories. Public visibility is not an open-source license claim.
+Discovery uses only the current controller GitHub CLI account. No Copilot login,
+secret-backend updater token, rootless filesystem access or SSH fallback is
+introduced. `github.project` derives the exact configured upstream, actual
+default branch, local branch and account; clients do not guess `main` or an
+account name.
+
+`github.source` and `startSession` bind canonical repository/item identity,
+numeric account identity, actual profile/root inode and reviewed complete
+title/body. The returned `binding` is not a filesystem or permission grant. `Session.githubSource`
+retains original provenance; relinking that source clears the current
+attribution without rewriting history. `Session.workItemUrl` is the separately
+typed GitHub issue binding, independent of local `workItemId`. New sessions
+contain an unsent draft, not a claimed prompt or changed checkout.
+Existing `github.preview`, `execute`, `read`, `wait` and cancellation retain the
+original exact-review/no-replay write lifecycle.
 
 ## Lean tools and session coordination
 

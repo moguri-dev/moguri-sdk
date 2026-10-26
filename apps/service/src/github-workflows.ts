@@ -1,15 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { MoguriError, isRecord, parse, type CommandResult, type EventInput } from "../../../packages/protocol/src/index.ts";
 import {
-  GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, GithubOperationResultSchema, GithubQuerySchema, GithubReviewDocumentSchema, githubRootQuarantined,
+  GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, GithubOperationResultSchema, GithubQuerySchema, GithubRepositorySchema, GithubReviewDocumentSchema, githubRootQuarantined,
   type GithubAction, type GithubBrowse, type GithubGitState, type GithubItem, type GithubOperation,
   type GithubOperationResult, type GithubPreview, type GithubQuery, type GithubResponse, type GithubScope, type GithubCommand,
-  type GithubReviewDocument,
+  type GithubReviewDocument, type GithubRepository, type GithubWorkSource, type GithubSourceBinding,
 } from "../../../packages/protocol/src/github-workflows.ts";
-import { candidateGitState, readGitBinding } from "./project-git.ts";
+import { candidateGitState, readGitBinding, readWorkspaceGit } from "./project-git.ts";
+import { observedRepository } from "./repository-metadata.ts";
 import { sourceRoot, sourceRootSync } from "./repository-source.ts";
 import { runProgram } from "./program.ts";
 import { digest, type EventStore } from "./store.ts";
@@ -294,6 +295,103 @@ export class GitHubWorkflows {
     if (string(actual.login).toLowerCase() !== expected.toLowerCase() || !numeric(actual.id)) throw new MoguriError("github_account", "The active controller gh account does not match the reviewed account. Switch it explicitly outside Moguri; no token was scraped or account substituted.", 409);
     return `${string(actual.login).toLowerCase()}:${numeric(actual.id)}`;
   }
+  private discoveryPolicy(): string {
+    const state = this.host.snapshot();
+    if (this.shutdown.signal.aborted) throw new MoguriError("github_closing", "GitHub discovery is stopping. No other account was used.", 409);
+    if (state.settings.values.permissions.tools.some((rule) => rule.decision === "deny" && ["*", "github", "run_command"].includes(rule.tool))) {
+      throw new MoguriError("github_denied", "A hard user policy excludes controller GitHub discovery.", 403);
+    }
+    return digest(stable([state.profileId, state.policy.revision, state.settings.permissionRevision, this.credentialEpoch]));
+  }
+  private async discoveryAccount(root: string, expected: string | undefined, signal: AbortSignal) {
+    const data = record((await this.api(root, "user", signal)).data), login = string(data.login), id = numeric(data.id);
+    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(login) || !id || expected && login.toLowerCase() !== expected.toLowerCase()) {
+      throw new MoguriError("github_account", "The signed-in GitHub CLI account is missing or changed. Sign in explicitly or reload the selected account; Copilot and updater credentials are not used.", 409);
+    }
+    return { account: login, accountId: `${login.toLowerCase()}:${id}` };
+  }
+  private async repositories(query: Extract<GithubQuery, { type: "github.repositories" }>): Promise<Extract<GithubResponse, { type: "github.repositories" }>> {
+    const policy = this.discoveryPolicy(), root = dirname(this.store.path), signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]);
+    const identity = await this.discoveryAccount(root, query.account, signal);
+    if (query.accountId && query.accountId !== identity.accountId) throw new MoguriError("github_account", "The repository page belongs to a different numeric GitHub account. Reload account selection explicitly.", 409);
+    if (query.source === "public" && !query.query.trim()) throw new MoguriError("github_search", "Enter a public repository search before sending it to GitHub.");
+    const suffix = `per_page=${query.perPage}&page=${query.page}`;
+    const response = await this.api(root, query.source === "account" ?
+      `user/repos?affiliation=owner,organization_member&sort=updated&direction=desc&${suffix}` :
+      `search/repositories?q=${encodeURIComponent(`${query.query.trim()} is:public archived:false`)}&sort=updated&order=desc&${suffix}`, signal);
+    if (query.source === "public" && record(response.data).incomplete_results !== false) throw new MoguriError("github_incomplete", "GitHub returned an incomplete public search. Refine the search; no complete list was inferred.", 502);
+    const values = items(response.data, query.source === "public" ? "items" : undefined);
+    if (values.length > query.perPage || response.next && query.page === 100) throw new MoguriError("github_limit", "The repository page exceeded its explicit bound. Refine the selection instead of silently omitting results.", 409);
+    const seen = new Set<number>();
+    const repositories = values.map((value): GithubRepository => {
+      const data = record(value), fullName = string(data.full_name);
+      const metadata = observedRepository(`https://github.com/${fullName}`, value);
+      if (seen.has(metadata.id) || data.ssh_url !== `git@github.com:${fullName}.git` || data.clone_url !== `https://github.com/${fullName}.git` ||
+        query.source === "public" && metadata.visibility !== "public" || typeof data.default_branch !== "string" ||
+        data.description !== null && typeof data.description !== "string") throw new MoguriError("github_repository", "GitHub returned a duplicate, mismatched or non-canonical repository. No clone destination or account was guessed.", 502);
+      seen.add(metadata.id); validateGithubRef(data.default_branch);
+      const relationship = query.source === "public" ? "public" : metadata.owner.toLowerCase() === identity.account.toLowerCase() ? "owner" :
+        metadata.ownerKind === "organization" ? "organization" : "accessible";
+      return parse(GithubRepositorySchema, { id: metadata.id, fullName, description: data.description ?? "", url: metadata.url,
+        sshUrl: data.ssh_url, cloneUrl: data.clone_url, visibility: metadata.visibility, defaultBranch: data.default_branch, relationship,
+        licenseId: metadata.licenseId, openSource: metadata.publicOsiLicensed });
+    }).filter((entry) => query.source === "public" || !query.query.trim() || `${entry.fullName} ${entry.description}`.toLowerCase().includes(query.query.trim().toLowerCase()));
+    const rank = { owner: 0, organization: 1, accessible: 2, public: 3 };
+    repositories.sort((a, b) => rank[a.relationship] - rank[b.relationship] || a.fullName.localeCompare(b.fullName));
+    if ((await this.discoveryAccount(root, identity.account, signal)).accountId !== identity.accountId || this.discoveryPolicy() !== policy) {
+      throw new MoguriError("github_stale", "Account or read policy changed during discovery. The old page was discarded.", 409);
+    }
+    return { type: "github.repositories", boundary: "controller-gh-account-not-ssh", ...identity, source: query.source,
+      repositories, page: query.page, nextPage: response.next ? query.page + 1 : null, warning };
+  }
+  private sourceBinding(scope: GithubScope, root: GithubReviewDocument["root"]): GithubSourceBinding {
+    const state = this.host.snapshot();
+    return { env: "Local", profileId: state.profileId, projectId: scope.projectId, workspaceId: scope.workspaceId ?? null, root,
+      configurationRevision: this.host.configuration(scope.projectId).revision, policyRevision: state.policy.revision,
+      permissionRevision: state.settings.permissionRevision };
+  }
+  private async projectContext(scope: GithubScope, expectedAccount?: Pick<GithubWorkSource, "account" | "accountId">): Promise<Extract<GithubResponse, { type: "github.project" }>> {
+    this.discoveryPolicy();
+    const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]);
+    const context = await this.context(scope, undefined, signal), root = context.root.root, configuration = this.host.configuration(scope.projectId);
+    const gitPolicy = { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders };
+    const git = await readWorkspaceGit(root, gitPolicy, false, signal);
+    if (!git.repository) throw new MoguriError("github_repository", "This project's configured upstream is not a supported GitHub repository. Set its Git remote in Project settings; no repository URL was guessed.", 409);
+    const repository = git.repository.slice("https://github.com/".length), identity = await this.discoveryAccount(root, expectedAccount?.account, signal);
+    if (expectedAccount?.accountId && identity.accountId !== expectedAccount.accountId) throw new MoguriError("github_source", "The original numeric GitHub account changed. No repository metadata was requested using its replacement.", 409);
+    const data = record((await this.api(root, `repos/${repository}`, signal)).data);
+    const metadata = observedRepository(git.repository, data);
+    validateGithubRef(string(data.default_branch));
+    const fresh = await readWorkspaceGit(root, gitPolicy, false, signal);
+    if (fresh.repository !== git.repository || fresh.branch !== git.branch ||
+      (await this.discoveryAccount(root, identity.account, signal)).accountId !== identity.accountId) throw new MoguriError("github_stale", "The project's upstream, branch or account changed during discovery. Reload before choosing an item.", 409);
+    context.current();
+    return { type: "github.project", boundary: "controller-gh-account-not-ssh", ...identity, repository: metadata.fullName,
+      defaultBranch: string(data.default_branch), branch: git.branch, url: metadata.url, binding: this.sourceBinding(scope, context.root), warning };
+  }
+  async projectItem(scope: GithubScope, source: GithubWorkSource): Promise<{ item: GithubItem; accountId: string; binding: GithubSourceBinding }> {
+    const project = await this.projectContext(scope, source);
+    if (project.repository.toLowerCase() !== source.repository.toLowerCase() || project.account.toLowerCase() !== source.account.toLowerCase() ||
+      source.accountId !== undefined && project.accountId !== source.accountId) {
+      throw new MoguriError("github_source", "Choose an item from this project's exact repository and current account. No cross-repository or account fallback was used.", 409);
+    }
+    const response = await this.browse(scope, { resource: source.kind, repository: source.repository, account: source.account,
+      number: source.number, page: 1, perPage: 1 }, AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]));
+    const selected = response.items[0], expected = `https://github.com/${source.repository}/${source.kind === "pull" ? "pull" : "issues"}/${source.number}`;
+    if (response.accountId !== project.accountId || !selected || !selected.id || !selected.title.trim() || !["open", "closed"].includes(selected.state) ||
+      selected.number !== source.number || selected.url !== expected || selected.kind !== source.kind) {
+      throw new MoguriError("github_source", "The returned GitHub item did not match the exact selected repository, account and number.", 409);
+    }
+    const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]), configuration = this.host.configuration(scope.projectId);
+    const context = await this.context(scope, undefined, signal);
+    const fresh = await readWorkspaceGit(context.root.root,
+      { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders }, false, signal);
+    if (fresh.repository?.toLowerCase() !== project.url.toLowerCase()) throw new MoguriError("github_source_stale", "The project's upstream changed while reading this item. Reload the exact source before using it.", 409);
+    context.current();
+    const binding = this.sourceBinding(scope, context.root);
+    if (stable(binding) !== stable(project.binding)) throw new MoguriError("github_source_stale", "The actual source root or policy changed during item inspection. Reload its complete review.", 409);
+    return { item: selected, accountId: project.accountId, binding };
+  }
   private async optionalApi(root: string, path: string, signal: AbortSignal): Promise<unknown | null> {
     try { return (await this.api(root, path, signal)).data; }
     catch (error) { if (notFound(error)) return null; throw error; }
@@ -474,6 +572,12 @@ export class GitHubWorkflows {
   }
   async query(query: GithubQuery): Promise<GithubResponse> {
     query = structuredClone(parse(GithubQuerySchema, query));
+    if (query.type === "github.repositories") return this.repositories(query);
+    if (query.type === "github.project") return this.projectContext(query.scope);
+    if (query.type === "github.source") {
+      const result = await this.projectItem(query.scope, query.source);
+      return { type: query.type, source: query.source, ...result, digest: digest(stable([query.source, result.accountId, result.binding, result.item])), warning };
+    }
     if (query.type === "github.preview") return { type: query.type, preview: (await this.preview(query.scope, query.action, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000))).preview };
     if (query.type === "github.browse") return this.browse(query.scope, query.input, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000));
     if (query.type === "github.history") {
@@ -560,6 +664,7 @@ export class GitHubWorkflows {
     if (collection && response.next && input.page === 100) throw new MoguriError("github_limit", "GitHub pagination reached its explicit 100-page bound; remaining records were not silently omitted.", 409);
     let values = collection ? items(response.data, field) : [response.data];
     if (input.resource === "issues") values = values.filter((value) => !record(value).pull_request);
+    if (input.resource === "issue" && record(response.data).pull_request) throw new MoguriError("github_source", "This number is a pull request, not an issue. Choose it from pull requests.", 409);
     const result = values.map((value) => item(value, kind));
     if (input.resource === "runs" && input.headSha && result.some((value) => value.headSha !== input.headSha)) throw new MoguriError("github_head", "GitHub returned workflow runs from a different head. No CI result was adopted.", 409);
     await this.account(root, input.account, signal); context.current();

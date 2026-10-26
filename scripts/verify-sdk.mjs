@@ -74,6 +74,19 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 59 ? `
+      await sdk.approvals.respond("generated-session","generated-approval",true,{scope:"project",match:"family"});
+      void sdk.approvals.list()[0]?.target.kind;
+      await sdk.approvals.revoke("generated-grant",0);
+      await sdk.sessions.autonomy("generated-session","Autopilot");
+      const repositories=await sdk.github.repositories({source:"account"});
+      void repositories.repositories[0]?.sshUrl;void repositories.repositories[0]?.openSource;
+      const githubScope={env:"Local" as const,projectId:"generated-project"};
+      const githubProject=await sdk.github.project(githubScope);
+      const githubSource={kind:"issue" as const,repository:githubProject.repository,account:githubProject.account,accountId:githubProject.accountId,number:7};
+      const githubReviewed=await sdk.github.source(githubScope,githubSource);
+      await sdk.github.startSession(githubScope,githubSource,githubReviewed.digest);
+      ` : ""}
       ${installedProtocol >= 58 ? `
       const nativeCatalogue=await sdk.tools.catalog("generated-id","file");
       void nativeCatalogue.tools[0]?.parameters;void nativeCatalogue.tools[0]?.schemaDigest;

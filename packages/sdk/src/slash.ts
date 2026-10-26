@@ -4,8 +4,10 @@ import { ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchem
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
+import { RememberApprovalSchema } from "../../protocol/src/permissions.ts";
+import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol/src/application-updates.ts";
 
-export type SessionPanel = "Terminal" | "Global Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
+export type SessionPanel = "Terminal" | "Global Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Changes" | "Work item" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
 export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
 export type SlashResult =
@@ -19,6 +21,9 @@ export type SlashResult =
   | { kind: "profile"; profileId: string }
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
+  { name: "approve", description: "Approve the current action once or remember its exact session/project/global scope", argument: "[once|session|project|global] [exact|family]" },
+  { name: "approvals", description: "Inspect or revoke this profile's remembered approvals", argument: "[revoke ID]" },
+  { name: "work-item", description: "Open the project's GitHub issues and linked work item" },
   { name: "review", description: "Investigate and fix current changes, or the project when clean, within existing policy", argument: "[PROMPT]" },
   { name: "security", description: "Investigate and fix reachable security weaknesses within existing authority", argument: "[PROMPT]" },
   { name: "performance", description: "Measure and improve current-code performance without changing outcomes", argument: "[PROMPT]" },
@@ -78,7 +83,7 @@ export const slashCommands = [
   { name: "capability", description: "Inspect historical bytes, explicitly enable/disable, roll back disabled or insert a reviewed skill", argument: "[history ID|version ID SHA|enable/disable ID REV confirm-state|rollback ID REV SHA confirm-rollback|use ID SHA]" },
   { name: "containment", description: "Inspect process-group limits or require qualified SendBox for whole-session containment", argument: "[status|require-sandbox confirm-policy]" },
   { name: "cache", description: "Inspect verified Local dependency plans and explicit private registry scopes", argument: "[inspect MANAGER|prepare MANAGER SHA accept-metadata|install MANAGER SHA accept-metadata replace-node-modules|registries|registry-save REV ID|- JSON|registry-remove ID REV confirm-remove|token ID|clear-token ID]" },
-  { name: "github", description: "Two-way Git/GitHub with exact-root review, protected-write confirmations, pinned CI and no replay", argument: "[browse JSON|preview ACTION_JSON|execute confirm-write {action,expectedDigest,confirmations}|history|read/wait ID|stop ID confirm-stop]" },
+  { name: "github", description: "Repository discovery, project PRs/issues and reviewed GitHub writes", argument: "[repos [public QUERY]|project|issues|pulls|source issue|pull NUMBER|start issue|pull NUMBER SHA|browse JSON|preview ACTION_JSON|execute confirm-write JSON|history]" },
   { name: "linear", description: "Reviewed Linear issue/project/comment workflows and explicit two-way local ticket sync", argument: "[status|import [CURSOR]|catalog JSON|issue UUID|preview JSON|execute SHA confirm-write JSON|history|read/wait ID|stop ID confirm-stop|token]" },
   { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
   { name: "profiles", description: "Choose or manage isolated profiles" },
@@ -93,7 +98,7 @@ export const slashCommands = [
   { name: "settings", description: "Open shared settings" },
   { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
-  { name: "updates", description: "Inspect private-release updates or explicitly check/cancel; never authenticate or install", argument: "[status|history|read ID|check|cancel ID]" },
+  { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
   { name: "models", description: "Choose an available model" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or configured kupo Single", argument: "[EXACT_MODEL_ID]" },
@@ -128,6 +133,19 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "approve": {
+      const [scope = "once", match = "exact", extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!session.pendingApproval || extra || !["once", "session", "project", "global"].includes(scope) || !["exact", "family"].includes(match) || scope === "once" && match !== "exact") throw new ClientError("approval_input", "Use /approve once, session|project|global [exact|family] for the actual pending action.");
+      await sdk.approvals.respond(session.id, session.pendingApproval.id, true, scope === "once" ? undefined : parse(RememberApprovalSchema, { scope, match }));
+      return { kind: "ok", message: scope === "once" ? "Approved this action." : `Approved and remembered in ${scope} scope. Hard policy still applies.` };
+    }
+    case "approvals": {
+      const [action, id, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!action) return { kind: "text", text: JSON.stringify(sdk.approvals.list(), null, 2) };
+      if (action !== "revoke" || !id || extra) throw new ClientError("approval_input", "Use /approvals or /approvals revoke ID.");
+      await sdk.approvals.revoke(id); return { kind: "ok", message: "Remembered approval revoked. Pending approvals were invalidated." };
+    }
+    case "work-item": return { kind: "panel", panel: "Work item" };
     case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
       return toolingSlash(sdk, session.id, command.name, command.argument);
     case "review": case "security": case "performance": case "debug": {
@@ -382,6 +400,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       throw new ClientError("notification_sounds_command", "Use /notification-sounds list, read ID or remove ID SHA confirm-remove. Explicit file imports use CLI notification-sounds import FILE.wav --confirm-write or desktop Settings. No terminal audio playback.");
     }
     case "updates": {
+      if (command.argument === "token-help") return { kind: "text", text: JSON.stringify({ url: UPDATE_TOKEN_CREATION_URL, steps: UPDATE_TOKEN_GUIDANCE }, null, 2) };
       const [action = "status", id, ...extra] = command.argument.split(/\s+/).filter(Boolean);
       if (extra.length) throw new ClientError("update_command", "Use /updates status/history/read ID/check/cancel ID. Credentials and installation never enter chat.");
       const result = !id && action === "status" ? await sdk.application.updates.status() : !id && action === "history" ? await sdk.application.updates.history() :

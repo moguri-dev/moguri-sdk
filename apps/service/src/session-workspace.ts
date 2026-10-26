@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import {
-  MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
+  MAX_TEXT, githubItemIdentity, MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
@@ -33,6 +33,7 @@ export interface SessionWorkspaceHost {
   validateAdmission(session: Session, attachments?: Session["draft"]["attachments"]): void;
   wake(): void;
   verifyPr(scope: SessionPrScope): Promise<PullRequestLink>;
+  githubItem?(projectId: string, workspaceId: string | undefined, source: GithubWorkSource): Promise<Extract<GithubResponse, { type: "github.source" }>>;
   contextPreview(session: Session): Promise<ModelContextPreview>;
   startup(projectId: string | null): ResolvedControls;
   project(session: Pick<Session, "projectId" | "workspaceId">): Project;
@@ -288,6 +289,7 @@ export class SessionWorkspace {
           const { pullRequestLink } = await import("./project-integrations.ts");
           pullRequestLink(command.changes.prUrl);
         }
+        if (command.changes.workItemUrl && githubItemIdentity(command.changes.workItemUrl).kind !== "issue") throw new MoguriError("work_item", "Choose a GitHub issue for the Work item binding.");
         return finish([this.event(session, { event_type: "session.organized", profile_id: this.snapshot().profileId, payload: { changes: command.changes } })], { revision: session.revision + 1 });
       }
       case "session.mode": {
@@ -301,6 +303,26 @@ export class SessionWorkspace {
       }
       case "session.from-work": {
         const project = this.project(command.projectId);
+        if (command.github) {
+          if (command.issueId || command.prUrl || !this.host.githubItem) throw new MoguriError("github_source", "Choose one exact reviewed GitHub item, not competing source bindings.");
+          const settingsRevision = this.snapshot().settings.revision, configuration = this.projects.configuration(project.id);
+          const { expectedDigest, ...sourceInput } = command.github;
+          const reviewed = await this.host.githubItem(project.id, command.workspaceId, sourceInput), selected = reviewed.item;
+          if (reviewed.digest !== expectedDigest || this.project(project.id).path !== project.path ||
+            this.snapshot().settings.revision !== settingsRevision || this.projects.configuration(project.id).revision !== configuration.revision) {
+            throw new MoguriError("github_source_stale", "The reviewed item, account settings or project changed. Reload its title/body before starting a session.", 409);
+          }
+          const source = githubItemIdentity(selected.url ?? ""), startup = this.host.startup(project.id);
+          if (command.workspaceId && startup.controls.env !== "Local") throw new MoguriError("workspace_env", "This worktree is Local only. No Remote root was inferred.", 409);
+          const text = `Work on ${source.url}\n\n${selected.title}\n\n${selected.body}\n\nThe project checkout has not been changed.`;
+          if (Buffer.byteLength(text) > MAX_TEXT) throw new MoguriError("github_source_limit", "The complete issue/PR body exceeds a session draft's limit. Nothing was truncated or submitted.");
+          const id = randomUUID();
+          return finish([{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
+            payload: { title: selected.title.slice(0, 160), ...startup, workspaceId: command.workspaceId ?? null,
+              prUrl: source.kind === "pull" ? source.url : null, workItemUrl: source.kind === "issue" ? source.url : null,
+              githubSource: { version: 1, source: reviewed.source, accountId: reviewed.accountId, binding: reviewed.binding, digest: reviewed.digest } } },
+          { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text, attachments: [] } }], { id });
+        }
         const issue = command.issueId ? this.snapshot().issues.find((issue) => issue.id === command.issueId && issue.projectId === project.id) : undefined;
         if (command.issueId && !issue) throw new MoguriError("work_item", "This work item does not belong to this project.");
         if (!issue && !command.prUrl) throw new MoguriError("work_item", "Choose an existing work item or explicit PR URL.");

@@ -14,7 +14,7 @@ import {
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
   CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
-  type SessionMode, type ControlDefaults,
+  type SessionMode, type ControlDefaults, type RememberApproval,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
@@ -37,7 +37,7 @@ import { IssueTools } from "./issue-tools.ts";
 import { workflowGuidance, type WorkflowKind } from "../../../packages/protocol/src/workflows.ts";
 import { SessionContextSchema, SessionControlSchema, SessionMessageSchema, WaitSessionSchema, type CoordinationOrigin } from "../../../packages/protocol/src/coordination.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
-import { authorizeTool, validateSettings } from "./permissions.ts";
+import { authorizeTool, rememberToolApproval, validateSettings } from "./permissions.ts";
 import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext, readTools } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -1052,6 +1052,34 @@ export class ControlPlane extends EventEmitter {
     }
     for (const external of [...this.externalRuns.values()]) if (!external.started && (!sessionId || external.sessionId === sessionId)) this.finishExternal(external, "stopped", "Permissions changed. The external tool was not executed.");
   }
+  private permissionContext(session: Session, call: ToolCall) {
+    const cached = session.controls.env === "Remote" && call.name === "mcp_gateway" && call.arguments.action === "call" ?
+      this.mcpCatalogs.get(String(call.arguments.schemaDigest)) : undefined;
+    const mcpBinding = call.name === "mcp_gateway" && call.arguments.action === "call" ?
+      frameDigest([this.platform.server(String(call.arguments.serverId), session.projectId),
+        call.arguments.serverId === "builtin" ? this.projection.registry.filter((entry) => entry.projectId === session.projectId && entry.kind === "script" && entry.enabled)
+          .map((entry) => [entry.id, entry.contentDigest]).sort(([a], [b]) => String(a).localeCompare(String(b))) : null,
+        session.controls.env === "Remote" ? [this.projection.settings.values.remote, cached?.helperDigest, this.remote.readiness.workerDigest] : null]) : undefined;
+    return { sessionId: session.id, projectId: session.projectId, env: session.controls.env, autonomy: session.controls.autonomy,
+      automaticApprovals: session.controls.automaticApprovals === true, ...(mcpBinding ? { mcpBinding } : {}), ...(cached ? { mcpSchemaDigest: cached.digest } : {}) };
+  }
+  private authorization(session: Session, call: ToolCall, root: string | null) {
+    return authorizeTool(this.projection.settings.values, call, root, this.permissionContext(session, call));
+  }
+  private rememberApproval(session: Session, call: ToolCall, remember?: RememberApproval): EventInput[] {
+    if (!remember) return [];
+    if (session.controls.env === "Remote" && call.name === "mcp_gateway" && call.arguments.action === "call" && !this.mcpCatalogs.has(String(call.arguments.schemaDigest))) {
+      throw new MoguriError("remote_mcp_catalog", "Rediscover this exact Remote tool before remembering approval. No scope or schema was inferred.", 409);
+    }
+    const current = this.projection.settings;
+    const settings = rememberToolApproval(current.values, call, this.permissionContext(session, call), remember, randomUUID());
+    if (settings === current.values) return [];
+    validateSettings(settings);
+    // Adding the reviewed grant must not revoke its active route; removals use normal permission epochs.
+    return [{ event_type: "settings.updated", profile_id: this.profileId, payload: {
+      settings, revision: current.revision + 1, permissionRevision: current.permissionRevision,
+    } }];
+  }
   private changeMode(session: Session, mode: SessionMode, finish: WorkspaceFinish): CommandResult {
     if (session.mode === mode && !session.pendingMode) return finish([], { revision: session.revision });
     if ((session.kind === "side" || session.kind === "subagent") && mode !== "read-only") throw new MoguriError("question_only", "Question-only side sessions and model subagents cannot acquire edit authority.", 403);
@@ -1242,7 +1270,7 @@ export class ControlPlane extends EventEmitter {
     const env = session.controls.env;
     if (!["Local", "Remote"].includes(env) || !this.projection.policy.allowedEnvs.includes(env) || !this.snapshot().capabilities.find((capability) => capability.env === env)?.ready) throw new MoguriError("mcp_env", "A qualified, policy-allowed MCP execution environment is required; no Local fallback.", 403);
     const root = env === "Remote" ? this.remoteMcpScope(session).root : session.projectId ? this.platform.managed.project(session).path : null;
-    const authorization = authorizeTool(this.projection.settings.values, call, root);
+    const authorization = this.authorization(session, call, root);
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
     return session;
   }
@@ -1294,6 +1322,13 @@ export class ControlPlane extends EventEmitter {
       { ...scope, event_type: "tool.requested", payload: { approval: { id: approvalId, stepId, call, policyRevision: external.policyRevision, permissionRevision: external.permissionRevision } } },
       ...(remoteIntent ? [this.mcpEvent(remoteIntent)] : []),
     ]); } catch (error) { this.externalRuns.delete(session.id); throw error; }
+    const authorization = this.authorization(session, call, session.projectId ?
+      session.controls.env === "Remote" ? this.remoteWorkspace(session) : this.platform.managed.project(session).path : null);
+    if (authorization.decision === "allow") {
+      this.commit([this.event(this.session(session.id), "tool.decided", { approvalId, allow: true,
+        actor: authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, stepId)]);
+      this.executeExternal(external);
+    }
     return jobId;
   }
   private async executeRemoteExternalMcp(external: ExternalRun, signal: AbortSignal): Promise<unknown> {
@@ -1433,8 +1468,10 @@ export class ControlPlane extends EventEmitter {
     const target = this.remote.assertReady(), workerDigest = this.remote.readiness.workerDigest, root = this.remoteWorkspace(session);
     if (!workerDigest || !root) throw new MoguriError("remote_unready", "Probe the exact installed worker and explicit Remote project before MCP access.", 409);
     const configuration = this.platform.sessions.projects.configuration(session.projectId);
+    const settings = structuredClone(this.projection.settings.values); delete settings.permissions.remembered;
     return { profileId: this.profileId, sessionId: session.id, projectId: session.projectId, root, target, workerDigest,
       settingsRevision: this.projection.settings.revision, permissionRevision: this.projection.settings.permissionRevision,
+      settingsDigest: frameDigest(settings),
       policyRevision: this.projection.policy.revision, projectRevision: configuration.revision, mode: session.mode, pendingMode: session.pendingMode ?? null };
   }
   private async remoteMcpCatalog(session: Session, server: McpServerConfig | null, signal: AbortSignal) {
@@ -1443,7 +1480,7 @@ export class ControlPlane extends EventEmitter {
     const project = this.platform.sessions.projects.configuration(scope.projectId);
     const queryCall: ToolCall = { id: "remote-mcp-catalog", name: "mcp_gateway", arguments: { action: "tools", serverId: server?.id ?? "builtin" } };
     await assertSessionTool(this.session(session.id), scope.root, project.values, queryCall, false);
-    const authorization = authorizeTool(this.projection.settings.values, queryCall, scope.root);
+    const authorization = this.authorization(session, queryCall, scope.root);
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
     const check = () => {
       const current = this.session(session.id), fresh = remoteMcpPreview(this.remoteMcpScope(current), this.platform.server(server?.id ?? "builtin", current.projectId), helperDigest);
@@ -1539,7 +1576,7 @@ export class ControlPlane extends EventEmitter {
       const preparedMemory = !server && ["search_memory", "memory_graph"].includes(entry.tool) ?
         await this.platform.preparedMemory(session.id, entry.tool, input, entry.scopeDigest, run.abort.signal) : undefined;
       check();
-      const policy = authorizeTool(this.projection.settings.values, call, scope.root);
+      const policy = this.authorization(session, call, scope.root);
       if (policy.decision === "deny") throw new MoguriError("tool_denied", policy.reason, 403);
       entry = this.updateMcp(entry, { phase: "authorized", accessForwarded: token ? null : false });
       const dispatch: McpDispatch = { id: entry.id, scopeDigest: entry.scopeDigest, callDigest: frameDigest(call), hadAccess: Boolean(token), access: token ? [token] : [] };
@@ -2051,10 +2088,12 @@ export class ControlPlane extends EventEmitter {
         this.stop(session.id);
         return {};
       case "approval.respond": {
+        if (!command.allow && command.remember) throw new MoguriError("approval_remember", "Only an actual approval can create a remembered grant.");
         const external = this.externalRuns.get(session.id);
         if (external) {
           if (external.started || external.approvalId !== command.approvalId || external.policyRevision !== this.projection.policy.revision || external.permissionRevision !== this.projection.settings.permissionRevision) throw new MoguriError("approval_stale", "This external tool approval expired or changed.", 409);
-          finish([this.event(session, "tool.decided", { approvalId: external.approvalId, allow: command.allow, actor: "user" }, external.stepId)]);
+          const remembered = this.rememberApproval(session, external.call, command.remember);
+          finish([...remembered, this.event(session, "tool.decided", { approvalId: external.approvalId, allow: command.allow, actor: "user" }, external.stepId)]);
           if (!command.allow) this.finishExternal(external, "stopped", "External MCP request denied by the user.", undefined, "denied");
           else this.executeExternal(external);
           return {};
@@ -2070,10 +2109,11 @@ export class ControlPlane extends EventEmitter {
         const hook = run.hooks?.calls.get(approval.call.id);
         if (command.allow && hook) this.platform.extensions.assertHook(session, hook);
         if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null, metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session), coordinator: Boolean(run.yieldedTo && session.mode === "agent" && session.pendingMode !== "read-only") }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
-        run.approval = undefined;
-        const events: EventInput[] = [this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
+        const remembered = this.rememberApproval(session, approval.call, command.remember);
+        const events: EventInput[] = [...remembered, this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
         if (command.allow) events.push(this.event(session, "tool.started", { call: approval.call }, run.stepId));
         finish(events);
+        run.approval = undefined;
         if (command.allow) this.grantTool(run, approval.call.id);
         this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow: command.allow, mode, folders: folderPolicy(configuration) } });
         return {};
@@ -3197,7 +3237,7 @@ export class ControlPlane extends EventEmitter {
         let admissionAttempted = false;
         try {
           await this.assertCurrentTool(session, request.call);
-          if (authorizeTool(this.projection.settings.values, request.call, null).decision === "deny") throw new MoguriError("tool_denied", "Current policy denies issue creation.", 403);
+          if (this.authorization(session, request.call, null).decision === "deny") throw new MoguriError("tool_denied", "Current policy denies issue creation.", 403);
           const source = this.modelAdviceSource(session, request);
           const finish: WorkspaceFinish = Object.assign((events: EventInput[], result: CommandResult = {}) => {
             admissionAttempted ||= events.length > 0;
@@ -3215,7 +3255,7 @@ export class ControlPlane extends EventEmitter {
       if (request.call.name === "query_state" || request.call.name === "mutate_state") {
         try {
           await this.assertCurrentTool(session, request.call);
-          if (authorizeTool(this.projection.settings.values, request.call, null).decision === "deny") throw new MoguriError("tool_denied", "Current policy denies this state operation.", 403);
+          if (this.authorization(session, request.call, null).decision === "deny") throw new MoguriError("tool_denied", "Current policy denies this state operation.", 403);
           const result = await this.stateSql.execute(session.id, request.call.name === "query_state" ? "query" : "mutate", request.call.arguments, run.abort.signal,
             request.call.name === "mutate_state" ? this.modelAdviceSource(session, request) : undefined);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: result });
@@ -3236,7 +3276,7 @@ export class ControlPlane extends EventEmitter {
       if (["session_context", "session_message", "session_control", "wait_session"].includes(request.call.name)) {
         try {
           await this.assertCurrentTool(session, request.call);
-          if (authorizeTool(this.projection.settings.values, request.call, null).decision === "deny") throw new MoguriError("tool_denied", "Current policy denies this coordination operation.", 403);
+          if (this.authorization(session, request.call, null).decision === "deny") throw new MoguriError("tool_denied", "Current policy denies this coordination operation.", 403);
           const source = this.modelAdviceSource(session, request), identity = frameDigest([run.turnId, request.stepId, request.call.id]);
           let result: unknown;
           if (request.call.name === "session_context") result = this.coordination.read(session.id, parse(SessionContextSchema, request.call.arguments));
@@ -3257,7 +3297,7 @@ export class ControlPlane extends EventEmitter {
           const policy = run.scopedReadPolicies.get(request.call.id);
           if (!policy || policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed after this exact scoped-read approval. No source text was read; request fresh approval.", 409);
           await this.assertCurrentTool(session, request.call);
-          const authorization = authorizeTool(this.projection.settings.values, request.call, null);
+          const authorization = this.authorization(session, request.call, null);
           if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
           run.abort.signal.throwIfAborted();
           if (policy !== this.scopedReadPolicy()) throw new MoguriError("approval_stale", "Policy changed during the scoped read. No source text was returned.", 409);
@@ -3280,7 +3320,7 @@ export class ControlPlane extends EventEmitter {
       if (request.call.name === "task_progress") {
         try {
           await this.assertCurrentTool(session, request.call);
-          const authorization = authorizeTool(this.projection.settings.values, request.call, null);
+          const authorization = this.authorization(session, request.call, null);
           if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
           const result = await this.platform.progress.tool(session.id, run.turnId, this.modelAdviceSource(session, request),
             parse(TaskProgressToolSchema, request.call.arguments), run.abort.signal);
@@ -3315,7 +3355,7 @@ export class ControlPlane extends EventEmitter {
         if (!run.declaredTools.has(request.call.name)) throw new MoguriError("tool_unavailable", "This capability was not enabled or declared for this turn.");
         const project = session.projectId ? this.platform.managed.project(session) : undefined;
         await this.assertCurrentTool(session, request.call);
-        const authorization = authorizeTool(this.projection.settings.values, request.call, run.sandboxExecutionId ? this.sandboxExecution(run.sandboxExecutionId).root :
+        const authorization = this.authorization(session, request.call, run.sandboxExecutionId ? this.sandboxExecution(run.sandboxExecutionId).root :
           session.controls.env === "Remote" ? this.remoteWorkspace(session) : project?.path ?? null);
         if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
         if (session.controls.autonomy === "Autopilot Max") this.decisions.capability(session.controls.env);
@@ -3323,8 +3363,9 @@ export class ControlPlane extends EventEmitter {
         const approval = { id: randomUUID(), stepId: request.stepId, call: request.call, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision,
           ...(recommendation ? { recommendation, recommendationSource: this.modelAdviceSource(session, request) } : {}) };
         const hook = run.hooks?.calls.get(request.call.id);
-        const hookRequiresHuman = Boolean(hook && session.controls.autonomy === "Autopilot Max" && this.projection.settings.values.decisions.reviewDelegatedTools);
-        if (!hook && authorization.decision === "allow" && authorization.ruleId && session.controls.autonomy === "Autopilot Max" &&
+        const automatic = session.controls.automaticApprovals === true;
+        const hookRequiresHuman = Boolean(!automatic && hook && session.controls.autonomy === "Autopilot Max" && this.projection.settings.values.decisions.reviewDelegatedTools);
+        if (!automatic && !hook && authorization.decision === "allow" && authorization.ruleId && session.controls.autonomy === "Autopilot Max" &&
           this.projection.settings.values.decisions.reviewDelegatedTools && request.call.name !== "ask_user") {
           run.approval = { ...approval, requestId: request.requestId };
           this.commit([this.event(session, "tool.requested", { approval }, request.stepId)]);
@@ -3337,7 +3378,7 @@ export class ControlPlane extends EventEmitter {
         }
         if (authorization.decision === "allow" && !hookRequiresHuman || ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config") {
           this.grantTool(run, request.call.id);
-          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
+          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(this.platform.sessions.projects.values(session.projectId)) } });
           return;
         }

@@ -7,6 +7,7 @@ import { ProjectArtifactChoiceSchema, type RetainedArtifact } from "./artifacts.
 import type { PlanBinding } from "./plan-saves.ts";
 import type { TerminalState } from "./terminals.ts";
 import { WorkflowGuidanceSchema } from "./preferences.ts";
+import { GithubSessionSourceSchema } from "./github-workflows.ts";
 export * from "./terminals.ts";
 export type { RetainedArtifact } from "./artifacts.ts";
 
@@ -65,6 +66,7 @@ export const SessionChangesSchema = object({
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), pinned: Type.Optional(Type.Boolean()), unread: Type.Optional(Type.Boolean()),
   order: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
   groupId: Type.Optional(nullableId), parentSessionId: Type.Optional(nullableId), prUrl: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()])),
+  workItemUrl: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()])),
 });
 export type SessionChanges = Static<typeof SessionChangesSchema>;
 export const SessionWorkspaceCommandSchema = Type.Union([
@@ -74,7 +76,8 @@ export const SessionWorkspaceCommandSchema = Type.Union([
     sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.mode"), sessionId: id, expectedRevision: revision, mode: SessionModeSchema }),
   object({ type: Type.Literal("session.spawn"), sessionId: id, kind: Type.Union([Type.Literal("agent"), Type.Literal("side")]), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })) }),
-  object({ type: Type.Literal("session.from-work"), projectId: id, workspaceId: Type.Optional(id), issueId: Type.Optional(id), prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })) }),
+  object({ type: Type.Literal("session.from-work"), projectId: id, workspaceId: Type.Optional(id), issueId: Type.Optional(id),
+    prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })), github: Type.Optional(GithubSessionSourceSchema) }),
   object({ type: Type.Literal("session.delete"), sessionId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("queue.release"), sessionId: id, messageId: id, expectedRevision: revision }),
   object({ type: Type.Literal("project.organize"), projectId: id, expectedRevision: revision, folderId: nullableId, color: Type.String({ pattern: "^#[a-fA-F0-9]{6}$" }), order: Type.Integer({ minimum: 0 }) }),

@@ -3,6 +3,13 @@
 This is an executable, user-reviewed workflow surface, not model-owned Git
 permission and not the completion of the wider first-release roadmap.
 
+Protocol 59 adds [repository and session entry points](session-github-workflows.md):
+explicit controller-account repository discovery, project-specific PR/issue
+pickers, complete detail views, reviewed creation and source-bound idle session
+starts. These reuse the write lifecycle below rather than another GitHub
+client. Project-free catalogue reads claim no project filesystem authority;
+Copilot login and private updater credentials stay separate.
+
 ## Reuse and qualification
 
 - Node.js 26 standard-library process, crypto, filesystem and timer primitives
@@ -23,7 +30,7 @@ real issues, reviews, releases or merges.
 
 ## Authority and containment
 
-Every request selects `{ env: "Local", projectId, workspaceId?, sessionId? }`.
+Every project operation selects `{ env: "Local", projectId, workspaceId?, sessionId? }`.
 The service resolves the exact managed root through `WorkflowHost.project`
 and `assertRoot`, including canonical path/device/inode. Missing workspaces
 never fall back to the base project. A supplied session must still own that

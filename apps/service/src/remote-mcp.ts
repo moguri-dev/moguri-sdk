@@ -8,6 +8,7 @@ import { remoteFingerprint } from "./remote.ts";
 export interface RemoteMcpScope {
   profileId: string; sessionId: string; projectId: string; root: string; target: RemoteTarget; workerDigest: string;
   settingsRevision: number; permissionRevision: number; policyRevision: number; projectRevision: number;
+  settingsDigest?: string;
   mode: "agent" | "read-only"; pendingMode: "agent" | "read-only" | null;
 }
 const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" }), revision = Type.Integer({ minimum: 0 });
@@ -16,7 +17,7 @@ export const RemoteMcpIntentSchema = Type.Object({
   format: Type.Literal("moguri-remote-mcp-intent"), version: Type.Literal(1),
   scope: Type.Object({
     profileId: id, sessionId: id, projectId: id, root: Type.String({ minLength: 1, maxLength: 4096 }), target: RemoteTargetSchema, workerDigest: hash,
-    settingsRevision: revision, permissionRevision: revision, policyRevision: revision, projectRevision: revision, mode, pendingMode: Type.Union([mode, Type.Null()]),
+    settingsRevision: revision, permissionRevision: revision, policyRevision: revision, projectRevision: revision, settingsDigest: Type.Optional(hash), mode, pendingMode: Type.Union([mode, Type.Null()]),
   }, { additionalProperties: false }),
   call: ToolCallSchema, server: Type.Union([McpServerSchema, Type.Null()]), helperDigest: hash, schemaDigest: hash, requiresAccess: Type.Boolean(),
 }, { additionalProperties: false });
@@ -39,9 +40,11 @@ export function mcpResource(server: McpServerConfig | null) {
 export function remoteMcpPreview(scope: RemoteMcpScope, server: McpServerConfig | null, helperDigest: string): RemoteMcpPreview {
   const resource = mcpResource(server), peerDigest = remoteMcpPeer(scope.target), resourceDigest = resource.digest;
   const grant = scope.target.mcpGrants?.find((grant) => grant.serverId === resource.id && grant.peerDigest === peerDigest && grant.resourceDigest === resourceDigest);
+  // An additive remembered approval changes settings CAS, not existing resource authority.
+  const boundScope = scope.settingsDigest ? { ...scope, settingsRevision: 0 } : scope;
   return {
     sessionId: scope.sessionId, projectId: scope.projectId, root: scope.root, peerDigest, resourceDigest,
-    digest: frameDigest(["moguri-remote-mcp-scope-v1", scope, resourceDigest, helperDigest]),
+    digest: frameDigest(["moguri-remote-mcp-scope-v1", boundScope, resourceDigest, helperDigest]),
     settingsRevision: scope.settingsRevision, permissionRevision: scope.permissionRevision, policyRevision: scope.policyRevision, projectRevision: scope.projectRevision,
     host: { name: scope.target.name, host: scope.target.host, port: scope.target.port, user: scope.target.user, fingerprint: remoteFingerprint(scope.target) },
     server: { id: resource.id, name: resource.name, transport: resource.transport, resource: resource.resource, auth: resource.auth },

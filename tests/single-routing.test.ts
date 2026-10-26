@@ -261,6 +261,22 @@ test("the selected solver uses the existing exact-argument human approval path r
   } finally { await fixture.close(); }
 });
 
+test("remembering an actual routed solver approval does not revoke its unchanged model policy or interrupt later solver steps", native, async () => {
+  const fixture = await routedFixture();
+  try {
+    await fixture.select(); await fixture.send("generated tool through the routed solver with a remembered grant");
+    const approval = await waitFor(() => fixture.session().pendingApproval);
+    await fixture.sdk.approvals.respond(fixture.sessionId, approval.id, true, { scope: "project", match: "exact" });
+    await fixture.terminal(); await fixture.sdk.refresh();
+    assert.equal(fixture.session().status, "completed", fixture.session().lastError ?? "The original solver route must retain its unchanged authority.");
+    assert.equal(fixture.solver.requests.length, 2);
+    assert.equal(fixture.sdk.approvals.list().length, 1);
+    await fixture.send("generated tool through the routed solver again");
+    assert.equal((await fixture.terminal()).status, "completed");
+    assert.equal(fixture.solver.requests.length, 4);
+  } finally { await fixture.close(); }
+});
+
 test("Guided questions in a routed solver retain the actual solver model, never the synthetic label or router", native, async () => {
   const fixture = await routedFixture();
   try {

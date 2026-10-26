@@ -158,6 +158,39 @@ export const GithubCommandSchema = Type.Union([
 ]);
 export type GithubCommand = Static<typeof GithubCommandSchema>;
 const page = { page: Type.Integer({ minimum: 1, maximum: 100 }), perPage: Type.Integer({ minimum: 1, maximum: 100 }) };
+export const GithubRepositorySchema = object({
+  id: number, fullName: repository, description: Type.String({ maxLength: 4096 }),
+  url: Type.String({ maxLength: 2048 }), sshUrl: Type.String({ maxLength: 2048 }), cloneUrl: Type.String({ maxLength: 2048 }),
+  visibility: Type.Union([Type.Literal("public"), Type.Literal("private"), Type.Literal("internal")]),
+  defaultBranch: ref, relationship: Type.Union([Type.Literal("owner"), Type.Literal("organization"), Type.Literal("accessible"), Type.Literal("public")]),
+  licenseId: Type.Union([Type.String({ maxLength: 100 }), Type.Null()]), openSource: Type.Union([Type.Boolean(), Type.Null()]),
+});
+export type GithubRepository = Static<typeof GithubRepositorySchema>;
+export const GithubWorkSourceSchema = object({
+  kind: Type.Union([Type.Literal("issue"), Type.Literal("pull")]), repository, account, number,
+  accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })),
+});
+export type GithubWorkSource = Static<typeof GithubWorkSourceSchema>;
+export const GithubSessionSourceSchema = object({ ...GithubWorkSourceSchema.properties, expectedDigest: hash });
+export type GithubSessionSource = Static<typeof GithubSessionSourceSchema>;
+export const GithubSourceBindingSchema = object({
+  env: Type.Literal("Local"), profileId: id, projectId: id, workspaceId: Type.Union([id, Type.Null()]),
+  root: GithubReviewDocumentSchema.properties.root, configurationRevision: count, policyRevision: count, permissionRevision: count,
+});
+export type GithubSourceBinding = Static<typeof GithubSourceBindingSchema>;
+export const GithubSessionOriginSchema = object({
+  version: Type.Literal(1), source: GithubWorkSourceSchema,
+  accountId: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" }), binding: GithubSourceBindingSchema, digest: hash,
+});
+export type GithubSessionOrigin = Static<typeof GithubSessionOriginSchema>;
+export function githubItemIdentity(input: string): { url: string; kind: "issue" | "pull"; repository: string; number: number } {
+  let url: URL;
+  try { url = new URL(input); } catch { throw new MoguriError("github_source", "Use a canonical GitHub issue or pull request URL."); }
+  const match = url.pathname.match(/^\/([A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100})\/(issues|pull)\/([1-9]\d*)\/?$/);
+  if (url.protocol !== "https:" || url.host !== "github.com" || url.username || url.password || url.search || url.hash || !match ||
+    !Number.isSafeInteger(Number(match[3])) || [".", ".."].includes(match[1]!.split("/")[1]!)) throw new MoguriError("github_source", "Use an exact credential-free github.com issue or pull request URL.");
+  return { url: `https://github.com/${match[1]}/${match[2]}/${match[3]}`, kind: match[2] === "pull" ? "pull" : "issue", repository: match[1]!, number: Number(match[3]) };
+}
 export const GithubBrowseSchema = Type.Union([
   object({ resource: Type.Union([Type.Literal("issues"), Type.Literal("pulls"), Type.Literal("releases")]), ...github, ...page }),
   object({ resource: Type.Union([Type.Literal("issue"), Type.Literal("pull"), Type.Literal("reviews"), Type.Literal("comments"), Type.Literal("review-comments"), Type.Literal("threads")]), ...github, number, ...page }),
@@ -168,6 +201,11 @@ export const GithubBrowseSchema = Type.Union([
 ]);
 export type GithubBrowse = Static<typeof GithubBrowseSchema>;
 export const GithubQuerySchema = Type.Union([
+  object({ type: Type.Literal("github.repositories"), source: Type.Union([Type.Literal("account"), Type.Literal("public")]),
+    query: Type.String({ maxLength: 200 }), account: Type.Optional(account),
+    accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })), ...page }),
+  object({ type: Type.Literal("github.project"), scope: GithubScopeSchema }),
+  object({ type: Type.Literal("github.source"), scope: GithubScopeSchema, source: GithubWorkSourceSchema }),
   object({ type: Type.Literal("github.preview"), scope: GithubScopeSchema, action: GithubActionSchema }),
   object({ type: Type.Literal("github.browse"), scope: GithubScopeSchema, input: GithubBrowseSchema }),
   object({ type: Type.Literal("github.read"), operationId: id }),
@@ -200,6 +238,11 @@ export const GithubOperationResultSchema = object({
 });
 export type GithubOperationResult = Static<typeof GithubOperationResultSchema>;
 export type GithubResponse =
+  | { type: "github.repositories"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string;
+      source: "account" | "public"; repositories: GithubRepository[]; page: number; nextPage: number | null; warning: string }
+  | { type: "github.project"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string;
+      repository: string; defaultBranch: string; branch: string; url: string; binding: GithubSourceBinding; warning: string }
+  | { type: "github.source"; source: GithubWorkSource; accountId: string; binding: GithubSourceBinding; item: GithubItem; digest: string; warning: string }
   | { type: "github.preview"; preview: GithubPreview }
   | { type: "github.browse"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string; repository: string; resource: GithubBrowse["resource"];
       page: number; perPage: number; nextPage: number | null; items: GithubItem[]; warning: string }

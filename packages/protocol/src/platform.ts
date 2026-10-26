@@ -11,6 +11,8 @@ import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
+import { RememberedApprovalSchema } from "./permissions.ts";
+export * from "./permissions.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
 import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "./tooling.ts";
@@ -121,6 +123,7 @@ export const SettingsSchema = object({
     defaultDecision: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("deny")])),
     tools: Type.Array(object({ id, tool: Type.String({ minLength: 1, maxLength: 80 }), decision, pathPrefix: Type.String({ maxLength: 4096 }) }), { maxItems: 100 }),
     commands: Type.Array(object({ id, command: Type.String({ minLength: 1, maxLength: 16384 }), decision }), { maxItems: 100 }),
+    remembered: Type.Optional(Type.Array(RememberedApprovalSchema, { maxItems: 500 })),
   }),
   memory: object({ enabled: Type.Boolean(), useInContext: Type.Boolean(), useTieredContext: Type.Optional(Type.Boolean()), maxFiles: Type.Integer({ minimum: 1, maximum: 5000 }) }),
   subagents: object({ enabled: Type.Boolean(), maxParallel: Type.Integer({ minimum: 1, maximum: 2 }) }),

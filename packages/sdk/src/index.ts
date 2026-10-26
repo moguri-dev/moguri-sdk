@@ -12,6 +12,7 @@ import { createCacheApi } from "./cache.ts";
 import { createGithubApi } from "./github.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
 import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
+import type { RememberApproval } from "../../protocol/src/permissions.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
@@ -36,6 +37,18 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly github = createGithubApi(this);
+  readonly approvals = {
+    respond: (sessionId: string, approvalId: string, allow: boolean, remember?: RememberApproval) =>
+      this.command({ type: "approval.respond", sessionId, approvalId, allow, ...(remember ? { remember } : {}) }),
+    list: () => this.getState().snapshot?.settings.values.permissions.remembered ?? [],
+    revoke: (id: string, expectedRevision = this.settings.get()?.revision) => {
+      const current = this.settings.get();
+      if (!current || expectedRevision === undefined) throw new ClientError("settings_missing", "Connect before changing remembered approvals.");
+      if (!current.values.permissions.remembered?.some((grant) => grant.id === id)) throw new ClientError("approval_missing", "This remembered approval is no longer present.");
+      return this.settings.update({ ...current.values, permissions: { ...current.values.permissions,
+        remembered: current.values.permissions.remembered.filter((grant) => grant.id !== id) } }, expectedRevision);
+    },
+  };
   readonly tools = {
     catalog: (sessionId: string, query = "", offset = 0) => this.query({ type: "tooling.catalog", sessionId, query, offset }),
     execute: (sessionId: string, name: string, args: Record<string, unknown>, schemaDigest: string) => this.command({ type: "tooling.execute", sessionId, name, arguments: args, schemaDigest }),
@@ -99,6 +112,12 @@ export class MoguriSdk extends TransportClient {
         controls.modelOptions?.thinkingEffort !== current.modelOptions?.thinkingEffort));
       return this.command({ type: "session.configure", sessionId, controls, expectedRevision,
         ...((rememberModelSelection ?? changed) ? { rememberModelSelection: true } : {}) });
+    },
+    autonomy: (sessionId: string, autonomy: Controls["autonomy"], expectedRevision = this.sessionRevision(sessionId)) => {
+      const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
+      if (!session) throw new ClientError("session_missing", "Choose an existing session before changing autonomy.");
+      return this.sessions.configure(sessionId, { ...session.controls, autonomy,
+        automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max" }, expectedRevision);
     },
     selectModel: (sessionId: string, modelId: string | null, expectedRevision = this.sessionRevision(sessionId)) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);

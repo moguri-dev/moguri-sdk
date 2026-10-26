@@ -6,7 +6,7 @@ import { isRecord } from "../packages/sdk/src/index.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { generatedAdvice } from "./fixtures/decisions-api.ts";
 
-test("fixed-model Max uses a separately configured bounded System One-compatible role only inside existing exact user delegation, retaining real actor and all-role charges", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("legacy bounded Max preserves its separately configured delegated tool review and original all-role charges", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
   const f = await setupDecisions(), { sdk, advice } = f;
   try {
     await f.send("generated tool with explicitly delegated bounded decision review"); await f.terminal(); await sdk.refresh();
@@ -21,6 +21,18 @@ test("fixed-model Max uses a separately configured bounded System One-compatible
     assert.equal((await sdk.budgets.status(f.sessionId)).status.totals.reportedTokens, 126);
     assert.equal(JSON.stringify(f.requests[1]?.messages).includes('"confidence"'), false);
   } finally { await f.close(); }
+});
+
+test("new Max automatically approves an undelegated tool without introducing a legacy decision-provider permission gate", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+  const fixture = await setupDecisions({ delegated: false });
+  try {
+    await fixture.sdk.sessions.autonomy(fixture.sessionId, "Autopilot Max");
+    await fixture.send("generated tool with automatic Max approval"); await fixture.terminal();
+    assert.equal(fixture.session().status, "completed"); assert.equal(fixture.session().pendingApproval, null);
+    assert.equal(fixture.advice.requests.length, 0);
+    assert.ok(fixture.service.controller.events(0).some((event) => event.event_type === "tool.decided" && event.payload.actor === "autonomy"));
+    assert.deepEqual(fixture.sdk.settings.get()!.values.permissions.tools, []);
+  } finally { await fixture.close(); }
 });
 
 test("active decision input/results cannot be edited, archived or deleted; only the actual one-shot owner can stop them", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
@@ -50,6 +62,7 @@ test("only exact user-delegated technical choices can be answered automatically,
       choices: ["Generated first choice", "Generated second choice"] });
     settings.artifacts.retainAnswers = true;
     await f.sdk.settings.update(settings, f.sdk.settings.get()!.revision);
+    await f.sdk.sessions.autonomy(f.sessionId, "Autopilot Max");
     await f.send("generated structured question choices only");
     await waitFor(() => f.service.controller.snapshot().decisions.some((record) => record.kind === "question"), 2500);
     await f.terminal(); await f.sdk.refresh();

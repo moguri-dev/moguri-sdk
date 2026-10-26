@@ -8,6 +8,7 @@ export * from "./model.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
+import { RememberApprovalSchema } from "./permissions.ts";
 import { defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
@@ -40,7 +41,7 @@ import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger
 import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
 import { DecisionRecordSchema, DecisionEvidenceSchema, projectDecision, validateDecisionLedger, type DecisionRecord, type DecisionEvidence } from "./decisions.ts";
 import { projectKnowledge, type KnowledgeEventPayloads, type KnowledgeRecord } from "./knowledge.ts";
-import { projectGithubOperation, type GithubEventPayloads, type GithubOperation } from "./github-workflows.ts";
+import { GithubSessionOriginSchema, projectGithubOperation, type GithubEventPayloads, type GithubOperation, type GithubSessionOrigin } from "./github-workflows.ts";
 import { projectLinearOperation, type LinearEventPayloads, type LinearOperation } from "./linear-workflows.ts";
 import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts";
 import type { TaskPlan, TaskProgressReport } from "./progress.ts";
@@ -53,7 +54,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 58;
+export const PROTOCOL_VERSION = 59;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -83,7 +84,7 @@ export const CommandSchema = object({
     object({ type: Type.Literal("queue.make-turn"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.reorder"), ...sessionId, messageIds: Type.Array(id, { maxItems: 100 }), expectedRevision: revision }),
     object({ type: Type.Literal("session.stop"), ...sessionId }),
-    object({ type: Type.Literal("approval.respond"), ...sessionId, approvalId: id, allow: Type.Boolean() }),
+    object({ type: Type.Literal("approval.respond"), ...sessionId, approvalId: id, allow: Type.Boolean(), remember: Type.Optional(RememberApprovalSchema) }),
     object({ type: Type.Literal("provider.login") }),
     object({ type: Type.Literal("provider.cancel") }),
     object({ type: Type.Literal("provider.logout") }),
@@ -198,6 +199,8 @@ export interface Session {
   prUrl: string | null;
   prObservation?: SessionPrObservation | null;
   workItemId: string | null;
+  workItemUrl?: string | null;
+  githubSource?: GithubSessionOrigin;
   browserUrl: string | null;
   suggestionSources?: SuggestionSource[];
   inheritedImages?: boolean;
@@ -240,7 +243,7 @@ export interface Connection {
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
+  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; workItemUrl?: string | null; githubSource?: GithubSessionOrigin; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "coordination.linked": { link: CoordinationLink };
   "coordination.message": { message: CoordinationMessage };
   "coordination.delivered": { messageId: string; turnId: string; stepId: string };
@@ -295,7 +298,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "execution.changed": { executionId: string; status: RemoteExecution["status"]; cancellation: RemoteExecution["cancellation"]; cleanup: RemoteExecution["cleanup"]; diagnostic: string | null; workerPid?: number };
   "execution.frame_recorded": { executionId: string; sequence: number; digest: string };
   "tool.requested": { approval: Approval };
-  "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" | "delegation" | "decision-provider"; ruleId?: string; decisionId?: string; decisionOrigin?: DecisionEvidence };
+  "tool.decided": { approvalId: string; allow: boolean; actor: "user" | "policy" | "delegation" | "autonomy" | "decision-provider"; ruleId?: string; decisionId?: string; decisionOrigin?: DecisionEvidence };
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
@@ -979,6 +982,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "session.created") {
       if (!event.session_id) throw new Error("Invalid session.created event scope.");
+      const origin = event.payload.githubSource;
+      if (origin) {
+        if (!Value.Check(GithubSessionOriginSchema, origin) || !event.project_id ||
+          origin.binding.profileId !== (event.profile_id ?? PROFILE_ID) || origin.binding.projectId !== event.project_id ||
+          origin.binding.workspaceId !== (event.payload.workspaceId ?? null) ||
+          !origin.accountId.startsWith(`${origin.source.account.toLowerCase()}:`) || origin.source.accountId !== undefined && origin.source.accountId !== origin.accountId ||
+          (origin.source.kind === "pull" ? event.payload.prUrl : event.payload.workItemUrl) !==
+          `https://github.com/${origin.source.repository}/${origin.source.kind === "pull" ? "pull" : "issues"}/${origin.source.number}`) {
+          throw new MoguriError("github_source_corrupt", "The session's reviewed GitHub source lost its original account, repository or item binding.", 409);
+        }
+      }
       sessions.set(event.session_id, {
         id: event.session_id, projectId: event.project_id ?? null, workspaceId: event.payload.workspaceId ?? null, sandboxWorkspaceId: null, title: event.payload.title,
         controls: structuredClone(event.payload.controls), defaults: event.payload.defaults ? structuredClone(event.payload.defaults) : undefined, revision: 0, status: "idle", draft: { revision: 0, text: "", attachments: [] },
@@ -987,7 +1001,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         parentSessionId: event.payload.parentSessionId, createdParentSessionId: event.payload.parentSessionId, coordinationParentId: event.payload.coordinationParentId, parentSnapshotDigest: event.payload.parentSnapshotDigest, readOnly: event.payload.readOnly,
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
         kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, order: nextSessionOrder++, unread: false, groupId: null, archivedAt: null,
-        prUrl: event.payload.prUrl ?? null, prObservation: null, workItemId: event.payload.workItemId ?? null, browserUrl: null,
+        prUrl: event.payload.prUrl ?? null, prObservation: null, workItemId: event.payload.workItemId ?? null, workItemUrl: event.payload.workItemUrl ?? null,
+        ...(origin ? { githubSource: structuredClone(origin) } : {}), browserUrl: null,
         suggestionSources: event.payload.suggestionSources,
         inheritedImages: event.payload.inheritedImages,
         activeCompactionId: null,
@@ -1053,7 +1068,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         if (changes.unread !== undefined) session.unread = changes.unread;
         if (changes.groupId !== undefined) session.groupId = changes.groupId;
         if (changes.parentSessionId !== undefined) session.parentSessionId = changes.parentSessionId ?? undefined;
-        if (changes.prUrl !== undefined) { if (changes.prUrl !== session.prUrl) session.prObservation = null; session.prUrl = changes.prUrl; }
+        if (changes.prUrl !== undefined) {
+          if (changes.prUrl !== session.prUrl) { session.prObservation = null; if (session.githubSource?.source.kind === "pull") delete session.githubSource; }
+          session.prUrl = changes.prUrl;
+        }
+        if (changes.workItemUrl !== undefined) {
+          if (changes.workItemUrl !== session.workItemUrl && session.githubSource?.source.kind === "issue") delete session.githubSource;
+          session.workItemUrl = changes.workItemUrl;
+        }
         session.revision++; break;
       }
       case "task.plan_updated": {
@@ -1164,6 +1186,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       case "tool.requested": session.pendingApproval = event.payload.approval; session.status = "waiting_input"; break;
       case "tool.decided":
+        if (event.payload.actor === "autonomy" && (!event.payload.allow || !session.controls.automaticApprovals ||
+          !["Autopilot", "Autopilot Max"].includes(session.controls.autonomy) || event.payload.ruleId !== `autonomy:${session.id}`)) {
+          throw new MoguriError("approval_corrupt", "Automatic tool approval lost its actual user-selected session delegation.", 409);
+        }
         if (event.payload.actor === "decision-provider") {
           const origin = event.payload.decisionOrigin, record = decisions.get(event.payload.decisionId ?? ""), entry = budgetEntries.get(origin?.stepId ?? "");
           if (!Value.Check(DecisionEvidenceSchema, origin) || origin.decisionId !== event.payload.decisionId ||
