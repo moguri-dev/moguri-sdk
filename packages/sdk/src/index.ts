@@ -234,6 +234,8 @@ export class MoguriSdk extends TransportClient {
   };
   readonly routing = {
     policy: () => this.settings.get()?.values.kupo ?? null,
+    capabilities: (env?: Controls["env"]) => structuredClone((this.getState().snapshot?.routingCapabilities ?? [])
+      .filter((profile) => env === undefined || profile.environments.some((value) => value === env))),
     configure: (policy: KupoSettings, expectedSettingsRevision: number) => {
       const settings = this.settings.get();
       if (!settings) throw new ClientError("disconnected", "Connect to the actual profile before configuring routing.");

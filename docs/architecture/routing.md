@@ -1,5 +1,10 @@
 # Experimental kupo Single
 
+This is the retained explicit Single policy, not the current factory default.
+[Automatic Kupo](automatic-kupo.md) is always listed and uses configured models
+by default. Existing saved Single policies keep this explicit contract;
+restoring Kupo defaults now switches to Automatic without starting inference.
+
 This checkpoint adds opt-in **Single** routing to the existing owned agent loop.
 It is not qualification of the complete D11 router, calibrated model quality,
 cascade, independent critique/revision, candidate application, finite-budget

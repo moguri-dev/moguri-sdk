@@ -36,6 +36,7 @@ async function run(start: WorkerStart): Promise<void> {
   const context: Message[] = start.context;
   const loadedTools = new Set<string>();
   const instructionSources = new Set<string>();
+  let kupoDraft: { stepId: string; message: ReturnType<typeof assistantMessage> } | undefined;
   debuggerRuntime = start.readOnly ? undefined : new OwnedDebugRuntime();
   let incompleteCleanup = false, mcpDispatched = false;
   const lifecycle = async (trigger: "turn.start" | "turn.end") => {
@@ -111,11 +112,12 @@ async function run(start: WorkerStart): Promise<void> {
     models.setProvider(localProvider());
     for (let index = 0; index < 32; index++) {
       abort.signal.throwIfAborted();
-      const stepId = randomUUID();
+      let stepId: string = randomUUID();
       const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId, loadedTools: [...loadedTools] });
       if (reply.halt && reply.error) { await finish(abort.signal.aborted ? "stopped" : "partial", reply.error); return; }
       if (reply.error || !reply.value || !("model" in reply.value)) throw new Error(reply.error ?? "Missing model authorization.");
       const boundary: BoundaryReply = reply.value;
+      if (boundary.phase?.startsWith("kupo-") && start.automaticKupo !== true) throw new Error("This worker does not own automatic Kupo response review. No model call or tool request was dispatched.");
       const secrets = [...new Set([
         ...(boundary.auth.apiKey && boundary.auth.headers?.Authorization !== null ? [boundary.auth.apiKey] : []),
         ...Object.entries(boundary.auth.headers ?? {}).filter(([name, value]) => value && /authorization|api[-_]?key|auth[-_]?token/i.test(name)).flatMap(([, value]) => value ? [value, value.replace(/^Bearer\s+/i, "")] : []),
@@ -132,7 +134,7 @@ async function run(start: WorkerStart): Promise<void> {
       try {
         const stream = models.streamSimple(model, {
           systemPrompt: boundary.systemPrompt,
-          messages: boundary.context ?? context, tools: start.readOnly || boundary.phase === "router" || boundary.phase === "compaction" || boundary.phase === "candidate" || boundary.phase === "checkpoint" ? [] : boundary.tools,
+          messages: boundary.context ?? context, tools: start.readOnly || boundary.phase === "router" || boundary.phase === "kupo-gate" || boundary.phase === "kupo-critic" || boundary.phase === "compaction" || boundary.phase === "candidate" || boundary.phase === "checkpoint" ? [] : boundary.tools,
         }, {
           apiKey: boundary.auth.apiKey, headers: boundary.auth.headers, signal: abort.signal,
           maxTokens: boundary.maxTokens, maxRetries: 0, timeoutMs: 120_000,
@@ -150,7 +152,8 @@ async function run(start: WorkerStart): Promise<void> {
         }
         flush();
         const tail = redactor.finish(); if (tail) send({ kind: "delta", stepId, text: tail });
-        const message = assistantMessage(redactSecrets(await stream.result(), secrets));
+        let message = assistantMessage(redactSecrets(await stream.result(), secrets));
+        if (boundary.phase === "kupo-draft") kupoDraft = { stepId, message };
         let accepted = await request({
           kind: "model.complete", requestId: randomUUID(), stepId, message,
           usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started, stream: metrics.snapshot(),
@@ -158,6 +161,12 @@ async function run(start: WorkerStart): Promise<void> {
         if (accepted.halt && accepted.error) { await finish(abort.signal.aborted ? "stopped" : "partial", accepted.error); return; }
         if (accepted.error) throw new Error(accepted.error);
         if (!accepted.value || !("accepted" in accepted.value) || accepted.value.accepted !== true) throw new Error("Model completion was not durably acknowledged. No success or next role was inferred.");
+        if (boundary.phase?.startsWith("kupo-") && (!usageReported || !["stop", "toolUse"].includes(message.stopReason) ||
+          !Number.isSafeInteger(message.usage.totalTokens) || !Number.isSafeInteger(message.usage.output) ||
+          message.usage.output < 0 || message.usage.output > message.usage.totalTokens || message.usage.output > boundary.maxTokens ||
+          (boundary.phase === "kupo-gate" || boundary.phase === "kupo-critic") && (message.stopReason !== "stop" || toolCalls(message).length))) {
+          throw new Error("Automatic Kupo continuation requires a complete metered response and tool-less review inside the actual output bound.");
+        }
         if ("validation" in accepted.value && accepted.value.validation) {
           if (start.publicCompound !== true || start.readOnly !== true || start.root !== null || boundary.phase !== "candidate" ||
             message.stopReason !== "stop" || toolCalls(message).length || !usageReported ||
@@ -176,7 +185,7 @@ async function run(start: WorkerStart): Promise<void> {
         }
         if ("continue" in accepted.value && accepted.value.continue === true) {
           abort.signal.throwIfAborted();
-          if (boundary.phase !== "router" && boundary.phase !== "candidate") throw new Error("Only an owned router or tool-less candidate stage may request a continuation.");
+          if (boundary.phase !== "router" && boundary.phase !== "candidate" && !boundary.phase?.startsWith("kupo-")) throw new Error("Only an owned router, reviewed Kupo response or tool-less candidate stage may request a continuation.");
           if (boundary.phase === "candidate") {
             if (start.readOnly !== true || start.root !== null || message.stopReason !== "stop" || toolCalls(message).length) throw new Error("Candidate continuation requires a root-less read-only owner and a complete tool-less result. No next role was authorized.");
             if (!usageReported || !Number.isSafeInteger(boundary.maxTokens) || boundary.maxTokens < 1 || boundary.maxTokens > model.maxTokens ||
@@ -185,6 +194,15 @@ async function run(start: WorkerStart): Promise<void> {
           }
           continue;
         }
+        if (boundary.phase?.startsWith("kupo-")) {
+          if (!("selectedResponse" in accepted.value) || !accepted.value.selectedResponse) throw new Error("No original Kupo response was selected. Unselected tool requests cannot execute.");
+          const selected = accepted.value.selectedResponse, original = boundary.phase === "kupo-gate" || boundary.phase === "kupo-critic" ? kupoDraft : { stepId, message };
+          const exact = (message: ReturnType<typeof assistantMessage>) => JSON.stringify({ api: message.api, provider: message.provider, model: message.model,
+            content: message.content, stopReason: message.stopReason, timestamp: message.timestamp, usage: message.usage });
+          const selectedMessage = assistantMessage(selected.message);
+          if (!original || selected.stepId !== original.stepId || exact(selectedMessage) !== exact(original.message)) throw new Error("Kupo selection changed the original response identity or bytes. No tools were executed.");
+          stepId = selected.stepId; message = selectedMessage; kupoDraft = undefined;
+        } else if ("selectedResponse" in accepted.value) throw new Error("Only automatic Kupo may select an original reviewed response.");
         context.push(message);
         abort.signal.throwIfAborted();
         if (message.stopReason === "aborted") throw new Error("Model request cancelled.");
@@ -200,7 +218,7 @@ async function run(start: WorkerStart): Promise<void> {
         }
         if (start.readOnly && calls.length) throw new Error("The read-only subagent requested tools. No tools were executed.");
         if (calls.length === 0) {
-          if (boundary.phase === "solver" || boundary.phase === undefined) await lifecycle("turn.end");
+          if (boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) await lifecycle("turn.end");
           await finish("completed", null);
           return;
         }

@@ -837,14 +837,14 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `agentTerminals` | Original agent `run_command` requests/results and bounded UTF-8 output/tails. No private User/Global console access, stdin, new execution or implicit persistent shell. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
 | `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
-| `routing` | Opt-in scoped Single or declared Compound policy/configure with an observed settings revision. Ordinary Single history remains separate from retained public compound reports. Finite Local turns need explicit qualified reserved wind-down; images and synthetic-model tuning remain blocked. |
+| `routing` | Automatic configured-model policy, service-owned `capabilities(env?)`, exact policy/configure CAS and ordinary routing/selected-response history. Explicit Single and reviewed worktree Compound policies remain available. Finite automatic budgets, images and synthetic tuning stay blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
-| `models` | Explicit Copilot/local catalog refresh, informational `evidence(modelId)`, eligible synthetic Single/Compound availability and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download, automatic evidence read or model substitution. |
+| `models` | Explicit Copilot/local catalog refresh, informational `evidence(modelId)`, always-visible Kupo with authoritative eligible environments, and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download, automatic evidence read or model substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
 
@@ -969,9 +969,42 @@ evidence event, automatic cache, pool widening, compound mode or Max.
 Ordinary Copilot login/discovery/inference is unchanged. See
 [the exact source/digest and qualification contract](architecture/model-evidence.md).
 
-### Opt-in Single routing
+### Automatic Kupo
 
-`sdk.routing.policy()` starts disabled. Configure exact discovered model IDs
+`sdk.routing.policy()` defaults to `workflow: "auto"`, enabled, with no explicit
+classifier and an empty approved-ID list meaning all eligible configured models.
+Selecting `KUPO_MODEL_ID` is still an explicit session action; saving/resetting
+policy never starts inference or grants tool permissions. Existing explicit
+Single/Compound policies survive upgrade.
+
+`sdk.routing.capabilities(env?)` returns the service-owned declared capability
+inventory without inference or extra provider inspection. General, reasoning,
+tools, vision and long-context categories describe declared support, not
+calibrated quality or billing; absent tool support is `null`. An optional env
+filter does not change the service's dispatch authority.
+
+The shared catalogue always includes **Kupo**, even with no eligible environment.
+Zero eligible models blocks admission. One uses that model directly with no
+classifier step; its retained plan has `basis: "only-model"` and null confidence.
+With multiple models the bounded router selects an exact Single, Cascade or
+eligible Critique binding based on the task and inventory. Critique needs a
+current exact-model reviewed lineage claim; provider names cannot create it.
+
+Each response proposal and read-only review is recorded with actual role/model
+usage. `routing.response_selected` points to the exact original result before
+the normal worker may process its tools. Rejected responses never become
+ordinary context or artifact sources. Selected responses preserve their actual
+model actor in conversation, activity and artifact promotion, including after
+restart. Manual approvals remain separate. Unknown usage, stale state, output
+limits, failed receipts and cancellation halt continuation without paid replay.
+
+Finite automatic budgets, images, synthetic tuning and Sandbox remain blocked.
+See [the automatic response contract](architecture/automatic-kupo.md).
+
+### Explicit Single routing
+
+Use `defaultSingleKupoSettings()` to construct a disabled explicit Single policy.
+Configure exact discovered model IDs
 with `sdk.routing.configure(policy, observedSettingsRevision)`; the policy has
 `workflow: "single"`, an actual `classifierModelId`, explicit
 `approvedModelIds`, separate `allowHosted` data consent and a
@@ -992,11 +1025,11 @@ The session stays labeled `kupo`; `snapshot.routings`, `session.usage` and
 Classifier output never enters solver context. Invalid, stale, unreported or
 over-limit classifier results pause without fallback or another paid attempt.
 
-This alpha uses the same Local/pinned-SSH worker and exact approvals, with an
-Unlimited preference only when no finite owning-session/profile/global cap
-applies. Images, per-model tuning, compound workflows and reserved wind-down
-remain unavailable. Restoring `settings.reset("kupo", revision)` disables
-future routing without deleting retained accounting or provenance. See the
+This policy uses the same Local/pinned-SSH worker and exact approvals. Finite
+Local admission needs its separately qualified reserved wind-down policy;
+images and per-model tuning remain unavailable. Restoring
+`settings.reset("kupo", revision)` returns to automatic routing without
+deleting retained accounting or provenance or starting inference. See the
 [durable routing contract](architecture/routing.md).
 
 In Guided mode `ask_user` may include a bounded offered-choice recommendation.

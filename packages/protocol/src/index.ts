@@ -22,7 +22,7 @@ import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./question
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import { BudgetPlanSchema, projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
-import type { RoutingTurn, SingleRoutingPlan } from "./routing.ts";
+import type { RoutingTurn, RoutingPlan, KupoResponsePhase, KupoObservation } from "./routing.ts";
 import type { ContextCompaction } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
@@ -53,7 +53,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 60;
+export const PROTOCOL_VERSION = 61;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -284,12 +284,13 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string };
   "steer.applied": { item: QueueItem };
   "steering.applied": { decisionId: string; modelId: string; providerId: string; sourceStepId: string; text: string; decisionOrigin: DecisionEvidence };
-  "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole };
+  "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole; kupoPhase?: KupoResponsePhase };
   "routing.started": { routing: RoutingTurn };
-  "routing.planned": { routingId: string; classifierStepId: string; plan: SingleRoutingPlan };
+  "routing.planned": { routingId: string; classifierStepId: string | null; plan: RoutingPlan };
   "routing.finished": { routingId: string; status: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
+  "routing.response_selected": { routingId: string; sourceStepId: string; reviewStepId: string; contextDigest: string };
   "assistant.delta": { text: string };
-  "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage; candidateGenerationId?: string };
+  "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage; candidateGenerationId?: string; kupo?: KupoObservation };
   "model.late_usage": { usage: Usage; executionId: string; sequence: number };
   "execution.started": { execution: RemoteExecution };
   "execution.changed": { executionId: string; status: RemoteExecution["status"]; cancellation: RemoteExecution["cancellation"]; cleanup: RemoteExecution["cleanup"]; diagnostic: string | null; workerPid?: number };
@@ -404,7 +405,7 @@ export const eventTypes: readonly EventType[] = [
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
   "budget.recorded", "budget.plan_recorded", "budget.policy_changed", "budget.blocked", "operation.recorded", "operation.coverage_started",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
-  "routing.started", "routing.planned", "routing.finished",
+  "routing.started", "routing.planned", "routing.finished", "routing.response_selected",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
   "candidate.saved", "candidate.generation_recorded", "candidate.owner_bound", "candidate.cleanup_recorded", "candidate.usage_retained", "role.sequence_recorded", "compound.recorded", "winddown.recorded", "decision.recorded",
   "knowledge.saved", "knowledge.forgotten",
@@ -444,6 +445,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const candidates = new Map<string, CandidateRecord>();
   const questions = new Map<string, UserQuestion>();
   const routings = new Map<string, RoutingTurn>();
+  const kupoResults = new Map<string, Extract<StoredEvent, { event_type: "model.completed" }>>();
   const compactions = new Map<string, ContextCompaction>();
   const planSaves = new Map<string, RemotePlanSave>();
   const budgetEntries = new Map<string, BudgetEntry>();
@@ -611,6 +613,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const routing = routings.get(event.payload.routingId);
       if (routing) Object.assign(routing, { status: event.payload.status, diagnostic: event.payload.diagnostic });
     }
+    if (event.event_type === "model.completed" && event.payload.kupo) kupoResults.set(event.payload.usage.stepId, event);
     if (event.event_type === "session.deleted") {
       sessions.delete(event.payload.deletedSessionId);
       blockedSessions.delete(event.payload.deletedSessionId);
@@ -1132,8 +1135,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       case "model.started":
         for (const routing of routings.values()) if (routing.turnId === event.turn_id && routing.status === "ready" && event.payload.role !== "router") routing.status = "running";
-        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: roleSequenceTurns.has(event.turn_id ?? "") || ["router", "compaction", "draft", "checkpoint", "decision", "steering"].includes(event.payload.role ?? "") ? "notice" : "assistant",
-          text: roleSequenceTurns.has(event.turn_id ?? "") ? "An owned role is producing untrusted data, not a user answer or approval." : event.payload.role === "router" ? "kupo is evaluating the explicitly approved solver pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : event.payload.role === "checkpoint" ? "Reserved metadata-only budget checkpoint; no source or Git approval." : ["decision", "steering"].includes(event.payload.role ?? "") ? "Bounded decision-provider advice inside explicit policy. Human intervention and deterministic authority win." : "", timestamp: event.timestamp });
+        session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: event.payload.kupoPhase || roleSequenceTurns.has(event.turn_id ?? "") || ["router", "compaction", "draft", "checkpoint", "decision", "steering"].includes(event.payload.role ?? "") ? "notice" : "assistant",
+          text: event.payload.kupoPhase ? `Kupo ${event.payload.kupoPhase}: proposed tool requests remain unexecuted until response selection and normal permissions.` : roleSequenceTurns.has(event.turn_id ?? "") ? "An owned role is producing untrusted data, not a user answer or approval." : event.payload.role === "router" ? "Kupo is evaluating the eligible model pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : event.payload.role === "checkpoint" ? "Reserved metadata-only budget checkpoint; no source or Git approval." : ["decision", "steering"].includes(event.payload.role ?? "") ? "Bounded decision-provider advice inside explicit policy. Human intervention and deterministic authority win." : "", timestamp: event.timestamp });
         session.usage.push({
           stepId: event.step_id ?? event.id, modelId: event.payload.modelId, role: event.payload.role ?? (session.kind === "side" ? "side" : session.kind === "subagent" ? "subagent" : "solver"),
           inputTokens: null, outputTokens: null, cacheReadTokens: null, totalTokens: null,
@@ -1155,6 +1158,31 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         else session.messages.push(message);
         const usageIndex = session.usage.findIndex((usage) => usage.stepId === event.payload.usage.stepId);
         if (usageIndex >= 0) session.usage[usageIndex] = event.payload.usage; else session.usage.push(event.payload.usage);
+        break;
+      }
+      case "routing.response_selected": {
+        const { routingId, sourceStepId, reviewStepId, contextDigest } = event.payload;
+        const routing = routings.get(routingId), source = kupoResults.get(sourceStepId), review = kupoResults.get(reviewStepId);
+        const response = source?.payload.kupo?.response, verdict = review?.payload.kupo, plan = routing?.plan;
+        const sourceModel = plan?.pattern === "cascade" && source?.payload.kupo?.phase === "escalation" ? plan.escalationId : plan?.modelId;
+        const reviewModel = plan?.pattern === "cascade" ? plan.escalationId : plan?.pattern === "critique" ? plan.criticId : null;
+        if (!routing || routing.policy.workflow !== "auto" || routing.status !== "running" || routing.turnId !== event.turn_id ||
+          routing.sessionId !== session.id || !response || response.id !== sourceStepId || response.role !== "assistant" ||
+          source?.session_id !== session.id || source.turn_id !== event.turn_id || source.step_id !== sourceStepId || source.payload.contextDigest !== contextDigest ||
+          source.payload.kupo?.routingId !== routingId || !review || review.session_id !== session.id || review.turn_id !== event.turn_id ||
+          verdict?.routingId !== routingId || routing.selectedStepIds?.includes(sourceStepId) ||
+          source.payload.usage.quality !== "provider-reported" || review.payload.usage.quality !== "provider-reported" ||
+          source.payload.usage.modelId !== sourceModel || review.payload.usage.modelId !== reviewModel || review.payload.usage.role !== "critic" ||
+          !(source.payload.kupo.phase === "draft" && verdict.responseStepId === sourceStepId && verdict.verdict === "pass" ||
+            source.payload.kupo.phase === "escalation" && plan?.pattern === "cascade" && verdict.phase === "gate" && verdict.verdict === "escalate" && verdict.responseStepId === source.payload.kupo.responseStepId ||
+            source.payload.kupo.phase === "revision" && plan?.pattern === "critique" && verdict.phase === "critic" && verdict.verdict === "revise" && verdict.responseStepId === source.payload.kupo.responseStepId)) {
+          throw new MoguriError("routing_corrupt", "A selected Kupo response lost its original metered model, review or owning turn. No response or tool authority was reconstructed.", 409);
+        }
+        routing.selectedStepIds = [...routing.selectedStepIds ?? [], sourceStepId];
+        const index = session.messages.findIndex((message) => message.id === sourceStepId);
+        if (index < 0) throw new MoguriError("routing_corrupt", "The selected original Kupo response is missing. State was preserved.", 409);
+        session.messages.splice(index, 1);
+        session.messages.push(structuredClone(response));
         break;
       }
       case "model.late_usage": {

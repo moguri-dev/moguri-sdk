@@ -64,7 +64,7 @@ test("schema-59 upgrade reattaches retained legacy consoles without creating or 
     const raw = new DatabaseSync(fixture.service.store.path);
     let retained: ReturnType<typeof retainedCiphertextRows>;
     try {
-      raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id='session_navigation_schema'; PRAGMA user_version=59; COMMIT;");
+      raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('automatic_kupo_schema','session_navigation_schema'); PRAGMA user_version=59; COMMIT;");
       retained = retainedCiphertextRows(raw);
     } finally { raw.close(); }
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey,

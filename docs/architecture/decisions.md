@@ -267,21 +267,34 @@ selected versions, signed history and separate setup approval.
 
 ## D11. kupo synthetic model and routing
 
-**Decision.** Users can select a fixed model or **kupo**. kupo is Moguri's own synthetic auto model: a classifier and versioned orchestration policy that choose among configured local and hosted models. It follows HydraFusion's public single, cascade, and independent critique/revision patterns, without assuming access to GitHub's internal implementation or a standalone HydraFusion API. [H1]
+**Decision.** Users can select a fixed model or **Kupo** (`kupo` in the SDK).
+Kupo is Moguri's synthetic model with a versioned automatic orchestration policy
+over configured local and hosted models. It follows HydraFusion's public
+single, cascade, and independent critique/revision patterns, without assuming
+access to GitHub's internal implementation or a standalone HydraFusion API. [H1]
 
 **Rules.**
 
 - Keep fixed-model selection available. kupo selection grants no extra autonomy, permissions, providers, or network access. Autonomy level, Env, and Budget remain separate.
-- Discover authenticated provider models and configured local endpoints before forming the pool, using metadata and health checks rather than paid inference or arbitrary network scans. Recheck accessibility from the selected env; Remote makes model calls on the SSH machine. An unset/unusable generative pool disables kupo, and decision-only Jev configuration does not supply a solver.
+- Always show Kupo in the model catalogue, including its unavailable state. Discover authenticated provider models and configured local endpoints before forming the pool, using metadata and health checks rather than paid inference or arbitrary network scans. Recheck accessibility from the selected env; Remote makes model calls on the SSH machine. An unset/unusable generative pool blocks inference, and decision-only Jev configuration does not supply a solver.
 - Filter the candidate pool by profile policy, data locality, capabilities, context and output limits, health, and budget before sending classifier input. Validate the typed plan and recheck eligibility at each dispatch; remote classifiers are themselves data destinations requiring permission.
-- A configured classifier can be local, hosted, or a D12 System One provider. Its result selects a workflow and concrete model bindings; it cannot create providers or change policy. Leg calls do not invoke kupo recursively. Replanning happens only at recorded safe boundaries, with context rebuilt from canonical events and approved artifacts rather than raw provider session payloads or replayed tools.
+- The automatic default uses configured models, subject to explicit pool/privacy policy. One eligible model always runs Single without a classifier. With multiple models, an eligible classifier selects a workflow and concrete bindings using declared capability categories and task complexity; it cannot invent quality scores, providers or policy. Explicit Single/Compound classifier policies remain supported. Leg calls never invoke Kupo recursively.
 - Single uses the normal loop. Cascade gates an efficient draft with explicit validation before accepting it or escalating. Critique uses an independent, read-only, tool-less model from a different family and a bounded solver revision; two aliases for the same model are not independent critics. If a pattern's prerequisites are absent, choose another eligible pattern or report it unavailable.
-- Reuse owned workspaces and worktree leases to stage compound candidates. Only an accepted, validated patch may be applied against its recorded base; conflict, cancellation, or rejection must not overwrite the user's changes. Solver legs cannot publish an unaccepted candidate; publishing is a separate policy-checked action after validation. Do not replay Git writes, network writes, or other side effects on retry/escalation. Report any effects already performed and partial cleanup honestly.
+- Automatic ordinary-composer orchestration selects a response/tool intent before normal tool permissions. Unselected responses never execute tools or become solver history. This is not patch application or test validation. The separate reviewed worktree workflow reuses owned workspaces and leases: only an accepted, validated patch may be applied against its recorded base. Neither path replays Git/network writes or hides already-performed effects and partial cleanup.
 - Bound legs, revisions, escalations, retries, spend, and time. Every classifier, draft, critic, revision, and fallback request belongs to the same cancellation tree and cost ledger, with its role, provider, resolved model version, configuration, and outcome recorded.
 - With a finite token/USD cap, reserve wind-down capacity and try to checkpoint and commit accepted work before exhaustion. Git policy and the autonomy level still govern approval; do not add calls past the cap or claim a denied/failed commit succeeded. Unlimited is the session preference default, not permission to lift inherited hard limits.
 - Expose the selected `kupo` label and actual per-leg models in both clients. Failure, unavailable models, invalid plans, or low confidence may use only a visible, preconfigured eligible fallback, or pause for the user. Never silently cross a privacy, budget, or sandbox boundary.
 
 **Schema impact.** Phase 1 defines versioned routing-policy snapshots, plans, leg ownership, candidate bases, acceptance/application outcomes, and complete per-call accounting. Use the existing event/projection model and normal migration and restart-recovery rules; do not build a second hidden workflow store.
+
+**Current automatic response slice, protocol 61.** The
+[automatic Kupo contract](automatic-kupo.md) records the user-selected normal
+composer behavior, reused licenses, prerequisite measurements, capability
+inventory, original-response selection, exact Manual approvals and no-replay
+recovery. Three through twenty configured models are covered without pool
+truncation. Critique still requires reviewed lineage; finite automatic budgets,
+images, tuning, Sandbox and live quality remain unqualified. Historical
+explicit Single and reviewed worktree policies below are not silently widened.
 
 **Measured prerequisite.** The [generated routing transport probe](routing-primitives.md)
 passes eight mechanical Single-pattern cases through maintained pi-ai:

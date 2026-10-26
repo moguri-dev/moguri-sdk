@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import {
-  activeCompound, activeDecision, decisionEvidence, legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
+  activeCompound, activeDecision, canonicalModelResponse, decisionEvidence, legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
   type ArtifactResponse, type ArtifactSource, type ArtifactSourcePreview, type CommandResult, type EventInput, type ProjectArtifactChoice,
   type ProjectArtifactPreview, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type ArtifactMaterializationPreview, type ArtifactMaterialization,
   type ArtifactMaterializeOptions, type CapabilityJob, type Project, type CandidatePatch, type SandboxPublication,
@@ -208,14 +208,19 @@ export class ArtifactRuntime {
   }
   private source(sessionId: string, kind: "message" | "tool", id: string): ArtifactSourcePreview {
     this.session(sessionId);
-    const event = this.host.events().find((event) => event.session_id === sessionId && (kind === "tool" ?
+    const events = this.host.events(), event = events.findLast((event) => event.session_id === sessionId && (kind === "tool" ?
       event.event_type === "tool.completed" && event.payload.call.id === id :
-      event.event_type === "model.completed" && event.payload.message.id === id ||
+      event.event_type === "model.completed" && !event.payload.kupo && event.payload.message.id === id ||
+      event.event_type === "routing.response_selected" && event.payload.sourceStepId === id ||
       (event.event_type === "turn.started" || event.event_type === "steer.applied") && event.payload.item.id === id));
     if (!event) throw new MoguriError("artifact_source", "Choose a canonical completed message or terminal tool result. A streamed fragment is not a completed source.", 409);
     let text: string, actor: ArtifactSource["actor"], modelId: string | null = null, outcome: string | null = null;
     if (event.event_type === "tool.completed") { text = event.payload.text; actor = "tool"; outcome = event.payload.outcome; }
-    else if (event.event_type === "model.completed") { text = event.payload.message.text; actor = ["decision", "steering"].includes(event.payload.usage.role) ? "decision-provider" : "model"; modelId = event.payload.usage.modelId; outcome = event.payload.usage.outcome; }
+    else if (event.event_type === "model.completed" || event.event_type === "routing.response_selected") {
+      const response = canonicalModelResponse(events, event);
+      if (!response) throw new MoguriError("artifact_source", "Only a canonical selected model response can supply this source.", 409);
+      text = response.message.text; actor = ["decision", "steering"].includes(response.usage.role) ? "decision-provider" : "model"; modelId = response.usage.modelId; outcome = response.usage.outcome;
+    }
     else if (event.event_type === "turn.started" || event.event_type === "steer.applied") { text = event.payload.item.text; actor = "user"; }
     else throw new MoguriError("artifact_source", "This source has no supported canonical text.");
     if (Buffer.byteLength(text) > 128 * 1024) throw new MoguriError("artifact_limit", "This source exceeds 128 KiB. Retain an explicitly selected manual excerpt; no source text was silently dropped.");
