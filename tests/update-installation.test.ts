@@ -54,7 +54,7 @@ test("the actual pinned helper waits for shutdown, preserves the old bundle and 
     for (let count = 0; count < 150; count++) {
       journal = await readInstallJournal(accepted.journal);
       if (journal.state === "partial") throw new Error(`${journal.diagnostic} ${logs}`);
-      if (journal.state === "installed") break;
+      if (journal.state === "installed" && /suppressed/.test(journal.diagnostic ?? "")) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.equal(journal?.state, "installed"); assert.match(journal!.diagnostic!, /suppressed/);
