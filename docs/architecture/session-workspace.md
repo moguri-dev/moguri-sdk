@@ -199,6 +199,12 @@ Generated hidden desktop coverage checks all seven presets, at least 3:1
 contrast against factory light/dark sidebar and menu surfaces, saved-color
 reload, custom Save/Cancel, reset, keyboard navigation, exact target-project
 ownership, pending requests and stale-revision preservation.
+The completed color/menu change passes eight project-settings domain checks,
+all 200 hidden desktop cases with three physical/packaged skips, both type
+checks and the production build. Fresh packed-SDK installation and all 12
+installed worker continuation probes pass; root and consumer audits report zero
+vulnerabilities. Existing FFI, renderer-size and transitive-deprecation advisories
+remain unchanged.
 
 Missing AGENTS.md/mcp.json are surfaced for explicit initialization. Creating
 and publishing defaults is an explicit user action on a non-protected branch,
