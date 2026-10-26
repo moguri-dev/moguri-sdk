@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { MoguriError } from "../../../packages/protocol/src/index.ts";
+import { hostExecutablePath } from "../../../packages/client/src/host-environment.ts";
 
 export async function runProgram(executable: string, args: string[], options: {
   cwd: string; signal: AbortSignal; env?: NodeJS.ProcessEnv; timeoutMs?: number; maxBytes?: number; label: string;
@@ -7,7 +8,7 @@ export async function runProgram(executable: string, args: string[], options: {
   options.signal.throwIfAborted();
   const child = spawn(executable, args, {
     cwd: options.cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"],
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, NO_COLOR: "1", ...options.env },
+    env: { PATH: hostExecutablePath(process.env.PATH), HOME: process.env.HOME, NO_COLOR: "1", ...options.env },
   });
   const chunks: Buffer[] = [];
   let diagnostic = "";

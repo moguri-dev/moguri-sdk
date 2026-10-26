@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
 import { isRecord, PROTOCOL_VERSION, type Connection } from "../../protocol/src/index.ts";
 import { readDefaultStateLocation } from "./state-location.ts";
+import { hostExecutablePath } from "./host-environment.ts";
 
 export function stateDirectory(): string {
   if (process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0") return resolve(process.env.MOGURI_STATE_DIR);
@@ -82,7 +83,7 @@ export async function ensureConnection(options: { stateDir?: string; runtime?: s
   const servicePath = options.servicePath ?? fileURLToPath(new URL(source ? "../../../apps/service/src/main.ts" : "./service.mjs", import.meta.url));
   const child = spawn(options.runtime ?? process.execPath, [...(servicePath.endsWith(".ts") ? ["--import", "tsx"] : []), servicePath], {
     detached: true, stdio: ["ignore", log.fd, log.fd],
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, MOGURI_STATE_DIR: stateDir,
+    env: { PATH: hostExecutablePath(process.env.PATH), HOME: process.env.HOME, MOGURI_STATE_DIR: stateDir,
       MOGURI_STATE_DIR_EXPLICIT: (options.explicitStateDir ?? Boolean(options.stateDir || process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0")) ? "1" : "0",
       ...(process.env.MOGURI_LOCATION_DIR ? { MOGURI_LOCATION_DIR: process.env.MOGURI_LOCATION_DIR } : {}) },
   });

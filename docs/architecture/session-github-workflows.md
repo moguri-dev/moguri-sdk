@@ -7,6 +7,17 @@ This slice reuses Node.js (MIT), TypeBox (MIT), React/OpenTUI (MIT), Git
 backends and existing reviewed GitHub operation lifecycle. No new dependency,
 provider framework, shell parser or credential-sharing mechanism is needed.
 
+macOS Local service startup and owned Git/GitHub program launches share a
+Node-only executable-path helper. It preserves inherited precedence and appends
+only missing standard Homebrew locations, reusing the native-host path list.
+Explicit program environments and absolute executable selections remain exact;
+there is no shell-profile execution, executable scan, alternate account,
+credential forwarding or automatic CLI installation. Other platforms retain
+their original lookup. This launch correction adds no dependency, event,
+durable schema or protocol and leaves service restart ownership and Remote
+credential boundaries unchanged. Generated service-startup, exact-selection,
+explicit-exclusion and cancellation tests cover the behavior.
+
 Remembered approvals are actual-user settings, scoped to one session, one
 project or every project in the current profile. Exact commands, conservative
 command families and exact schema/configuration-bound MCP tools are separate

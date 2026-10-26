@@ -20,6 +20,7 @@ import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { runProgram } from "./program.ts";
 import { sandboxConfiguration, sandboxRunConfiguration, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
 import { PrivateControl } from "./private-control.ts";
+import { MACOS_TOOL_PATHS } from "../../../packages/client/src/host-environment.ts";
 import { assertSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
 import type { SandboxSetupOptions } from "./sandbox-setup.ts";
 
@@ -54,7 +55,7 @@ export async function verifyNativeBootstrap(value: unknown, bindOriginalGuest: (
 }
 export function sandboxHostEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const paths = (environment.PATH || "/usr/bin:/bin:/usr/sbin:/sbin").split(delimiter).filter(Boolean);
-  return { PATH: [...new Set([...paths, "/usr/local/bin", "/opt/homebrew/bin"])].join(delimiter), HOME: environment.HOME };
+  return { PATH: [...new Set([...paths, ...MACOS_TOOL_PATHS])].join(delimiter), HOME: environment.HOME };
 }
 export interface NativeConnection extends WorkerConnection {
   verified: Promise<BridgeInfo>;
