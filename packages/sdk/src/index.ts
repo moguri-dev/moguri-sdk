@@ -1,7 +1,7 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
-import type { BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
+import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
@@ -121,7 +121,8 @@ export class MoguriSdk extends TransportClient {
         session.controls.modelId === null ? false : rememberModelSelection);
     },
     context: (sessionId: string) => this.query({ type: "session.context", sessionId }),
-    organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes, expectedRevision }),
+    organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId), confirmDetach?: true) =>
+      this.command({ type: "session.organize", sessionId, changes, expectedRevision, ...(confirmDetach ? { confirmDetach } : {}) }),
     reorder: (...args: [sessionIds: string[]] | [projectId: string | null, parentSessionId: string | null, groupId: string | null, archived: boolean, sessions: { sessionId: string; revision: number }[]]) => {
       if (args.length === 1) return this.command({ type: "session.reorder", sessions: args[0].map((sessionId) => ({ sessionId, revision: this.sessionRevision(sessionId) })) });
       const [projectId, parentSessionId, groupId, archived, sessions] = args;
@@ -141,8 +142,8 @@ export class MoguriSdk extends TransportClient {
     browser: (sessionId: string, url: string) => this.command({ type: "session.browser", sessionId, url }),
   };
   readonly suggestions = {
-    preview: (sessionId: string, allProjects = false) => this.query({ type: "suggestions.preview", sessionId, allProjects }),
-    generate: (sessionId: string, expectedDigest: string, allProjects: boolean, confirmScope: true) => this.command({ type: "suggestions.generate", sessionId, expectedDigest, allProjects, confirmScope }),
+    preview: (sessionId: string | null = null, allProjects = sessionId === null) => this.query({ type: "suggestions.preview", sessionId, allProjects }),
+    generate: (sessionId: string | null, expectedDigest: string, allProjects: boolean, confirmScope: true) => this.command({ type: "suggestions.generate", sessionId, expectedDigest, allProjects, confirmScope }),
   };
   readonly models = {
     refresh: () => this.command({ type: "provider.refresh" }),
@@ -219,6 +220,17 @@ export class MoguriSdk extends TransportClient {
     calls: (filters: Omit<Extract<BudgetQuery, { type: "budget.calls" }>, "type"> = {}) => this.query({ type: "budget.calls", ...filters }),
     plans: (filters: Omit<Extract<BudgetQuery, { type: "budget.plans" }>, "type"> = {}) => this.query({ type: "budget.plans", ...filters }),
     policy: (limit: BudgetLimit | null, expectedRevision: number, confirmRisk: true) => this.command({ type: "budget.policy", limit, expectedRevision, confirmRisk }),
+  };
+  readonly dashboard = {
+    overview: (filters: Omit<DashboardQuery, "type"> = {}) => this.query({ type: "dashboard.overview", ...filters }),
+  };
+  readonly skills = {
+    find: (query = "", options: { sessionId?: string; sourceId?: string; offset?: number; expectedCatalogDigest?: string; signal?: AbortSignal } = {}) => {
+      const { signal, ...filters } = options;
+      return this.query({ type: "skills.find", query, offset: 0, ...filters }, signal);
+    },
+    read: (skillId: string, expectedDigest: string, sessionId?: string, signal?: AbortSignal) =>
+      this.query({ type: "skills.read", skillId, expectedDigest, ...(sessionId ? { sessionId } : {}) }, signal),
   };
   readonly routing = {
     policy: () => this.settings.get()?.values.kupo ?? null,
@@ -476,9 +488,9 @@ export class MoguriSdk extends TransportClient {
     acknowledgeOwner: (ownerId: string, confirmInspection: true) => this.command({ type: "terminal.owner.acknowledge", ownerId, confirmInspection }),
   };
   slash(sessionId: string, text: string, client: "desktop" | "tui" | "cli" = "desktop"): Promise<SlashResult> { return executeSlash(this, sessionId, text, client); }
-  async query<Q extends PlatformQuery>(query: Q): Promise<Extract<PlatformResponse, { type: Q["type"] }>> {
+  async query<Q extends PlatformQuery>(query: Q, signal?: AbortSignal): Promise<Extract<PlatformResponse, { type: Q["type"] }>> {
     parse(QuerySchema, query);
-    const result = await this.request("/v1/query", query);
+    const result = await this.request("/v1/query", query, signal);
     if (!isRecord(result) || result.type !== query.type) throw new ClientError("invalid_response", "The service returned an incompatible capability response.");
     return result as Extract<PlatformResponse, { type: Q["type"] }>;
   }

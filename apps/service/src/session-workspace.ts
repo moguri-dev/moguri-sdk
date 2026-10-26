@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
+import { homedir } from "node:os";
 import {
   MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
@@ -51,7 +52,7 @@ export class SessionWorkspace {
   private powerTimer?: ReturnType<typeof setInterval>;
   private cleaning = false;
   private globalOpening?: Promise<TerminalState>;
-  constructor(private readonly host: SessionWorkspaceHost, private readonly stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
+  constructor(private readonly host: SessionWorkspaceHost, stateDir: string, private readonly options: SessionWorkspaceOptions = {}) {
     this.projects = new ProjectService(() => host.snapshot(), stateDir);
     this.power = new KeepAwake(() => this.snapshot(), options.power, options.now);
     this.terminals = new TerminalManager({
@@ -130,6 +131,11 @@ export class SessionWorkspace {
       throw new MoguriError("terminal_env", "Local user consoles are blocked by the current execution policy. No Remote or Sandbox fallback was used.", 409);
     }
   }
+  private defaultTerminalRoot(): string {
+    const root = this.options.terminal?.defaultRoot ?? homedir();
+    if (!isAbsolute(root) || /[\0\r\n]/.test(root)) throw new MoguriError("terminal_root", "Configured HOME must be an absolute Local directory. No state-directory or project fallback was used.");
+    return root;
+  }
   private async globalTerminal(root: string, cols: number, rows: number, intent: NonNullable<WorkspaceFinish["intent"]>): Promise<TerminalState> {
     if (!isAbsolute(root)) throw new MoguriError("terminal_root", "Choose an explicit absolute directory for the global Local console.");
     const canonical = await realpath(root);
@@ -173,6 +179,10 @@ export class SessionWorkspace {
     return { session, project, script, scope, remote, signature: frameDigest([scope, env, configuration?.revision ?? null, this.snapshot().policy.revision, script ?? null, remote ?? null]) };
   }
   private async terminalAdmission(sessionId: string, scriptId?: string, explicitRoot?: string) {
+    const session = this.session(sessionId);
+    if (explicitRoot === undefined && session.projectId === null && session.controls.env === "Local") {
+      explicitRoot = this.defaultTerminalRoot();
+    }
     if (explicitRoot !== undefined) {
       if (!isAbsolute(explicitRoot)) throw new MoguriError("terminal_root", "Choose an explicit absolute Local console root.");
       explicitRoot = await realpath(explicitRoot);
@@ -211,7 +221,7 @@ export class SessionWorkspace {
   async query(query: SessionWorkspaceQuery): Promise<SessionWorkspaceResponse> {
     switch (query.type) {
       case "project.repositories": return this.projects.repositories(this.project(query.projectId), AbortSignal.timeout(5000));
-      case "terminal.default-root": return { type: query.type, root: await realpath(this.options.terminal?.defaultRoot ?? this.stateDir) };
+      case "terminal.default-root": return { type: query.type, root: await realpath(this.defaultTerminalRoot()) };
       case "session.context": return { type: query.type, context: await this.host.contextPreview(this.session(query.sessionId)) };
       case "project.configuration": return { type: query.type, configuration: this.projects.configuration(query.projectId) };
       case "project.sources": return this.projects.sources(this.project(query.projectId));
@@ -266,6 +276,10 @@ export class SessionWorkspace {
         if (command.changes.title !== undefined && !command.changes.title.trim()) throw new MoguriError("session_title", "A session name cannot be empty.");
         if (command.changes.parentSessionId !== undefined) {
           if (session.turnId || session.kind === "subagent") throw new MoguriError("session_busy", "Stop active work before reparenting. Model-owned subagents cannot be detached into independent authority.");
+          if (session.parentSessionId && command.changes.parentSessionId === null &&
+            this.snapshot().settings.values.interactions.confirmSessionDetach !== false && !command.confirmDetach) {
+            throw new MoguriError("session_detach_confirmation", "Confirm detaching this child session, or change this profile's detach confirmation preference. No hierarchy was changed.", 409);
+          }
           let parent = command.changes.parentSessionId;
           const visited = new Set([session.id]);
           while (parent) {
@@ -434,7 +448,7 @@ export class SessionWorkspace {
       case "terminal.global.open":
       case "terminal.open-global": {
         if (!finish.intent) throw new MoguriError("terminal_intent", "A global launch requires its actual user command identity. No console was started.", 409);
-        const terminal = await this.globalTerminal(command.type === "terminal.global.open" ? this.stateDir : command.root, command.cols, command.rows, finish.intent);
+        const terminal = await this.globalTerminal(command.type === "terminal.global.open" ? this.defaultTerminalRoot() : command.root, command.cols, command.rows, finish.intent);
         return finish([], { id: terminal.id });
       }
       case "terminal.reconcile": {

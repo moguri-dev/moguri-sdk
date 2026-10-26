@@ -68,6 +68,15 @@ existing `rg`/`jq` and isolated data workers under the D06 checkpoint allowance.
 No new Rust helper, agent framework, silent compaction or permission-bearing
 model/router advice is introduced.
 
+The [protocol-59 workspace experience](workspace-experience.md) retains this stack
+while adding refreshed profile-owned skill discovery through the shared SDK/MCP
+gateway, explicit global suggestion previews, and four event/accounting-backed
+dashboard pages. Its measured prerequisite results, additive migration and
+unqualified execution boundaries are recorded in that contract.
+The protocol-60 session-navigation follow-up keeps the same stack and owner
+lifecycle, removes Global Terminal surfaces and the session grip, and adds
+revision-bound child-detachment review with a profile-owned opt-out.
+
 ## D01. Build from zero with borrowed libraries
 
 **Decision.** Moguri owns its domain model, event store, protocol, local service and clients. It does not fork OpenCode or Pi. Maintained libraries supply providers, MCP, PTYs, terminal rendering, diffs, SQLite and UI toolkits.

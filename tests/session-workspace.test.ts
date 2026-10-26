@@ -92,7 +92,7 @@ test("side context runs in parallel without edit authority and explicit nested s
     await assert.rejects(() => sdk.sessions.organize(fixture.sessionId, { parentSessionId: nested.id! }), /Stop|acyclic/);
     await sdk.command({ type: "session.stop", sessionId: fixture.sessionId }); await fixture.terminal();
     await assert.rejects(() => sdk.sessions.organize(fixture.sessionId, { parentSessionId: nested.id! }), /acyclic/);
-    await sdk.sessions.organize(nested.id!, { parentSessionId: null, pinned: true, unread: true });
+    await sdk.sessions.organize(nested.id!, { parentSessionId: null, pinned: true, unread: true }, undefined, true);
     assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === nested.id)?.pinned, true);
   } finally { sdk.disconnect(); await fixture.close(); }
 });

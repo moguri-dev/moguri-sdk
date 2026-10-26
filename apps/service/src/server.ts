@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { ControlPlane } from "./controller.ts";
 import { EventStore } from "./store.ts";
 import type { ProviderAdapter } from "./provider.ts";
-import { CommandSchema, GLOBAL_PROFILE_ID, isApplicationCommand, isApplicationQuery, isUpdateQuery, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QuerySchema, SpeechCaptureRequestSchema, StorageMoveRequestSchema, UpdateTokenRequestSchema, UpdateInstallRequestSchema, isRecord, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
+import { CommandSchema, GLOBAL_PROFILE_ID, isApplicationCommand, isApplicationQuery, isUpdateQuery, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QUERY_ID_PATTERN, QueryCancellationSchema, QuerySchema, SpeechCaptureRequestSchema, StorageMoveRequestSchema, UpdateTokenRequestSchema, UpdateInstallRequestSchema, isRecord, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
 import type { PlatformOptions } from "./platform.ts";
 import { retentionKey } from "./retention-key.ts";
 import { ProfileRuntime } from "./profiles.ts";
@@ -142,6 +142,9 @@ export async function startService(options: ServiceOptions) {
     const token = randomBytes(32).toString("hex");
     let closeRuntime!: (options?: RuntimeCloseOptions, preserveInstaller?: boolean) => Promise<void>;
     let lifecycle: { action: "stop" | "restart"; status: "stopping" | "unconfirmed"; diagnostic: string | null } | null = null;
+    const activeQueries = new Map<string, AbortController>(), cancelledQueries = new Map<string, number>();
+    const pruneQueries = () => { for (const [key, expires] of cancelledQueries) if (expires <= Date.now()) cancelledQueries.delete(key); };
+    const queryCancelled = () => new MoguriError("query_cancelled", "The client cancelled this query. No result was published.", 409);
     let expectedHost = "";
     const acceptable = (request: IncomingMessage) => request.headers.host === expectedHost &&
       (request.headers.origin === undefined || request.headers.origin === "moguri://app");
@@ -157,7 +160,7 @@ export async function startService(options: ServiceOptions) {
         const profileId = suppliedProfile === undefined ? PROFILE_ID : typeof suppliedProfile === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(suppliedProfile) ? suppliedProfile : null;
         if (!profileId || profileId === GLOBAL_PROFILE_ID) throw new MoguriError("profile_scope", "Choose one explicit user profile. No Default fallback was used.", 403);
         if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(await rootProfiles.snapshot(profileId))); return; }
-        if (!["/v1/commands", "/v1/query", "/v1/terminal", "/v1/voice", "/v1/lifecycle", "/v1/application"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
+        if (!["/v1/commands", "/v1/query", "/v1/query-cancel", "/v1/terminal", "/v1/voice", "/v1/lifecycle", "/v1/application"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
         let bytes = 0;
@@ -215,6 +218,14 @@ export async function startService(options: ServiceOptions) {
           await (await rootProfiles.control(profileId)).platform.sessions.input(parse(TerminalInputSchema, body));
           response.end(JSON.stringify({ accepted: true })); return;
         }
+        if (request.url === "/v1/query-cancel") {
+          const { requestId } = parse(QueryCancellationSchema, body), key = `${profileId}:${requestId}`;
+          pruneQueries();
+          if (!cancelledQueries.has(key) && cancelledQueries.size >= 1024) throw new MoguriError("query_capacity", "Too many recent query cancellations. Wait for their short-lived markers to expire.", 429);
+          cancelledQueries.set(key, Date.now() + 30_000);
+          activeQueries.get(key)?.abort(queryCancelled());
+          response.end(JSON.stringify({ requested: true })); return;
+        }
         if (request.url === "/v1/query") {
           const query = parse(QuerySchema, body);
           if (isApplicationQuery(query)) {
@@ -227,7 +238,26 @@ export async function startService(options: ServiceOptions) {
             if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "This profile is missing/unready. No registry fallback was used.", 404);
             response.end(JSON.stringify({ type: query.type, catalog: rootProfiles.catalog() })); return;
           }
-          response.end(JSON.stringify(await (await rootProfiles.control(profileId)).platform.query(query))); return;
+          const abort = new AbortController();
+          const requestId = request.headers["x-moguri-query-id"];
+          if (requestId !== undefined && (typeof requestId !== "string" || !new RegExp(QUERY_ID_PATTERN).test(requestId))) throw new MoguriError("query_identity", "Use one exact UUID for this cancellable query.");
+          const key = requestId ? `${profileId}:${requestId}` : null;
+          if (key) {
+            pruneQueries();
+            if (cancelledQueries.has(key)) throw queryCancelled();
+            if (activeQueries.has(key)) throw new MoguriError("query_identity", "This exact query is already active. No second source read was started.", 409);
+            if (activeQueries.size >= 1024) throw new MoguriError("query_capacity", "Too many active cancellable queries. Finish or cancel existing reads first.", 429);
+            activeQueries.set(key, abort);
+          }
+          const disconnected = () => { if (!response.writableEnded) abort.abort(queryCancelled()); };
+          response.once("close", disconnected);
+          try {
+            const scoped = await rootProfiles.control(profileId);
+            abort.signal.throwIfAborted();
+            const result = await scoped.platform.query(query, abort.signal);
+            if (!response.destroyed) response.end(JSON.stringify(result));
+          } finally { response.off("close", disconnected); if (key) activeQueries.delete(key); }
+          return;
         }
         const command = parse(CommandSchema, body);
         if (command.profileId !== profileId) throw new MoguriError("profile_scope", "Request scope and command profile differ. No foreign receipt or effect was used.", 403);
@@ -240,6 +270,7 @@ export async function startService(options: ServiceOptions) {
       void handle().catch((error: unknown) => {
         const known = error instanceof MoguriError;
         if (!known) console.error("Moguri command failed:", error instanceof Error && "code" in error ? error.code : "internal_error");
+        if (response.destroyed) return;
         response.statusCode = known ? error.status : 500;
         response.end(JSON.stringify({ error: { code: known ? error.code : "internal_error", message: known ? error.message : "The operation failed. Check local paths, permissions and service diagnostics; no success was recorded." } }));
       });

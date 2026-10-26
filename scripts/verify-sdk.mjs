@@ -74,6 +74,18 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 60 ? `
+      const confirmsDetach:boolean=sdk.settings.get()?.values.interactions.confirmSessionDetach!==false;void confirmsDetach;
+      await sdk.sessions.organize("generated-child",{parentSessionId:null},0,true);
+      ` : ""}
+      ${installedProtocol >= 59 ? `
+      const overview=await sdk.dashboard.overview({range:{kind:"days",days:7}});
+      void overview.dashboard.projects[0]?.work.inProgress;void overview.dashboard.velocity.productivityIncrease;
+      const freshSkills=await sdk.skills.find("generated",{sessionId:"generated-id",offset:0});
+      void freshSkills.catalogDigest;void freshSkills.skills[0]?.sourceId;
+      await sdk.skills.read("generated-id","a".repeat(64),"generated-session");
+      await sdk.suggestions.preview(null,true);
+      ` : ""}
       ${installedProtocol >= 58 ? `
       const nativeCatalogue=await sdk.tools.catalog("generated-id","file");
       void nativeCatalogue.tools[0]?.parameters;void nativeCatalogue.tools[0]?.schemaDigest;
@@ -369,6 +381,7 @@ try {
     import {createHash,randomUUID} from "node:crypto";
     import {createServer} from "node:http";
     import {fileURLToPath} from "node:url";
+    import {homedir} from "node:os";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
     import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}} from "moguri";
@@ -420,6 +433,41 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       const s=await sdk.command({type:"session.create",projectId:p.id});
+      ${installedProtocol >= 59 ? `{
+      const skillDirectory=join(root,"generated-skills");await mkdir(skillDirectory);
+      const skillPath=join(skillDirectory,"SKILL.md");
+      await writeFile(skillPath,"---\\nname: generated-installed-skill\\ndescription: Generated installed skill lookup\\n---\\nUse generated fixture evidence.\\n");
+      const beforeSettings=sdk.settings.get();
+      await sdk.settings.update({...beforeSettings.values,skillSources:[{id:"generated-installed-source",name:"Generated installed skills",kind:"local",path:skillDirectory,enabled:true}]},beforeSettings.revision);
+      const discovered=await sdk.skills.find("installed",{sessionId:s.id});assert.equal(discovered.skills.length,1);
+      assert.match((await sdk.skills.read(discovered.skills[0].id,discovered.skills[0].digest,s.id)).body,/generated fixture evidence/);
+      await writeFile(skillPath,"---\\nname: generated-installed-skill\\ndescription: Generated installed skill lookup\\n---\\nChanged generated fixture.\\n");
+      await assert.rejects(()=>sdk.skills.read(discovered.skills[0].id,discovered.skills[0].digest,s.id),error=>error.code==="skill_source_changed");
+      const overview=(await sdk.dashboard.overview()).dashboard;
+      assert.equal(overview.days.length,7);assert.equal(overview.work.total,1);assert.equal(overview.velocity.productivityIncrease,null);
+      const globalSuggestions=await sdk.suggestions.preview(null,true);assert.equal(globalSuggestions.preview.scope,"all-projects");
+      const freshSettings=sdk.settings.get();await sdk.settings.update({...freshSettings.values,skillSources:[]},freshSettings.revision);
+      console.log("Installed protocol-59 skill freshness, global suggestions and authoritative dashboard work without a model call or new permission.");
+      }` : ""}
+      ${installedProtocol >= 60 ? `{
+      assert.equal(sdk.settings.get().values.interactions.confirmSessionDetach,true);
+      const child=await sdk.sessions.spawn(s.id,"agent","Generated installed detach review");
+      const original=sdk.getState().snapshot.sessions.find(value=>value.id===child.id);
+      await assert.rejects(()=>sdk.sessions.organize(child.id,{parentSessionId:null}),error=>error.code==="session_detach_confirmation");
+      await sdk.sessions.organize(child.id,{parentSessionId:null},original.revision,true);
+      const detached=sdk.getState().snapshot.sessions.find(value=>value.id===child.id);
+      assert.equal(detached.parentSessionId,undefined);
+      assert.deepEqual([detached.projectId,detached.workspaceId,detached.controls.env,detached.coordinationParentId],
+        [original.projectId,original.workspaceId,original.controls.env,original.coordinationParentId]);
+      await sdk.sessions.organize(child.id,{parentSessionId:s.id});
+      const settings=sdk.settings.get();await sdk.settings.update({...settings.values,interactions:{...settings.values.interactions,confirmSessionDetach:false}},settings.revision);
+      await sdk.sessions.organize(child.id,{parentSessionId:null});
+      await sdk.settings.reset("interactions",sdk.settings.get().revision);
+      assert.equal(sdk.settings.get().values.interactions.confirmSessionDetach,true);
+      for(const client of ["desktop","tui"])await assert.rejects(()=>sdk.slash(s.id,"/terminal global",client),error=>error.code==="terminal_removed");
+      await sdk.sessions.delete(child.id,true);
+      console.log("Installed protocol-60 detach acknowledgement, profile preference/reset, unchanged ownership and retired global entrypoints pass.");
+      }` : ""}
       ${installedProtocol >= 58 ? `{
       const child=await sdk.sessions.spawn(s.id,"side","Generated installed coordinated side");
       const review=await sdk.coordination.preview(s.id,child.id);
@@ -512,7 +560,7 @@ try {
       assert.equal(beta.getState().snapshot.provider.status,"disconnected");
       ${installedProtocol >= 53 ? `
       {
-      assert.deepEqual(sdk.settings.get().values.interactions,{confirmSessionAttachments:true,confirmTerminalClose:true});
+      assert.deepEqual(sdk.settings.get().values.interactions,{confirmSessionAttachments:true,confirmTerminalClose:true,...(PROTOCOL_VERSION>=60?{confirmSessionDetach:true}:{})});
       const interactionRoot=join(root,"generated-interaction-project");await mkdir(interactionRoot);
       await writeFile(join(interactionRoot,"generated.txt"),"Generated installed interaction snapshot.");
       const interactionProject=await sdk.projects.add(interactionRoot,"generated_interactions");
@@ -1216,12 +1264,12 @@ try {
         await consoleSdk.terminal.close(opened.id);
         if(PROTOCOL_VERSION>=53&&mode==="Local"){
           const global=await consoleSdk.terminal.openGlobal(),globalState=(await consoleSdk.terminal.read(global.id)).terminal;
-          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(consoleState));
+          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(PROTOCOL_VERSION>=59?homedir():consoleState));
           const globalCli=JSON.parse((await invoke(["terminal","read",global.id])).stdout);assert.equal(globalCli.terminal.id,global.id);
           const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
           await consoleSdk.sessions.delete(session.id,true);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);
           await consoleSdk.terminal.close(global.id);
-          console.log("Installed protocol-44 global Local console owns the exact data directory independently of sessions/projects through SDK, CLI and TUI, with no model context or launch replay.");
+          console.log("Installed protocol-"+PROTOCOL_VERSION+" compatibility Local console retains exact "+(PROTOCOL_VERSION>=59?"configured HOME":"data directory")+" independently of sessions/projects, with SDK ownership and CLI/TUI inspection, no model context or launch replay.");
         }
         consoleSdk.disconnect();await stopMoguriService(consoleState,{expectedConnection:consoleRuntime.connection});
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});

@@ -68,7 +68,7 @@ export const SessionChangesSchema = object({
 });
 export type SessionChanges = Static<typeof SessionChangesSchema>;
 export const SessionWorkspaceCommandSchema = Type.Union([
-  object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema }),
+  object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema, confirmDetach: Type.Optional(Type.Literal(true)) }),
   object({ type: Type.Literal("session.reorder"), sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.reorder"), projectId: nullableId, parentSessionId: nullableId, groupId: nullableId, archived: Type.Boolean(),
     sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),

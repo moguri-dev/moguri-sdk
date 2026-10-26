@@ -38,7 +38,8 @@ test("suggestions preview stays scoped, excludes control chats and requires exac
     await assert.rejects(() => sdk.suggestions.preview(fixture.sessionId, true), /Cross-project/);
     const session = sdk.getState().snapshot!.sessions.find((value) => value.id === current.id)!;
     await sdk.command({ type: "session.configure", sessionId: session.id, expectedRevision: session.revision, controls: { ...session.controls, modelId: fixture.modelId } });
-    const generated = await sdk.suggestions.generate(session.id, preview.digest, false, true);
+    const selected = (await sdk.suggestions.preview(session.id)).preview;
+    const generated = await sdk.suggestions.generate(session.id, selected.digest, false, true);
     await waitFor(() => fixture.service.controller.snapshot().sessions.find((value) => value.id === generated.id)?.status === "completed");
     const meta = fixture.service.controller.snapshot().sessions.find((value) => value.id === generated.id)!;
     assert.equal(meta.kind, "metachat"); assert.equal(meta.controls.autonomy, "Manual");

@@ -64,7 +64,7 @@ test("birth grants support bidirectional messages without inference or navigatio
     assert.equal(f.requests.length, 0);
     assert.ok(f.session().messages.some((item) => item.role === "notice" && item.text.includes("Generated child observation.")));
     const child = f.service.controller.snapshot().sessions.find((session) => session.id === childId)!;
-    await f.service.controller.dispatch(envelope({ type: "session.organize", sessionId: childId, expectedRevision: child.revision, changes: { parentSessionId: null } }));
+    await f.service.controller.dispatch(envelope({ type: "session.organize", sessionId: childId, expectedRevision: child.revision, changes: { parentSessionId: null }, confirmDetach: true }));
     assert.equal((await read()).type, "coordination.read");
     const stranger = await f.service.controller.dispatch(envelope({ type: "session.create", projectId: f.session().projectId }));
     await assert.rejects(() => f.service.controller.platform.query({ type: "coordination.read", sessionId: stranger.id!, input: { action: "transcript", targetSessionId: childId } }), { code: "coordination_denied" });
