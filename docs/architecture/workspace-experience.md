@@ -144,3 +144,65 @@ bundle-size warning, and deprecated transitive `whatwg-encoding` /
 `node-domexception` packages in the external consumer. Its existing install
 script review is explicitly approved and rebuilt by the verification harness.
 None is an audit vulnerability or a qualification of the skipped physical gates.
+
+## Session navigation follow-up
+
+The desktop no longer offers a Global Terminal, global scope picker or a hidden
+project console. Project actions open an existing session's private console at
+its bound worktree; project-free sessions use configured HOME. Without an
+existing session, the action asks the user to create/select one rather than
+creating a hidden chat. CLI/slash entrypoints stop offering global creation.
+Low-level SDK compatibility and authenticated inspection, reconciliation and
+close of retained null-session consoles remain available. Removing navigation
+never kills, retargets or replays an existing owner.
+
+Reuse React (MIT), the existing native dialog, scoped reorder API, settings
+events and Ghostty/PTY lifecycle. No dependency or terminal implementation is
+added. Whole session rows use their upper/lower halves to reorder siblings,
+including children. The grip is removed, not replaced with another button.
+Context menus, Shift+F10 and Alt+Up/Down remain keyboard alternatives; attaching
+to a parent remains an explicit context-menu action.
+
+Dropping a child on a root row, its project/Chats/group header or a root-list
+background requests detachment into that root group. Its original project,
+workspace, Env and cancellation owner do not change. A root-row drop is a
+detachment destination, not a promise of an additional reorder transaction.
+Only a single organization command is committed. Sibling reordering retains
+complete structural-intent checks, fresh revision CAS and the one safe retry
+for a revision-only conflict.
+
+Protocol/schema 60 adds default-on `interactions.confirmSessionDetach` and an
+explicit optional detach acknowledgement on `session.organize`. An additive
+metadata migration preserves old settings, events, receipts, profiles and
+console owners; nested settings normalize the missing preference to true.
+The preference is profile-owned and resettable in Settings / Confirmations.
+Remembering a choice cannot bypass service hierarchy, active-work, model-owned
+subagent, profile or revision checks, and never grants tool permissions.
+
+Drag and menu detach use the same native review. Cancel changes neither
+settings nor hierarchy. Confirmation rechecks the captured source hierarchy,
+workspace/Env and root destination after any draft/preference save. Structural
+changes invalidate review; active work and service failures remain explicit.
+No failed or partial detach is labeled successful.
+
+Fresh prerequisite measurements before this follow-up, macOS arm64:
+
+| Primitive | Result | Measurement |
+| --- | --- | --- |
+| Generated provider streaming/cancellation | PASS | 6 requests; cancellation 32.04 ms |
+| SQLite WAL/crash/rebuild | PASS | 1,000 events; append p95 0.044 ms; rebuild 0.52 ms |
+| Known PTY process-group cancellation | PASS | 152.17 ms; zero survivors |
+| OpenTUI React timeline | PASS | 60 updates; mean 17.30 ms |
+| Hidden Electron timeline | PASS | cold start 184.54 ms; 443.77 MiB; frame 8.26 ms |
+| Generated filesystem/Git baseline | PASS | 2,000 files; search 1.04 ms; Git 5.55 ms |
+| Independent encrypted compartments | PASS | 500 events / 250 artifacts in 109.26 ms |
+| Hidden Ghostty WASM | PASS | 423,045 bytes; input/108x24 grid in 25.40 ms |
+
+The base spike's live inference, Rust/Linux, signed packaging, physical SendBox,
+multi-model quality, decisions, personal SSH and historical complete-feature
+gates remain FAIL/unavailable, not newly qualified by this UI work.
+Generated checks must prove whole-row child ordering, cancel/confirm,
+remembered and reset preferences across restart/profile boundaries, stale
+review refusal, unchanged authority, removed global entrypoints and retained
+private-console lifecycle. Packed-consumer, build and migration checks remain
+required.

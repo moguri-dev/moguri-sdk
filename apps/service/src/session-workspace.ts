@@ -276,6 +276,10 @@ export class SessionWorkspace {
         if (command.changes.title !== undefined && !command.changes.title.trim()) throw new MoguriError("session_title", "A session name cannot be empty.");
         if (command.changes.parentSessionId !== undefined) {
           if (session.turnId || session.kind === "subagent") throw new MoguriError("session_busy", "Stop active work before reparenting. Model-owned subagents cannot be detached into independent authority.");
+          if (session.parentSessionId && command.changes.parentSessionId === null &&
+            this.snapshot().settings.values.interactions.confirmSessionDetach !== false && !command.confirmDetach) {
+            throw new MoguriError("session_detach_confirmation", "Confirm detaching this child session, or change this profile's detach confirmation preference. No hierarchy was changed.", 409);
+          }
           let parent = command.changes.parentSessionId;
           const visited = new Set([session.id]);
           while (parent) {

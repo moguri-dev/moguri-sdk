@@ -15,8 +15,8 @@ Text controls have an adjacent Save action. Neither search nor navigation
 discards edits or commits unrelated fields.
 
 The scrollable left navigation owns New and profile-wide Dashboard, Suggestions,
-Automations and Global Terminal. Automations is intentionally empty in protocol
-59. Code change and Work item live in the right rail, bound to the selected
+and Automations. Global Terminal is removed in protocol 60; Automations is
+intentionally empty. Code change and Work item live in the right rail, bound to the selected
 session, not global resources. Independently retained
 Artifacts/Candidates and native execution management live in Settings; Sandbox
 combines managed SendBox setup and retained workspace/publication controls.
@@ -39,6 +39,12 @@ fields are explicitly excluded. Long explanatory prose uses focusable
 information tooltips. Consequential warnings, actual status, errors and source
 review acknowledgements stay visible. Editing, revision conflicts and dirty
 navigation guards are unchanged.
+
+Settings / Confirmations also owns default-on child-session detachment review.
+The same review applies to drag-out, Detach and the parent selector's None
+choice. Remembering an opt-out saves only this profile's interactions preference;
+reset restores confirmation. The service's exact revision, hierarchy, active
+work and model-owned-subagent checks are independent of that preference.
 
 ## Authority and defaults
 

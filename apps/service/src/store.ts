@@ -309,6 +309,12 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='workspace_experience_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid workspace experience schema marker. State was preserved.");
       }
+      if (version < 60) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('session_navigation_schema','1');
+        PRAGMA user_version=60; COMMIT;`);
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_navigation_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid session navigation schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateDesktopMerge(version: number): void {

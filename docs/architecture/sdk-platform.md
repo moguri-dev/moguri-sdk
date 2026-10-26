@@ -146,23 +146,30 @@ development-signing limitations remain.
 
 ## Global and session sidebar placement
 
-Protocol 59 updates the **left** resources to Dashboard, Suggestions, Automations
-and Global Terminal. Artifacts/Candidates/Sandbox move to Settings. Code change
+Protocol 60 leaves the **left** resources as Dashboard, Suggestions and
+Automations, removing Global Terminal. Artifacts/Candidates/Sandbox move to Settings. Code change
 and Work item belong to the **right**, following the selected session; an existing
 linked PR remains accessible without a new linking/write workflow. Automations
 and the issue-link panel are placeholders, not scheduled work or provider-write authority. The
 **right** rail contains only Terminal, Browser, Insights, Changes, Files, Plan,
 Side chat, Code change and Work item, in that order. The left resource group is a named native navigation
 landmark; repeated selection still returns to chat after existing dirty/terminal
-checks. Existing styles, model controls and session hierarchy are unchanged.
+checks. Existing styles and model controls are unchanged. Whole rows reorder
+siblings, including children; child drag-out and menu detachment share a
+profile-owned, default-on confirmation. The six-dot action grip is removed.
 
 This reuses React/native navigation (MIT) and existing SDK/resource routing.
 The placement change itself adds no durable event or dependency; the associated
-[skill/dashboard contract](workspace-experience.md) describes protocol/schema 59.
+[skill/dashboard contract](workspace-experience.md) describes the schema-59 slice
+and schema-60 session-navigation follow-up.
 Legacy saved Artifacts/Candidates/Sandbox panel names restore their Settings
 destination rather than becoming invalid preferences or another right-rail tab;
 widths remain intact. Legacy PR actions open Code change; attention stays auxiliary, not another primary
 rail items. Hiding an auxiliary panel returns keyboard focus to Insights.
+Legacy Global Terminal layouts restore a passive session Terminal pane without
+launching, adopting or closing the old independent console. Its authenticated
+inspection/close APIs remain; project actions select an existing session and
+never create a global console or hidden chat.
 Globals still create no hidden session/inference, terminal opening remains
 one-shot and hiding a live owner keeps its existing review/opt-out. Read-only/
 profile/root, cancellation and retained-resource behavior are unchanged.

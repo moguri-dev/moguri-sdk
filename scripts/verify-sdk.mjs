@@ -74,6 +74,10 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 60 ? `
+      const confirmsDetach:boolean=sdk.settings.get()?.values.interactions.confirmSessionDetach!==false;void confirmsDetach;
+      await sdk.sessions.organize("generated-child",{parentSessionId:null},0,true);
+      ` : ""}
       ${installedProtocol >= 59 ? `
       const overview=await sdk.dashboard.overview({range:{kind:"days",days:7}});
       void overview.dashboard.projects[0]?.work.inProgress;void overview.dashboard.velocity.productivityIncrease;
@@ -445,6 +449,25 @@ try {
       const freshSettings=sdk.settings.get();await sdk.settings.update({...freshSettings.values,skillSources:[]},freshSettings.revision);
       console.log("Installed protocol-59 skill freshness, global suggestions and authoritative dashboard work without a model call or new permission.");
       }` : ""}
+      ${installedProtocol >= 60 ? `{
+      assert.equal(sdk.settings.get().values.interactions.confirmSessionDetach,true);
+      const child=await sdk.sessions.spawn(s.id,"agent","Generated installed detach review");
+      const original=sdk.getState().snapshot.sessions.find(value=>value.id===child.id);
+      await assert.rejects(()=>sdk.sessions.organize(child.id,{parentSessionId:null}),error=>error.code==="session_detach_confirmation");
+      await sdk.sessions.organize(child.id,{parentSessionId:null},original.revision,true);
+      const detached=sdk.getState().snapshot.sessions.find(value=>value.id===child.id);
+      assert.equal(detached.parentSessionId,undefined);
+      assert.deepEqual([detached.projectId,detached.workspaceId,detached.controls.env,detached.coordinationParentId],
+        [original.projectId,original.workspaceId,original.controls.env,original.coordinationParentId]);
+      await sdk.sessions.organize(child.id,{parentSessionId:s.id});
+      const settings=sdk.settings.get();await sdk.settings.update({...settings.values,interactions:{...settings.values.interactions,confirmSessionDetach:false}},settings.revision);
+      await sdk.sessions.organize(child.id,{parentSessionId:null});
+      await sdk.settings.reset("interactions",sdk.settings.get().revision);
+      assert.equal(sdk.settings.get().values.interactions.confirmSessionDetach,true);
+      for(const client of ["desktop","tui"])await assert.rejects(()=>sdk.slash(s.id,"/terminal global",client),error=>error.code==="terminal_removed");
+      await sdk.sessions.delete(child.id,true);
+      console.log("Installed protocol-60 detach acknowledgement, profile preference/reset, unchanged ownership and retired global entrypoints pass.");
+      }` : ""}
       ${installedProtocol >= 58 ? `{
       const child=await sdk.sessions.spawn(s.id,"side","Generated installed coordinated side");
       const review=await sdk.coordination.preview(s.id,child.id);
@@ -537,7 +560,7 @@ try {
       assert.equal(beta.getState().snapshot.provider.status,"disconnected");
       ${installedProtocol >= 53 ? `
       {
-      assert.deepEqual(sdk.settings.get().values.interactions,{confirmSessionAttachments:true,confirmTerminalClose:true});
+      assert.deepEqual(sdk.settings.get().values.interactions,{confirmSessionAttachments:true,confirmTerminalClose:true,...(PROTOCOL_VERSION>=60?{confirmSessionDetach:true}:{})});
       const interactionRoot=join(root,"generated-interaction-project");await mkdir(interactionRoot);
       await writeFile(join(interactionRoot,"generated.txt"),"Generated installed interaction snapshot.");
       const interactionProject=await sdk.projects.add(interactionRoot,"generated_interactions");
@@ -1246,7 +1269,7 @@ try {
           const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
           await consoleSdk.sessions.delete(session.id,true);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);
           await consoleSdk.terminal.close(global.id);
-          console.log("Installed protocol-"+PROTOCOL_VERSION+" global Local console owns the exact "+(PROTOCOL_VERSION>=59?"configured HOME":"data directory")+" independently of sessions/projects through SDK, CLI and TUI, with no model context or launch replay.");
+          console.log("Installed protocol-"+PROTOCOL_VERSION+" compatibility Local console retains exact "+(PROTOCOL_VERSION>=59?"configured HOME":"data directory")+" independently of sessions/projects, with SDK ownership and CLI/TUI inspection, no model context or launch replay.");
         }
         consoleSdk.disconnect();await stopMoguriService(consoleState,{expectedConnection:consoleRuntime.connection});
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});

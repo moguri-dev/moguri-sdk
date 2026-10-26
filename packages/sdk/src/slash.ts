@@ -5,7 +5,7 @@ import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
 
-export type SessionPanel = "Terminal" | "Global Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
+export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
 export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
 export type SlashResult =
@@ -52,9 +52,9 @@ export const slashCommands = [
   { name: "reorder-sessions", description: "Set the exact shared order of one complete sibling section", argument: "SESSION_ID..." },
   { name: "side", description: "Open parallel, question-only context" },
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
-  { name: "terminal", aliases: ["termnial"], description: "Open an embedded Ghostty terminal at the project worktree or configured HOME", argument: "[global]", desktopOnly: true },
+  { name: "terminal", aliases: ["termnial"], description: "Open this session's Ghostty terminal at its project worktree or configured HOME", desktopOnly: true },
   { name: "clone", description: "Explicitly clone a repository into a new Local project folder without inference", argument: '{\"repository\":\"URL\",\"path\":\"ABSOLUTE_NEW_PATH\"} confirm-clone' },
-  { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open [LOCAL_ROOT]|global [LOCAL_ROOT]|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
+  { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open [LOCAL_ROOT]|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
   { name: "agent-terminal", description: "Inspect this session's approved Agent command output, never its private User/Global consoles", argument: "[list [SEQUENCE ID]|read COMMAND_ID [UTF8_OFFSET|tail]]" },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
   { name: "diff", description: "Read local file changes" },
@@ -803,19 +803,13 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "session", sessionId: result.id!, side };
     }
     case "terminal":
-      if (command.argument === "global") {
-        if (client === "desktop") return { kind: "panel", panel: "Global Terminal" };
-        return { kind: "text", text: JSON.stringify(await sdk.terminal.openGlobal(), null, 2) };
-      }
+      if (command.argument === "global") throw new ClientError("terminal_removed", "Global Terminal was removed. Use the selected session terminal; existing consoles remain inspectable through /terminals list/read/close.");
+      if (command.argument) throw new ClientError("terminal_command", "Use /terminal without arguments to open this session's terminal.");
       if (client !== "desktop") throw new ClientError("terminal_context", "This client is already a terminal. Use /terminals open/list/read for explicit Local or pinned SSH user consoles; /terminal opens Ghostty only in desktop.");
       return { kind: "panel", panel: "Terminal" };
     case "terminals": {
       const [action = "list", id, option, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
-      if (action === "global") {
-        const root = command.argument.slice("global".length).trim();
-        const opened = root ? await sdk.terminal.openGlobal(root) : await sdk.terminal.openGlobal();
-        return client === "desktop" ? { kind: "panel", panel: "Global Terminal" } : { kind: "text", text: JSON.stringify(opened, null, 2) };
-      }
+      if (action === "global") throw new ClientError("terminal_removed", "Global Terminal was removed. Use /terminals open for this session terminal; retained consoles remain inspectable with list/read/close.");
       if (action === "open") {
         const root = command.argument.slice("open".length).trim() || undefined;
         const opened = await sdk.terminal.open(session.id, 80, 24, undefined, root);

@@ -3,7 +3,11 @@
 The [protocol-51 interaction follow-up](session-interactions.md) adds atomic
 sibling ordering, existing guarded drag attachment, shared confirmation
 preferences, explicit model-only task checklists and real-user Other answers.
-It does not change actual session roots or grant model authority. and Ghostty contract
+It does not change actual session roots or grant model authority.
+The [protocol-60 follow-up](workspace-experience.md#session-navigation-follow-up)
+removes Global Terminal navigation/CLI creation and the session grip, reuses
+whole-row sibling ordering and adds reviewed, profile-preference-bound child
+detachment. Retained independent owners remain inspectable and closable.
 
 This user-requested slice keeps capability semantics in the SDK/service and
 extends the existing dark client world. It is not a new terminal implementation
@@ -30,7 +34,7 @@ The exact destination and any containing registered project/worktree are leased;
 active clone roots cannot be imported or opened as a second user console.
 Successful project registration and the completed clone-job record commit together.
 
-Protocol/migration 44 extends Local terminal bindings/states with actual null
+For retained SDK compatibility, protocol/migration 44 extends Local terminal bindings/states with actual null
 session/project identities for one independently owned **Global terminal** per
 profile, not a synthetic chat or inherited project. A profile-default query
 discloses the canonical home directory; the user explicitly opens that root.
@@ -42,7 +46,7 @@ worktree. Remote bindings still require real session/project/peer identities.
 The existing profile-owned broker authenticates all consoles; no PID guessing,
 input replay, new VT implementation or output persistence is introduced.
 
-Global launches retain root-scoped `terminal.changed` intent with null
+Compatibility global launches retain root-scoped `terminal.changed` intent with null
 session/project fields. Global history survives unrelated session/project
 deletion. A second concurrent global open selects no replacement: the service
 admits at most one original live global intent. Captured inode/root and allowed

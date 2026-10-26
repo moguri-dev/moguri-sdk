@@ -63,7 +63,8 @@ Resume. Logs/statistics remain separate from private consoles. See
 ## Shared presentation and retention
 
 User remains the original private Ghostty console, with its current explicit
-open/reattachment/no-input-replay semantics. Global Terminal remains user-only.
+open/reattachment/no-input-replay semantics. Retained independent consoles remain
+user-only and inspectable; Global Terminal navigation is removed in protocol 60.
 Agent displays actual agent output through the same maintained Ghostty runtime,
 with original command selection, truthful lifecycle labels and bounded output
 pages/tails. Merely opening, restoring, reconnecting or selecting Agent never

@@ -263,17 +263,29 @@ retention. Files are UTF-8 only, up to 128 KiB. The review digest binds actual
 access provenance as well as source content and destination. This is a disclosed
 client-attachment boundary, not a substitute for pinned-SSH metadata reads.
 
-`terminal.openGlobal(cols?, rows?)` explicitly opens a Local console in the
-runtime's canonical Moguri data directory. Its binding has null session,
+The low-level compatibility method `terminal.openGlobal(cols?, rows?)` opens a
+Local console in configured canonical HOME. Its binding has null session,
 project and workspace IDs and the active profile's authenticated Local owner.
 It neither inherits a selected project's root nor depends on its retention.
-CLI `terminal global`, `/terminals global`, and `/terminal global` expose it.
-`terminal.openGlobal(root, cols?, rows?)` and CLI `terminal open-global ROOT`
-retain main's explicit independent-root form. The console displays that actual
+Protocol 60 retires Global Terminal UI and CLI/slash creation with an explicit
+error. Existing null-session consoles remain in `terminal list` and
+`/terminals list` for exact inspection/reconciliation/close.
+`terminal.openGlobal(root, cols?, rows?)` retains the explicit-root SDK
+compatibility overload. Its binding retains the actual
 captured root; it does not substitute a project, session or configured SSH root.
 Existing `terminal.open(sessionId)` keeps its exact project/worktree/SSH root.
 Closing/hiding the desktop pane detaches; `terminal.close(id)` terminates.
 Reconnection/restoration never creates a replacement or replays input.
+
+`sessions.organize(id, changes, expectedRevision?, confirmDetach?)` requires
+the final `true` acknowledgement when removing an existing parent and this
+profile's `interactions.confirmSessionDetach` is not false. It does not bypass
+revision, same-project, active-work, cycle or model-owned-subagent guards.
+Desktop drag/menu/parent-selector detachment uses the same native review;
+remembered opt-out is a profile-owned settings edit, not an approval grant.
+Missing legacy preferences normalize to true and reset with
+`settings.reset("interactions", revision)`. Schema 60 adds the transactional
+`session_navigation_schema` marker without rewriting retained payloads.
 
 The original desktop schema-44 marker is additive; legacy confirmations default to asking,
 legacy session order derives from creation, and historical data/grants retain

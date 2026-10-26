@@ -119,7 +119,7 @@ Finish with the outcome and any real blocker. Do not claim access to hidden reas
 
 export const SettingsSchema = object({
   appearance: AppearanceSchema,
-  interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean() }),
+  interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),
@@ -168,7 +168,7 @@ export const SettingsSchema = object({
 });
 export type UserSettings = Static<typeof SettingsSchema>;
 export const defaultSettings = (): UserSettings => ({
-  appearance: { theme: "dark", palette: "moguri", custom: {} }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
+  appearance: { theme: "dark", palette: "moguri", custom: {} }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true, confirmSessionDetach: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
   permissions: { defaultDecision: "ask", tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [], skillSources: [],
@@ -193,6 +193,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
   const defaults = defaultSettings();
   return { ...defaults, ...settings,
     appearance: { ...defaults.appearance, ...settings.appearance },
+    interactions: { ...defaults.interactions, ...settings.interactions },
     permissions: { ...defaults.permissions, ...settings.permissions },
     voice: { ...defaults.voice, ...settings.voice },
     retention: { ...defaults.retention, ...settings.retention },

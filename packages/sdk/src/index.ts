@@ -121,7 +121,8 @@ export class MoguriSdk extends TransportClient {
         session.controls.modelId === null ? false : rememberModelSelection);
     },
     context: (sessionId: string) => this.query({ type: "session.context", sessionId }),
-    organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes, expectedRevision }),
+    organize: (sessionId: string, changes: SessionChanges, expectedRevision = this.sessionRevision(sessionId), confirmDetach?: true) =>
+      this.command({ type: "session.organize", sessionId, changes, expectedRevision, ...(confirmDetach ? { confirmDetach } : {}) }),
     reorder: (...args: [sessionIds: string[]] | [projectId: string | null, parentSessionId: string | null, groupId: string | null, archived: boolean, sessions: { sessionId: string; revision: number }[]]) => {
       if (args.length === 1) return this.command({ type: "session.reorder", sessions: args[0].map((sessionId) => ({ sessionId, revision: this.sessionRevision(sessionId) })) });
       const [projectId, parentSessionId, groupId, archived, sessions] = args;

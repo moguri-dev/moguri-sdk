@@ -88,7 +88,7 @@ test("session reorder checks complete sibling revisions atomically and preserves
     const child = sessions().find((session) => session.id === second.id)!;
     assert.equal(child.workspaceId, null); assert.equal(child.mode, "agent");
     await assert.rejects(() => sdk.sessions.organize(third.id!, { parentSessionId: second.id! }), /acyclic|cycle/i);
-    await sdk.sessions.organize(second.id!, { parentSessionId: null });
+    await sdk.sessions.organize(second.id!, { parentSessionId: null }, undefined, true);
     assert.equal(sessions().find((session) => session.id === second.id)?.parentSessionId, undefined);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
