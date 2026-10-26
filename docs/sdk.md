@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **62**, including
+Current source uses protocol **63**, including
+[automatic Kupo and its shared capability inventory](architecture/automatic-kupo.md),
 [project Kanban continuation and provider-equivalent prices](architecture/project-kanban.md),
 [remembered approvals and repository-aware GitHub workflows](architecture/session-github-workflows.md),
 [skill gateway and graphic workspace dashboards](architecture/workspace-experience.md),
@@ -26,6 +27,10 @@ approval/GitHub metadata without rewriting encrypted history. The exact private
 approval-development schema-59 lineage also converges by its own retained
 marker, atomically adding the workspace/navigation markers. Missing or
 ambiguous provenance is rejected rather than guessed.
+Schema 63 explicitly converges the independent automatic-Kupo schema 61 and
+session/GitHub schema 61, plus Kanban/pricing schema 62. Exact original markers,
+approvals, selected responses, encrypted history, receipts and held accounting
+survive failure and reopen; a missing current marker is never silently repaired.
 It retains protocol-54 exact-scoped session PR observations
 and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
 [the separate Agent terminal](architecture/agent-terminal.md),

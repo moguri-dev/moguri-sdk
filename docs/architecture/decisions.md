@@ -299,7 +299,7 @@ access to GitHub's internal implementation or a standalone HydraFusion API. [H1]
 
 **Schema impact.** Phase 1 defines versioned routing-policy snapshots, plans, leg ownership, candidate bases, acceptance/application outcomes, and complete per-call accounting. Use the existing event/projection model and normal migration and restart-recovery rules; do not build a second hidden workflow store.
 
-**Current automatic response slice, protocol 61.** The
+**Automatic response slice, introduced in protocol 61.** The
 [automatic Kupo contract](automatic-kupo.md) records the user-selected normal
 composer behavior, reused licenses, prerequisite measurements, capability
 inventory, original-response selection, exact Manual approvals and no-replay

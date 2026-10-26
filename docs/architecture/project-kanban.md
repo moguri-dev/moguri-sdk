@@ -182,3 +182,46 @@ qualification is claimed. CI remains restricted to `main` pushes.
 
 These measurements precede integration of automatic Kupo and contextual project
 colors from `main`; they are not qualification of that integrated tree.
+
+## Integrated qualification, 2026-10-26
+
+The protocol-63 integration preserves automatic Kupo, its private-role model
+boundaries, contextual rainbow/custom colors and the Kanban/approval/GitHub
+features. Type checks and the production build pass. Exact original schema-61
+lineages, Kanban schema 62, private approval schema 59 and interrupted
+intermediate migrations retain their markers, ciphertext, receipts, original
+responses and existing consent through failure and reopen.
+
+The complete Node/service/worker/CLI/native-TUI run passes **1,552 cases with
+14 platform/native skips**, zero failures, across 1,566 cases in
+**1,292,019.42 ms**. A generated Cascade task exercises the real selected draft
+through commit and PR publication: five actual router/draft/critic calls remain
+charged to the origin, only the selected original response can publish, and
+remaining same-response tools are denied without another model call.
+
+The complete hidden Electron run passes **207 flows with three
+packaged/physical-native skips**, zero failures, across 210 flows in
+**6.6 minutes**. This includes both project-color and Kanban menus, toggle/focus
+behavior, stale-revision refusal, project/session dragging, Kupo, native
+approvals, repository sources and full PR/issue bodies.
+
+The independently packed external SDK installs and audits cleanly. All public,
+Node, React and MCP imports/declarations, actual installed runtime/CLI/SSH flows,
+automatic Kupo and Kanban/pricing surfaces pass, along with all **12 installed
+worker continuation probes**. Root and external-consumer audits report **zero
+vulnerabilities**. The package's native preparation script is explicitly
+approved in the generated consumer, not silently enabled for other packages.
+
+An initial full run exposed a fixture acknowledgement race: provider dispatch
+could be visible before that test's SDK event stream had received the retained
+reservation. The SIGKILL fixture now waits for the exact session/model
+reservation, then verifies that same immutable entry after recovery instead of
+indexing an unacknowledged client array. All four current/original-main
+Kanban/Kupo recovery cases pass in five consecutive repetitions, and the final
+complete runs include this correction. No production authorization or
+accounting assertion was weakened. Initial failure evidence remains separate.
+
+The known notices and unavailable real-service/native/release boundaries above
+remain unchanged. All execution uses generated roots and credentials, owned
+loopback services and hidden windows. This does not qualify real model quality,
+physical SendBox, fork-head updates, Remote/Sandbox continuation or billed spend.
