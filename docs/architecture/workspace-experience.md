@@ -114,6 +114,8 @@ an independently packed SDK consumer remain required.
 
 ## Integrated qualification
 
+This subsection records the protocol-59 checkpoint.
+
 The final generated macOS arm64 runs pass **1,446 Node/worker/CLI/TUI cases**
 with **14 platform/native skips**, and **183 hidden desktop cases** with
 **three packaged/physical-native skips**. No tests remain failed or cancelled.
@@ -218,4 +220,28 @@ The first full desktop run also found a browser fixture sending its keyboard
 command before the authenticated command gate was ready. It now waits for
 the actual Run command button, not merely an editable textarea; no timeout or
 dialog-dismissal assertion was weakened. That exact case passes ten repeated
-checks while the complete Node suite runs.
+checks under concurrent complete-Node-suite load.
+
+## Protocol-60 integrated qualification
+
+The final macOS arm64 runs pass **1,455 Node/worker/CLI/TUI checks** with
+**14 platform/native skips** in 21.2 minutes, and **192 hidden desktop checks**
+with **three packaged/physical-native skips** in 6.4 minutes. No checks remain
+failed or cancelled. Type checks and the committed production build pass.
+The independently installed packed SDK passes every entrypoint, the explicit
+detach acknowledgement/preference/reset checks and all **12 installed worker
+continuation probes**. Root and independently installed consumer audits report
+**zero vulnerabilities**.
+
+Coverage includes both child-list scopes, root/group/header destinations,
+cancel and restored focus, keyboard/parent-selector alternatives, stale source
+and destination refusal, preference-save failures and concurrent hierarchy
+changes. Genuine model-owned subagents and active work remain non-detachable.
+Profile isolation, reset, encrypted restart recovery and schema-59 migration
+rollback preserve original identities, payloads, receipts and legacy consoles.
+Project terminal actions use the selected actual managed worktree; empty
+projects create neither a global console nor a hidden chat.
+
+The same non-blocking FFI, lazy Ghostty bundle-size and transitive-deprecation
+advisories above remain. Generated success does not qualify physical SendBox,
+personal provider/SSH access, signed release artifacts or deferred features.
