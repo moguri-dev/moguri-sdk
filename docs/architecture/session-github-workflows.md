@@ -21,6 +21,16 @@ durable schema or protocol and leaves service restart ownership and Remote
 credential boundaries unchanged. Generated service-startup, exact-selection,
 explicit-exclusion and cancellation tests cover the behavior.
 
+The Finder-launch follow-up passes type checks and the production build,
+**118 related service/process/GitHub/SSH checks with three unqualified native
+skips**, **13 hidden desktop flows**, and the independently installed SDK with
+all **12 worker continuation probes**. Root and external-consumer audits remain
+clean. Missing CLI tools on an SSH peer still produce the original unavailable
+error rather than discovering a different executable. A Local version-only
+probe confirms the installed Homebrew `gh` starts with the corrected startup
+environment, without authentication or a GitHub request. These are focused
+follow-up results, not a new full-suite run or personal-account qualification.
+
 Remembered approvals are actual-user settings, scoped to one session, one
 project or every project in the current profile. Exact commands, conservative
 command families and exact schema/configuration-bound MCP tools are separate
