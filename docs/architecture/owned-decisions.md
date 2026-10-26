@@ -30,6 +30,12 @@ Jev wire/schema prerequisite remains in
 adapter. Remote/native Max is also blocked rather than executing its model
 on the Local controller.
 
+[Laya's optional-provider evaluation](decisions.md#laya-optional-provider-evaluation)
+describes a separately installed loopback or user-managed HTTP alternative.
+It is not selectable in current settings and cannot use this generative
+worker/accounting path unchanged. No Laya installation, automatic fallback
+or Jev qualification is implied.
+
 One decision binds the exact actual parent session/turn and solver step,
 pending request ID/revision, arguments, declared alternatives, user
 delegation, policy, selected model and complete input/output envelope.

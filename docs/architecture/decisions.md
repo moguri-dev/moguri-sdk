@@ -483,6 +483,167 @@ The same slice adds controller-account repository discovery, exact reviewed
 GitHub source starts, native client pickers and existing reviewed PR/issue
 publication. It adds no dependency or Jev/Remote/native qualification.
 
+### Laya optional provider evaluation
+
+**Assessment, 2026-10-26.** Recommend qualifying
+[Laya](https://github.com/NandhaKishorM/laya) as an opt-in, separately installed
+System 1 decision provider alongside the Jev target, not replacing Jev or
+silently substituting for it. The user would choose the provider and exact
+checkpoint independently of the generative solver, kupo, Env and autonomy.
+The existing bounded-model alternative also remains separate. This is an
+evaluation, not an implemented adapter, an installation or automatic-decision
+qualification. Current settings accept only `bounded-model` and `jev`;
+Jev's output-bound restriction above is unchanged.
+
+**Evidence boundary.** Source review pins Laya to
+`b9fe351ce81e2d974bca2bf219c1e4030c0a05ea`, whose package declares `0.4.16`.
+PyPI and the latest GitHub release reported `0.4.15` on the assessment date.
+Do not assume a plain `pip install` contains every reviewed source behavior.
+No Laya package, weights or server was installed or executed for this review;
+no live Jev call or Moguri laptop benchmark was performed. [LY1], [LY8]
+
+**Technical fit.** Laya uses an encoder and fixed decision heads rather than
+autoregressive text generation. It returns named `choice`, `noul` (P(true))
+and ordinal `score` answers. Its optional `laya[serve]` Python package exposes
+`POST /v1/systemone`, `POST /v1/systemone/batch` and `GET /health`. There is no
+OpenAI-compatible chat endpoint, so it cannot be registered as an ordinary
+Moguri local chat model or sent through the existing pi-ai worker unchanged.
+A fixed answer space prevents invented labels, not confident wrong decisions.
+[LY1], [LY2]
+
+| Checkpoint | Parameters | Published token window | Appropriate evaluation |
+|---|---|---|---|
+| [English](https://huggingface.co/convaiinnovations/laya/blob/7b928d828b7b0e022f929d9bd2e44165aa270148/README.md) | 421M | 512 | Short English classification |
+| [Multilingual](https://huggingface.co/convaiinnovations/laya-multilingual/blob/1720e3e3357cfe1e281542e223f8273b0890ca34/README.md) | 322M | 1,024 by default; explicitly configurable to 8,192 | Mixed-language and longer bounded state |
+| [Typed decisions](https://huggingface.co/convaiinnovations/laya-typed-decisions/blob/e929ae5cf69bc34259cd2f95c9e91145b818b1f0/README.md) | 421M | 1,024 | Specialist trained on four synthetic workflows, not general coding approvals |
+
+These are whole per-question row windows: instructions, alternatives and
+special tokens take space away from the state. The model-card links pin the
+observed Hub revisions, not tested or approved deployment artifacts.
+The source license and all three model cards declare Apache-2.0. This is a
+permissive integration candidate, not a completed training-data or transitive
+license audit. Separate installation avoids embedding Python, PyTorch, ONNX
+or model weights in Moguri; any later redistribution needs its own dependency,
+license/notice and exact-artifact review. [LY3], [LY9]
+
+**Deployment and user ownership.** Both deployment modes would use one
+dedicated service-owned HTTP adapter and one shared SDK configuration:
+
+| Deployment | Required boundary |
+|---|---|
+| Same laptop | The user separately provisions Python 3.10+, `laya[serve]` and selected checkpoint weights, then starts the server on loopback, explicitly setting `LAYA_HOST=127.0.0.1`; upstream defaults to `0.0.0.0`. Prefer the host Python runtime when evaluating Metal/MPS rather than assuming a Linux container exposes it. |
+| User-managed endpoint | The user supplies the exact approved destination and any profile-owned bearer secret reference. Require authenticated encrypted transport for non-loopback use and separate data/network consent; self-hosted is not synonymous with local-only. |
+
+Moguri must not install Laya, download weights, scan for servers, start or
+terminate the user's service, or acquire credentials implicitly. The external
+server's normal lazy/preload behavior can download weights, so provision the
+reviewed artifacts separately before an offline deployment. Preload only the
+selected checkpoint when cold-load latency matters; default all-model
+preloading increases residency. A remote HTTP destination does not itself
+select the Remote execution Env. Future Remote calls must originate on the
+captured SSH machine; existing Remote/native Max gates stay blocked. [LY1], [LY2]
+
+**Compatibility gaps that block a settings-only switch:**
+
+1. **Exact identity.** The response's top-level `model` is the constant
+   `laya-rl-agent`, not a Jev version or checkpoint identity. `routing` reports
+   the selected checkpoint/repository; authenticated health exposes loaded
+   revisions. Unrecognized non-path model names, including Jev IDs, can mean
+   "let the router choose." Send a recognized explicitly selected checkpoint,
+   pin its revision and artifact digests, and reject unexpected routing.
+   Upstream supports opt-in `LAYA_REVISION`/`LAYA_SHA256_DIGESTS`; its
+   `reviewed` alias refers to its own pinned table, not a Moguri qualification.
+   A separate health read is not atomic per-call provenance. Automatic
+   application still needs evidence binding the actual inference to the
+   configured runtime, weights, tokenizer/configuration and calibration. [LY2], [LY4], [LY6]
+2. **Lossless input.** Moguri's 64 KiB state and 4,096-character criteria
+   limits do not establish a fit in these windows. Laya can return an answer
+   after cutting state, instruction text or option descriptions.
+   `usage.truncated`/`state_tokens_dropped` expose state loss, but do not prove
+   that instructions and all option text survived: `build_head` caps each
+   option's encoding at 48 tokens and can shorten the combined head further.
+   Require exact-renderer/tokenizer preflight or additional server evidence
+   covering the complete question and state; reject loss, collisions or
+   missing evidence. Do not silently summarize, window, repair or drop
+   alternatives to make a request fit. [LY2], [LY3]
+3. **Confidence and authority.** Laya's `confidence` is normalized entropy for
+   choice/score, while `answer_confidence` is the reported answer's probability.
+   `x_jev_confidence` computes a Jev-style formula over Laya probabilities;
+   neither it nor wire compatibility makes existing Jev thresholds calibrated
+   for Laya. Preserve these distinct semantics and fit/validate thresholds on
+   held-out generated Moguri decisions. Upstream documents overconfidence,
+   label-sensitive yes/no answers, score weaknesses and an
+   `action.act_probability` head with little usable signal. None can authorize
+   tools, supply user-only facts or override policy. [LY1], [LY2]
+4. **Wire validation.** The full response carries extra routing, confidence,
+   action and truncation fields; it is not the exact inner
+   `DecisionAdviceSchema`. Validate and retain the raw provider envelope before
+   projecting the declared typed advice. Keep `LAYA_JEV_STRICT=0`: strict mode
+   removes routing and truncation evidence and does not convert entropy
+   confidence into Jev confidence. Test four-decimal probability/score rounding
+   against Moguri's existing 0.001 consistency tolerance at every supported
+   option count; restrict unsupported shapes rather than globally weakening
+   validation or silently repairing results. Disable tournament/shortlist
+   paths for an initial one-call adapter, since they change alternatives,
+   confidence and accounting. [LY2]
+5. **Honest accounting.** Laya reports zero generated output tokens by design,
+   but nonzero input work: `input_tokens` sums non-padding rows, including the
+   repeated state and question/options for each question. A one-state context
+   estimate would underreserve multi-question work. Current
+   `decisionCapability`, `DecisionRecord` and `BudgetRuntime.reservation`
+   require positive generative output capacity; a new provider-specific,
+   provably non-generative admission path is needed, not an invented
+   `max_tokens` field, fake generated tokens or zero-cost bypass. Reserve the
+   entire bounded question set before dispatch and retain every actual role,
+   input usage and known/unknown charge. No API invoice does not imply an
+   approved zero USD rate, and JSON response bytes are not generated tokens.
+   Unknown completion keeps its hold. [LY4]
+6. **Cancellation and readiness.** HTTP abort/deadline cannot prove the
+   synchronous inference thread stopped; upstream explicitly allows an
+   already-running forward pass to continue after request cancellation.
+   `/health` is liveness, not loaded-model readiness, and a wrong/missing
+   bearer can still receive `{"status":"ok"}`. Require exact authenticated
+   capability checks, bounded request/response bodies and deadlines. Report
+   unavailable, busy, failed, partial and cancellation-unconfirmed outcomes;
+   do not retry an uncertain call, switch providers or apply a stale late
+   result. Stopping Moguri must not kill a separately owned Laya server. [LY2], [LY5]
+
+**Quality and performance judgment.** The 322-421M parameter range and
+CPU/MPS support make a separate laptop service plausible, not qualified.
+Upstream reports about 2.3 GB for the three-checkpoint download; that is not
+resident RAM including PyTorch, activations and caches. Its macOS Intel/Radeon
+measurements report 121-146 ms for four short questions on MPS and roughly
+13 seconds of first-call Metal compilation. These are not Apple Silicon
+laptop or Moguri end-to-end measurements, nor does the advertised 33 ms T4
+figure predict them. The specialist's reported 0.766 accuracy versus Jev's
+published 0.727 is not a controlled head-to-head: upstream states that it had
+no TypeSafe API access and prompts/sample sizes differ. Neither those four
+workflows nor a confidence threshold qualifies coding-tool decisions. [LY1], [LY7]
+
+**Qualification and implementation impact.** First run the documented Phase 0
+prerequisites and add a separately recorded Laya adapter spike. Generated
+fixtures must cover exact named alternatives/legends and confidence semantics,
+input/head truncation, Unicode/rounding, alias/revision drift, auth/readiness,
+oversized/malformed replies and busy/error responses. Prove concurrent
+all-role input-only admission under finite token/USD policy, unknown/late
+usage, cancellation failure, actual controller loss/restart, source/report
+retention, human intervention and revoked delegation without call/effect
+replay. A separately provisioned real-weight run must measure cold/warm
+latency, peak RSS, actual device, full supported input sizes and held-out
+false-allow/abstention rates; transport fixtures alone cannot qualify quality.
+No such Laya qualification is claimed here.
+
+Reuse Node fetch/abort/HTTP (MIT), TypeBox (MIT), existing owned decision
+reports, authorizer and append-only all-role ledger, not another agent loop
+or client-specific Python binding. An implementation needs a versioned
+decision-provider configuration/capability contract, endpoint and secret
+references, non-generative bounds/accounting and retained exact inference
+provenance. Durable additions require migrations, protocol compatibility,
+packed SDK and restart-recovery coverage; old Jev/bounded-model settings
+remain intact and defaults stay off. CLI/TUI/desktop must share SDK readiness,
+selection, errors, actual actors/usage and stop behavior. This evaluation
+changes no dependency, schema, event, API or executable behavior.
+
 ## D13. Remote SSH execution
 
 **Decision.** Include a user-configured **Remote** env in the first release. It runs the agent task, tools, and all router/solver/critic/decision model calls on the SSH machine. The user's local Moguri service still owns durable state and the client API; the remote worker reports through a versioned, run-scoped protocol inside SSH.
@@ -981,6 +1142,15 @@ entrypoints is not executable by a standalone Node process.
 - [J1]: TypeSafe AI's official Jev introduction: System One models produce typed decisions, not chat.
 - [J2]: Official Jev API: endpoint, state/questions/answers, question types, confidence fields, usage, and errors.
 - [J3]: Official Jev model/version documentation: limits, aliases, and resolved versions.
+- [LY1]: Laya README at the reviewed source commit: architecture, checkpoints, installation and documented limitations.
+- [LY2]: Laya HTTP contract at the reviewed source commit: endpoint, routing, confidence, truncation, usage and strict-mode behavior.
+- [LY3]: Laya sequence/head renderer at the reviewed source commit: state window and instruction/option caps.
+- [LY4]: Laya inference implementation at the reviewed source commit: exact per-question row usage and zero generated output.
+- [LY5]: Laya HTTP implementation at the reviewed source commit: inference executor, cancellation, health and request handling.
+- [LY6]: Laya opt-in revision and artifact-digest verification at the reviewed source commit.
+- [LY7]: Upstream macOS setup and measurements at the reviewed source commit, not Moguri qualification.
+- [LY8]: Laya PyPI metadata, checked 2026-10-26; published release 0.4.15 versus reviewed source declaration 0.4.16.
+- [LY9]: Laya Apache-2.0 source license at the reviewed source commit; model-card declarations are linked in the evaluation.
 
 [B]: ../implementation.md
 [I]: ../../README.md
@@ -1001,3 +1171,12 @@ entrypoints is not executable by a standalone Node process.
 [J1]: https://docs.typesafe.ai/introduction
 [J2]: https://docs.typesafe.ai/api
 [J3]: https://docs.typesafe.ai/models
+[LY1]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/README.md
+[LY2]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/docs/http-api.md
+[LY3]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/laya/common.py#L157-L278
+[LY4]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/laya/agent.py#L1524-L1574
+[LY5]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/laya/serve.py#L1200-L1492
+[LY6]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/laya/revisions.py
+[LY7]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/LOCAL_SETUP.md
+[LY8]: https://pypi.org/pypi/laya/json
+[LY9]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/LICENSE
