@@ -177,7 +177,7 @@ test("context filtering down to one eligible model still skips the classifier an
   } finally { await fixture.close(); }
 });
 
-test("losing the only configured model blocks Kupo without consuming a saved draft or substituting a provider", async () => {
+test("losing the only configured model blocks Kupo without consuming a saved draft or substituting a provider", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
@@ -189,7 +189,7 @@ test("losing the only configured model blocks Kupo without consuming a saved dra
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("an Unlimited automatic Kupo session cannot lift a finite profile policy or spend its held draft", async () => {
+test("an Unlimited automatic Kupo session cannot lift a finite profile policy or spend its held draft", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture({ maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);

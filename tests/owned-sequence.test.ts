@@ -298,6 +298,20 @@ test("an alternate advertised model without an approved privacy-eligible pool ca
   } finally { await f.close(); }
 });
 
+test("an automatic composer pool cannot approve alternate models for the private owned-role executor", async () => {
+  const f = await fixture();
+  try {
+    const alternative = `${f.modelId}-generated-private-alias`;
+    f.provider.state.models.push({ ...f.provider.state.models[0]!, id: alternative }); f.provider.onChange();
+    await f.sdk.refresh();
+    const policy = f.sdk.routing.policy(); assert.ok(policy?.workflow === "auto");
+    await f.sdk.routing.configure({ ...policy, classifierModelId: f.modelId, approvedModelIds: [alternative] }, f.sdk.settings.get()!.revision);
+    const value = structuredClone(f.input); value.roles[1]!.modelId = alternative;
+    await assert.rejects(() => f.execution.preview(value), { code: "routing_disabled" });
+    assert.equal(f.requests.length, 0); assert.equal(f.control.snapshot().roleSequences.length, 0); assert.equal(f.control.snapshot().budgetPlans.length, 0);
+  } finally { await f.close(); }
+});
+
 test("owned admission snapshots caller input and cost review before yielding rather than following later object mutation", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
   const f = await fixture(), gate = Promise.withResolvers<void>(), captured = Promise.withResolvers<void>();
   try {

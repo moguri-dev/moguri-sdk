@@ -7,6 +7,8 @@ agent runtime. The user explicitly chose automatic orchestration inside the
 normal loop, with only the selected response's tool requests reaching existing
 Manual approvals. The separately reviewed
 [compound worktree workflow](compound-workflows.md) remains available.
+The automatic composer pool cannot approve alternate models for the private
+owned-role executor; that existing explicit-pool boundary remains separate.
 
 The design follows GitHub's public
 [Project HydraFusion overview](https://github.blog/ai-and-ml/github-copilot/project-hydrafusion-frontier-quality-via-multi-model-orchestration/):
