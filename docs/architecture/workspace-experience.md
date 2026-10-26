@@ -206,3 +206,16 @@ remembered and reset preferences across restart/profile boundaries, stale
 review refusal, unchanged authority, removed global entrypoints and retained
 private-console lifecycle. Packed-consumer, build and migration checks remain
 required.
+
+Native checks also exposed focus loss after successful detachment: a
+microtask could focus the old child row before React replaced it in the root
+list. Session actions now restore focus in a layout effect only after the
+rendered snapshot reaches the committed SDK sequence. Cancel, remembered
+detachment, parent-selector review, archive and delete dialogs pass twelve
+repeated checks without weakening focus assertions.
+
+The first full desktop run also found a browser fixture sending its keyboard
+command before the authenticated command gate was ready. It now waits for
+the actual Run command button, not merely an editable textarea; no timeout or
+dialog-dismissal assertion was weakened. That exact case passes ten repeated
+checks while the complete Node suite runs.
