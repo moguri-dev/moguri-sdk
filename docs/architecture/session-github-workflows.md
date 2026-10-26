@@ -28,7 +28,10 @@ all **12 worker continuation probes**. Root and external-consumer audits remain
 clean. Missing CLI tools on an SSH peer still produce the original unavailable
 error rather than discovering a different executable. A Local version-only
 probe confirms the installed Homebrew `gh` starts with the corrected startup
-environment, without authentication or a GitHub request. These are focused
+environment, without authentication or a GitHub request. The actual packaged
+Node, SDK and matching compiled runtime also pass a generated minimal-PATH
+service launch while preserving bundle provenance and environment isolation.
+These are focused
 follow-up results, not a new full-suite run or personal-account qualification.
 
 Remembered approvals are actual-user settings, scoped to one session, one
