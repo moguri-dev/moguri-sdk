@@ -68,6 +68,15 @@ existing `rg`/`jq` and isolated data workers under the D06 checkpoint allowance.
 No new Rust helper, agent framework, silent compaction or permission-bearing
 model/router advice is introduced.
 
+The [protocol-59 workspace experience](workspace-experience.md) retains this stack
+while adding refreshed profile-owned skill discovery through the shared SDK/MCP
+gateway, explicit global suggestion previews, and four event/accounting-backed
+dashboard pages. Its measured prerequisite results, additive migration and
+unqualified execution boundaries are recorded in that contract.
+The protocol-60 session-navigation follow-up keeps the same stack and owner
+lifecycle, removes Global Terminal surfaces and the session grip, and adds
+revision-bound child-detachment review with a profile-owned opt-out.
+
 ## D01. Build from zero with borrowed libraries
 
 **Decision.** Moguri owns its domain model, event store, protocol, local service and clients. It does not fork OpenCode or Pi. Maintained libraries supply providers, MCP, PTYs, terminal rendering, diffs, SQLite and UI toolkits.
@@ -382,7 +391,7 @@ candidate origin and independent raw-copy history.
 
 ## D12. System One decisions and autonomy levels
 
-**Decision, amended by the owner's protocol-59 request.** Keep the typed
+**Decision, amended by the owner's session-handling request.** Keep the typed
 decision-provider interface and optional **Jev by TypeSafe AI** adapter.
 **Manual** remains default and **Guided** still requires human confirmation.
 Explicitly selecting **Autopilot** now delegates automatic tool/command
@@ -391,7 +400,7 @@ unattended approvals and adds a qualified System One-compatible decision layer
 for delegated technical choices and steering. Neither changes model, Env,
 Budget, hard denials, root ownership or user-only settings. Existing bounded
 selections retain their old behavior until explicitly reselected. See the
-[protocol-59 contract](session-github-workflows.md).
+[protocol-61 contract](session-github-workflows.md).
 
 **Provider contract.** Jev is a structured decision model, not a code/chat generator. Its documented hosted API evaluates state against typed Noul (yes/no probability), Choice, and Score questions; some types include a separate confidence value. Use a dedicated adapter to `POST https://api.typesafe.ai/v1/systemone`, not an invented OpenAI-compatible endpoint or assumed `pi-ai` integration. Other local or hosted providers must declare and satisfy equivalent capabilities. [J1], [J2]
 
@@ -439,7 +448,7 @@ The final generated full/packed/native sweep passes without changing factory
 defaults or qualified archives. Remote/native Max and live
 reliability/calibration remain distinct gates.
 
-**Protocol-59 source slice.** Remembered approvals reuse `settings.updated`;
+**Protocol-61 source slice.** Remembered approvals reuse `settings.updated`;
 actual user answers and scoped grants are one transaction. A metadata-only
 schema marker preserves encrypted history and legacy autonomy behavior.
 Automatic approvals record an `autonomy` actor bound to the explicit consent

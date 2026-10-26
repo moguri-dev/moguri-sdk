@@ -165,12 +165,13 @@ cannot close or erase them. Local policy, exact root identity, shutdown
 admission checks and owner/build authentication remain mandatory. No selected
 project, previous session or SSH mapping supplies a fallback root.
 
-The desktop starts an eligible console on explicit pane opening, including
-Global Terminal with no selected session. It waits for actual Remote readiness
+The desktop starts an eligible session console on explicit pane opening.
+Protocol 60 removes Global Terminal navigation and CLI/slash creation, without
+closing, adopting or relabeling retained independent owners. It waits for actual Remote readiness
 for project consoles rather than using Local. Explicitly selecting another
 session/project or starting a chat while the Terminal pane is open carries a
 new one-shot intent for that actual selected session. It reuses an existing
-console or opens the exact qualified root, including a disclosed data root for
+console or opens the exact qualified root, including disclosed configured HOME for
 project-free Local chats. Passive initial selection, profile restoration,
 Settings/tab remounts, hidden project selection, or reselecting the same
 already-visible X-closed session do not create intent. Hiding a running terminal pane asks

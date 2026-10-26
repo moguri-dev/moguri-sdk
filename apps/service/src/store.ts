@@ -303,10 +303,43 @@ export class EventStore {
         this.db.prepare("SELECT value FROM retention_metadata WHERE id='lean_tooling_convergence_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid lean tooling/convergence schema marker. State was preserved.");
       }
-      if (version < 59) this.db.exec(`BEGIN IMMEDIATE;
-        INSERT INTO retention_metadata(id,value) VALUES ('session_github_workflows_schema','1');
-        PRAGMA user_version=59; COMMIT;`);
-      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_workflows_schema'").get()?.value !== "1") {
+      const workflowMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_workflows_schema'").get();
+      const workspaceMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='workspace_experience_schema'").get();
+      const navigationMarker = this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_navigation_schema'").get();
+      const workflowConvergence = this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_convergence_schema'").get();
+      const workflow59 = version === 59 && workflowMarker?.value === "1" && !workspaceMarker && !navigationMarker && !workflowConvergence;
+      if (workflow59) this.db.exec(`BEGIN IMMEDIATE;
+        INSERT INTO retention_metadata(id,value) VALUES ('workspace_experience_schema','1');
+        INSERT INTO retention_metadata(id,value) VALUES ('session_navigation_schema','1');
+        INSERT INTO retention_metadata(id,value) VALUES ('session_github_convergence_schema','1');
+        PRAGMA user_version=61; COMMIT;`);
+      else {
+        if (version < 61 && (workflowMarker || workflowConvergence)) throw new Error("Invalid pre-61 session/GitHub workflow lineage markers. State was preserved.");
+        if (version < 59) this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('workspace_experience_schema','1');
+          PRAGMA user_version=59; COMMIT;`);
+        if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='workspace_experience_schema'").get()?.value !== "1") {
+          throw new Error("Missing or invalid workspace experience schema marker. State was preserved.");
+        }
+        if (version < 60) this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('session_navigation_schema','1');
+          PRAGMA user_version=60; COMMIT;`);
+        if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_navigation_schema'").get()?.value !== "1") {
+          throw new Error("Missing or invalid session navigation schema marker. State was preserved.");
+        }
+        if (version < 61) this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('session_github_workflows_schema','1');
+          INSERT INTO retention_metadata(id,value) VALUES ('session_github_convergence_schema','1');
+          PRAGMA user_version=61; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='workspace_experience_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid workspace experience schema marker. State was preserved.");
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_navigation_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid session navigation schema marker. State was preserved.");
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_workflows_schema'").get()?.value !== "1" ||
+        this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_github_convergence_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid session/GitHub workflow schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }

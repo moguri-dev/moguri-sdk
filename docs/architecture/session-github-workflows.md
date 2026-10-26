@@ -35,7 +35,7 @@ Starting from a GitHub item retains its explicit source and draft without
 starting inference or changing the checkout. Desktop and TUI consume the same
 SDK capabilities.
 
-Protocol/schema 59 preserves existing events and settings. Older grants
+Protocol/schema 61 preserves existing events and settings. Older grants
 are not inferred, and old autonomy selections are not silently upgraded into
 broader permission. New automatic approvals require the retained
 `controls.automaticApprovals` marker and record an `autonomy` actor.
@@ -66,6 +66,13 @@ original revision-bound verification. Remembered Remote tools bind the actual
 underlying tool schema, not an ephemeral catalogue wrapper, and still require
 fresh scoped discovery after restart. No access-forwarding grant is created.
 
+Schema 61 retains the main-line workspace-experience schema 59 and reviewed
+session-navigation schema 60. The exact earlier approval-development schema
+59 is recognized only by its distinct retained workflow marker and absence
+of main-line/future markers; it atomically adds both main-line markers and
+the new convergence marker. Ambiguous/corrupt lineage is never repaired or
+inferred from a version number. No ciphertext or existing consent is rewritten.
+
 ## Prerequisite measurements
 
 Before implementation, `npm run spike` passed all six available generated
@@ -73,6 +80,14 @@ groups on macOS arm64: provider cancellation 31.68 ms; SQLite append p95
 0.058 ms and rebuild 0.516 ms; owned PTY cancellation 151.32 ms with zero
 survivors; TUI updates 17.29 ms; hidden Electron startup 201.14 ms, 445.23 MiB
 and 12.09 ms per frame; 2,000-file search/Git 0.935/5.867 ms.
+
+After integrating the main-line workspace/navigation changes and before the
+protocol-61 convergence, all six prerequisite groups passed again: provider
+cancellation 32.61 ms; SQLite append p95 0.065 ms and rebuild 0.499 ms; owned
+PTY cancellation 152.84 ms with zero survivors; TUI updates 17.88 ms; hidden
+Electron startup 171.71 ms, 446.27 MiB and 8.04 ms per frame; 2,000-file
+search/Git 0.867/5.950 ms. The same separately listed live/native gates remain
+unqualified.
 
 Before integrating remembered Remote MCP approvals, the generated
 `npm run spike:remote` passed in 141.29 ms with one actual loopback SSH-worker

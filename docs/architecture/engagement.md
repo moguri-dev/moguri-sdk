@@ -80,17 +80,23 @@ shell arguments, events or the model.
 
 ## Suggestions and metachat
 
-`/suggestions` previews bounded previous-session user prompts and their scope.
-Project chats default to that project; project-free chats default only to
-other project-free chats. Cross-project analysis requires an explicit scope
-preview and consent, not an automatic global read. Generation uses the shared
+Protocol 59's `/suggestions` and desktop Suggestions page default to a global
+profile preview of deterministic usage gaps and bounded prior user prompts.
+Opening it creates no hidden session, downloads no source and makes no model
+call. Selecting a source chat, or `/suggestions session`, narrows the scope;
+explicit non-null SDK session previews retain project/project-free scoping.
+Cross-project model analysis still requires exact source/model preview and
+consent, not automatic sending or configuration changes. Generation uses the shared
 worker/provider/accounting/cancellation path, never hidden model calls.
 Preview includes at most 12 prior agent/side sessions and the last eight user
 prompts from each, at most 4,000 Unicode characters per prompt and 32 KiB of
 actual UTF-8 content in total. Control/model-subagent conversations are excluded.
 The analysis chat retains only those exact approved excerpts as evidence, not
 unreviewed tails of a truncated source. Cross-project hints require the reviewed
-analysis path before becoming proposals.
+analysis path before becoming proposals. Its digest also binds observed gaps
+and the selected model/environment; changed settings or sources require review
+again. Gap checks inspect only this profile's actual saved configuration and
+accounting, never claim a quality score, and do not enable optional features.
 
 The desktop **ask Moguri** action, `/meta` and `/metachat` create a settings-focused conversation for the chosen
 scope. Its tools read non-secret configuration or create exact reviewed

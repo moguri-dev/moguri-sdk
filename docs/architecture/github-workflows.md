@@ -3,7 +3,7 @@
 This is an executable, user-reviewed workflow surface, not model-owned Git
 permission and not the completion of the wider first-release roadmap.
 
-Protocol 59 adds [repository and session entry points](session-github-workflows.md):
+Protocol 61 adds [repository and session entry points](session-github-workflows.md):
 explicit controller-account repository discovery, project-specific PR/issue
 pickers, complete detail views, reviewed creation and source-bound idle session
 starts. These reuse the write lifecycle below rather than another GitHub

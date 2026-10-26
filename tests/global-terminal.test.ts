@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdir, realpath, rename } from "node:fs/promises";
 import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
@@ -9,6 +10,20 @@ import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 
 const native = { skip: process.platform !== "darwin" };
 const program = { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_GLOBAL_READY\\n'; exec cat"] };
+
+test("the default Local console root is configured HOME, never the Moguri state directory", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    assert.equal((await sdk.terminal.defaultRoot()).root, await realpath(homedir()));
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("an invalid configured HOME fails instead of resolving relative to the state or checkout", async () => {
+  const fixture = await setupFixture({ platform: { terminal: { defaultRoot: "." } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try { await assert.rejects(() => sdk.terminal.defaultRoot(), /HOME.*absolute/); assert.equal(fixture.service.controller.snapshot().terminals.length, 0); }
+  finally { sdk.disconnect(); await fixture.close(); }
+});
 
 test("one global console is independent of all sessions, deduplicates concurrent opens and never enters model context", native, async () => {
   const fixture = await setupFixture({ platform: { terminal: program } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -65,11 +80,13 @@ test("restart reattaches the exact global owner and PTY without a session or rep
   } finally { sdk.disconnect(); peer?.disconnect(); await restarted?.close(); await fixture.close(); }
 });
 
-test("project-free session consoles require an explicitly chosen root and remain distinct from the global console", native, async () => {
-  const fixture = await setupFixture({ platform: { terminal: program } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+test("project-free session consoles default to configured HOME and remain distinct from the global console", native, async () => {
+  const fixture = await setupFixture({ platform: { terminal: { ...program, defaultRoot: tmpdir() } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const created = await sdk.sessions.create(null);
-    await assert.rejects(() => sdk.terminal.open(created.id!), /explicit|root|project/i);
+    const home = await sdk.terminal.open(created.id!);
+    assert.equal((await sdk.terminal.read(home.id!)).terminal.binding?.root, await realpath(tmpdir()));
+    await sdk.terminal.close(home.id!);
     const global = await sdk.terminal.openGlobal(fixture.project);
     const own = await sdk.terminal.open(created.id!, 80, 24, undefined, fixture.project);
     assert.notEqual(global.id, own.id);

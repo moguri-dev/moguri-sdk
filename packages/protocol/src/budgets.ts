@@ -103,6 +103,7 @@ export type BudgetResponse =
   | { type: "budget.status"; status: BudgetStatus }
   | { type: "budget.plans"; plans: BudgetPlan[]; nextOffset: number | null; window: BudgetWindow }
   | { type: "budget.dashboard"; totals: BudgetTotals; groups: Array<{ role: ModelRole; modelId: string; providerId: string | null; totals: BudgetTotals }>; policy: { revision: number; limit: BudgetLimit | null }; nextOffset: number | null;
+      projects: Array<{ projectId: string | null; totals: BudgetTotals }>; models: Array<{ modelId: string; totals: BudgetTotals }>;
       window: BudgetWindow; bucket: BudgetBucket; periods: Array<{ from: string | null; to: string | null; totals: BudgetTotals }>;
       pricing: Array<{ rate: BudgetRate; calls: number; estimatedUsd: number | null }>; currency: "USD"; repositoryCoverage: RepositoryCoverage }
   | { type: "budget.calls"; calls: BudgetEntry[]; nextOffset: number | null; window: BudgetWindow; repositoryCoverage: RepositoryCoverage };

@@ -49,18 +49,18 @@ test("quiesced service shutdown closes an admitted unfinished HTTP body without 
   } finally { clearTimeout(deadline); pending.destroy(); await closing; await fixture.close(); }
 });
 
-test("an interrupted schema-58 workflow migration rolls back and keeps original encrypted rows", async () => {
+test("an interrupted schema-60 workflow migration rolls back and keeps original encrypted rows", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
   let store: EventStore | undefined;
   try {
     const before = retainedCiphertextRows(fixture.service.store.db);
-    await writeLegacyState(fixture.service, 58);
+    await writeLegacyState(fixture.service, 60);
     const original = new DatabaseSync(path);
     original.exec("CREATE TRIGGER generated_workflow_migration BEFORE INSERT ON retention_metadata WHEN NEW.id='session_github_workflows_schema' BEGIN SELECT RAISE(ABORT,'Generated workflow migration interruption'); END"); original.close();
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated workflow migration interruption/);
     const failed = new DatabaseSync(path);
     try {
-      assert.equal(failed.prepare("PRAGMA user_version").get()?.user_version, 58);
+      assert.equal(failed.prepare("PRAGMA user_version").get()?.user_version, 60);
       assert.deepEqual(retainedCiphertextRows(failed), before);
       failed.exec("DROP TRIGGER generated_workflow_migration");
     } finally { failed.close(); }
@@ -69,8 +69,61 @@ test("an interrupted schema-58 workflow migration rolls back and keeps original 
   } finally { store?.close(); await fixture.close(); }
 });
 
+async function privateWorkflow59Fixture() {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  await sdk.sessions.autonomy(fixture.sessionId, "Autopilot"); sdk.disconnect(); await fixture.service.close();
+  const raw = new DatabaseSync(fixture.service.store.path);
+  try {
+    raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('workspace_experience_schema','session_navigation_schema','session_github_convergence_schema'); PRAGMA user_version=59; COMMIT;");
+  } finally { raw.close(); }
+  return fixture;
+}
+
+test("the exact private approval schema-59 lineage converges atomically without rewriting actual consent", async () => {
+  const fixture = await privateWorkflow59Fixture(), path = fixture.service.store.path;
+  let store: EventStore | undefined;
+  try {
+    const raw = new DatabaseSync(path), before = retainedCiphertextRows(raw); raw.close();
+    store = new EventStore(path, fixture.retentionKey);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+    assert.equal(projectEvents(store.events()).sessions[0]?.controls.automaticApprovals, true);
+    for (const marker of ["workspace_experience_schema", "session_navigation_schema", "session_github_workflows_schema", "session_github_convergence_schema"]) {
+      assert.equal(store.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(marker)?.value, "1");
+    }
+    assert.deepEqual(retainedCiphertextRows(store.db), before);
+  } finally { store?.close(); await fixture.close(); }
+});
+
+test("private approval schema-59 convergence failure rolls back every new marker and preserves encrypted history", async () => {
+  const fixture = await privateWorkflow59Fixture(), path = fixture.service.store.path;
+  try {
+    const raw = new DatabaseSync(path), before = retainedCiphertextRows(raw), markers = raw.prepare("SELECT id,value FROM retention_metadata ORDER BY id").all();
+    raw.exec("CREATE TRIGGER generated_workflow_convergence_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='session_navigation_schema' BEGIN SELECT RAISE(ABORT,'Generated workflow convergence interruption'); END"); raw.close();
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated workflow convergence interruption/);
+    const preserved = new DatabaseSync(path);
+    try {
+      assert.equal(preserved.prepare("PRAGMA user_version").get()?.user_version, 59);
+      assert.deepEqual(preserved.prepare("SELECT id,value FROM retention_metadata ORDER BY id").all(), markers);
+      assert.deepEqual(retainedCiphertextRows(preserved), before);
+    } finally { preserved.close(); }
+  } finally { await fixture.close(); }
+});
+
+test("an ambiguous schema-59 lineage is refused without repairing or rewriting retained state", async () => {
+  const fixture = await privateWorkflow59Fixture(), path = fixture.service.store.path;
+  try {
+    const raw = new DatabaseSync(path), before = retainedCiphertextRows(raw);
+    raw.exec("INSERT INTO retention_metadata(id,value) VALUES ('workspace_experience_schema','1')"); raw.close();
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Invalid pre-61.*lineage/);
+    const preserved = new DatabaseSync(path);
+    try { assert.equal(preserved.prepare("PRAGMA user_version").get()?.user_version, 59); assert.deepEqual(retainedCiphertextRows(preserved), before); }
+    finally { preserved.close(); }
+  } finally { await fixture.close(); }
+});
+
 test("current workflow schemas reject missing or corrupted consent metadata without resetting state", async (t) => {
-  for (const sql of ["DELETE FROM retention_metadata WHERE id='session_github_workflows_schema'", "UPDATE retention_metadata SET value='0' WHERE id='session_github_workflows_schema'"]) await t.test(sql, async () => {
+  for (const sql of ["DELETE FROM retention_metadata WHERE id='session_github_workflows_schema'", "UPDATE retention_metadata SET value='0' WHERE id='session_github_workflows_schema'",
+    "DELETE FROM retention_metadata WHERE id='session_github_convergence_schema'"]) await t.test(sql, async () => {
     const fixture = await setupFixture(), path = fixture.service.store.path;
     try {
       const before = retainedCiphertextRows(fixture.service.store.db); await fixture.service.close();

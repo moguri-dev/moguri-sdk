@@ -13,17 +13,21 @@ const outcome = (value: string): OperationOutcome => {
 type Provenance = Pick<OperationEntry, "actor" | "env" | "modelId" | "providerId" | "role" | "folderId" | "ownerSessionId" | "ownerTurnId" | "repository" | "repositoryDiagnostic">;
 const scopedStep = (event: StoredEvent) => JSON.stringify([event.session_id, event.turn_id, event.step_id]);
 const operationEvent = (event: StoredEvent) => ["tool.requested", "tool.decided", "tool.started", "tool.completed", "turn.finished"].includes(event.event_type);
+export function externalOperationTurns(events: StoredEvent[], snapshot?: Snapshot): Set<string> {
+  const turns = new Set<string>();
+  for (const event of events) if (event.event_type === "job.started" && ["mcp.call", "tool.call"].includes(event.payload.job.kind) && event.turn_id) turns.add(event.turn_id);
+  for (const job of snapshot?.jobs ?? []) if (job.kind === "mcp.call" && job.parentTurnId) turns.add(job.parentTurnId);
+  return turns;
+}
 function provenance(events: StoredEvent[], snapshot?: Snapshot) {
-  const modelSteps = new Map<string, Extract<StoredEvent, { event_type: "model.started" }>>(), externalTurns = new Set<string>(), planTurns = new Set<string>(), envs = new Map<string, OperationEntry["env"]>();
+  const modelSteps = new Map<string, Extract<StoredEvent, { event_type: "model.started" }>>(), externalTurns = externalOperationTurns(events, snapshot), planTurns = new Set<string>(), envs = new Map<string, OperationEntry["env"]>();
   const externalCaptures = new Map(events.flatMap((event) => event.event_type === "turn.started" && event.turn_id && event.payload.repositoryCapture ? [[event.turn_id, event.payload.repositoryCapture] as const] : []));
   for (const event of events) {
     if (event.event_type === "model.started") modelSteps.set(scopedStep(event), event);
-    if (event.event_type === "job.started" && ["mcp.call", "tool.call"].includes(event.payload.job.kind) && event.turn_id) externalTurns.add(event.turn_id);
     if (event.event_type === "turn.control_started" && event.payload.purpose === "plan.save" && event.turn_id) planTurns.add(event.turn_id);
     if (event.event_type === "turn.started" || event.event_type === "turn.control_started") if (event.turn_id) envs.set(event.turn_id, event.payload.controls.env);
   }
   for (const save of snapshot?.planSaves ?? []) planTurns.add(save.id);
-  for (const job of snapshot?.jobs ?? []) if (job.kind === "mcp.call" && job.parentTurnId) externalTurns.add(job.parentTurnId);
   return {
     planTurns,
     describe: (event: StoredEvent): Provenance => {

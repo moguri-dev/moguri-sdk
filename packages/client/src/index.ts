@@ -34,17 +34,43 @@ export class MoguriClient {
     if (!this.state.snapshot && this.refreshError instanceof ClientError) throw this.refreshError;
     this.openSocket();
   }
-  protected async request(path: string, body?: unknown): Promise<unknown> {
-    const response = await fetch(`${this.connection.baseUrl}${path}`, {
-      method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${this.connection.token}`, "X-Moguri-Profile": this.profileId, ...(body ? { "Content-Type": "application/json" } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20_000),
-    });
-    const result: unknown = await response.json();
-    if (!response.ok) {
-      const error = isRecord(result) && isRecord(result.error) ? result.error : undefined;
-      throw new ClientError(typeof error?.code === "string" ? error.code : "request_failed", typeof error?.message === "string" ? error.message : `Service request failed (${response.status}).`);
-    }
-    return result;
+  protected async request(path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
+    signal?.throwIfAborted();
+    const connection = this.connection, requestId = path === "/v1/query" && signal ? crypto.randomUUID() : null;
+    const headers = { Authorization: `Bearer ${connection.token}`, "X-Moguri-Profile": this.profileId, ...(body ? { "Content-Type": "application/json" } : {}) };
+    let cancellation: Promise<ClientError | null> | undefined;
+    const cancel = () => {
+      if (!requestId || cancellation) return;
+      cancellation = (async () => {
+        try {
+          const response = await fetch(`${connection.baseUrl}/v1/query-cancel`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ requestId }), signal: AbortSignal.timeout(5000) });
+          const result: unknown = await response.json();
+          if (!response.ok || !isRecord(result) || result.requested !== true) throw new Error("The original query cancellation was not acknowledged.");
+          return null;
+        } catch {
+          return new ClientError("query_cancellation_failed", "The reply was discarded, but query cancellation could not be confirmed. Its source read may finish before its deadline. No result was applied.");
+        }
+      })();
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      const response = await fetch(`${connection.baseUrl}${path}`, {
+        method: body ? "POST" : "GET", headers: { ...headers, ...(requestId ? { "X-Moguri-Query-Id": requestId } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
+      });
+      const result: unknown = await response.json();
+      signal?.throwIfAborted();
+      if (!response.ok) {
+        const error = isRecord(result) && isRecord(result.error) ? result.error : undefined;
+        throw new ClientError(typeof error?.code === "string" ? error.code : "request_failed", typeof error?.message === "string" ? error.message : `Service request failed (${response.status}).`);
+      }
+      return result;
+    } catch (error) {
+      const failed = cancellation ? await cancellation : null;
+      if (failed) throw failed;
+      throw error;
+    } finally { signal?.removeEventListener("abort", cancel); }
   }
   async command(command: Command, id: string = crypto.randomUUID()): Promise<CommandResult> {
     if (this.state.status !== "connected") throw new ClientError("disconnected", "Reconnect to Moguri before changing state. Your local edit has not been sent.");

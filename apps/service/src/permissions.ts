@@ -1,7 +1,7 @@
 import { relative, isAbsolute, normalize } from "node:path";
 import { createHash } from "node:crypto";
 import type { Controls, RememberApproval, RememberedApproval, ToolCall, UserSettings } from "../../../packages/protocol/src/index.ts";
-import { appearanceErrors, commandFamily, sqlEndpoint, validateShortcutSet, isPasteFilePath, MoguriError } from "../../../packages/protocol/src/index.ts";
+import { appearanceErrors, commandFamily, sqlEndpoint, skillArchiveUrl, validateShortcutSet, isPasteFilePath, MoguriError } from "../../../packages/protocol/src/index.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { validateRemoteTarget } from "./remote.ts";
 
@@ -59,6 +59,13 @@ function rememberedAuthorization(settings: UserSettings, call: ToolCall, context
 export function validateSettings(settings: UserSettings): void {
   validateLocalEndpoints(settings.localModels);
   validateRemoteTarget(settings.remote);
+  const sourceIds = new Set<string>();
+  for (const source of settings.skillSources ?? []) {
+    if (sourceIds.has(source.id)) throw new MoguriError("skill_source_id", "Skill source IDs must be unique within the profile.");
+    sourceIds.add(source.id);
+    if (source.kind === "remote") skillArchiveUrl(source.url);
+    else if (!isAbsolute(source.path) || /[\0\r\n]/.test(source.path)) throw new MoguriError("skill_source_path", "Use an explicit absolute skill folder without control characters.");
+  }
   const shortcuts = validateShortcutSet({ voice: settings.voice.shortcut ?? "Control+Space",
     commands: settings.shortcuts?.commands ?? "Primary+KeyK", terminalCopy: settings.shortcuts?.terminalCopy ?? "Primary+Shift+KeyC" });
   if (shortcuts.length) throw new MoguriError("shortcut_conflict", shortcuts.join(" "));

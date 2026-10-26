@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
 import { test } from "node:test";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -123,14 +124,14 @@ test("automatic GitHub attachment access discloses public fallback without borro
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("global consoles are profile-owned Local data-root terminals, independent of project/session deletion and restart", { skip: process.platform !== "darwin" }, async () => {
+test("global consoles are profile-owned Local HOME terminals, independent of project/session deletion and restart", { skip: process.platform !== "darwin" }, async () => {
   const program = { executable: process.execPath, args: ["-e", "process.stdout.write('GENERATED_GLOBAL_READY\\n'); process.stdin.resume();"], brokerPath: resolve("dist/terminal-broker.mjs") };
   const fixture = await setupFixture({ platform: { terminal: program } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined, peer: MoguriSdk | undefined;
   try {
     const opened = await sdk.terminal.openGlobal(), terminal = sdk.getState().snapshot!.terminals.find((terminal) => terminal.id === opened.id)!;
     assert.equal(terminal.sessionId, null); assert.equal(terminal.projectId, null);
-    assert.equal(terminal.binding?.root, await realpath(join(fixture.directory, "state")));
+    assert.equal(terminal.binding?.root, await realpath(homedir()));
     const settings = sdk.settings.get()!;
     await sdk.settings.update({ ...settings.values, interactions: { confirmSessionAttachments: false, confirmTerminalClose: false } }, settings.revision);
     await sdk.sessions.delete(fixture.sessionId, true);

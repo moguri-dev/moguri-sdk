@@ -146,19 +146,30 @@ development-signing limitations remain.
 
 ## Global and session sidebar placement
 
-The owner clarified that the six global items belong on the **left**, ordered
-Dashboard, Artifacts, Candidates, Sandbox, Suggestions, Global Terminal. The
+Protocol 60 leaves the **left** resources as Dashboard, Suggestions and
+Automations, removing Global Terminal. Artifacts/Candidates/Sandbox move to Settings. Code change
+and Work item belong to the **right**, following the selected session; an existing
+linked PR remains accessible without a new linking/write workflow. Automations
+and the issue-link panel are placeholders, not scheduled work or provider-write authority. The
 **right** rail contains only Terminal, Browser, Insights, Changes, Files, Plan,
-Side chat, in that order. The left resource group is a named native navigation
+Side chat, Code change and Work item, in that order. The left resource group is a named native navigation
 landmark; repeated selection still returns to chat after existing dirty/terminal
-checks. Existing styles, model controls and session hierarchy are unchanged.
+checks. Existing styles and model controls are unchanged. Whole rows reorder
+siblings, including children; child drag-out and menu detachment share a
+profile-owned, default-on confirmation. The six-dot action grip is removed.
 
 This reuses React/native navigation (MIT) and existing SDK/resource routing.
-No dependency, setting, API, durable event, schema or migration is added.
-Legacy saved global-panel names still restore their independent full-page
-resource rather than becoming invalid preferences or another right-rail tab;
-widths remain intact. PR and attention actions remain auxiliary, not new primary
+The placement change itself adds no durable event or dependency; the associated
+[skill/dashboard contract](workspace-experience.md) describes the schema-59 slice
+and schema-60 session-navigation follow-up.
+Legacy saved Artifacts/Candidates/Sandbox panel names restore their Settings
+destination rather than becoming invalid preferences or another right-rail tab;
+widths remain intact. Legacy PR actions open Code change; attention stays auxiliary, not another primary
 rail items. Hiding an auxiliary panel returns keyboard focus to Insights.
+Legacy Global Terminal layouts restore a passive session Terminal pane without
+launching, adopting or closing the old independent console. Its authenticated
+inspection/close APIs remain; project actions select an existing session and
+never create a global console or hidden chat.
 Globals still create no hidden session/inference, terminal opening remains
 one-shot and hiding a live owner keeps its existing review/opt-out. Read-only/
 profile/root, cancellation and retained-resource behavior are unchanged.
@@ -199,7 +210,7 @@ accounts, terminals and ongoing owners were not closed or adopted.
 
 ## Right-pane icon toggles
 
-Each of the seven right-rail buttons opens its session view when inactive and
+Each of the nine right-rail buttons opens its session view when inactive and
 uses the existing guarded header-hide path when clicked again while visible.
 The icon rail remains, including after maximized-pane collapse; existing open/
 size preferences and keyboard focus are retained. Expanded/pressed state and
@@ -268,7 +279,7 @@ only desktop entry routing and its local pending-state presentation change.
 Explicitly navigating to another session/project or starting a chat while
 Terminal is open creates one entry intent for that actual selected session.
 An existing console is reused; otherwise an eligible transport opens its exact
-root. Project-free Local requests disclose/use the data root, never the previous
+root. Protocol 59 project-free Local requests disclose/use configured HOME, never the previous
 project. Passive initial selection, profile restoration, Settings/tab remounts,
 hidden project selection and reselecting the same visible X-closed chat cannot
 manufacture launch intent.

@@ -14,9 +14,13 @@ Boolean/select controls save their own field against the committed revision.
 Text controls have an adjacent Save action. Neither search nor navigation
 discards edits or commits unrelated fields.
 
-The scrollable left navigation owns Start and profile-wide resources:
-Suggestions, usage, independently retained artifacts/candidates, native execution
-management and the global console. Attention has one entrypoint in the top bar.
+The scrollable left navigation owns New and profile-wide Dashboard, Suggestions,
+and Automations. Global Terminal is removed in protocol 60; Automations is
+intentionally empty. Code change and Work item live in the right rail, bound to the selected
+session, not global resources. Independently retained
+Artifacts/Candidates and native execution management live in Settings; Sandbox
+combines managed SendBox setup and retained workspace/publication controls.
+Attention has one entrypoint in the top bar.
 The right rail contains only current-session tools. Existing sessions are selected
 explicitly where a global operation needs a source; opening a global page never
 creates a hidden session, inherits a null root or starts a model.
@@ -25,6 +29,22 @@ Provider configuration and profile management live in Settings. Project-folder
 actions open the actual project's configuration. Original Moguri typography,
 colors and component patterns are retained; the reference image is not a design
 source.
+Copilot connection status is visible only under Settings / Models / Providers;
+the left footer does not contain a provider badge or connection button.
+
+The [protocol-59 experience](workspace-experience.md) keeps profile name, mascot
+Ask Moguri and icon-only Settings on one footer row. Non-secret input/textarea
+controls throughout Settings share hover/focus copy affordances; password
+fields are explicitly excluded. Long explanatory prose uses focusable
+information tooltips. Consequential warnings, actual status, errors and source
+review acknowledgements stay visible. Editing, revision conflicts and dirty
+navigation guards are unchanged.
+
+Settings / Confirmations also owns default-on child-session detachment review.
+The same review applies to drag-out, Detach and the parent selector's None
+choice. Remembering an opt-out saves only this profile's interactions preference;
+reset restores confirmation. The service's exact revision, hierarchy, active
+work and model-owned-subagent checks are independent of that preference.
 
 ## Authority and defaults
 
