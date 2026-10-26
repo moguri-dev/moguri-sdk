@@ -7,9 +7,12 @@ This slice reuses Node.js (MIT), TypeBox (MIT), React/OpenTUI (MIT), Git
 backends and existing reviewed GitHub operation lifecycle. No new dependency,
 provider framework, shell parser or credential-sharing mechanism is needed.
 
-macOS Local service startup and owned Git/GitHub program launches share a
-Node-only executable-path helper. It preserves inherited precedence and appends
+macOS Local service startup uses a Node-only executable-path helper. It
+preserves inherited precedence and appends
 only missing standard Homebrew locations, reusing the native-host path list.
+Owned programs inherit that Local service environment. Generic process launch,
+direct in-process SDK runtimes and Remote peer PATH remain unchanged, so missing
+tools on a selected SSH host cannot acquire another executable.
 Explicit program environments and absolute executable selections remain exact;
 there is no shell-profile execution, executable scan, alternate account,
 credential forwarding or automatic CLI installation. Other platforms retain

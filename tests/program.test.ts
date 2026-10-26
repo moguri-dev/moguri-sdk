@@ -7,14 +7,14 @@ import { join, resolve } from "node:path";
 import { runProgram } from "../apps/service/src/program.ts";
 import { waitFor } from "./fixture.ts";
 
-test("owned Local programs expose standard macOS tools when an in-process SDK runtime starts with Finder's PATH", { skip: process.platform !== "darwin" }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-program-path-")), previous = process.env.PATH;
+test("generic program launch keeps its actual host PATH unchanged instead of discovering tools for a Remote peer", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-peer-path-")), previous = process.env.PATH;
   try {
-    process.env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
-    const output = await runProgram(process.execPath, ["-p", "JSON.stringify(process.env.PATH.split(':'))"], {
-      cwd: directory, signal: AbortSignal.timeout(5000), label: "Generated Local PATH", timeoutMs: 5000,
+    process.env.PATH = "/generated/peer-only";
+    const output = await runProgram(process.execPath, ["-p", "JSON.stringify(process.env.PATH)"], {
+      cwd: directory, signal: AbortSignal.timeout(5000), label: "Generated peer PATH", timeoutMs: 5000,
     });
-    assert.deepEqual(JSON.parse(output), ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin", "/opt/homebrew/bin"]);
+    assert.equal(JSON.parse(output), "/generated/peer-only");
   } finally {
     if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous;
     await rm(directory, { recursive: true, force: true });
