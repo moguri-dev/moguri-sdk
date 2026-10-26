@@ -228,3 +228,27 @@ test("an actual service restart retains exact source ownership and imports updat
     assert.ok(fixture.calls.every((call) => call.method === "GET"));
   } finally { peer?.disconnect(); await restarted?.close(); await fixture.close(); }
 });
+
+test("full GitHub database identifiers beyond GraphQL Int32 retain their exact safe integer identity", async () => {
+  const fixture = await githubBoardFixture();
+  fixture.state.bigIdentifiers = true;
+  try {
+    await fixture.configure(true); assert.equal((await fixture.refresh()).status, "completed");
+    const board = await fixture.sdk.issues.board(fixture.projectId);
+    assert.equal(board.board.githubSource?.repositoryId, 3_000_000_041);
+    assert.equal(board.issues[0]?.github?.databaseId, 3_000_000_007);
+    assert.ok(fixture.reads.every((read) => read.query.includes("databaseId: fullDatabaseId")));
+  } finally { await fixture.close(); }
+});
+
+test("an identifier beyond exact numeric representation cannot mint a rounded source binding", async () => {
+  const fixture = await githubBoardFixture();
+  fixture.state.responseOverride = { data: { viewer: { login: "generated-owner", databaseId: 42 },
+    repository: { databaseId: "9007199254740993", nameWithOwner: "generated-owner/fixture", url: "https://github.com/generated-owner/fixture" } } };
+  try {
+    await assert.rejects(() => fixture.configure(true), { code: "github_sync_identity" });
+    const board = await fixture.sdk.issues.board(fixture.projectId);
+    assert.equal(board.board.githubSource, undefined); assert.equal(board.issues.length, 0);
+    assert.equal(board.board.autoRefreshPrs, false);
+  } finally { await fixture.close(); }
+});

@@ -16,15 +16,24 @@ export interface GithubBoardIssue {
   state: "open" | "closed"; stateReason: "completed" | "not_planned" | "duplicate" | null; updatedAt: string; pullRequests: PullRequestLink[];
 }
 const githubBoardFragment = `fragment MoguriKanbanCard on Issue {
-  id databaseId number url title body state stateReason updatedAt repository { nameWithOwner }
+  id databaseId: fullDatabaseId number url title body state stateReason updatedAt repository { nameWithOwner }
   closedByPullRequestsReferences(first: 100, includeClosedPrs: false) {
     nodes { number url state isDraft mergedAt repository { nameWithOwner } }
     pageInfo { hasNextPage endCursor }
   }
 }`;
+function githubDatabaseId(value: unknown): number {
+  const parsed = typeof value === "string" && /^[1-9][0-9]{0,15}$/.test(value) ? Number(value) : value;
+  if (typeof parsed !== "number" || !Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new MoguriError("github_sync_identity", "GitHub did not return an exact safely representable database identity. No rounded or substituted identifier was retained.", 502);
+  }
+  return parsed;
+}
 function githubBoardIssue(value: unknown, repository: string, expectedNumber?: number): GithubBoardIssue {
-  if (!isRecord(value) || typeof value.id !== "string" || !/^[A-Za-z0-9_+/=-]{1,256}$/.test(value.id) ||
-    !Number.isSafeInteger(value.databaseId) || Number(value.databaseId) < 1 || !Number.isSafeInteger(value.number) || Number(value.number) < 1 ||
+  if (!isRecord(value)) throw new MoguriError("github_sync_issue", "The exact linked issue is missing or unavailable. No closure or replacement was inferred.", 502);
+  const databaseId = githubDatabaseId(value.databaseId);
+  if (typeof value.id !== "string" || !/^[A-Za-z0-9_+/=-]{1,256}$/.test(value.id) ||
+    !Number.isSafeInteger(value.number) || Number(value.number) < 1 ||
     expectedNumber !== undefined && value.number !== expectedNumber || value.url !== `https://github.com/${repository}/issues/${value.number}` ||
     !isRecord(value.repository) || value.repository.nameWithOwner !== repository || typeof value.title !== "string" || !value.title.trim() ||
     value.title.length > 256 || typeof value.body !== "string" || value.body.length > 64 * 1024 ||
@@ -50,7 +59,7 @@ function githubBoardIssue(value: unknown, repository: string, expectedNumber?: n
     return { url, repo, number, state: request.state === "MERGED" ? "merged" : request.state === "CLOSED" ? "closed" : "open",
       draft: request.isDraft, checkedAt, diagnostic: null };
   });
-  return { nodeId: value.id, databaseId: Number(value.databaseId), repo: repository, number: Number(value.number), url: String(value.url),
+  return { nodeId: value.id, databaseId, repo: repository, number: Number(value.number), url: String(value.url),
     title: value.title, body: value.body, state: value.state === "CLOSED" ? "closed" : "open",
     stateReason: value.stateReason === "NOT_PLANNED" ? "not_planned" : value.stateReason === "COMPLETED" ? "completed" : value.stateReason === "DUPLICATE" ? "duplicate" : null,
     updatedAt: value.updatedAt, pullRequests };
@@ -88,11 +97,11 @@ export class ProjectIntegrations {
   private linearChanging = false;
   private readonly linearProjects = new Map<string, AbortController>();
   constructor(readonly vault: SecretVault, private readonly options: IntegrationOptions = {}) {}
-  private async boardGraphql(repository: string, accountId: string, root: string, fields: string, cursor: string | null, signal: AbortSignal) {
+  private async boardGraphql(repository: string, accountId: string, root: string, fields: string, cursor: string | null, signal: AbortSignal): Promise<Record<string, unknown> & { databaseId: number }> {
     const [owner, name, extra] = repository.split("/");
     if (extra || !owner || !name || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(name)) throw new MoguriError("github_sync_repository", "Use the exact reviewed GitHub repository.");
     const query = `query MoguriKanban($owner: String!, $name: String!${fields.includes("$cursor") ? ", $cursor: String" : ""}) {
-      viewer { login databaseId } repository(owner: $owner, name: $name) { databaseId nameWithOwner url ${fields} }
+      viewer { login databaseId } repository(owner: $owner, name: $name) { databaseId: fullDatabaseId nameWithOwner url ${fields} }
     }${fields.includes("MoguriKanbanCard") ? githubBoardFragment : ""}`;
     const variables: Record<string, string | null> = { owner, name, ...(fields.includes("$cursor") ? { cursor } : {}) };
     let response: unknown;
@@ -117,13 +126,14 @@ export class ProjectIntegrations {
       throw new MoguriError("github_sync_account", "The complete GitHub response did not verify the captured account. Partial or foreign observations were preserved as errors.", 409);
     }
     const result = response.data.repository;
-    if (!Number.isSafeInteger(result.databaseId) || Number(result.databaseId) < 1 || result.nameWithOwner !== repository || result.url !== `https://github.com/${repository}`) {
+    const repositoryId = githubDatabaseId(result.databaseId);
+    if (result.nameWithOwner !== repository || result.url !== `https://github.com/${repository}`) {
       throw new MoguriError("github_sync_repository", "The response did not verify this exact repository identity. No source was substituted.", 409);
     }
-    return result;
+    return { ...result, databaseId: repositoryId };
   }
   async githubBoardIdentity(repository: string, accountId: string, root: string, signal: AbortSignal): Promise<number> {
-    return Number((await this.boardGraphql(repository, accountId, root, "", null, signal)).databaseId);
+    return (await this.boardGraphql(repository, accountId, root, "", null, signal)).databaseId;
   }
   async githubBoardPage(source: GithubBoardSource, cursor: string | null, signal: AbortSignal): Promise<{ items: GithubBoardIssue[]; nextCursor: string | null }> {
     if (cursor !== null && (!cursor || cursor.length > 512 || /[\u0000-\u001f]/.test(cursor))) throw new MoguriError("github_sync_cursor", "The original GitHub cursor is invalid.");

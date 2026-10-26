@@ -8,11 +8,11 @@ export interface GeneratedGithubCard {
 }
 export async function githubBoardFixture(options: { refreshMs?: number; retentionKey?: Buffer } = {}) {
   const state: {
-    cards: GeneratedGithubCard[]; viewerId: number; repositoryId: number; responseOverride?: unknown;
+    cards: GeneratedGithubCard[]; viewerId: number; repositoryId: number; bigIdentifiers: boolean; responseOverride?: unknown;
     beforeRead?: (query: string, signal: AbortSignal) => Promise<void>;
   } = {
     cards: [{ number: 7, title: "Generated GitHub issue", body: "Generated remote body.", state: "OPEN", reason: null, draft: true, updatedAt: "2026-01-02T00:00:00Z" }],
-    viewerId: 42, repositoryId: 41,
+    viewerId: 42, repositoryId: 41, bigIdentifiers: false,
   };
   const reads: Array<{ query: string; variables: Record<string, string | null> }> = [];
   const integrations: IntegrationOptions = {
@@ -22,9 +22,9 @@ export async function githubBoardFixture(options: { refreshMs?: number; retentio
       reads.push({ query, variables: { ...variables } });
       await state.beforeRead?.(query, signal); signal.throwIfAborted();
       if (state.responseOverride !== undefined) return state.responseOverride;
-      const repository = { databaseId: state.repositoryId, nameWithOwner: "generated-owner/fixture", url: "https://github.com/generated-owner/fixture" };
+      const repository = { databaseId: state.bigIdentifiers ? String(3_000_000_000 + state.repositoryId) : state.repositoryId, nameWithOwner: "generated-owner/fixture", url: "https://github.com/generated-owner/fixture" };
       const document = (card: GeneratedGithubCard) => ({
-        id: `I_generated_${card.number}`, databaseId: card.number + 100, number: card.number, title: card.title, body: card.body,
+        id: `I_generated_${card.number}`, databaseId: state.bigIdentifiers ? String(3_000_000_000 + card.number) : card.number + 100, number: card.number, title: card.title, body: card.body,
         url: `${repository.url}/issues/${card.number}`, state: card.state, stateReason: card.reason, updatedAt: card.updatedAt,
         repository: { nameWithOwner: repository.nameWithOwner },
         closedByPullRequestsReferences: {

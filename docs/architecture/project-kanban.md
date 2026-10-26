@@ -94,6 +94,9 @@ reads; GraphQL also verifies the actual viewer and repository identity within
 each complete response. No credential, public-account or alternate-root
 fallback is allowed. Disabling sync aborts the original owned read; an ignored
 abort or late response cannot publish a card after revocation.
+Repository and issue IDs use `fullDatabaseId`, not the limited GraphQL Int32
+field. Decimal BigInt responses retain their exact safely representable value;
+larger values are rejected rather than rounded into another source identity.
 
 The official public GraphQL schema at
 <https://docs.github.com/public/fpt/schema.docs.graphql> confirms that
