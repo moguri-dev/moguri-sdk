@@ -295,3 +295,50 @@ The known notices and unavailable real-service/native/release boundaries above
 remain unchanged. All execution uses generated roots and credentials, owned
 loopback services and hidden windows. This does not qualify real model quality,
 physical SendBox, fork-head updates, Remote/Sandbox continuation or billed spend.
+
+## Kanban interaction qualification, 2026-10-27
+
+The protocol-64 executable checkpoint `ac9eb78` passes type checks and the
+production build. The complete Node/service/worker/CLI/native-TUI suite passes
+**1,590 cases with 14 existing platform/native skips**, zero failures or
+cancellations, across 1,604 cases in **1,313,408.72 ms**. This includes atomic
+ordering, competing structural intent, actual continuation choices and saved
+draft ownership, schema-marker rollback, revocation during pending imports,
+ignored cancellation, concurrent local text edits and actual service restart
+without duplicate imports or replay. Full-width GitHub IDs above Int32 retain
+their exact value; values outside safe numeric representation cannot mint a
+rounded source binding.
+
+The complete hidden Electron suite passes **211 flows with three existing
+packaged/physical-native skips**, zero failures, across 214 flows in
+**6.7 minutes**. All **seven related flows also pass against the actual packaged
+app** in **18.4 seconds**, including native card drags, per-column creation,
+every-request plain/slash route choice, cancellation preserving the draft,
+read-only issue import, real draft/ready status, synchronized-column locks and
+one-item draft-PR publication without changing the parent.
+
+The final independently packed SDK consumer installs and audits cleanly.
+Browser-safe root/React, explicit Node/MCP entrypoints and declarations,
+protocol-64 ordering/typed route reviews, installed runtime/CLI/SSH scenarios
+and all **12 installed-worker continuation probes** pass. Fresh source and
+external-consumer audits report **zero vulnerabilities**.
+
+Native packaging rebuilds the exact protocol-64 Linux arm64 worker payload
+without cache and verifies the bundled Node runtime and application identity.
+The actual ZIP/manifest passes the bounded production update consumer; the
+canonical DMG and distinct
+`Moguri-0.30.0-alpha.1-kanban-64-macos-arm64.dmg` preserve the exact signed
+bundle bytes and pass native Finder layout/background verification. The
+distinct image also passes its native checksum. Qualification mounts only
+private read-only verification volumes and opens no Finder window or personal
+application. The installer remains local ad-hoc-signed development output,
+not an uploaded or notarized release. Updating the previously installed app
+requires the user's separate quit/replace/reopen action.
+
+The initial broad run was intentionally stopped before correcting the official
+GitHub identifier-width contract; it is not counted as a passing qualification.
+The complete runs above use the final stable executable tree. Existing
+experimental FFI, lazy Ghostty chunk, optional packager `.icon` and transitive
+deprecation notices remain. CI is still restricted to `main` pushes. Physical
+SendBox containment, live model quality, personal authentication, Remote/Sandbox
+continuation and Linux/notarized release readiness are not broadened.
