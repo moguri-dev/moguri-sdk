@@ -113,5 +113,44 @@ compound/owned-role prerequisite passed 92 cases in 140.30 s, including real
 controller loss, cancellation, retained roles and unknown accounting.
 
 The baseline product build passed. Existing warnings were experimental FFI
-and renderer chunks above 500 kB. Integration observations belong below once
-the rebuilt path has actually been exercised.
+and renderer chunks above 500 kB.
+
+## Integrated protocol-61 qualification
+
+The user-approved integration preserves main's protocol-59 workspace/skill
+gateway and protocol-60 session navigation. Kupo uses its own additive
+protocol-61 marker rather than reusing either schema number or replacing
+their settings, events, identities or console ownership.
+
+Final generated macOS arm64 qualification:
+
+| Check | Result |
+| --- | --- |
+| Full Node/worker/CLI/TUI suite | 1,491 passed, 14 physical/platform skips, zero failed/cancelled; 1,231.88 s |
+| Full hidden desktop suite | 195 passed, three physical/packaged skips; 6.3 min |
+| Final desktop routing recheck | All six automatic, explicit Single and reviewed-worktree cases passed |
+| Production build and both type checks | Passed |
+| Independently packed SDK | Browser/React/Node/MCP imports/types, real installed automatic Single and all 12 installed worker continuation probes passed |
+| Root and independent consumer audits | Zero reported vulnerabilities |
+
+The actual loopback/SSH runs cover all three patterns, conditional escalation,
+one same-model revision, exact Manual approvals, solver-sourced Guided advice,
+selected-answer artifact/activity provenance, three-through-twenty model
+inventories, unknown usage, cancellation and atomic receipt failure. Real
+controller SIGKILL during review and selected-response approval retains unknown
+capacity and original blobs without replaying paid calls or proposed tools.
+Schema-60 rollback/reopen preserves ciphertext, receipts and explicit policies;
+forged selections and downgrade/replay attempts fail explicitly.
+
+The broad sweep exposed a private-role eligibility regression from the new
+automatic default. That executor now explicitly rejects borrowing an automatic
+composer pool, including a manually narrowed automatic subset. Both the
+original rejection and expanded consent-boundary regression pass in the final
+full suite. Exact context filtering also runs the sole remaining model directly,
+without paying for a redundant classifier or dropping the original task.
+
+Known non-blocking advisories remain experimental OpenTUI FFI, renderer
+bundle-size warnings and deprecated transitive `whatwg-encoding` /
+`node-domexception` packages in the packed consumer. None is an audit
+vulnerability. These results do not qualify live-model quality, physical
+SendBox, Linux release readiness or signed/notarized release artifacts.
