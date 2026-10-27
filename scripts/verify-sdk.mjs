@@ -640,6 +640,10 @@ try {
       await assert.rejects(()=>sdk.voice.appendCapture(side.id,randomUUID(),randomUUID(),1,new Uint8Array(2)),{code:"speech_capture_owner"});
       const host=fileURLToPath(new URL("./node_modules/moguri/dist/speech-host.mjs",import.meta.url));
       execFileSync(process.execPath,[host,process.execPath,"-e","setInterval(()=>{},1000)"],{input:"",timeout:10000});
+      const failedHost=spawn(process.execPath,[host,process.execPath,"-e","process.kill(process.pid,'SIGTERM')"],{stdio:["pipe","ignore","pipe"]});
+      let nativeDiagnostic="";failedHost.stderr.on("data",chunk=>{nativeDiagnostic+=chunk.toString();});
+      assert.equal(await new Promise((resolve,reject)=>{failedHost.once("close",resolve);failedHost.once("error",reject);}),1);
+      assert.match(nativeDiagnostic,/recognizer.*SIGTERM/);
       const grant=sdk.approvals.list().find(value=>value.scope.kind==="project"&&value.scope.projectId===second.id);
       await sdk.approvals.revoke(grant.id);
       await sdk.sessions.delete(opened.id,true);

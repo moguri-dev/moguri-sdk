@@ -26,6 +26,12 @@ test("Autopilot and Max automatically approve commands and exact MCP calls witho
     { source: "project", values: { autonomy: "Guided" } }], { settingsRevision: 1, projectRevision: 1 });
   assert.equal(defaults.controls.automaticApprovals, undefined);
   assert.equal(defaults.defaults.sources.automaticApprovals, undefined);
+  for (const autonomy of ["Manual", "Guided"] as const) {
+    const explicit = resolveControls([{ source: "global", values: { autonomy: "Autopilot", automaticApprovals: true } },
+      { source: "session", values: { autonomy } }], { settingsRevision: 1, projectRevision: null });
+    assert.equal(explicit.controls.automaticApprovals, undefined);
+    assert.equal(explicit.defaults.sources.automaticApprovals, undefined);
+  }
 });
 
 test("command families never absorb shell composition, wrappers, substitutions or another scope/environment", () => {

@@ -151,8 +151,9 @@ through another member while the group owns it. Archive preserves unknown
 ownership; deletion/removal cannot erase it. Read-only sides preserve the exact
 root set and original parent context without acquiring writer tools. Folder
 session restarts retain queued/held work and identities without replay.
-Repository-specific GitHub/plan panels explicitly direct users to a member
-project chat; unqualified per-repo MCP, hooks, memory indexing, background jobs,
+Repository-specific GitHub panels and workspace plan files stay in a member
+project chat; a folder's explicit model task checklist remains in Plan.
+Unqualified per-repo MCP, hooks, memory indexing, background jobs,
 publication and managed-worktree rebinding do not substitute a member.
 
 Native center drops attach session navigation or review a newly named project

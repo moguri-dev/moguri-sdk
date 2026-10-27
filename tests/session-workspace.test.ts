@@ -81,8 +81,8 @@ test("side context runs in parallel without edit authority and explicit nested s
     try { draft.edit("generated parallel question"); await draft.send("queue"); } finally { draft.dispose(); }
     await waitFor(() => fixture.service.controller.snapshot().sessions.find((session) => session.id === side.id)?.status === "completed");
     assert.equal(fixture.session().status, "running");
-    assert.doesNotMatch(JSON.stringify(fixture.requests[1]?.messages), /generated slow parent context/);
-    assert.match(JSON.stringify(fixture.requests[1]?.messages), /parent-session-reference/);
+    assert.match(JSON.stringify(fixture.requests[1]?.messages), /generated slow parent context/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[1]?.messages), /parent-session-reference/);
     const captured = await sdk.coordination.read(side.id!, { action: "snapshot" });
     assert.match(JSON.stringify(captured), /generated slow parent context/);
     assert.equal(fixture.service.controller.snapshot().sessions.find((session) => session.id === side.id)?.usage[0]?.role, "side");
