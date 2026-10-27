@@ -101,7 +101,7 @@ test("Max steering runs only after a real safe solver boundary, selects exact us
   } finally { await f.close(); }
 });
 
-test("kupo Single and Max remain independent: the real routed solver uses the same owned decision authority and all-role ledger without promoting router/advice text into its context", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("kupo Single and explicitly bounded Max remain independent: the real routed solver uses the same owned decision authority and all-role ledger without promoting router/advice text into its context", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
   const f = await routedFixture(), advice = await fixtureProvider({ responseMode: "text", exposeModels: true, replyText: generatedAdvice() });
   try {
     const settings = structuredClone(f.sdk.settings.get()!.values);
@@ -113,7 +113,7 @@ test("kupo Single and Max remain independent: the real routed solver uses the sa
     const configured = structuredClone(f.sdk.settings.get()!.values);
     configured.decisions = { ...configured.decisions, enabled: true, modelId: model.id, outputTokens: 256 };
     await f.sdk.settings.update(configured, f.sdk.settings.get()!.revision); await f.select();
-    await f.sdk.sessions.configure(f.sessionId, { ...f.session().controls, autonomy: "Autopilot Max" });
+    await f.sdk.sessions.configure(f.sessionId, { ...f.session().controls, autonomy: "Autopilot Max", automaticApprovals: false });
     await f.send("generated tool from actual routed Max"); await f.terminal();
     assert.equal(f.session().status, "completed"); assert.equal(f.session().controls.modelId, "kupo");
     assert.equal(f.requests.length, 1); assert.equal(f.solver.requests.length, 2); assert.equal(advice.requests.length, 1);

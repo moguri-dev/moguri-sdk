@@ -15,8 +15,9 @@ process.stdin.once("error", stop);
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 child.once("error", () => { console.error("The exact pinned speech runtime could not start. No alternate executable or recognizer was used."); });
-child.once("close", (code) => {
+child.once("close", (code, signal) => {
   clearTimeout(escalation);
+  if (!stopping && signal) console.error(`The exact local recognizer stopped from signal ${signal}.`);
   process.stdin.destroy();
   process.exitCode = stopping ? 0 : code !== null && code >= 0 ? code : 1;
 });

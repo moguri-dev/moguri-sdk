@@ -173,3 +173,16 @@ folder creation, explicit file/console selection and actual saved phase order.
 The speech suite additionally SIGKILLs a real generated control plane, observes
 its exact recognizer stop through the private host pipe, and restarts without
 reopening audio, replaying frames or creating inference/accounting entries.
+
+Independent multi-acknowledgement Git reviews keep their checkbox checklist;
+one acknowledgement uses the single-option switch. Worktree-removal choices
+use one explicit dropdown target with its captured revision and a labelled bin
+action, preserving the branch and every unselected checkout. Unexpected native
+recognizer signals remain in the private host's failure diagnostic rather than
+being reduced to an unexplained supervisor exit code.
+
+Compatibility fixtures explicitly choose bounded Max when exercising its older
+tool-decision authority. They do not use a new automatic Max selection to
+manufacture that old consent. New automatic approvals and Max technical choices
+are qualified separately. Earlier failed/aborted runs with old toggle/hold/drag
+expectations are not counted as final passing qualification.

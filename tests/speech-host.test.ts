@@ -31,6 +31,16 @@ test("the private speech host reaps only its exact child when its controller pip
   }
 });
 
+test("the private speech host preserves an unexpected recognizer signal in its failure diagnostic", { timeout: 5000 }, async () => {
+  const host = spawn(process.execPath, [resolve("apps/service/src/speech-host.ts"), process.execPath, "-e", "process.kill(process.pid,'SIGTERM')"],
+    { stdio: ["pipe", "ignore", "pipe"] });
+  let diagnostic = "";
+  host.stderr.on("data", (chunk: Buffer) => { diagnostic += chunk.toString(); });
+  const exited = new Promise<number | null>((done) => host.once("close", done));
+  try { assert.equal(await exited, 1); assert.match(diagnostic, /recognizer.*SIGTERM/); }
+  finally { if (host.exitCode === null && host.signalCode === null) host.kill("SIGTERM"); await exited; }
+});
+
 test("an actual control-plane SIGKILL reaps its generated realtime recognizer and restart never reopens audio or replays PCM", { timeout: 20_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-speech-crash-")), stateDir = join(directory, "state"), marker = join(directory, "recognizer.pid");
   const weights = Buffer.from("Generated crash-only recognizer weights."), key = Buffer.alloc(32, 0x67);
