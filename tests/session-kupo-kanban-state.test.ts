@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { EventStore } from "../apps/service/src/store.ts";
 import { defaultSingleKupoSettings, MoguriSdk, PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { appendLegacyAutopilot, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 const mergedMarker = "session_kupo_kanban_schema";
 const workflowMarkers = ["session_github_workflows_schema", "session_github_convergence_schema"];
@@ -16,7 +16,7 @@ for (const lineage of ["automatic-61", "workflows-61", "kanban-62"] as const) {
     try {
       const policy = { ...defaultSingleKupoSettings(), classifierModelId: fixture.modelId };
       await sdk.routing.configure(policy, sdk.settings.get()!.revision);
-      if (lineage === "automatic-61") await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, autonomy: "Autopilot" });
+      if (lineage === "automatic-61") appendLegacyAutopilot(fixture.service, fixture.sessionId);
       else await sdk.sessions.autonomy(fixture.sessionId, "Autopilot");
       if (lineage === "kanban-62") {
         await sdk.kanban.open(fixture.session().projectId!);
@@ -30,7 +30,7 @@ for (const lineage of ["automatic-61", "workflows-61", "kanban-62"] as const) {
       const raw = new DatabaseSync(path), version = lineage === "kanban-62" ? 62 : 61;
       let markers: Record<string, SQLOutputValue>[];
       try {
-        const removed = ["kanban_interactions_schema", mergedMarker, ...(lineage === "automatic-61" ? workflowMarkers : ["automatic_kupo_schema"]),
+        const removed = ["session_reliability_schema", "kanban_interactions_schema", mergedMarker, ...(lineage === "automatic-61" ? workflowMarkers : ["automatic_kupo_schema"]),
           ...(lineage === "kanban-62" ? [] : ["project_kanban_schema"])];
         for (const id of removed) raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(id);
         raw.exec(`PRAGMA user_version=${version}`);
@@ -94,7 +94,7 @@ test("schema 62 cannot manufacture a missing workflow lineage from the unrelated
     await fixture.service.close();
     const raw = new DatabaseSync(path);
     try {
-      for (const id of ["kanban_interactions_schema", mergedMarker, ...workflowMarkers]) raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(id);
+      for (const id of ["session_reliability_schema", "kanban_interactions_schema", mergedMarker, ...workflowMarkers]) raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(id);
       raw.exec("PRAGMA user_version=62");
     } finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Invalid schema-62.*lineage/);
@@ -119,7 +119,7 @@ test("current convergence markers cannot be silently repaired or relabelled as e
       const raw = new DatabaseSync(path);
       let rows: ReturnType<typeof retainedCiphertextRows>;
       try {
-        if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id='kanban_interactions_schema'");
+        if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('session_reliability_schema','kanban_interactions_schema')");
         raw.exec(sql); rows = retainedCiphertextRows(raw);
       } finally { raw.close(); }
       assert.throws(() => new EventStore(path, fixture.retentionKey), /session\/Kupo\/Kanban.*(marker|lineage)|pre-63/);

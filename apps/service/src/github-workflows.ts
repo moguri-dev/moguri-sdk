@@ -276,7 +276,7 @@ export class GitHubWorkflows {
       rule.decision === "deny" && rule.command === ["gh", ...args].join(" "))) throw new MoguriError("github_denied", "This exact GitHub invocation is denied by user policy.", 403);
     let output: string;
     try { output = await this.run("gh", args, { cwd: root, signal, label: "Reviewed GitHub CLI request", timeoutMs: method === "GET" ? this.options.readTimeoutMs ?? 30_000 : this.options.writeTimeoutMs ?? 120_000,
-      maxBytes: 512 * 1024, env: { GH_HOST: "github.com", GH_PROMPT_DISABLED: "1", GH_PAGER: "cat" } }); }
+      maxBytes: method === "GET" ? 8 * 1024 * 1024 : 512 * 1024, env: { GH_HOST: "github.com", GH_PROMPT_DISABLED: "1", GH_PAGER: "cat" } }); }
     catch (error) {
       const status = error instanceof MoguriError && error.code === "program_failed" ? Number(error.message.match(/\bHTTP[\s:]+(\d{3})\b/i)?.[1]) : 0;
       if (status >= 400 && status <= 599) throw new MoguriError(`github_http_${status}`, `GitHub returned HTTP ${status} for the exact reviewed resource. Raw provider diagnostics are not retained; no account substitution or automatic write retry.`, status);

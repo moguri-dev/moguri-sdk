@@ -16,6 +16,7 @@ const commandText = (call: ToolCall): string | null => call.name === "run_comman
 function rememberedTarget(call: ToolCall, context: PermissionContext, match: RememberApproval["match"]): RememberedApproval["target"] {
   const command = commandText(call);
   if (command !== null) {
+    if (match === "tool") throw new MoguriError("approval_command", "Use an exact command or safe command family, not a blanket execution-tool grant.");
     const family = match === "family" && call.name !== "debug" ? commandFamily(command) : null;
     if (match === "family" && !family) throw new MoguriError("approval_family", "This shell expression has no safe command-family grant. Approve the exact command instead.");
     return { kind: "command", command: family ?? command, match };
@@ -29,7 +30,7 @@ function rememberedTarget(call: ToolCall, context: PermissionContext, match: Rem
     }
     return { kind: "mcp", serverId: call.arguments.serverId, tool: call.arguments.tool, schemaDigest, bindingDigest: context.mcpBinding };
   }
-  return { kind: "tool", tool: call.name, argumentsDigest: argumentsDigest(call.arguments) };
+  return { kind: "tool", tool: call.name, ...(match === "tool" ? {} : { argumentsDigest: argumentsDigest(call.arguments) }) };
 }
 export function rememberToolApproval(settings: UserSettings, call: ToolCall, context: PermissionContext, request: RememberApproval, id: string): UserSettings {
   if (request.scope === "project" && !context.projectId) throw new MoguriError("approval_project", "A project-scoped approval requires this session's actual project.");
@@ -52,7 +53,7 @@ function rememberedAuthorization(settings: UserSettings, call: ToolCall, context
     if (target.kind === "command") return command !== null && (target.match === "exact" ? command === target.command : call.name !== "debug" && commandFamily(command) === target.command);
     if (target.kind === "mcp") return call.name === "mcp_gateway" && call.arguments.action === "call" &&
       call.arguments.serverId === target.serverId && call.arguments.tool === target.tool && (context.mcpSchemaDigest ?? call.arguments.schemaDigest) === target.schemaDigest && context.mcpBinding === target.bindingDigest;
-    return call.name === target.tool && argumentsDigest(call.arguments) === target.argumentsDigest;
+    return call.name === target.tool && (target.argumentsDigest === undefined || argumentsDigest(call.arguments) === target.argumentsDigest);
   });
   return grant ? { decision: "allow", ruleId: grant.id, reason: `Remembered actual-user ${grant.scope.kind} approval.` } : undefined;
 }

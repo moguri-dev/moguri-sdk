@@ -61,6 +61,20 @@ test("remembered MCP tools bind exact server configuration and schema but intent
   assert.throws(() => rememberToolApproval(settings, call, context, { scope: "project", match: "exact" }, "generated-invalid"), { code: "approval_project" });
 });
 
+test("an explicitly remembered named tool permits new arguments only inside its original scope and hard policy", () => {
+  const context = { sessionId: "generated-session", projectId: "generated-project", env: "Local" as const, autonomy: "Manual" as const };
+  const call: ToolCall = { id: "generated-read", name: "read_file", arguments: { path: "first.txt" } };
+  const settings = rememberToolApproval(defaultSettings(), call, context, { scope: "project", match: "tool" }, "generated-whole-tool");
+  const other = { ...call, arguments: { path: "second.txt" } };
+  assert.equal(authorizeTool(settings, other, "/generated", context).decision, "allow");
+  assert.equal(authorizeTool(settings, other, "/generated", { ...context, projectId: "generated-other" }).decision, "ask");
+  assert.equal(authorizeTool(settings, other, "/generated", { ...context, env: "Remote" }).decision, "ask");
+  settings.permissions.tools.push({ id: "generated-deny", tool: "read_file", pathPrefix: "", decision: "deny" });
+  assert.equal(authorizeTool(settings, other, "/generated", context).decision, "deny");
+  assert.throws(() => rememberToolApproval(defaultSettings(), { ...call, name: "run_command", arguments: { command: "printf generated" } }, context,
+    { scope: "global", match: "tool" }, "generated-invalid"), /exact command|family/i);
+});
+
 test("explicit Autopilot runs ungranted commands across turns and records autonomy, never a fabricated human approval", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture({ toolCall: { name: "run_command", args: { command: "printf 'Generated automatic command\\n'", timeoutMs: 2000 } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -74,6 +88,22 @@ test("explicit Autopilot runs ungranted commands across turns and records autono
     assert.equal(decisions.length, 2); assert.ok(decisions.every((event) => event.event_type === "tool.decided" && event.payload.actor === "autonomy"));
     assert.deepEqual(sdk.settings.get()!.values.permissions.tools, []);
     assert.match(JSON.stringify(fixture.requests[0]?.messages), /Automatic tool approvals are enabled by the user/);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("an explicit generic Autopilot selection enables real tool approvals without requiring the SDK convenience method", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({ toolCall: { name: "run_command", args: { command: "printf 'Generated selected autopilot\\n'", timeoutMs: 2000 } } });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure();
+    await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, autonomy: "Autopilot" }, fixture.session().revision);
+    await fixture.send("Generated explicit automatic tool.");
+    await waitFor(() => fixture.session().pendingApproval || fixture.session().status === "completed");
+    assert.equal(fixture.session().pendingApproval, null);
+    assert.equal((await fixture.terminal()).status, "completed");
+    assert.equal(fixture.session().controls.automaticApprovals, true);
+    const created = resolveControls([{ source: "session", values: { autonomy: "Autopilot" } }], { settingsRevision: 0, projectRevision: null });
+    assert.equal(created.controls.automaticApprovals, true);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

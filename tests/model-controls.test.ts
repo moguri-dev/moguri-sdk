@@ -43,6 +43,18 @@ test("historical usage cannot undercut the fresh source estimate or output headr
   assert.throws(() => modelRequest(base, { contextWindow: 8192 }, { ...context, systemPrompt: "Generated expanded policy. ".repeat(2000) }), /working context/);
 });
 
+test("retained text above one MiB is admitted when it fits the actual model window without dropping history", () => {
+  const model = { ...githubCopilotProvider().getModels().find((model) => hasApi(model, "openai-completions"))!, contextWindow: 2_097_152 };
+  const text = "Generated retained conversation. ".repeat(40_000);
+  const messages: Context["messages"] = [{ role: "user", timestamp: 1, content: text }];
+  assert.ok(Buffer.byteLength(JSON.stringify(messages)) > 1024 * 1024);
+  const request = modelRequest(model, undefined, { messages });
+  assert.ok(request.estimatedTokens > 0);
+  assert.equal(messages[0]?.content, text);
+  assert.ok(request.estimatedTokens + request.maxTokens + 4096 <= model.contextWindow);
+  assert.throws(() => modelRequest({ ...model, contextWindow: 8192 }, undefined, { messages }), /working context/);
+});
+
 test("reasoning cannot expand the output ceiling beyond the configured context room", async () => {
   const catalog = githubCopilotProvider().getModels();
   const base = { ...catalog.find((model) => hasApi(model, "anthropic-messages") && model.reasoning && !model.compat?.forceAdaptiveThinking)!, contextWindow: 16384 };

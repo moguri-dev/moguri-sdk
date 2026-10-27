@@ -21,6 +21,7 @@ export * from "./brand.ts";
 export * from "./slash.ts";
 export { ClientError };
 export { DraftEditor } from "../../client/src/draft.ts";
+export type { DraftDictation } from "../../client/src/draft.ts";
 export type { ClientState } from "../../client/src/index.ts";
 export const sessionTitle = (session: Session, limit = 64, fallback = "New session"): string =>
   session.title !== "New session" ? session.title : session.messages.find((message) => message.role === "user")?.text.split("\n")[0]?.slice(0, limit) || fallback;
@@ -138,6 +139,7 @@ export class MoguriSdk extends TransportClient {
   readonly sessions = {
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
+    side: (sessionId: string) => this.command({ type: "session.side", sessionId }),
     configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
       const current = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.controls;
       const changed = controls.modelId !== null && Boolean(current && (controls.modelId !== current.modelId ||
@@ -680,12 +682,28 @@ export class MoguriSdk extends TransportClient {
     readResult: (resultId: string, offset = 0, limit = 12000) => this.query({ type: "result.read", resultId, offset, limit }),
   };
   readonly voice = {
-    startCapture: async (sessionId: string, id: string = crypto.randomUUID()): Promise<{ id: string; token: string }> => {
+    startCapture: async (sessionId: string, id: string = crypto.randomUUID(), options: { streaming?: true } = {}): Promise<{ id: string; token: string }> => {
       if (this.getState().status !== "connected") throw new ClientError("disconnected", "Reconnect the original profile before capturing audio.");
-      const request = parse(SpeechCaptureRequestSchema, { action: "start", sessionId, id });
+      const request = parse(SpeechCaptureRequestSchema, { action: "start", sessionId, id, ...(options.streaming ? { streaming: true } : {}) });
       const result = await this.request("/v1/voice", request);
       if (!isRecord(result) || result.id !== id || typeof result.token !== "string" || !/^[a-f0-9-]{36}$/.test(result.token)) throw new ClientError("speech_capture_response", "The service did not acknowledge the exact original capture. No microphone was started.");
+      if (options.streaming && result.streaming !== true) throw new ClientError("speech_capture_response", "The service did not acknowledge streaming for this exact capture. No batch or cloud fallback was used.");
       await this.refresh(); return { id, token: result.token };
+    },
+    appendCapture: async (sessionId: string, id: string, token: string, sequence: number, bytes: Uint8Array): Promise<void> => {
+      if (!bytes.length || bytes.length % 2 || bytes.length > 64 * 1024) throw new ClientError("speech_audio", "Use one bounded little-endian PCM16 frame.");
+      const result = await this.request("/v1/voice", parse(SpeechCaptureRequestSchema, { action: "append", sessionId, id, token, sequence, audio: audioBase64(bytes) }));
+      if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "The owning capture did not acknowledge this audio frame. It was not replayed.");
+    },
+    finishCapture: async (sessionId: string, id: string, token: string, sequence: number): Promise<void> => {
+      const result = await this.request("/v1/voice", parse(SpeechCaptureRequestSchema, { action: "finish", sessionId, id, token, sequence }));
+      if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "The original capture did not accept its final buffer. It was not replayed.");
+    },
+    readCapture: async (sessionId: string, id: string, token: string): Promise<{ text: string; revision: number }> => {
+      const result = await this.request("/v1/voice", parse(SpeechCaptureRequestSchema, { action: "read", sessionId, id, token }));
+      if (!isRecord(result) || result.id !== id || result.accepted !== true || typeof result.text !== "string" ||
+        typeof result.revision !== "number" || !Number.isSafeInteger(result.revision) || result.revision < 0) throw new ClientError("speech_capture_response", "The original streamed transcript was not acknowledged. No text was inserted.");
+      return { text: result.text, revision: result.revision };
     },
     uploadCapture: async (sessionId: string, id: string, token: string, bytes: Uint8Array): Promise<void> => {
       validateSpeechWav(bytes);

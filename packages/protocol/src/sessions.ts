@@ -77,6 +77,7 @@ export const SessionWorkspaceCommandSchema = Type.Union([
     sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.mode"), sessionId: id, expectedRevision: revision, mode: SessionModeSchema }),
   object({ type: Type.Literal("session.spawn"), sessionId: id, kind: Type.Union([Type.Literal("agent"), Type.Literal("side")]), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })) }),
+  object({ type: Type.Literal("session.side"), sessionId: id }),
   object({ type: Type.Literal("session.from-work"), projectId: id, workspaceId: Type.Optional(id), issueId: Type.Optional(id),
     prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })), github: Type.Optional(GithubSessionSourceSchema) }),
   object({ type: Type.Literal("session.delete"), sessionId: id, expectedRevision: revision, confirm: Type.Literal(true) }),

@@ -6,12 +6,16 @@ export const MAX_SPEECH_BYTES = 44 + MAX_SPEECH_SAMPLES * 2;
 const id = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 const sessionId = Type.String({ minLength: 1, maxLength: 128 });
 export const SpeechCaptureRequestSchema = Type.Union([
-  Type.Object({ action: Type.Literal("start"), sessionId, id }, { additionalProperties: false }),
+  Type.Object({ action: Type.Literal("start"), sessionId, id, streaming: Type.Optional(Type.Literal(true)) }, { additionalProperties: false }),
   Type.Object({ action: Type.Literal("cancel"), sessionId, id, token: id }, { additionalProperties: false }),
   Type.Object({ action: Type.Literal("upload"), sessionId, id, token: id, audio: Type.String({ minLength: 1, maxLength: Math.ceil(MAX_SPEECH_BYTES / 3) * 4 }) }, { additionalProperties: false }),
+  Type.Object({ action: Type.Literal("append"), sessionId, id, token: id, sequence: Type.Integer({ minimum: 1, maximum: 10000 }),
+    audio: Type.String({ minLength: 4, maxLength: Math.ceil(64 * 1024 / 3) * 4 }) }, { additionalProperties: false }),
+  Type.Object({ action: Type.Literal("finish"), sessionId, id, token: id, sequence: Type.Integer({ minimum: 0, maximum: 10000 }) }, { additionalProperties: false }),
+  Type.Object({ action: Type.Literal("read"), sessionId, id, token: id }, { additionalProperties: false }),
 ]);
 export type SpeechCaptureRequest = Static<typeof SpeechCaptureRequestSchema>;
-export type SpeechCaptureResponse = { id: string; token: string } | { id: string; accepted: true };
+export type SpeechCaptureResponse = { id: string; token: string; streaming?: true } | { id: string; accepted: true; text?: string; revision?: number };
 
 export function audioBase64(bytes: Uint8Array): string {
   let text = "";
@@ -23,19 +27,26 @@ export function audioFromBase64(value: string): Uint8Array {
   return Uint8Array.from(text, (character) => character.charCodeAt(0));
 }
 
-export function encodeSpeechWav(samples: Float32Array): Uint8Array {
+export function encodeSpeechPcm(samples: Float32Array): Uint8Array {
   if (!samples.length || samples.length > MAX_SPEECH_SAMPLES) throw new Error("Capture non-empty audio up to two minutes. No audio was truncated.");
+  const bytes = new Uint8Array(samples.length * 2), view = new DataView(bytes.buffer);
+  for (let i = 0; i < samples.length; i++) {
+    if (!Number.isFinite(samples[i])) throw new Error("Captured PCM contains a non-finite sample. No audio was accepted.");
+    const value = Math.max(-1, Math.min(1, samples[i]!));
+    view.setInt16(i * 2, Math.round(value * (value < 0 ? 32768 : 32767)), true);
+  }
+  return bytes;
+}
+
+export function encodeSpeechWav(samples: Float32Array): Uint8Array {
+  const pcm = encodeSpeechPcm(samples);
   const bytes = new Uint8Array(44 + samples.length * 2), view = new DataView(bytes.buffer);
   const ascii = (offset: number, text: string) => { for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); };
   ascii(0, "RIFF"); view.setUint32(4, bytes.length - 8, true); ascii(8, "WAVE"); ascii(12, "fmt ");
   view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
   view.setUint32(24, SPEECH_SAMPLE_RATE, true); view.setUint32(28, SPEECH_SAMPLE_RATE * 2, true);
   view.setUint16(32, 2, true); view.setUint16(34, 16, true); ascii(36, "data"); view.setUint32(40, samples.length * 2, true);
-  for (let i = 0; i < samples.length; i++) {
-    if (!Number.isFinite(samples[i])) throw new Error("Captured PCM contains a non-finite sample. No WAV was accepted.");
-    const value = Math.max(-1, Math.min(1, samples[i]!));
-    view.setInt16(44 + i * 2, Math.round(value * (value < 0 ? 32768 : 32767)), true);
-  }
+  bytes.set(pcm, 44); pcm.fill(0);
   return bytes;
 }
 

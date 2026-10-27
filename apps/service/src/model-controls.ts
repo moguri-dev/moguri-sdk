@@ -23,10 +23,11 @@ export function contextHasImages(messages: Context["messages"]): boolean {
   return messages.some((message) => typeof message.content !== "string" && message.content.some((block) => block.type === "image"));
 }
 export function validateContextSize(messages: Context["messages"]): void {
-  const text = messages.map((message) => message.role === "assistant" || typeof message.content === "string" ? message :
-    { ...message, content: message.content.map((block) => block.type === "image" ? { ...block, data: "" } : block) });
-  if (Buffer.byteLength(JSON.stringify(text)) > 1024 * 1024) throw new MoguriError("context_limit", "Conversation text exceeds 1 MiB. Existing history is preserved; start a new session before inference.", 409);
-  if (Buffer.byteLength(JSON.stringify(messages)) > 16 * 1024 * 1024) throw new MoguriError("context_limit", "Conversation including approved image data exceeds 16 MiB. Existing history is preserved; no image was dropped or request sent.", 409);
+  let imageBytes = 0;
+  for (const message of messages) if (typeof message.content !== "string") {
+    for (const block of message.content) if (block.type === "image") imageBytes += Buffer.byteLength(block.data);
+  }
+  if (imageBytes > 16 * 1024 * 1024) throw new MoguriError("context_limit", "Approved image data exceeds the 16 MiB image-resource bound. Existing history is preserved; no image was dropped or request sent.", 409);
 }
 export function modelRequest(model: Model<Api> & Pick<ModelWindowCapability, "supportedContextWindows">, options: ModelOptions | undefined, context: Context, advertised: ModelWindowCapability = model) {
   if (model.contextWindow !== advertised.contextWindow || JSON.stringify(modelContextWindows(model)) !== JSON.stringify(modelContextWindows(advertised))) throw new MoguriError("model_context_changed", "The prepared model's working windows changed from its advertised capabilities. Refresh and choose explicitly; no request was sent.", 409);
@@ -38,7 +39,7 @@ export function modelRequest(model: Model<Api> & Pick<ModelWindowCapability, "su
   const selected = { ...model, contextWindow: window };
   const normalized = normalizeContext(context);
   const estimatedTokens = estimateNormalizedContext(normalized);
-  if (estimatedTokens + CONTEXT_HEADROOM >= selected.contextWindow) throw new MoguriError("model_context", "The estimated request exceeds the working context window. Shorten the prompt or start a new session; no history was truncated and no model request was sent.", 409);
+  if (estimatedTokens + CONTEXT_HEADROOM >= selected.contextWindow) throw new MoguriError("model_context", "The estimated request exceeds the working context window. Compact context in this session or choose a larger supported window; all conversation history is preserved and no model request was sent.", 409);
   const maxTokens = clampMaxTokensToContext(selected, normalized, Math.min(model.maxTokens, selected.contextWindow - estimatedTokens - CONTEXT_HEADROOM));
   return { model: { ...selected, maxTokens }, maxTokens, estimatedTokens, thinkingEffort: options?.thinkingEffort };
 }

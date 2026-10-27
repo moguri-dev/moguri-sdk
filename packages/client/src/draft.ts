@@ -1,6 +1,7 @@
 import type { Attachment, CommandResult, Session } from "../../protocol/src/index.ts";
 import { ClientError, type MoguriClient } from "./index.ts";
 import { isContinueWork, type ContinueWorkChoice, type ContinueWorkReview } from "../../protocol/src/kanban.ts";
+import { MAX_TEXT } from "../../protocol/src/core.ts";
 
 export interface DraftState {
   text: string;
@@ -10,6 +11,7 @@ export interface DraftState {
   conflict: boolean;
   error: string | null;
 }
+export interface DraftDictation { update(text: string): void; close(): void }
 export class DraftEditor {
   private state: DraftState;
   private revision: number;
@@ -18,6 +20,8 @@ export class DraftEditor {
   private task?: Promise<void>;
   private captureTask?: Promise<void>;
   private latest: Session["draft"];
+  private externalRevision = 0;
+  private disposed = false;
   constructor(private readonly client: MoguriClient, readonly sessionId: string, draft: Session["draft"]) {
     this.revision = draft.revision;
     this.latest = draft;
@@ -29,6 +33,7 @@ export class DraftEditor {
   receive(draft: Session["draft"]): void {
     this.latest = draft;
     if (this.task || this.captureTask || draft.revision <= this.revision) return;
+    this.externalRevision++;
     if (this.state.dirty) {
       this.update({ conflict: true, error: "Another client changed this draft. Your text is preserved. Reload theirs or explicitly keep yours." });
     } else {
@@ -40,6 +45,38 @@ export class DraftEditor {
     this.update({ text, attachments, dirty: true, error: this.state.conflict ? this.state.error : null });
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { void this.flush().catch(() => console.error("Moguri draft autosave failed; the unsent edit and error remain visible.")); }, 200);
+  }
+  startDictation(start = this.state.text.length, end = start): DraftDictation {
+    let source = this.state.text, from = start, to = end, closed = false;
+    const external = this.externalRevision;
+    const splitsPair = (offset: number) => offset > 0 && offset < source.length && /[\ud800-\udbff]/.test(source[offset - 1]!) && /[\udc00-\udfff]/.test(source[offset]!);
+    if (this.disposed || this.captureTask || this.state.conflict || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) ||
+      from < 0 || from > to || to > source.length || splitsPair(from) || splitsPair(to)) throw new ClientError("dictation_selection", "Resolve the current draft and choose a valid original text selection before dictating.");
+    return {
+      update: (text) => {
+        if (closed || this.disposed || this.externalRevision !== external || this.state.conflict) throw new ClientError("dictation_stale", "The original dictation draft changed or closed. Existing text was preserved.");
+        if (typeof text !== "string" || !text.isWellFormed()) throw new ClientError("dictation_text", "The local recognizer did not return valid text. Existing text was preserved.");
+        if (!text.trim()) return;
+        const current = this.state.text;
+        if (current !== source) {
+          let prefix = 0, suffix = 0;
+          while (prefix < Math.min(source.length, current.length) && source[prefix] === current[prefix]) prefix++;
+          if (splitsPair(prefix)) prefix--;
+          while (suffix < Math.min(source.length, current.length) - prefix && source[source.length - suffix - 1] === current[current.length - suffix - 1]) suffix++;
+          const previousEnd = source.length - suffix;
+          if (previousEnd <= from) { const delta = current.length - source.length; from += delta; to += delta; }
+          else if (prefix < to) { closed = true; throw new ClientError("dictation_edited", "You edited the active dictated text. Recognition stopped; your correction was preserved."); }
+        }
+        const before = current.slice(0, from), after = current.slice(to), spoken = text.trim();
+        const leading = /[\p{L}\p{N}\p{P}]$/u.test(before) && !/[([{]$/.test(before) && /^[\p{L}\p{N}]/u.test(spoken) ? " " : "";
+        const trailing = after && !/^[\s,.;:!?)}\]]/.test(after) ? " " : "";
+        const replacement = `${leading}${spoken}${trailing}`, next = before + replacement + after;
+        if (next.length > MAX_TEXT) throw new ClientError("dictation_limit", "Dictation would exceed the inline composer limit. Existing text was preserved.");
+        if (next !== current) this.edit(next);
+        source = next; to = from + replacement.length;
+      },
+      close: () => { closed = true; },
+    };
   }
   flush(): Promise<void> {
     clearTimeout(this.timer);
@@ -146,5 +183,5 @@ export class DraftEditor {
     if (saved) this.receive(saved);
     return result;
   }
-  dispose(): void { clearTimeout(this.timer); this.listeners.clear(); }
+  dispose(): void { this.disposed = true; clearTimeout(this.timer); this.listeners.clear(); }
 }

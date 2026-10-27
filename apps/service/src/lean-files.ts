@@ -77,7 +77,7 @@ export async function editProjectFile(root: string, args: { path: string; expect
 }
 export async function readFileSelection(root: string, args: Record<string, unknown>, policy: FolderPolicy) {
     const file = await readProjectFile(root, String(args.path), args.mode === "full" ? 128 * 1024 : 1024 * 1024);
-    if (args.expectedDigest !== undefined && args.expectedDigest !== file.digest) throw new MoguriError("file_conflict", "The source version changed. No newer bytes were substituted for the requested digest.", 409);
+    if (args.expectedDigest !== undefined && args.expectedDigest !== file.digest) throw new MoguriError("file_conflict", "The file changed since the requested source version. Call read_file without expectedDigest to read its current version, then use that response's sourceRef.expectedDigest for edits. No write or version substitution occurred.", 409);
     const instructions = (await repositoryInstructionLayers(root, { ...defaultProjectSettings(), deniedFolders: policy.denied, readOnlyFolders: policy.readOnly }, file.path)).filter((layer) => layer.depth > 0);
     const lines = file.text.split("\n");
     let view: Record<string, unknown> = { ...file, view: "full", complete: true };

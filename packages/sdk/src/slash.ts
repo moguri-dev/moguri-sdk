@@ -866,7 +866,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "side":
     case "subsession": {
       const side = command.name === "side";
-      const result = await sdk.sessions.spawn(sessionId, side ? "side" : "agent", command.argument || undefined);
+      const result = side && !command.argument ? await sdk.sessions.side(sessionId) : await sdk.sessions.spawn(sessionId, side ? "side" : "agent", command.argument || undefined);
       return { kind: "session", sessionId: result.id!, side };
     }
     case "terminal":

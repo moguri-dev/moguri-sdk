@@ -314,6 +314,12 @@ export class SessionWorkspace {
         return this.host.mode(session, command.mode, finish);
       }
       case "session.spawn": return this.host.spawn(this.session(command.sessionId), command.kind, command.title, finish);
+      case "session.side": {
+        const parent = this.session(command.sessionId);
+        const existing = this.snapshot().sessions.findLast((session) => session.parentSessionId === parent.id && session.createdParentSessionId === parent.id &&
+          session.kind === "side" && session.status !== "archived");
+        return existing ? finish([], { id: existing.id }) : this.host.spawn(parent, "side", undefined, finish);
+      }
       case "session.delete": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
         return this.host.deleteSession(session, finish);

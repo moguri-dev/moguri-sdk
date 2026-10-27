@@ -60,6 +60,31 @@ test("the original capture can be cancelled after its client disconnects without
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("streamed client capture returns partial text before release and commits one exact final transcript without retaining PCM", async () => {
+  const { fixture, sdk } = await captureFixture();
+  try {
+    const lease = await sdk.voice.startCapture(fixture.sessionId, undefined, { streaming: true });
+    const pcm = new Uint8Array(6400).fill(1);
+    await sdk.voice.appendCapture(fixture.sessionId, lease.id, lease.token, 1, pcm);
+    let partial = "";
+    const deadline = Date.now() + 5000;
+    while (!partial && Date.now() < deadline) {
+      partial = (await sdk.voice.readCapture(fixture.sessionId, lease.id, lease.token)).text;
+      if (!partial) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(partial, "Generated ");
+    await assert.rejects(() => sdk.voice.appendCapture(fixture.sessionId, lease.id, lease.token, 1, pcm), /sequence|original/i);
+    await sdk.voice.finishCapture(fixture.sessionId, lease.id, lease.token, 1);
+    assert.equal((await sdk.jobs.wait(lease.id)).status, "completed");
+    assert.equal(await sdk.voice.transcript(fixture.sessionId, lease.id), "Generated local dictation.");
+    assert.equal((await sdk.voice.readCapture(fixture.sessionId, lease.id, lease.token)).text, "Generated local dictation.");
+    const events = JSON.stringify(fixture.service.controller.events(0));
+    assert.equal(events.includes(lease.token), false);
+    assert.equal(events.includes(Buffer.from(pcm).toString("base64")), false);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
 test("paged and JSON-escaped transcripts are reviewed and inserted completely, without submitting a model request", async () => {
   for (const [flag, text] of [
     ["--long-transcript", "Generated paged local dictation. ".repeat(2000).trim()],

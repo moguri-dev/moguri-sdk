@@ -202,7 +202,8 @@ export class PlatformRuntime {
   private commandTails = new Map<string, { text: string; bytes: number; startedAt: number; pid: number | null }>();
   private shuttingDown = false;
   private speechCleanupError: string | null = null;
-  private voiceCaptures = new Map<string, { sessionId: string; token: string; consumed: boolean; input: ReturnType<typeof Promise.withResolvers<Uint8Array>> }>();
+  private voiceCaptures = new Map<string, { sessionId: string; token: string; consumed: boolean; input: ReturnType<typeof Promise.withResolvers<Uint8Array>>;
+    stream?: { frames: Uint8Array[]; sequence: number; bytes: number; text: string; revision: number; finishing: boolean; wake: ReturnType<typeof Promise.withResolvers<void>> } }>();
   private readonly memoryIndexes = new Map<string, string>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, private readonly options: PlatformOptions = {}) {
     this.browser = new BrowserBroker(() => this.snapshot());
@@ -947,7 +948,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       this.host.commit([...events, ...(commandStatus === "partial" && sessionId ? [{ event_type: "session.blocked" as const, profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { diagnostic: error! } }] : []),
         { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: commandStatus, resultDigest, error, ...retention } }]);
     }).catch((error: unknown) => {
-      const partial = error instanceof MoguriError && ["install_partial", "cache_partial", "cache_cleanup_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
+      const partial = error instanceof MoguriError && ["install_partial", "cache_partial", "cache_cleanup_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial", "speech_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
         kind === "repository.refresh" && this.snapshot().repositoryObservations.some((observation) => observation.jobId === id) ||
         kind === "memory.index" && this.memory.published(id);
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
@@ -969,12 +970,42 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (request.action !== "start") {
       const lease = this.voiceCaptures.get(request.id), job = this.snapshot().jobs.find((job) => job.id === request.id);
       if (request.action === "cancel" && !lease && job?.kind === "voice.capture" && job.sessionId === session.id && !["running", "waiting_input"].includes(job.status)) return { id: request.id, accepted: true };
-      if (!lease || lease.sessionId !== session.id || request.action === "upload" && lease.consumed || job?.kind !== "voice.capture" || job.status !== "running") throw new MoguriError("speech_capture_owner", "This original client capture is missing, consumed or no longer running. No audio or ASR work was replayed.", 409);
+      if (request.action === "read" && !lease && job?.kind === "voice.capture" && job.sessionId === session.id && job.status === "completed" && job.resultDigest) {
+        const result: unknown = JSON.parse(this.store.blob(job.resultDigest));
+        if (!isRecord(result) || result.source !== "local" || typeof result.text !== "string" || typeof result.revision !== "number" || !Number.isSafeInteger(result.revision)) throw new MoguriError("speech_result", "The original result is not a streamed local transcript.");
+        return { id: request.id, accepted: true, text: result.text, revision: result.revision };
+      }
+      if (!lease || lease.sessionId !== session.id || ["upload", "append", "finish"].includes(request.action) && lease.consumed || job?.kind !== "voice.capture" || job.status !== "running") throw new MoguriError("speech_capture_owner", "This original client capture is missing, consumed or no longer running. No audio or ASR work was replayed.", 409);
       const supplied = Buffer.from(request.token), actual = Buffer.from(lease.token);
       if (supplied.length !== actual.length || !timingSafeEqual(supplied, actual)) throw new MoguriError("speech_capture_scope", "This audio does not own the original capture lease. No input was accepted.", 403);
       if (request.action === "cancel") {
-        this.active.get(request.id)?.abort.abort(); return { id: request.id, accepted: true };
+        const owned = this.active.get(request.id);
+        owned?.abort.abort(); await owned?.done;
+        const settled = this.snapshot().jobs.find((job) => job.id === request.id);
+        if (settled?.status === "partial") throw new MoguriError("speech_partial", settled.error ?? "The original recognizer cleanup remains unconfirmed.", 409);
+        return { id: request.id, accepted: true };
       }
+      if (this.active.get(request.id)?.abort.signal.aborted) throw new MoguriError("speech_capture_owner", "The original capture was revoked. No late audio was accepted.", 409);
+      const stream = lease.stream;
+      if (request.action === "read") {
+        if (!stream) throw new MoguriError("speech_capture_mode", "This capture was not admitted for streaming. No recording mode was substituted.");
+        return { id: request.id, accepted: true, text: stream.text, revision: stream.revision };
+      }
+      if (request.action === "append") {
+        if (!stream || request.sequence !== stream.sequence + 1) throw new MoguriError("speech_capture_sequence", "Append only the next original streaming frame. No duplicate or out-of-order audio was replayed.", 409);
+        const pcm = Buffer.from(request.audio, "base64");
+        if (pcm.toString("base64") !== request.audio || !pcm.length || pcm.length % 2 || pcm.length > 64 * 1024 || stream.bytes + pcm.length > 16_000 * 120 * 2) {
+          pcm.fill(0); throw new MoguriError("speech_audio", "Use canonical bounded mono 16-kHz PCM16 frames up to two minutes. No audio was truncated.");
+        }
+        stream.sequence = request.sequence; stream.bytes += pcm.length; stream.frames.push(pcm); stream.wake.resolve();
+        return { id: request.id, accepted: true };
+      }
+      if (request.action === "finish") {
+        if (!stream || request.sequence !== stream.sequence) throw new MoguriError("speech_capture_sequence", "Finish only the exact original accepted frame sequence.", 409);
+        lease.consumed = true; stream.finishing = true; stream.wake.resolve();
+        return { id: request.id, accepted: true };
+      }
+      if (stream) throw new MoguriError("speech_capture_mode", "A streamed capture cannot accept a batch WAV or replay its original input.");
       const bytes = Buffer.from(request.audio, "base64");
       if (bytes.toString("base64") !== request.audio) throw new MoguriError("speech_audio", "Use canonical base64 for the bounded local WAV.");
       try { validateSpeechWav(bytes); } catch (error) { throw new MoguriError("speech_audio", error instanceof Error ? error.message : "Local WAV validation failed."); }
@@ -989,23 +1020,52 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if ([...this.active.values()].some((job) => ["voice.capture", "voice.record", "voice.transcribe"].includes(job.kind))) throw new MoguriError("speech_busy", "Finish or cancel the original local capture before starting another.", 409);
     const current = this.session(session.id);
     if (current.status === "archived") throw new MoguriError("archived", "The session was archived before capture admission.", 409);
-    const lease = { sessionId: current.id, token: randomUUID(), consumed: false, input: Promise.withResolvers<Uint8Array>() };
+    const lease = { sessionId: current.id, token: randomUUID(), consumed: false, input: Promise.withResolvers<Uint8Array>(),
+      stream: request.streaming ? { frames: [] as Uint8Array[], sequence: 0, bytes: 0, text: "", revision: 0, finishing: false, wake: Promise.withResolvers<void>() } : undefined };
     const settings = structuredClone(this.snapshot().settings.values.voice);
     this.voiceCaptures.set(request.id, lease);
     try {
       this.job("voice.capture", current.projectId, current.id, async (signal, progress, id) => {
-        const cancelled = () => lease.input.reject(new DOMException("The original client capture was cancelled. No audio was replayed.", "AbortError"));
-        const deadline = setTimeout(() => lease.input.reject(new MoguriError("speech_capture_timeout", "The client capture did not deliver audio within its bounded deadline. No transcript was accepted.")), 150_000);
+        const stream = lease.stream;
+        const cancelled = () => stream ? stream.wake.resolve() : lease.input.reject(new DOMException("The original client capture was cancelled. No audio was replayed.", "AbortError"));
+        const deadline = setTimeout(() => {
+          if (stream) this.active.get(id)?.abort.abort(new MoguriError("speech_capture_timeout", "The original client capture exceeded its recording/flush deadline. Already inserted text is preserved."));
+          else lease.input.reject(new MoguriError("speech_capture_timeout", "The client capture did not deliver audio within its bounded deadline. No transcript was accepted."));
+        }, stream ? 210_000 : 150_000);
         signal.addEventListener("abort", cancelled, { once: true });
         try {
           signal.throwIfAborted(); progress("Waiting for the explicitly selected client microphone. Raw audio is transient and never sent to a model.");
+          if (stream) {
+            progress("Streaming local dictation. Recognized words appear in the owning composer; release to flush.");
+            const recognition = await this.voice.stream(id, settings, signal, (text) => {
+              if (!signal.aborted && stream.text !== text) { stream.text = text; stream.revision++; }
+            });
+            try {
+              for (;;) {
+                signal.throwIfAborted();
+                const frame = stream.frames.shift();
+                if (frame) { try { await recognition.append(frame); } finally { frame.fill(0); } continue; }
+                if (stream.finishing) {
+                  progress("Finalizing local dictation. Already inserted words are preserved.");
+                  return { ...await recognition.finish(), revision: stream.revision };
+                }
+                const wake = stream.wake; await wake.promise;
+                if (stream.wake === wake) stream.wake = Promise.withResolvers<void>();
+              }
+            } finally { await recognition.cancel(); }
+          }
           const bytes = await lease.input.promise;
           signal.throwIfAborted();
           return await withSpeechSpool(this.stateDir, id, bytes, signal, (path) => this.voice.transcribe(id, path, settings, signal, progress));
-        } finally { clearTimeout(deadline); signal.removeEventListener("abort", cancelled); this.voiceCaptures.delete(id); }
+        } finally {
+          clearTimeout(deadline); signal.removeEventListener("abort", cancelled);
+          for (const frame of stream?.frames ?? []) frame.fill(0);
+          if (stream) stream.frames.length = 0;
+          this.voiceCaptures.delete(id);
+        }
       }, undefined, undefined, undefined, undefined, request.id);
     } catch (error) { this.voiceCaptures.delete(request.id); throw error; }
-    return { id: request.id, token: lease.token };
+    return { id: request.id, token: lease.token, ...(request.streaming ? { streaming: true } : {}) };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
     if (isPricingCommand(command)) {
@@ -1459,6 +1519,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
     const settled = await Promise.allSettled([this.inputs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);
+    settled.push(...await Promise.allSettled([this.voice.close()]));
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Platform cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "platform_cleanup");
     if (failed?.status === "rejected") throw failed.reason;

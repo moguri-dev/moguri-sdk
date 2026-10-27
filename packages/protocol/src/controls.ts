@@ -30,7 +30,10 @@ export function resolveControls(layers: { source: Exclude<DefaultSource, "factor
   for (const layer of layers) {
     Object.assign(controls, structuredClone(layer.values));
     if (Object.hasOwn(layer.values, "autonomy") && !Object.hasOwn(layer.values, "automaticApprovals")) {
-      delete controls.automaticApprovals; delete sources.automaticApprovals;
+      if (layer.source === "session") {
+        controls.automaticApprovals = layer.values.autonomy === "Autopilot" || layer.values.autonomy === "Autopilot Max";
+        sources.automaticApprovals = layer.source;
+      } else { delete controls.automaticApprovals; delete sources.automaticApprovals; }
     }
     for (const key of controlKeys) if (Object.hasOwn(layer.values, key)) sources[key] = layer.source;
   }

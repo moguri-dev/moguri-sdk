@@ -130,6 +130,9 @@ export class EventStore {
       if (version < 64 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='kanban_interactions_schema'").get()) {
         throw new Error("Invalid pre-64 Kanban interactions lineage marker. State was preserved.");
       }
+      if (version < 65 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_reliability_schema'").get()) {
+        throw new Error("Invalid pre-65 session reliability lineage marker. State was preserved.");
+      }
       if (version < 63 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_kupo_kanban_schema'").get()) {
         throw new Error("Invalid pre-63 session/Kupo/Kanban lineage marker. State was preserved.");
       }
@@ -333,6 +336,18 @@ export class EventStore {
       }
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='kanban_interactions_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid Kanban interactions schema marker. State was preserved.");
+      }
+      if (version < 65) {
+        if (this.events().some((event) => event.event_type === "session.created" && (Object.hasOwn(event.payload, "repositories") || Object.hasOwn(event.payload, "projectFolderId")) ||
+          event.event_type === "settings.updated" && event.payload.settings.permissions.remembered?.some((grant) => grant.target.kind === "tool" && grant.target.argumentsDigest === undefined))) {
+          throw new Error("Session reliability history cannot be relabelled without its original schema marker. State was preserved.");
+        }
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('session_reliability_schema','1');
+          PRAGMA user_version=65; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_reliability_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid session reliability schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }

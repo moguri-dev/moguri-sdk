@@ -7,13 +7,13 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { appendLegacyAutopilot, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema 58 upgrades without changing ciphertext or silently broadening saved Autopilot permissions", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let store: EventStore | undefined;
   try {
-    await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, autonomy: "Autopilot" });
+    appendLegacyAutopilot(fixture.service, fixture.sessionId);
     const before = retainedCiphertextRows(fixture.service.store.db), path = fixture.service.store.path;
     sdk.disconnect(); await writeLegacyState(fixture.service, 58);
     store = new EventStore(path, fixture.retentionKey);
@@ -74,7 +74,7 @@ async function privateWorkflow59Fixture() {
   await sdk.sessions.autonomy(fixture.sessionId, "Autopilot"); sdk.disconnect(); await fixture.service.close();
   const raw = new DatabaseSync(fixture.service.store.path);
   try {
-    raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','workspace_experience_schema','session_navigation_schema','session_github_convergence_schema'); PRAGMA user_version=59; COMMIT;");
+    raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','workspace_experience_schema','session_navigation_schema','session_github_convergence_schema'); PRAGMA user_version=59; COMMIT;");
   } finally { raw.close(); }
   return fixture;
 }

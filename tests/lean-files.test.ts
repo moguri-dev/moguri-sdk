@@ -55,3 +55,21 @@ test("compact search and its original retained source both exclude protected and
     assert.equal(result.rawComplete, true);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("Local source conflicts recover through an explicit fresh read while stale edits remain rejected", async () => {
+  const root = await mkdtemp(join(tmpdir(), "moguri-local-source-"));
+  const run = (name: string, args: Record<string, unknown>) => executeTool(root, { id: "generated-source", name, arguments: args },
+    new AbortController().signal, () => {}, () => {}, undefined, { mode: "agent", env: "Local", folders: { denied: [], readOnly: [] } });
+  try {
+    await writeFile(join(root, "generated.txt"), "Generated original.");
+    const first = JSON.parse((await run("read_file", { path: "generated.txt" })).text);
+    assert.equal(first.sourceRef.expectedDigest, digest("Generated original."));
+    await writeFile(join(root, "generated.txt"), "Generated external update.");
+    await assert.rejects(() => run("read_file", first.sourceRef), /without expectedDigest/);
+    await assert.rejects(() => run("edit_file", { ...first.sourceRef, edits: [{ oldText: "Generated original.", newText: "Must not publish." }] }), { code: "file_conflict" });
+    const fresh = JSON.parse((await run("read_file", { path: "generated.txt" })).text);
+    assert.equal(fresh.text, "Generated external update.");
+    assert.equal((await run("edit_file", { ...fresh.sourceRef, edits: [{ oldText: "external update", newText: "reviewed update" }] })).outcome, "completed");
+    assert.equal(await readFile(join(root, "generated.txt"), "utf8"), "Generated reviewed update.");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

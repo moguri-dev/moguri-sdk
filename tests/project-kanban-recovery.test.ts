@@ -17,7 +17,7 @@ test("schema 61 upgrades atomically without rewriting retained history, and a fa
   try {
     await fixture.service.close();
     const db = new DatabaseSync(path);
-    db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema'); PRAGMA user_version=61; COMMIT;");
+    db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema'); PRAGMA user_version=61; COMMIT;");
     const before = retainedCiphertextRows(db);
     db.exec("CREATE TRIGGER generated_kanban_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='project_kanban_schema' BEGIN SELECT RAISE(ABORT,'Generated Kanban migration failure'); END;");
     db.close();

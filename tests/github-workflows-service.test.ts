@@ -7,6 +7,31 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { runProgram } from "../apps/service/src/program.ts";
 import { connectGithubSdk, githubServiceFixture } from "./github-workflows-fixture.ts";
 
+test("a realistic PR page above 512 KiB loads through the actual bounded CLI reader without truncating bodies", { timeout: 20_000 }, async () => {
+  let responsePath = "";
+  const fixture = await githubServiceFixture({ runProgram: async (executable, args, options) => {
+    if (executable === "git") return runProgram(executable, args, options);
+    const path = args[args.indexOf("--method") + 2];
+    if (path === "user") return 'HTTP/2.0 200 OK\r\n\r\n{"login":"generated-owner","id":42}';
+    assert.match(path!, /^repos\/generated-owner\/fixture\/pulls\?/);
+    return runProgram(process.execPath, ["-e", "process.stdout.write(require('node:fs').readFileSync(process.argv[1]))", responsePath], options);
+  } });
+  try {
+    const body = "Generated complete PR description.\n".repeat(900);
+    const pulls = Array.from({ length: 20 }, (_, index) => ({ id: index + 100, number: index + 1, title: `Generated PR ${index + 1}`,
+      body, state: "open", html_url: `https://github.com/generated-owner/fixture/pull/${index + 1}`, draft: true,
+      head: { sha: fixture.git(["rev-parse", "HEAD"]), ref: `generated-${index}`, repo: { full_name: "generated-owner/fixture", description: "Generated metadata.".repeat(1000) } },
+      base: { ref: "main", repo: { description: "Generated metadata.".repeat(1000) } } }));
+    const response = `HTTP/2.0 200 OK\r\n\r\n${JSON.stringify(pulls)}`;
+    assert.ok(Buffer.byteLength(response) > 512 * 1024);
+    responsePath = join(fixture.directory, "generated-pr-response.txt"); await writeFile(responsePath, response);
+    const result = await fixture.sdk.github.browse(fixture.scope, { resource: "pulls", repository: "generated-owner/fixture", account: "generated-owner", page: 1, perPage: 20, state: "open" });
+    assert.equal(result.items.length, 20); assert.equal(result.items.at(-1)?.body, body);
+    assert.equal(result.nextPage, null);
+    assert.equal(fixture.service.controller.snapshot().githubOperations.length, 0);
+  } finally { await fixture.close(); }
+});
+
 test("two real SDK clients share reviewed Git jobs and independent results survive deletion of the owning source session", { timeout: 20_000 }, async () => {
   const f = await githubServiceFixture(), other = new MoguriSdk(f.service.connection);
   try {

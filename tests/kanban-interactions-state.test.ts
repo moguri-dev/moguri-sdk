@@ -14,7 +14,7 @@ test("schema 63 upgrades Kanban interactions atomically, retaining exact ciphert
     await fixture.service.close();
     const raw = new DatabaseSync(path);
     try {
-      raw.exec("DELETE FROM retention_metadata WHERE id='kanban_interactions_schema'; PRAGMA user_version=63; CREATE TRIGGER generated_kanban_interactions_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='kanban_interactions_schema' BEGIN SELECT RAISE(ABORT,'Generated interaction migration interruption'); END;");
+      raw.exec("DELETE FROM retention_metadata WHERE id IN ('session_reliability_schema','kanban_interactions_schema'); PRAGMA user_version=63; CREATE TRIGGER generated_kanban_interactions_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='kanban_interactions_schema' BEGIN SELECT RAISE(ABORT,'Generated interaction migration interruption'); END;");
     } finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated interaction migration interruption/);
     const interrupted = new DatabaseSync(path);

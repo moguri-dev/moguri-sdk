@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **64**, including
+Current source uses protocol **65**, including
+[session reliability, streaming dictation and shared controls](architecture/session-reliability.md),
 [automatic Kupo and its shared capability inventory](architecture/automatic-kupo.md),
 [project Kanban continuation and provider-equivalent prices](architecture/project-kanban.md),
 [remembered approvals and repository-aware GitHub workflows](architecture/session-github-workflows.md),
@@ -1373,7 +1374,20 @@ is explicit Node client delivery through `loadNotificationSoundFile(path)`;
 the browser-safe SDK never gains arbitrary filesystem authority. No TUI/CLI
 operation automatically plays audio.
 
-Desktop dictation uses `voice.startCapture(sessionId, optionalOriginalId)`,
+Streaming desktop dictation uses
+`voice.startCapture(sessionId, optionalOriginalId, { streaming: true })`,
+ordered `voice.appendCapture(sessionId, id, token, sequence, pcmBytes)`,
+`voice.readCapture(sessionId, id, token)` and
+`voice.finishCapture(sessionId, id, token, finalSequence)`.
+The original intake acknowledges frames without waiting for model startup;
+read returns the current transcript/revision, and the final capability job
+retains the acknowledged complete transcript. Duplicate/out-of-order frames,
+late audio after revocation and incomplete flushes are rejected, never replayed.
+`DraftEditor.startDictation(start, end)` replaces only its original provisional
+span, preserving surrounding typing and refusing foreign/overlapping changes.
+Insertion never sends a prompt.
+
+The retained batch API uses `voice.startCapture(sessionId, optionalOriginalId)`,
 `voice.uploadCapture(sessionId, id, token, wavBytes)` and
 `voice.cancelCapture(sessionId, id, token)`. These use transient authenticated
 `/v1/voice` requests, not durable commands. The original profile/session/job and
@@ -1382,7 +1396,7 @@ normalized clip is 120 seconds / 3,840,044 bytes; malformed rates/channels,
 noncanonical base64, duplicate upload and reused job identity are rejected.
 Audio and upload nonces are never retained in events/receipts. Actual ASR jobs
 and explicit transcript insertion still use existing shared APIs. Root exports
-`encodeSpeechWav`, `validateSpeechWav`, shortcut parsing/matching helpers and
+`encodeSpeechPcm`, `encodeSpeechWav`, `validateSpeechWav`, shortcut parsing/matching helpers and
 typed preferences without importing native/provider runtime.
 
 `await sdk.voice.transcript(sessionId, jobId)` returns the complete recognized
@@ -1391,6 +1405,11 @@ It reads bounded result pages, including JSON escaping, without truncating them
 or opening a microphone. Pending/cancelled/foreign-session results are rejected.
 `voice.insert(sessionId, jobId, expectedDraftRevision)` remains a separate
 explicit write and never submits a prompt.
+
+`sessions.side(parentSessionId)` atomically opens an existing original side chat
+or creates one with the parent's model, thinking/window, autonomy and budget,
+capturing its real effective context. It remains permanently read-only.
+Navigation attachment alone never grants another parent's context.
 
 ### Held prompts, modes and retained plans
 
