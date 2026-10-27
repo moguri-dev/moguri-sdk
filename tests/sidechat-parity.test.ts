@@ -46,5 +46,13 @@ test("the inherited Kupo model runs in a read-only side chat through the same ac
     assert.match(JSON.stringify(fixture.requests.at(-1)?.messages), /Generated parent Kupo history/);
     assert.equal(/write_file|edit_file|run_command/.test(JSON.stringify(fixture.requests.at(-1)?.tools)), false);
     assert.equal(fixture.requests.length, 2);
+    await fixture.send("Generated later parent Kupo history."); await fixture.terminal();
+    const later = new DraftEditor(sdk, created.id!, side().draft);
+    try { later.edit("Generated next inherited Kupo side question."); await later.send("queue"); } finally { later.dispose(); }
+    await waitFor(() => ["completed", "partial", "failed"].includes(side().status));
+    assert.equal(side().status, "completed", side().lastError ?? "");
+    assert.match(JSON.stringify(fixture.requests.at(-1)?.messages), /Generated later parent Kupo history/);
+    assert.equal(side().sideContext?.parentSessionId, fixture.sessionId);
+    assert.equal(fixture.requests.length, 4);
   } finally { sdk.disconnect(); await fixture.close(); }
 });

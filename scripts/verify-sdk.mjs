@@ -203,6 +203,10 @@ try {
       const estimate:import("moguri").UsageEstimate|null|undefined=saved?.estimate;
       void estimate?.outputTokens;void saved?.turns[0]?.usage.knownCacheReadTokens;void saved?.context?.outputEstimate;
       ` : ""}
+      ${installedProtocol >= 67 ? `
+      const source:import("moguri").SideContext|undefined=sdk.getState().snapshot?.sessions[0]?.sideContext;
+      void source?.parentSessionId;void source?.throughSeq;void source?.contextDigest;void source?.documents[0]?.summary;
+      ` : ""}
       ${conversationNavigationAvailable ? `
       const points:import("moguri").ConversationNavigationEntry[]=(await import("moguri")).conversationNavigation(sdk.getState().snapshot!,"generated-id");
       void points[0]?.messageIndex;const answer=points.find(value=>value.kind==="answer");if(answer?.kind==="answer"){void answer.questionId;void answer.answer;}
@@ -1252,6 +1256,33 @@ try {
           console.log("Installed protocol-66 snapshots retain original turn/cache/context and captured-rate estimates across client reopen without detail queries, new model calls or foreign-profile data.");
         }
         console.log("Installed protocol-61 Kupo catalogue, automatic default and capability inventory use the exact sole model through the real delivered worker without a classifier or extra permission.");
+      }
+      if(PROTOCOL_VERSION>=67){
+        const before=generatedRequests.length;
+        const parent=await beta.sessions.create(null,"Generated installed live side parent",{modelId:generatedModel.id,autonomy:"Manual"});
+        const send=async(id,text)=>{
+          const current=beta.getState().snapshot.sessions.find(value=>value.id===id);
+          await beta.command({type:"draft.save",sessionId:id,expectedRevision:current.draft.revision,text,attachments:[]});
+          await beta.command({type:"message.send",sessionId:id,expectedRevision:current.draft.revision+1,delivery:"queue"});
+          for(let n=0;n<400&&!["completed","partial","failed","stopped"].includes(beta.getState().snapshot.sessions.find(value=>value.id===id).status);n++)await new Promise(resolve=>setTimeout(resolve,20));
+          assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===id).status,"completed");
+        };
+        await send(parent.id,"Generated INSTALLED_MAIN_TIME_ONE.");
+        const side=await beta.sessions.side(parent.id);
+        await send(side.id,"Generated INSTALLED_SIDE_TIME_ONE.");
+        const first=JSON.stringify(generatedRequests.at(-1).messages);
+        await send(parent.id,"Generated INSTALLED_MAIN_TIME_TWO.");
+        await send(side.id,"Generated INSTALLED_SIDE_TIME_TWO.");
+        const last=JSON.stringify(generatedRequests.at(-1).messages);
+        for(const sentinel of ["INSTALLED_MAIN_TIME_ONE","INSTALLED_MAIN_TIME_TWO","INSTALLED_SIDE_TIME_ONE","INSTALLED_SIDE_TIME_TWO"])assert.equal(last.split(sentinel).length-1,1);
+        assert.ok(!first.includes("INSTALLED_MAIN_TIME_TWO"));
+        const retained=beta.getState().snapshot.sessions.find(value=>value.id===side.id);
+        assert.equal(retained.mode,"read-only");assert.equal(retained.sideContext.parentSessionId,parent.id);
+        const reopened=await sdk.profiles.open(beta.profileId);
+        try{assert.deepEqual(reopened.getState().snapshot.sessions.find(value=>value.id===side.id).sideContext,retained.sideContext);assert.ok(!sdk.getState().snapshot.sessions.some(value=>value.id===side.id));}
+        finally{reopened.disconnect();}
+        assert.equal(generatedRequests.length,before+4);
+        console.log("Installed protocol-67 side questions refresh exact retained main history once per new turn, retain original side exchanges and read-only model controls across profile-owned reopen without extra model calls.");
       }
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
       await sdk.profiles.globalBudget({basis:"estimate",tokens:rootCharges},0,true);

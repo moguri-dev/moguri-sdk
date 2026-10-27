@@ -59,7 +59,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 66;
+export const PROTOCOL_VERSION = 67;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -125,6 +125,15 @@ export interface PublicMessage {
   toolCalls?: ToolCall[];
   outcome?: string;
   attachments?: Attachment[];
+}
+export const SideContextSchema = object({
+  parentSessionId: id, throughSeq: Type.Integer({ minimum: 0 }), contextDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+  inheritedImages: Type.Boolean(), pasteFiles: Type.Array(AttachmentSchema), documents: Type.Array(AttachmentSchema),
+});
+export interface SideContext {
+  parentSessionId: string; throughSeq: number; contextDigest: string; inheritedImages: boolean;
+  pasteFiles: Extract<Attachment, { kind: "paste_file" }>[];
+  documents: Extract<Attachment, { kind: "document" }>[];
 }
 export interface Usage {
   stepId: string;
@@ -215,6 +224,7 @@ export interface Session {
   browserUrl: string | null;
   suggestionSources?: SuggestionSource[];
   inheritedImages?: boolean;
+  sideContext?: SideContext & { turnId: string; capturedAt: string };
   activeCompactionId?: string | null;
 }
 export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
@@ -288,7 +298,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "queue.removed": { messageId: string };
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
-  "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string; repositoryCapture?: RepositoryCapture };
+  "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string; repositoryCapture?: RepositoryCapture; sideContext?: SideContext };
   "turn.control_started":
     | { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string }
     | { purpose: "candidate.generate"; generationId: string; controls: Controls; policyRevision: number; promptDigest: string }
@@ -1209,6 +1219,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       }
       case "turn.started":
+        if (event.payload.sideContext) {
+          const capture = event.payload.sideContext;
+          if (!Value.Check(SideContextSchema, capture) || session.kind !== "side" || session.mode !== "read-only" || !event.turn_id ||
+            capture.parentSessionId !== session.createdParentSessionId || capture.throughSeq >= event.seq ||
+            capture.pasteFiles.some((file) => file.kind !== "paste_file") || capture.documents.some((file) => file.kind !== "document")) {
+            throw new MoguriError("side_context_corrupt", "Side context lost its exact read-only birth-parent/turn/source binding. History was preserved.", 409);
+          }
+          session.sideContext = { ...structuredClone(capture), turnId: event.turn_id, capturedAt: event.timestamp };
+        }
         session.turnId = event.turn_id ?? null; session.status = "running"; session.lastError = null; session.localFinishing = false;
         session.queue = session.queue.filter((item) => item.id !== event.payload.item.id); session.queueRevision++;
         addUser(event.payload.item);

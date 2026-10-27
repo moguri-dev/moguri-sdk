@@ -71,7 +71,8 @@ function references(input: EventInput): string[] {
     case "queue.enqueued": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "queue.edited": return input.payload.attachments?.flatMap(attachmentDigests) ?? [];
     case "session.created": return [...(input.payload.contextDigest ? [input.payload.contextDigest] : []), ...(input.payload.parentSnapshotDigest ? [input.payload.parentSnapshotDigest] : []), ...(input.payload.pasteFiles ?? []).flatMap(attachmentDigests), ...(input.payload.documents ?? []).flatMap(attachmentDigests)];
-    case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.flatMap(attachmentDigests)];
+    case "turn.started": return [...(input.payload.promptDigest ? [input.payload.promptDigest] : []), ...input.payload.item.attachments.flatMap(attachmentDigests),
+      ...(input.payload.sideContext ? [input.payload.sideContext.contextDigest, ...input.payload.sideContext.pasteFiles.flatMap(attachmentDigests), ...input.payload.sideContext.documents.flatMap(attachmentDigests)] : [])];
     case "turn.prompt_bound": return [input.payload.promptDigest];
     case "turn.control_started": return [input.payload.purpose === "plan.save" ? input.payload.intentDigest : input.payload.promptDigest];
     case "plan.save_recorded": return [input.payload.save.inputDigest, input.payload.save.resultDigest].filter((hash): hash is string => hash !== null);
@@ -127,6 +128,9 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version < 67 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='side_context_schema'").get()) {
+        throw new Error("Invalid pre-67 side context lineage marker. State was preserved.");
+      }
       if (version < 66 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='retained_telemetry_schema'").get()) {
         throw new Error("Invalid pre-66 retained telemetry lineage marker. State was preserved.");
       }
@@ -359,6 +363,17 @@ export class EventStore {
       }
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='retained_telemetry_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid retained telemetry schema marker. State was preserved.");
+      }
+      if (version < 67) {
+        if (this.events().some((event) => event.event_type === "turn.started" && event.payload.sideContext !== undefined)) {
+          throw new Error("Side context history cannot be relabelled without its original schema marker. State was preserved.");
+        }
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('side_context_schema','1');
+          PRAGMA user_version=67; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='side_context_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid side context schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }

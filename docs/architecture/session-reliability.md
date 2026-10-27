@@ -118,6 +118,46 @@ use the same composer, model/window/effort controls, activity Markdown, voice
 and queue. The service permanently enforces read-only mode; navigation nesting
 does not grant parent context or coordination.
 
+### Per-question side context
+
+The owner requires later main-session history on each new side question, while
+earlier side responses keep their original captured inputs. Reuse the maintained
+pi-ai message types/estimator (MIT), React/Electron (MIT), existing Node/component
+notices and SQLite's public-domain event authority; add no dependency or paid
+model call. Refresh only from the actual birth parent in the same profile,
+never a navigation attachment or another project/default.
+
+Protocol/schema 67 adds an optional exact `turn.started.sideContext` capture:
+source parent, retained sequence watermark, context digest, image evidence and
+admitted file/document descriptors. Append it atomically with the new side turn
+and encrypted child grants before worker launch; original history, receipts,
+model charges and earlier captures are not rewritten. Capture once per new
+turn, not on model/tool continuations, provider retries or a late main delta.
+The source is the retained effective main context, excluding private roles,
+unsent drafts/queues and model/permission advice as authority. Preserve the
+side's own prior exchanges and reviewed own-context compactions separately.
+
+New inherited images/documents require the actual selected model's capability.
+Input/window/budget admission sizes the complete refreshed envelope; no old
+history, images or scoped sources can be silently dropped. Missing original
+parent or failed retention is explicit and preserves the undispatched queue.
+Restart never replays a side/model call. Parent removal cannot erase existing
+child-owned captures or turn a navigation relink into a new source.
+Desktop, TUI and SDK use this service-owned behavior with unchanged controls
+and permanent read-only enforcement; UI labels disclose capture-at-question
+semantics, not continuous mid-answer observation.
+
+Before feature edits the generated macOS arm64/Node 26 baseline passes
+OAuth/streaming in 1,124.50 ms (32.09 ms cancellation), SQLite in 73.81 ms
+(append p95 0.059 ms), PTY in 160.69 ms (151.85 ms cancellation, zero survivors),
+OpenTUI in 1,034.47 ms, hidden Electron in 790.07 ms (8.26 ms scroll frames),
+and filesystem/Git in 98.62 ms. Live Copilot/ds4, Rust/Linux, signed/notarized
+release, physical SendBox, Kupo quality, System One, configured physical SSH
+and full-milestone gates remain explicitly FAIL/unavailable in this primitive.
+Tests must prove fixed/routed/queued side refresh, exact prior-input stability,
+typed source retention, unsupported images, compactions, profile/birth-parent
+isolation, concurrent main work, cancellation, failure, migration and restart.
+
 The current focused source checkpoint passes the original approval/schema
 lineages plus actual generated recognizer streaming, controller-pipe teardown,
 frame sequence/finalization, no-PCM/token retention and safe composer edits.

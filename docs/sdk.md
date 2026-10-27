@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **66**, including
+Current source uses protocol **67**, including
+[per-question refreshed side context](architecture/session-reliability.md#per-question-side-context),
 [saved turn, cache and live usage telemetry](architecture/chat-activity.md#retained-telemetry-follow-up-contract),
 [session reliability, streaming dictation and shared controls](architecture/session-reliability.md),
 [automatic Kupo and its shared capability inventory](architecture/automatic-kupo.md),
@@ -134,6 +135,17 @@ managed-worktree surfaces are not implicitly combined.
 creates one with inherited controls and captured full parent context. It never
 runs inference or grants write/coordination authority. The root set is inherited
 unchanged for folder sides. Navigation nesting alone does not grant context.
+Before each new side turn, the service refreshes from its actual
+`createdParentSessionId`, atomically retaining `turn.started.sideContext` and
+child-owned source grants. `Session.sideContext` exposes the original source
+watermark/digest and owning turn/time; it is retained provenance, not model
+authority. Later main work appears in the next side question, while earlier
+side exchanges and in-progress continuations keep their exact previous inputs.
+Fresh inherited images/documents require actual selected-model support and
+full input/window/budget admission. Private roles, unsent drafts and held main
+queues are excluded; no paid retry, truncation or alternate parent is used.
+The same behavior applies to SDK, TUI and desktop callers. Protocol/schema 67
+adds its atomic metadata marker without rewriting legacy captures or receipts.
 
 Desktop dictation uses `voice.startCapture(sessionId, id?, { streaming: true })`,
 ordered `appendCapture(..., sequence, pcmBytes)`, volatile
@@ -349,8 +361,9 @@ original source, and answer entries retain `questionId`, question text and exact
 user answer. Original model `turnId` values are preserved. Missing sessions are
 explicit errors; tool approvals, queued prompts and model/decision-provider
 answers are excluded. The same browser-safe selector serves main/side desktop
-navigation and other SDK clients. No service endpoint or protocol change is
-required, so a matching protocol-66 service remains compatible.
+navigation and other SDK clients without another service endpoint. The current
+runtime still requires its matching service protocol for per-question side
+refresh and the other shared APIs.
 
 `Snapshot.sessionTelemetry[sessionId]` already contains original `turns`, current
 `budget` or its explicit `budgetDiagnostic`, live `estimate`, and recorded
@@ -447,6 +460,12 @@ their original encryption and identities. Local project names are safe unique
 identifiers; normalization never renames filesystem directories.
 
 ### Retained-state upgrades
+
+Protocol/database 67 atomically adds `side_context_schema` and rejects missing,
+corrupt or prematurely relabelled markers. Older ciphertext, receipts, creation
+snapshots and accounting remain unchanged. The first new side question captures
+its actual original main source under the child's grants; old turns are not
+replayed, rewritten or granted another paid call.
 
 Protocol/database 66 atomically inserts `retained_telemetry_schema` and advances
 the version. Missing/corrupt current markers and premature older-lineage markers
