@@ -154,6 +154,9 @@ deletion, unknown cancellation, migration rollback and restart without replay.
 
 ## Protocol-66 qualification
 
+This records the retained-telemetry checkpoint; the later SDK/desktop-only
+turn-navigation qualification is recorded below.
+
 The generated regression first reproduced a normalized 10-token cache report
 being discarded when transport presence flags were false. Hidden desktop tests
 reject `activity.turn`, `budget.status` and `session.context` detail queries:
@@ -246,3 +249,50 @@ and filesystem/Git in 87.62 ms. Live Copilot/ds4, Rust/Linux, signed/notarized
 release, physical SendBox, Kupo quality, System One, configured physical SSH
 and full-milestone attachment/default/budget gates remain explicitly
 FAIL/unavailable in this primitive spike; it does not broaden qualification.
+
+### Turn navigation qualification
+
+The shared selector and desktop use the existing protocol-66 snapshot, with no
+service implementation, durable schema, endpoint or dependency change.
+Fresh focused source coverage passes 46 navigation/question/activity/telemetry
+cases and 26 SDK-discovery/profile/interaction cases. It includes actual fixed
+and automatically routed model questions, the original user choice, service
+restart without another model call, 5,000 retained navigation points, repeated
+call IDs, regressed clocks and explicit automated-answer/permission exclusions.
+
+The complete final hidden desktop suite passes **225 flows, three existing
+skips, zero failures** across 228 flows in **7.1 minutes**. New native coverage
+checks keyboard focus/current location, saved drafts, reload, old history,
+streamed output without scroll capture, independent main/side transcripts,
+compact preview Escape handling and actual viewport/Send visibility at
+840 by 620. Wide and compact generated screenshots were inspected.
+
+The independently packed/audited SDK qualifies the exported selector and
+declarations, exact user-choice provenance, owner-profile reopen and unchanged
+model counts. Browser-safe root/React and explicit Node/MCP entrypoints pass,
+as do all 12 actual installed-worker accounting/continuation probes.
+Source and independent-consumer audits report zero vulnerabilities.
+
+The actual packaged app passes **18 functional flows in 38.2 seconds**, plus
+the separate **nine navigation/readability/composer flows in 24.8 seconds**.
+The readability check retains its 85% threshold against the actual transcript
+column, excluding the intentionally added navigation sidebar. Earlier failed
+checks and the compact clipping regression are not passing evidence. No
+deadlines were increased or new unsaved-draft guard bypasses introduced.
+
+The 779,788,594-byte ZIP passes the actual bounded production update consumer.
+The canonical styled DMG preserves its exact signed bundle, and the labelled
+copy has identical bytes plus successful disk-image verification:
+
+```text
+release/Moguri-0.30.0-alpha.1-turn-navigation-66-macos-arm64.dmg
+794037986 bytes
+SHA-512:
+a7401fdfc68ad29d6b1d68a8fabc5781b89ad5c5575dd8f02d1c3dd8a46dd767192c8bb4fb0530cdce721df5825e5ce7bd476a08402a6e1350ce288df1042d0e
+```
+
+The previously verified native worker payload remains byte-identical.
+Ad-hoc development signing, known notices and all physical/live-provider,
+Linux-release and notarization exclusions remain unchanged. No installed
+personal application, Finder, real microphone, personal login or paid inference
+was used.
