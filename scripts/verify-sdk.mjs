@@ -218,6 +218,15 @@ try {
       await sdk.slash("generated-id","/thinking low","tui");await sdk.slash("generated-id","/effort default","desktop");
       await sdk.slash("generated-id","/context-window 24577","cli");
       ` : ""}
+      ${installedProtocol >= 70 ? `
+      const catalogue:import("moguri").ModelCatalogue=sdk.models.catalogue();
+      const preferences:import("moguri").ModelPreferences|undefined=sdk.settings.get()?.values.modelPreferences;
+      void catalogue.providers[0]?.enabled;void catalogue.models[0]?.sourceModelId;void preferences?.disabledModels;
+      await sdk.models.setProviderEnabled("github-copilot",false,0);
+      await sdk.models.setEnabled("generated-api",false,1);
+      await sdk.models.selectSource("generated-api","generated-model",2);
+      await sdk.slash("generated-id","/models catalogue","tui");
+      ` : ""}
       ${conversationNavigationAvailable ? `
       const points:import("moguri").ConversationNavigationEntry[]=(await import("moguri")).conversationNavigation(sdk.getState().snapshot!,"generated-id");
       void points[0]?.messageIndex;const answer=points.find(value=>value.kind==="answer");if(answer?.kind==="answer"){void answer.questionId;void answer.answer;}
@@ -1065,6 +1074,9 @@ try {
       await assert.rejects(()=>sdk.artifacts.read(retained.id),/missing|deleted|outside/);
       const generatedRequests=[];
       budgetServer=createServer(async(request,response)=>{
+        if(PROTOCOL_VERSION>=70&&request.method==="GET"&&request.url.endsWith("/models")){
+          response.writeHead(200,{"Content-Type":"application/json"}).end(JSON.stringify({data:[{id:"generated-external-budget"}]}));return;
+        }
         const chunks=[];for await(const chunk of request)chunks.push(Buffer.from(chunk));
         const body=JSON.parse(Buffer.concat(chunks).toString("utf8"));generatedRequests.push(body);
         response.writeHead(200,{"Content-Type":"text/event-stream"});
@@ -1330,6 +1342,32 @@ try {
           assert.equal(generatedRequests.length,before);
           console.log("Installed protocol-69 shortcuts preserve exact/min/half/max context ceilings, real unsupported-effort errors and profile-owned model controls without inference.");
         }finally{generatedModel.contextWindow=maximum;betaProvider.state.models=previous;betaProvider.onChange();await beta.models.refresh();}
+      }
+      if(PROTOCOL_VERSION>=70){
+        const before=generatedRequests.length,savedSettings=structuredClone(beta.settings.get().values),savedModels=structuredClone(betaProvider.state.models);
+        const extra=Array.from({length:20},(_,index)=>({...savedModels[0],id:"generated-installed-choice-"+index,apiModelId:"generated-installed-choice-"+index,name:"Generated installed choice "+index}));
+        try{
+          betaProvider.state.models=[...savedModels,...extra];betaProvider.onChange();await beta.models.refresh();
+          for(const model of extra.slice(2))await beta.models.setEnabled(model.apiModelId,false);
+          assert.equal(beta.getState().snapshot.provider.models.filter(model=>!model.synthetic).length,3);
+          assert.equal(beta.models.catalogue().models.length,21);
+          await assert.rejects(()=>beta.slash(betaMetered.id,"/model "+extra[2].id),/available|disabled/i);
+          const settings=beta.settings.get();await beta.settings.update({...settings.values,localModels:[...settings.values.localModels,{id:"installed-choice",name:"Generated installed source",enabled:true,baseUrl:generatedModel.baseUrl+"/v1",auth:"none",models:[{id:generatedModel.id,name:"Generated installed duplicate",contextWindow:8192,maxTokens:128,imageInput:false}]}]},settings.revision);
+          await beta.models.refresh();
+          let group=beta.models.catalogue().models.find(model=>model.apiModelId===generatedModel.id);
+          assert.equal(group.offerings.length,2);assert.equal(group.sourceModelId,null);
+          const local=group.offerings.find(offering=>offering.model.source==="local").model;
+          await beta.models.selectSource(generatedModel.id,local.id);
+          assert.ok(beta.getState().snapshot.provider.models.some(model=>model.id===local.id));
+          assert.ok(!beta.getState().snapshot.provider.models.some(model=>model.id===generatedModel.id));
+          await beta.models.setProviderEnabled(local.providerId,false);
+          group=beta.models.catalogue().models.find(model=>model.apiModelId===generatedModel.id);
+          assert.equal(group.sourceModelId,local.id);assert.ok(group.diagnostic);
+          assert.ok(!beta.getState().snapshot.provider.models.some(model=>model.id===generatedModel.id));
+          await beta.models.selectSource(generatedModel.id,generatedModel.id);
+          assert.equal(generatedRequests.length,before);
+          console.log("Installed protocol-70 SDK reduces 21 models to three, blocks disabled slash selection and enforces an exact retained provider source without fallback or inference.");
+        }finally{betaProvider.state.models=savedModels;betaProvider.onChange();await beta.settings.update(savedSettings,beta.settings.get().revision);await beta.models.refresh();}
       }
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
       await sdk.profiles.globalBudget({basis:"estimate",tokens:rootCharges},0,true);

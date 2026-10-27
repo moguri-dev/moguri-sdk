@@ -128,6 +128,9 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version < 70 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_preferences_schema'").get()) {
+        throw new Error("Invalid pre-70 model preference lineage marker. State was preserved.");
+      }
       if (version < 68 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='composer_workflows_schema'").get()) {
         throw new Error("Invalid pre-68 composer workflow lineage marker. State was preserved.");
       }
@@ -390,6 +393,17 @@ export class EventStore {
         throw new Error("Missing or invalid composer workflow schema marker. State was preserved.");
       }
       if (version < 69) this.db.exec("PRAGMA user_version=69;");
+      if (version < 70) {
+        if (this.events().some((event) => event.event_type === "settings.updated" && Object.hasOwn(event.payload.settings, "modelPreferences"))) {
+          throw new Error("Model preference history cannot be relabelled without its original schema marker. State was preserved.");
+        }
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('model_preferences_schema','1');
+          PRAGMA user_version=70; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_preferences_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid model preference schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {

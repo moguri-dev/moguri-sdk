@@ -1,7 +1,7 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
-import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
+import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
@@ -110,6 +110,11 @@ export class MoguriSdk extends TransportClient {
     if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");
     return session.revision;
   }
+  private settingsRevision(): number {
+    const snapshot = this.getState().snapshot;
+    if (!snapshot) throw new ClientError("profile_missing", "Connect this profile before changing model availability.");
+    return snapshot.settings.revision;
+  }
   private draftRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (!session) throw new ClientError("session_missing", "Choose an existing destination session.");
@@ -213,6 +218,25 @@ export class MoguriSdk extends TransportClient {
     generate: (sessionId: string | null, expectedDigest: string, allProjects: boolean, confirmScope: true) => this.command({ type: "suggestions.generate", sessionId, expectedDigest, allProjects, confirmScope }),
   };
   readonly models = {
+    catalogue: (): ModelCatalogue => {
+      const catalogue = this.getState().snapshot?.provider.catalogue;
+      if (!catalogue) throw new ClientError("model_catalogue", "The current service has not supplied this profile's model inventory. No default catalogue was substituted.");
+      return catalogue;
+    },
+    setEnabled: (apiModelId: string, enabled: boolean, expectedRevision = this.settingsRevision()) =>
+      this.command({ type: "models.model.set", apiModelId, enabled, expectedRevision }),
+    selectSource: (apiModelId: string, modelId: string, expectedRevision = this.settingsRevision()) =>
+      this.command({ type: "models.source.select", apiModelId, modelId, expectedRevision }),
+    setProviderEnabled: async (providerId: string, enabled: boolean, expectedRevision = this.settingsRevision()) => {
+      const provider = this.models.catalogue().providers.find((entry) => entry.id === providerId);
+      if (!provider) throw new ClientError("model_provider", "Choose a provider from this actual profile's inventory.");
+      const result = await this.command({ type: "models.provider.set", providerId, enabled, expectedRevision });
+      if (enabled && provider.scope === "copilot") {
+        try { await this.models.refresh(); }
+        catch (error) { throw new ClientError("model_refresh", `The provider preference was saved, but metadata refresh failed. Inspect its actual connection; no login or inference was started. ${error instanceof Error ? error.message : ""}`); }
+      }
+      return result;
+    },
     refresh: () => this.command({ type: "provider.refresh" }),
     evidence: (modelId: string) => this.query({ type: "model.evidence", modelId }),
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),

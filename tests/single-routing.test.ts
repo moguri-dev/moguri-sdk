@@ -8,7 +8,7 @@ import { setupFixture, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { kupoPool } from "../apps/service/src/routing.ts";
-import { modelEndpointBoundary } from "../apps/service/src/model-registry.ts";
+import { localModelId, modelEndpointBoundary } from "../apps/service/src/model-registry.ts";
 const native = { skip: process.platform !== "darwin", timeout: 20_000 };
 
 async function useLoopbackClassifier(fixture: Awaited<ReturnType<typeof routedFixture>>) {
@@ -16,6 +16,7 @@ async function useLoopbackClassifier(fixture: Awaited<ReturnType<typeof routedFi
   settings.localModels.push({ id: "generated-loopback-router", name: "Generated loopback router", enabled: true, baseUrl: `${fixture.baseUrl}/v1`, auth: "none",
     models: [{ id: fixture.modelId, name: "Generated local classifier", contextWindow: 16384, maxTokens: 128, imageInput: false }] });
   await fixture.sdk.settings.update(settings, fixture.sdk.settings.get()!.revision); await fixture.sdk.models.refresh();
+  await fixture.sdk.models.selectSource(fixture.modelId, localModelId("generated-loopback-router", fixture.modelId));
   const classifier = fixture.sdk.getState().snapshot!.provider.models.find((model) => model.name === "Generated local classifier");
   if (!classifier) throw new Error("The generated loopback classifier was not discovered.");
   await fixture.sdk.routing.configure({ ...fixture.sdk.routing.policy()!, classifierModelId: classifier.id, allowHosted: false }, fixture.sdk.settings.get()!.revision);

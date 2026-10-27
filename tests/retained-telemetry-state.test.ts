@@ -14,7 +14,7 @@ test("schema 65 telemetry upgrade rolls back atomically and preserves original c
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('composer_workflows_schema','side_context_schema','retained_telemetry_schema'); PRAGMA user_version=65; CREATE TRIGGER generated_telemetry_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='retained_telemetry_schema' BEGIN SELECT RAISE(ABORT,'Generated telemetry migration interruption'); END;"); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema'); PRAGMA user_version=65; CREATE TRIGGER generated_telemetry_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='retained_telemetry_schema' BEGIN SELECT RAISE(ABORT,'Generated telemetry migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated telemetry migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -38,7 +38,7 @@ test("current telemetry provenance cannot be missing, corrupt or relabelled as o
     const fixture = await setupFixture(), path = fixture.service.store.path;
     try {
       await fixture.service.close();
-      const raw = new DatabaseSync(path); try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('composer_workflows_schema','side_context_schema')"); raw.exec(sql); } finally { raw.close(); }
+      const raw = new DatabaseSync(path); try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_preferences_schema','composer_workflows_schema','side_context_schema')"); raw.exec(sql); } finally { raw.close(); }
       assert.throws(() => new EventStore(path, fixture.retentionKey), /retained telemetry.*(marker|lineage)/i);
     } finally { await fixture.close(); }
   });

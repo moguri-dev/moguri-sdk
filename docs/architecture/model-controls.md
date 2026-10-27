@@ -4,6 +4,66 @@ This user-requested slice preserves the dark Operate interface and one shared
 SDK/service authority. It replaces redundant composer rows with labeled icon
 controls and progressive disclosure, not new client-only execution behavior.
 
+## Provider and model availability
+
+Provider/model availability belongs to the actual profile, not client-only
+picker state. Providers can be disabled without signing out, deleting secrets
+or changing existing sessions. Local/SSH endpoint configuration remains exact;
+the provider-list action changes its existing enabled flag and the shared
+availability preference atomically. Copilot availability is independent of
+its retained login. Enabling may refresh configured metadata, never authorize
+an account, scan a host, download weights or start inference.
+
+Model rows are grouped only by the exact upstream `apiModelId` (or its original
+concrete ID), not fuzzy display names, prices, vendor/family claims or inferred
+lineage. This is a declared catalog key, not proof of actual model identity,
+training independence or quality. Each group has one enabled preference and
+at most one selected concrete provider offering. Multiple offerings require
+an explicit source choice. A retained choice never silently switches when
+that provider becomes disabled, disappears or becomes unavailable. A sole
+offering without a saved choice is the default; adding a collision requires a
+choice before either source is selectable. Preparation rechecks the exact
+advertised API ID as well as availability after asynchronous credential work.
+The ordinary boundary rechecks that exact metadata again after asynchronous
+repository attribution, immediately before reservation and `model.started`.
+An upstream API literally named `kupo` remains distinct from the synthetic
+router's concrete ID.
+
+The selectable catalog contains only enabled, available, selected offerings.
+The management inventory still exposes disabled/configured entries and clear
+reasons. Desktop, TUI, CLI, `/model`, defaults, Kupo and owned-model admission
+share the service registry; hiding a row alone is insufficient. New selection
+and new model admissions reject disabled or unselected IDs, including prepared
+calls held before admission. Already admitted work retains its actual result,
+charges and cancellation outcome; configuration never refunds an unknown hold
+or replays a call. Existing session/default IDs remain visible as unavailable
+instead of being cleared or rebound to another provider.
+
+Reuse TypeBox/React/Electron and maintained pi-ai under their existing
+MIT/component notices; no dependency or provider-evidence call is added.
+Browser-safe SDK capabilities manage typed revision-bound availability actions.
+Protocol 70 adds profile-owned model preferences through existing
+`settings.updated` persistence plus a strict migration marker. No old encrypted
+history, receipts, grants, model provenance or accounting is rewritten. Restart
+must preserve disabled IDs and exact source choice, and old matching services
+must not be reused for the new selection contract.
+
+Generated tests must prove a 21-model catalog can expose only three selected
+models, disabled IDs fail through both shared slash and raw commands, exact
+duplicate source exclusivity, provider re-enable without credential loss,
+scope isolation, concurrent edits, disable during preparation, no automatic
+fallback, migration failure/reopen and real restart without paid replay.
+Settings use the existing switches, exclusive source dropdowns and explicit
+help rows; ordinary model controls display only the authoritative selected set.
+
+Before feature edits the generated prerequisite passes OAuth/streaming in
+1,077.40 ms (32.18 ms cancellation), SQLite in 66.09 ms (append p95 0.065 ms),
+PTY in 159.20 ms (151.32 ms cancellation, zero survivors), OpenTUI in
+1,026.71 ms, hidden Electron in 565.67 ms (8.12 ms frames) and filesystem/Git
+in 93.69 ms. The generated configured-provider/startup probe also passes.
+Physical SendBox/SSH, live-provider, Rust/Linux, family/quality, notarization
+and full-milestone exclusions remain explicitly unchanged.
+
 ## Direct tuning slash commands
 
 `/thinking LEVEL` and `/effort LEVEL` share the existing explicit model-option

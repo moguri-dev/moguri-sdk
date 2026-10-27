@@ -14,7 +14,7 @@ test("schema 66 side-context upgrade rolls back atomically and preserves origina
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('composer_workflows_schema','side_context_schema'); PRAGMA user_version=66; CREATE TRIGGER generated_side_schema_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='side_context_schema' BEGIN SELECT RAISE(ABORT,'Generated side migration interruption'); END;"); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_preferences_schema','composer_workflows_schema','side_context_schema'); PRAGMA user_version=66; CREATE TRIGGER generated_side_schema_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='side_context_schema' BEGIN SELECT RAISE(ABORT,'Generated side migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated side migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -38,7 +38,7 @@ test("current side-context provenance cannot be missing, corrupted or relabelled
     const fixture = await setupFixture(), path = fixture.service.store.path;
     try {
       await fixture.service.close();
-      const raw = new DatabaseSync(path); try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id='composer_workflows_schema'"); raw.exec(sql); } finally { raw.close(); }
+      const raw = new DatabaseSync(path); try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_preferences_schema','composer_workflows_schema')"); raw.exec(sql); } finally { raw.close(); }
       assert.throws(() => new EventStore(path, fixture.retentionKey), /side context.*(marker|lineage)/i);
     } finally { await fixture.close(); }
   });

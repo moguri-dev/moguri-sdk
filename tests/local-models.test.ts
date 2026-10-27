@@ -37,8 +37,13 @@ test("explicit local endpoints use the maintained worker without Copilot, ambien
     assert.equal(fixture.session().usage[0]?.billedUsd, null);
     await sdk.command({ type: "provider.login" });
     fixture.provider.authorize();
-    await waitFor(() => sdk.getState().snapshot!.provider.models.some((model) => model.source === "copilot"));
+    await waitFor(() => sdk.models.catalogue().models[0]?.offerings.length === 2);
+    assert.equal(sdk.getState().snapshot!.provider.models.filter((model) => !model.synthetic).length, 0);
+    await sdk.models.selectSource(fixture.modelId, model.id);
     assert.ok(sdk.getState().snapshot!.provider.models.some((candidate) => candidate.id === model.id));
+    assert.equal(sdk.getState().snapshot!.provider.models.some((candidate) => candidate.id === fixture.modelId), false);
+    await sdk.models.selectSource(fixture.modelId, fixture.modelId);
+    assert.equal(sdk.getState().snapshot!.provider.models.some((candidate) => candidate.id === model.id), false);
     assert.ok(sdk.getState().snapshot!.provider.models.some((candidate) => candidate.id === fixture.modelId));
   } finally { sdk.disconnect(); await fixture.close(); }
 });
@@ -51,6 +56,7 @@ test("local credentials are resource-bound, echoed secrets never enter streaming
     await sdk.settings.update({ ...settings.values, localModels: [endpoint] }, settings.revision);
     await waitFor(() => sdk.getState().snapshot?.provider.connections?.find((entry) => entry.source === "local")?.status === "error");
     await sdk.models.setToken(endpoint.id, "generated-private-local-key");
+    await sdk.models.selectSource(fixture.modelId, localModelId(endpoint.id, fixture.modelId));
     const model = await waitFor(() => sdk.getState().snapshot?.provider.models.find((model) => model.source === "local"));
     await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, modelId: model.id });
     await fixture.send("generated echo credential");
@@ -72,6 +78,8 @@ test("local model configuration rejects unsafe endpoints/limits, never advertise
     await assert.rejects(() => sdk.settings.update({ ...original.values, localModels: [{ ...endpoint, baseUrl: "http://unapproved.example.test/v1" }] }, original.revision), /HTTPS or explicit loopback/);
     await assert.rejects(() => sdk.settings.update({ ...original.values, localModels: [{ ...endpoint, models: [{ ...endpoint.models[0]!, maxTokens: endpoint.models[0]!.contextWindow }] }] }, original.revision), /output limit/);
     await sdk.settings.update({ ...original.values, localModels: [endpoint] }, original.revision);
+    await waitFor(() => sdk.models.catalogue().models[0]?.offerings.find((entry) => entry.model.source === "local")?.available);
+    await sdk.models.selectSource(fixture.modelId, localModelId(endpoint.id, fixture.modelId));
     const model = await waitFor(() => sdk.getState().snapshot?.provider.models.find((model) => model.source === "local"));
     await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, modelId: model.id });
     await fixture.send("generated slow local request");

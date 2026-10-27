@@ -12,7 +12,7 @@ import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type
 import { RememberApprovalSchema } from "./permissions.ts";
 import type { SessionTelemetry } from "./activity.ts";
 import { defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema, SessionRepositoriesSchema, type SessionRepository } from "./sessions.ts";
-import type { ProviderConnection } from "./providers.ts";
+import type { ProviderConnection, ModelCatalogue } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
 import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
 export * from "./controls.ts";
@@ -59,7 +59,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 69;
+export const PROTOCOL_VERSION = 70;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -235,6 +235,7 @@ export interface ProviderState {
   login: { code: string; url: string; expiresAt: number } | null;
   diagnostic: string | null;
   connections?: ProviderConnection[];
+  catalogue?: ModelCatalogue;
 }
 export interface Policy { revision: number; allowedEnvs: Controls["env"][] }
 export interface Snapshot extends PlatformSnapshot {

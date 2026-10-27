@@ -102,7 +102,7 @@ test("Max steering runs only after a real safe solver boundary, selects exact us
 });
 
 test("kupo Single and explicitly bounded Max remain independent: the real routed solver uses the same owned decision authority and all-role ledger without promoting router/advice text into its context", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
-  const f = await routedFixture(), advice = await fixtureProvider({ responseMode: "text", exposeModels: true, replyText: generatedAdvice() });
+  const f = await routedFixture(), advice = await fixtureProvider({ modelId: "generated-routed-decision-api", responseMode: "text", exposeModels: true, replyText: generatedAdvice() });
   try {
     const settings = structuredClone(f.sdk.settings.get()!.values);
     settings.permissions.tools.push({ id: "generated-routed-read", tool: "read_file", decision: "allow", pathPrefix: "fixture.txt" });

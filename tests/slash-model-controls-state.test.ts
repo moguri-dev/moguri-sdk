@@ -10,11 +10,11 @@ test("schema 68 tuning qualification upgrades only metadata, preserves encrypted
   const fixture = await setupFixture(), path = fixture.service.store.path;
   let reopened: EventStore | undefined;
   try {
-    assert.equal(PROTOCOL_VERSION, 69);
+    assert.ok(PROTOCOL_VERSION >= 69);
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("PRAGMA user_version=68"); } finally { raw.close(); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id='model_preferences_schema'; PRAGMA user_version=68"); } finally { raw.close(); }
     const exec = DatabaseSync.prototype.exec;
     const fault = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
       if (/PRAGMA user_version=69/.test(sql)) throw new Error("Generated model-tuning metadata interruption");
@@ -28,7 +28,7 @@ test("schema 68 tuning qualification upgrades only metadata, preserves encrypted
       assert.deepEqual(retainedCiphertextRows(interrupted), original);
     } finally { interrupted.close(); }
     reopened = new EventStore(path, fixture.retentionKey);
-    assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, 69);
+    assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(retainedCiphertextRows(reopened.db), original);
     reopened.close(); reopened = new EventStore(path, fixture.retentionKey);
     assert.deepEqual(retainedCiphertextRows(reopened.db), original);

@@ -1051,7 +1051,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
-| `models` | Explicit Copilot/local catalog refresh, informational `evidence(modelId)`, always-visible Kupo with authoritative eligible environments, and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download, automatic evidence read or model substitution. |
+| `models` | Profile-owned `catalogue()`, `setProviderEnabled`, `setEnabled` and exclusive `selectSource`, plus explicit refresh, informational `evidence(modelId)`, always-visible Kupo and resource-bound endpoint keys. Selection and admission use only enabled, available, chosen sources; disabled inventory remains inspectable. No sign-in, inference, host scan, automatic evidence read or substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
 
@@ -1330,6 +1330,27 @@ and declared model limits. Metadata discovery lists only configured advertised
 IDs. Use `models.setToken`/`clearToken` for bearer credentials; no token belongs
 in settings. `provider.connections` keeps Copilot and local status independent;
 each model/call has actual provider/API-model provenance.
+
+`models.catalogue()` returns the actual profile's provider list plus one model
+group per exact upstream `apiModelId`. It includes disabled and configured-but-
+unready offerings; `snapshot.provider.models` is the authoritative selectable
+set, plus the synthetic Kupo entry with its actual readiness.
+`models.setProviderEnabled(providerId, enabled, expectedRevision?)`,
+`models.setEnabled(apiModelId, enabled, expectedRevision?)`, and
+`models.selectSource(apiModelId, concreteModelId, expectedRevision?)` use the
+current profile settings revision when omitted. Concurrent edits fail rather
+than overwrite another client.
+
+Multiple offerings require one explicit selected source. Disabled models,
+providers and unselected offerings fail raw session selection and every new
+model admission, not only `/model`. Disabling preserves credentials, source
+choices, current session/default IDs, original results and ledger charges.
+Reenabling Copilot explicitly refreshes its configured metadata; a refresh
+failure reports that the preference was saved without claiming connection or
+inference. Local/SSH changes reuse their exact configured endpoint flags.
+`settings.modelPreferences` and protocol-70 migration metadata persist this
+contract without rewriting old history. See
+[provider/model availability](architecture/model-controls.md#provider-and-model-availability).
 
 `settings.remote` holds a non-secret explicit SSH target, pinned public host key,
 selected local identity path, private remote state directory, installed worker

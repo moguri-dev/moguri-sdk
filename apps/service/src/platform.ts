@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import { Value } from "typebox/value";
 import {
-  defaultSettings, guidanceText, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
+  defaultSettings, defaultModelPreferences, guidanceText, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
@@ -897,6 +897,17 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     const snapshot = this.snapshot();
     if (expectedRevision !== snapshot.settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before saving.", 409);
     if (settings.systemPrompt !== snapshot.settings.values.systemPrompt && !acknowledge) throw new MoguriError("prompt_warning", SYSTEM_PROMPT_WARNING, 409);
+    if (settings.modelPreferences) {
+      const enabledEndpoints = (snapshot.provider.catalogue?.providers ?? []).filter((provider) => {
+        if (provider.scope === "copilot") return false;
+        const before = provider.scope === "local" ? snapshot.settings.values.localModels : snapshot.settings.values.remote?.models;
+        const after = provider.scope === "local" ? settings.localModels : settings.remote?.models;
+        return before?.some((endpoint) => endpoint.id === provider.endpointId && !endpoint.enabled) &&
+          after?.some((endpoint) => endpoint.id === provider.endpointId && endpoint.enabled);
+      });
+      settings = { ...settings, modelPreferences: { ...settings.modelPreferences,
+        disabledProviders: settings.modelPreferences.disabledProviders.filter((id) => !enabledEndpoints.some((provider) => provider.id === id)) } };
+    }
     validateSettings(settings);
     for (const choice of [settings.notifications.needsInputSound, settings.notifications.completedSound]) {
       if (choice && choice.id !== "default" && !snapshot.notificationSounds.some((sound) => sound.id === choice.id)) throw new MoguriError("notification_sound_missing", "Choose an existing sound from this actual profile. No missing sound was silently replaced.", 409);
@@ -905,7 +916,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
     const managementPolicy = (values: UserSettings) => [values.sandboxManagement?.enabled ?? false,
       values.sandboxManagement?.automaticWorkspaces ?? true, values.sandboxManagement?.automaticProviderNetwork ?? true];
-    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.remote, settings.kupo, settings.winddown, settings.decisions, settings.sandbox, managementPolicy(settings)]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions, snapshot.settings.values.sandbox, managementPolicy(snapshot.settings.values)]);
+    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.modelPreferences, settings.remote, settings.kupo, settings.winddown, settings.decisions, settings.sandbox, managementPolicy(settings)]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.modelPreferences, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions, snapshot.settings.values.sandbox, managementPolicy(snapshot.settings.values)]);
     return { event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
   }
   private skill(content: string) {
@@ -1200,13 +1211,42 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         await this.sessions.power.retry(); return finish([]);
       case "models.token.set":
       case "models.token.clear": return this.host.modelCredential(command.endpointId, command.type === "models.token.set" ? command.token : undefined, finish);
+      case "models.provider.set":
+      case "models.model.set":
+      case "models.source.select": {
+        const catalogue = snapshot.provider.catalogue;
+        if (!catalogue) throw new MoguriError("model_catalogue", "The profile's current provider catalogue is unavailable. No preference was guessed.", 409);
+        const settings = structuredClone(snapshot.settings.values), preferences = structuredClone(settings.modelPreferences ?? defaultModelPreferences());
+        if (command.type === "models.provider.set") {
+          const provider = catalogue.providers.find((entry) => entry.id === command.providerId);
+          if (!provider) throw new MoguriError("model_provider", "Choose a provider from this actual profile. No endpoint or account was substituted.", 409);
+          preferences.disabledProviders = [...preferences.disabledProviders.filter((id) => id !== provider.id), ...(!command.enabled ? [provider.id] : [])];
+          if (provider.scope === "local") settings.localModels = settings.localModels.map((endpoint) => endpoint.id === provider.endpointId ? { ...endpoint, enabled: command.enabled } : endpoint);
+          if (provider.scope === "remote") {
+            if (!settings.remote) throw new MoguriError("model_provider", "The original SSH model source is no longer configured.", 409);
+            settings.remote.models = settings.remote.models.map((endpoint) => endpoint.id === provider.endpointId ? { ...endpoint, enabled: command.enabled } : endpoint);
+          }
+        } else {
+          const model = catalogue.models.find((entry) => entry.apiModelId === command.apiModelId);
+          if (!model) throw new MoguriError("model_catalogue", "Choose an exact upstream model ID from this profile's current inventory.", 409);
+          if (command.type === "models.model.set") preferences.disabledModels = [...preferences.disabledModels.filter((id) => id !== model.apiModelId), ...(!command.enabled ? [model.apiModelId] : [])];
+          else {
+            const offering = model.offerings.find((entry) => entry.model.id === command.modelId);
+            if (!offering?.available || !catalogue.providers.some((provider) => provider.id === offering.model.providerId && provider.enabled)) throw new MoguriError("model_source", "Enable and refresh this exact provider before choosing its model source. No other source was selected.", 409);
+            preferences.sources = [...preferences.sources.filter((entry) => entry.apiModelId !== model.apiModelId), { apiModelId: model.apiModelId, modelId: offering.model.id }];
+          }
+        }
+        settings.modelPreferences = preferences;
+        const event = this.settingsEvent(settings, command.expectedRevision, false), result = finish([event], { revision: event.payload.revision });
+        this.host.invalidateApprovals(); return result;
+      }
       case "settings.update":
       case "settings.reset": {
         const settings = command.type === "settings.update" ? command.settings : structuredClone(snapshot.settings.values);
         if (command.type === "settings.reset") {
           const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
-          if (command.section === "all") Object.assign(settings, defaults);
+          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; }
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }

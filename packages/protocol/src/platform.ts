@@ -8,7 +8,7 @@ import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAutho
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
 import type { ModelSelection } from "./model.ts";
-import { LocalEndpointSchema } from "./providers.ts";
+import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 import { RememberedApprovalSchema } from "./permissions.ts";
@@ -170,6 +170,7 @@ export const SettingsSchema = object({
     needsInputSound: Type.Optional(notificationSound), completedSound: Type.Optional(notificationSound), soundWhileFocused: Type.Optional(Type.Boolean()),
   }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
+  modelPreferences: Type.Optional(ModelPreferencesSchema),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
 });
@@ -214,7 +215,7 @@ const section = Type.Union([
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("skillSources"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
-  Type.Literal("localModels"), Type.Literal("startup"),
+  Type.Literal("localModels"), Type.Literal("modelPreferences"), Type.Literal("startup"),
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
   Type.Literal("kupo"),
   Type.Literal("winddown"),
@@ -222,6 +223,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  ModelPreferenceCommandSchema,
   PricingCommandSchema,
   KanbanCommandSchema,
   WorkflowCommandSchema,

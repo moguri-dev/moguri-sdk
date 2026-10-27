@@ -10,7 +10,7 @@ import { lstatSync, realpathSync } from "node:fs";
 import { localRootsOverlap } from "./project-clone.ts";
 import type { Message } from "@earendil-works/pi-ai";
 import {
-  TaskProgressToolSchema, AgentTerminalReadSchema,
+  TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
   canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
@@ -208,8 +208,10 @@ export class ControlPlane extends EventEmitter {
       refresh: async () => {}, cancel: async () => {}, logout: async () => {},
       login: () => { throw new MoguriError("remote_account", "Configure the remote endpoint's explicit account, not a second Copilot login."); },
       prepare: async () => { throw new MoguriError("remote_model", "This remote model is no longer configured. No provider was substituted.", 409); },
-    }, () => this.remote.readiness.ready ? this.projection.settings.values.remote?.models ?? [] : [], {
+    }, () => this.projection.settings.values.remote?.models ?? [], {
       includeCopilot: false, environments: ["Remote"], vault: platformOptions.remote?.modelsVault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.remote-models`),
+      scope: "remote", nested: true, ready: () => this.remote.readiness.ready,
+      preferences: () => this.projection.settings.values.modelPreferences ?? defaultModelPreferences(),
       idPrefix: () => {
         const target = this.projection.settings.values.remote;
         return `remote.${frameDigest(target ? [target.id, target.host, target.port, target.user, target.hostKey] : null).slice(0, 16)}.local`;
@@ -223,7 +225,8 @@ export class ControlPlane extends EventEmitter {
       },
     });
     this.provider = new ModelRegistry(provider ?? new CopilotAdapter(new KeyringCredentials(this.profileId)), () => this.projection.settings.values.localModels, {
-      ...platformOptions.models, additional: this.remoteModels,
+      ...platformOptions.models, additional: this.remoteModels, nested: false, scope: "local",
+      preferences: () => this.projection.settings.values.modelPreferences ?? defaultModelPreferences(),
       vault: platformOptions.models?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.models`),
       localEnvironments: (endpoint) => {
         const environments: Controls["env"][] = ["Local"], management = this.projection.settings.values.sandboxManagement;
@@ -628,6 +631,7 @@ export class ControlPlane extends EventEmitter {
         payload: { executionId: context.frame.executionId, sequence: context.frame.sequence, digest: context.frame.digest } }];
     }
     events = this.profileHooks?.extendCommit(this.profileId, events) ?? events;
+    const previousModelPreferences = JSON.stringify(this.projection.settings.values.modelPreferences);
     const appended = this.store.commit(events, receipt, forget, (primary) => {
       const next = { ...this.snapshot(), ...projectEvents([...this.history, ...primary], this.profileId) };
       const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
@@ -648,6 +652,9 @@ export class ControlPlane extends EventEmitter {
     this.remote.synchronize();
     this.sandbox.synchronize();
     this.provider.synchronize();
+    if (JSON.stringify(this.projection.settings.values.modelPreferences) !== previousModelPreferences) {
+      this.providerEpoch++; this.emit("change", []);
+    }
     this.platform?.sessionPrs.changed(appended);
     this.candidateCleanup?.changed(appended);
     this.platform?.browser.synchronize();
@@ -2077,6 +2084,7 @@ export class ControlPlane extends EventEmitter {
         if (command.folderProjects && !command.projectFolderId) throw new MoguriError("repository_scope", "Captured folder members require their exact owning folder.");
         if (projectId !== null) this.projectRequired(projectId);
         const startup = this.startup(projectId, command.overrides);
+        if (command.overrides?.modelId) this.available(startup.controls, false);
         let repositories: import("../../../packages/protocol/src/sessions.ts").SessionRepository[] | undefined;
         if (command.projectFolderId) {
           if (projectId || command.workspaceId || !command.folderProjects?.length || startup.controls.env !== "Local") throw new MoguriError("repository_scope", "A folder session requires the exact reviewed member set and explicitly selected Local execution, never a single/base/Remote checkout.", 409);
@@ -3334,6 +3342,7 @@ export class ControlPlane extends EventEmitter {
           } else routedContext = [{ role: "user", timestamp: Date.now(), content: JSON.stringify({ task: canonicalContext, instructions: solverPrompt, tools: solverInterface, proposedResponse }) }];
         }
         const metadata = this.provider.state.models.find((model) => model.id === modelId);
+        if (!metadata) throw new MoguriError("model_unavailable", "The actual model source became disabled, unselected or unavailable before admission. No cached preparation or different provider was dispatched.", 409);
         if (phase !== "router" && kupoPhase !== "critic" && kupoPhase !== "gate" && this.hasDocuments(current) && metadata?.toolInput === false) throw new MoguriError("model_documents", "The selected actual solver has document tools disabled. Original attachments remain retained; no other model or complete-document expansion was substituted.", 409);
         if (synthetic && (!metadata || prepared.model.id !== metadata.apiModelId ||
           prepared.model.maxTokens !== metadata.maxTokens || metadata.imageInput && !prepared.model.input.includes("image"))) {
@@ -3345,13 +3354,14 @@ export class ControlPlane extends EventEmitter {
         }, metadata);
         const role = phase === "router" ? "router" : kupoPhase === "gate" ? "critic" : kupoPhase ?? (current.kind === "side" ? "side" : current.kind === "subagent" ? "subagent" : "solver");
         if (run.winddown) this.winddowns.current(run.winddown.id);
-        const admissionScope = this.admissionSignature(current);
+        const admissionScope = this.admissionSignature(current), modelBinding = JSON.stringify(metadata);
         const capturedRepository = await this.platform.repositories.capture(current, run.abort.signal);
         if (run.done || run.abort.signal.aborted) return;
         current = this.session(run.sessionId);
         if (routing?.policy.workflow === "auto") this.checkRoutingSnapshot(current, routing);
         if (admissionScope !== this.admissionSignature(current)) throw new MoguriError(synthetic ? "routing_stale" : "model_scope_changed", "Model root, controls or authority changed during repository attribution. No stale request was admitted.", 409);
         if (synthetic && (policyDigest !== digest(JSON.stringify(this.projection.settings.values.kupo)) || permissionRevision !== this.projection.settings.permissionRevision || policyRevision !== this.projection.policy.revision || contextAtPrepare !== this.routingContextDigest(current))) throw new MoguriError("routing_stale", "Routing authority or input changed during repository attribution. No stale request was admitted.", 409);
+        if (JSON.stringify(this.provider.state.models.find((model) => model.id === modelId)) !== modelBinding) throw new MoguriError("model_unavailable", "The exact model source changed or became unavailable during repository attribution. No prepared request or different provider was dispatched.", 409);
         const reservation = this.platform.budgets.reserve(current, {
           stepId: request.stepId, turnId: run.turnId, providerId: metadata?.providerId ?? prepared.model.provider,
           apiModelId: prepared.model.id, role, modelId, inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens,

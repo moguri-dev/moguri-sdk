@@ -5,7 +5,7 @@ import { fixtureProvider } from "./fixture.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 
 test("finite Single reserves its whole finishing role before routing, then uses it at the actual cap without a solver call or invented Git success", { skip: process.platform !== "darwin", timeout: 20000 }, async (t) => {
-  const f = await routedFixture(), checkpoint = await fixtureProvider({ responseMode: "text", exposeModels: true, replyText: JSON.stringify({ summary: "Generated wind-down: ordinary work was blocked by the actual cumulative cap. No code was accepted or committed." }) });
+  const f = await routedFixture(), checkpoint = await fixtureProvider({ modelId: "generated-service-checkpoint-api", responseMode: "text", exposeModels: true, replyText: JSON.stringify({ summary: "Generated wind-down: ordinary work was blocked by the actual cumulative cap. No code was accepted or committed." }) });
   try {
     const settings = structuredClone(f.sdk.settings.get()!.values);
     settings.localModels.push({ id: "generated-winddown", name: "Generated wind-down model", enabled: true, baseUrl: checkpoint.baseUrl + "/v1", auth: "none",
