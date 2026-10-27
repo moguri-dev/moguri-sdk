@@ -444,6 +444,9 @@ ciphertext, grants, receipts, totals and unknown holds. Startup recovery may
 append existing `budget.recorded` events for the same settled call only when
 its retained original model identity and token totals match exactly. It never
 infers absent zero counts, reprices with new rates or repeats a completed repair.
+Unqualified historical result formats are diagnosed without blocking recovery
+or inventing counts. Stopped runtime snapshots preserve final root-owned
+capacity without reading closed stores; they cannot authorize another call.
 
 Protocol/database 56 adds the strict transactional `browser_control_schema`
 marker and reviewed upgrade from an older running service. Native browser

@@ -26,6 +26,7 @@ export class ProfileRuntime {
   private readonly active = new Map<string, { abort: AbortController; done: Promise<void> }>();
   private readonly pending = new Map<string, { digest: string; result: Promise<CommandResult> }>();
   private closed = false;
+  private closedBudget?: GlobalBudgetCapacity;
   private closeTask?: Promise<void>;
   readonly hooks: ProfileHooks;
   constructor(private readonly initial: EventStore, private readonly stateDir: string, private readonly options: Options) {
@@ -172,6 +173,7 @@ export class ProfileRuntime {
     }
   }
   private globalBudget(): GlobalBudgetCapacity {
+    if (this.closedBudget) return structuredClone(this.closedBudget);
     const limit = this.catalog().globalBudget.limit;
     if (!limit) return { limit: null, chargedTokens: 0, chargedUsdMicros: 0 };
     const entries: BudgetEntry[] = [], plans: BudgetPlan[] = [];
@@ -296,6 +298,7 @@ export class ProfileRuntime {
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Profile cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "profile_cleanup");
     if (failed?.status === "rejected") throw failed.reason;
+    this.closedBudget = this.globalBudget();
     for (const [id, store] of this.stores) if (id !== PROFILE_ID) store.close();
     this.global.close();
   }

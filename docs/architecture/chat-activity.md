@@ -111,6 +111,20 @@ groups, rather than a dashboard's first page, and unchanged snapshots reuse the
 same derived view. Missing original accounting ownership is an explicit
 diagnostic, not a reason to block every other chat's snapshot.
 
+Cache repair requires the exact retained profile/session/step, normalized
+provider model result, safe integer categories and matching original totals.
+It appends existing `budget.recorded` metadata for the same settled call and
+uses only that entry's original captured rate. Missing, mismatched, non-JSON or
+older non-provider result formats are diagnosed and leave cache unknown, rather
+than blocking otherwise valid chat recovery. Known categories are not replaced.
+
+Stopped control planes retain their final accounting view. After owned shutdown
+settles, the profile authority captures global capacity before closing stores;
+subsequent read-only snapshots use that exact last value instead of reading a
+closed database or substituting unlimited capacity. Failed cleanup does not
+freeze or discard still-live authority, and stopped controllers cannot admit
+new work. Restart reconstructs authority from retained events, not this cache.
+
 Reuse React, TypeBox, Node and the maintained pi-ai estimation utilities under
 their existing MIT/component notices and SQLite's public-domain terms. No new
 dependency, provider metadata request, model call, credentials, tool permission
@@ -122,7 +136,10 @@ Original turn accounting must include actual owning roles and late results,
 not unrelated sessions or private role content. Streaming output quantities and
 USD based on captured rates are explicitly estimates until provider completion;
 they never settle/refund a reservation or become a bill. Retained model input
-and output estimates must not weaken fresh inference sizing. Protocol/schema
+and output estimates must not weaken fresh inference sizing. Context combines
+the last visible model's captured input estimate and retained visible output,
+not unsent draft text; original turn windows remain unchanged when the next
+working window is selected. Protocol/schema
 changes preserve ciphertext, receipts, known/unknown charges and original
 identities through atomic migration and restart, with no paid or tool replay.
 

@@ -76,9 +76,10 @@ const assistantSchema = Type.Object({
     cost: Type.Object({ input: Type.Number(), output: Type.Number(), cacheRead: Type.Number(), cacheWrite: Type.Number(), total: Type.Number() }),
   }),
 });
+export const isAssistantMessage = (value: unknown): value is AssistantMessage => Value.Check(assistantSchema, value);
 export function assistantMessage(value: unknown): AssistantMessage {
-  if (!Value.Check(assistantSchema, value)) throw new Error("Worker returned an invalid normalized model message.");
-  return value as AssistantMessage;
+  if (!isAssistantMessage(value)) throw new Error("Worker returned an invalid normalized model message.");
+  return value;
 }
 const textBlock = Type.Object({ type: Type.Literal("text"), text: Type.String() });
 const imageBlock = Type.Object({ type: Type.Literal("image"), data: Type.String(), mimeType: Type.String() });

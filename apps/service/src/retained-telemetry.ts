@@ -3,7 +3,7 @@ import { MoguriError, type BudgetEntry, type EventInput, type GlobalBudgetCapaci
 import { budgetModelGroups, budgetTotals, BudgetRuntime } from "./budgets.ts";
 import { retainedTurnInfo } from "./chat-activity.ts";
 import { estimateRateMicros } from "./provider-pricing.ts";
-import { assistantMessage } from "./worker-protocol.ts";
+import { isAssistantMessage } from "./worker-protocol.ts";
 
 export function recoverCachedUsage(snapshot: Snapshot, history: StoredEvent[], read: (digest: string) => string): EventInput[] {
   const retained = new Set(snapshot.sessions.map((session) => session.id));
@@ -23,7 +23,15 @@ export function recoverCachedUsage(snapshot: Snapshot, history: StoredEvent[], r
       if (!(error instanceof Error) || !error.message.startsWith("Missing or deleted content snapshot ")) throw error;
       console.error("Retained cache source is unavailable; original cache counts remain unknown:", source.id); continue;
     }
-    const message = assistantMessage(JSON.parse(text));
+    let message: unknown;
+    try { message = JSON.parse(text); }
+    catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      console.error("Retained cache source is not normalized JSON; original cache counts remain unknown:", source.id); continue;
+    }
+    if (!isAssistantMessage(message) || ![message.usage.input, message.usage.output, message.usage.cacheRead, message.usage.cacheWrite, message.usage.totalTokens].every(Number.isSafeInteger)) {
+      console.error("Retained cache source format is unqualified; original cache counts remain unknown:", source.id); continue;
+    }
     if (message.model !== entry.apiModelId || message.usage.totalTokens !== entry.reportedTokens || message.usage.output !== entry.outputTokens ||
       message.usage.input + message.usage.cacheRead + message.usage.cacheWrite !== entry.inputTokens ||
       entry.cacheReadTokens !== null && entry.cacheReadTokens !== undefined && entry.cacheReadTokens !== message.usage.cacheRead ||

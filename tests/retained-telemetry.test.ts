@@ -179,6 +179,9 @@ test("cache recovery refuses mismatched model evidence, absent reports, changed 
     assert.deepEqual(recoverCachedUsage(snapshot, history, (hash) => {
       const source = JSON.parse(read(hash)); source.model = "generated-other-model"; return JSON.stringify(source);
     }), []);
+    assert.deepEqual(recoverCachedUsage(snapshot, history, (hash) => {
+      const source = JSON.parse(read(hash)); source.usage.input -= 0.5; source.usage.cacheRead += 0.5; return JSON.stringify(source);
+    }), []);
     const changed = structuredClone(snapshot); changed.budgetEntries[0]!.reportedTokens = 43;
     assert.deepEqual(recoverCachedUsage(changed, history, read), []);
     const unreported = structuredClone(snapshot); unreported.budgetEntries[0]!.status = "unknown";
@@ -236,6 +239,39 @@ test("long retained histories rebuild every original turn without model calls or
     assert.equal(saved.turns.at(-1)?.turnId, turns.at(-1));
     assert.equal(saved.turns.at(-1)?.usage.reportedTokens, 42);
     assert.equal(saved.budget?.totals.reportedTokens, 2000 * 42);
+    assert.equal(fixture.requests.length, 1);
+  } finally { await fixture.close(); }
+});
+
+test("closed-service snapshots preserve the exact last global limit and charge without reading a closed store", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await sdk.profiles.globalBudget({ basis: "estimate", tokens: 100_000 }, 0, true);
+    await fixture.configure(); await fixture.send("Generated retained closed-service telemetry."); await fixture.terminal();
+    const original = fixture.service.controller.snapshot().sessionTelemetry[fixture.sessionId]!;
+    assert.ok(original.budget);
+    assert.equal(original.budget?.remainingTokens, 100_000 - 42);
+    sdk.disconnect(); await fixture.service.close();
+    const closed = fixture.service.controller.snapshot().sessionTelemetry[fixture.sessionId]!;
+    assert.equal(closed.budget?.remainingTokens, original.budget.remainingTokens);
+    assert.deepEqual(closed.budget?.limits, original.budget.limits);
+    assert.deepEqual(closed.turns, original.turns);
+    assert.equal(fixture.requests.length, 1);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("unqualified legacy retained result formats are diagnosed without blocking chat recovery or inventing cache counts", { skip: process.platform !== "darwin" }, async (t) => {
+  const fixture = await setupFixture({ responseMode: "text" });
+  try {
+    await fixture.configure(); await fixture.send("Generated legacy cache source format."); await fixture.terminal();
+    const snapshot = fixture.service.controller.snapshot(), history = fixture.service.controller.events(0);
+    const diagnostics = t.mock.method(console, "error", () => {});
+    for (const raw of [JSON.stringify({ request: "Generated earlier retained request, not a provider result." }), "Generated non-JSON original result."]) {
+      assert.deepEqual(recoverCachedUsage(snapshot, history, () => raw), []);
+    }
+    assert.equal(diagnostics.mock.calls.length, 2);
+    assert.ok(diagnostics.mock.calls.every((call) => String(call.arguments[0]).includes("cache")));
+    assert.equal(snapshot.budgetEntries[0]?.cacheReadTokens, null);
     assert.equal(fixture.requests.length, 1);
   } finally { await fixture.close(); }
 });
