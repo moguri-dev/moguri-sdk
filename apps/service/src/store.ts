@@ -127,6 +127,9 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version < 66 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='retained_telemetry_schema'").get()) {
+        throw new Error("Invalid pre-66 retained telemetry lineage marker. State was preserved.");
+      }
       if (version < 64 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='kanban_interactions_schema'").get()) {
         throw new Error("Invalid pre-64 Kanban interactions lineage marker. State was preserved.");
       }
@@ -348,6 +351,14 @@ export class EventStore {
       }
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='session_reliability_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid session reliability schema marker. State was preserved.");
+      }
+      if (version < 66) {
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('retained_telemetry_schema','1');
+          PRAGMA user_version=66; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='retained_telemetry_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid retained telemetry schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }

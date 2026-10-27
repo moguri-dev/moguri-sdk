@@ -93,3 +93,44 @@ views, copy/info actions, live timers and compact budget policy/price behavior.
 The [protocol-45 source qualification](../setup.md#protocol-45-source-qualification)
 records the complete generated unit/native-TUI, hidden Electron and actual
 packed-SDK/installed-worker results, with physical/release exclusions unchanged.
+
+## Retained telemetry follow-up contract
+
+The owner requires cached-input reporting and immediately available saved
+turn/cost/context/token information, including while a turn is running and after
+reopening a chat. Reuse the original append-only model/delta/budget events and
+captured rates as authority; the desktop must not start `activity.turn`,
+`budget.status` or `session.context` reads merely to open these displays.
+Root/React/Node SDK clients, TUI and desktop receive one profile-scoped retained
+telemetry view with their normal snapshot/event refresh.
+
+Protocol/schema 66 requires `Snapshot.sessionTelemetry`; turn and compact usage
+controls select it synchronously. No second telemetry journal or client-only
+provider state is introduced. Session/turn indexes reuse all original ledger
+groups, rather than a dashboard's first page, and unchanged snapshots reuse the
+same derived view. Missing original accounting ownership is an explicit
+diagnostic, not a reason to block every other chat's snapshot.
+
+Reuse React, TypeBox, Node and the maintained pi-ai estimation utilities under
+their existing MIT/component notices and SQLite's public-domain terms. No new
+dependency, provider metadata request, model call, credentials, tool permission
+or budget admission path is added. Normalized positive provider cache counts
+remain reported even when transport presence metadata is absent; zero requires
+actual evidence, and missing usage is never fabricated as zero.
+
+Original turn accounting must include actual owning roles and late results,
+not unrelated sessions or private role content. Streaming output quantities and
+USD based on captured rates are explicitly estimates until provider completion;
+they never settle/refund a reservation or become a bill. Retained model input
+and output estimates must not weaken fresh inference sizing. Protocol/schema
+changes preserve ciphertext, receipts, known/unknown charges and original
+identities through atomic migration and restart, with no paid or tool replay.
+
+Before feature edits the generated platform spike passes OAuth/streaming in
+1,090.15 ms (32.66 ms cancellation), SQLite in 70.61 ms, PTY in 159.96 ms
+(152.52 ms cancellation, zero survivors), OpenTUI in 1,077.82 ms, hidden Electron
+in 537.23 ms and filesystem/Git in 93.06 ms. Physical/live-provider, Rust/Linux,
+SendBox, quality and release exclusions remain explicitly unavailable. Tests
+must prove absent/zero/positive cache categories, live saved updates, immediate
+popover data without those detail queries, cross-chat/profile isolation,
+deletion, unknown cancellation, migration rollback and restart without replay.

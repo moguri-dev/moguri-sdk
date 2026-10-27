@@ -126,7 +126,7 @@ async function generated(options: GitHubWorkflowOptions & { gh?: GeneratedGithub
   const configuration = defaultProjectConfiguration("generated-project");
   const project = { id: "generated-project", name: "Generated", path: await realpath(root) };
   const extra = { policy: { revision: 0, allowedEnvs: ["Local"] as Snapshot["policy"]["allowedEnvs"] }, settings: projectEvents([]).settings };
-  const state = (): Snapshot => ({ ...projectEvents(history), githubOperations: operations, ...extra, protocolVersion: PROTOCOL_VERSION,
+  const state = (): Snapshot => ({ ...projectEvents(history), sessionTelemetry: {}, githubOperations: operations, ...extra, protocolVersion: PROTOCOL_VERSION,
     seq: history.at(-1)?.seq ?? 0, profileId: "default", provider: { status: "disconnected", models: [], login: null, diagnostic: null }, capabilities: [] });
   const append = (events: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }) => {
     const saved = store.commit(events, receipt); history.push(...saved);

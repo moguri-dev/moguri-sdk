@@ -5,7 +5,7 @@ import {
 import { digest, type EventStore } from "./store.ts";
 import { textFilePage } from "./files.ts";
 
-type Dashboard = Extract<BudgetResponse, { type: "budget.dashboard" }>;
+type Dashboard = Pick<Extract<BudgetResponse, { type: "budget.dashboard" }>, "groups" | "totals">;
 interface Host {
   snapshot(): Snapshot; events(): StoredEvent[];
   turnBudget(sessionId: string, turnId: string): Dashboard;
@@ -34,6 +34,22 @@ const status = (value: string): ActivityStatus => {
 };
 const modelStatus = (value: string): ActivityStatus => value === "stop" || value === "toolUse" ? "completed" :
   value === "length" ? "partial" : value === "error" ? "failed" : value === "aborted" ? "stopped" : status(value);
+export function retainedTurnInfo(session: Session, turnId: string, history: StoredEvent[], profileId: string, budget: Dashboard): TurnInfo {
+  const events = history.filter((event) => event.profile_id === profileId && event.session_id === session.id && event.turn_id === turnId);
+  if (!events.length || !session.messages.some((message) => message.turnId === turnId)) throw new MoguriError("activity_turn", "Choose an original visible turn in this retained session.", 404);
+  const start = events.find((event) => event.event_type === "turn.started" || event.event_type === "turn.control_started");
+  const end = events.findLast((event) => event.event_type === "turn.finished");
+  const messages = new Set(session.messages.filter((message) => message.turnId === turnId && message.role === "assistant").map((message) => message.id));
+  const last = session.usage.findLast((usage) => messages.has(usage.stepId));
+  const startedAt = validTime(start?.timestamp), finishedAt = validTime(end?.timestamp);
+  return {
+    sessionId: session.id, turnId, startedAt, finishedAt, durationMs: elapsed(startedAt, finishedAt),
+    outcome: end?.event_type === "turn.finished" ? end.payload.outcome : session.turnId === turnId ? session.status : "unknown",
+    models: budget.groups.map(({ modelId, providerId, role }) => ({ modelId, providerId, role })), usage: budget.totals,
+    context: last ? { estimatedTokens: last.contextEstimate ?? null, window: last.contextWindow ?? null } : null,
+    responseBytes: Buffer.byteLength(responseText(session.messages, turnId)),
+  };
+}
 export function describeActivityCall(call: ToolCall, snapshot: Snapshot): { kind: ActivityKind; label: string; subject: string | null } {
   const args = call.arguments, subject = text(args.path) ?? text(args.query);
   if (call.name === "read_file") return args.search === undefined ? { kind: "read-file", label: "Read file", subject } : { kind: "search-files", label: "Search file", subject };
@@ -203,21 +219,10 @@ export class ChatActivity {
       messageOrder: [...messageOrder].map(([id, sequence]) => ({ id, sequence })) };
   }
   private turn(session: Session, turnId: string): TurnInfo {
-    const events = this.host.events().filter((event) => event.profile_id === this.host.snapshot().profileId && event.session_id === session.id && event.turn_id === turnId);
-    if (!events.length || !session.messages.some((message) => message.turnId === turnId)) throw new MoguriError("activity_turn", "Choose an original visible turn in this retained session.", 404);
-    const start = events.find((event) => event.event_type === "turn.started" || event.event_type === "turn.control_started");
-    const end = events.findLast((event) => event.event_type === "turn.finished");
+    const saved = this.host.snapshot().sessionTelemetry?.[session.id]?.turns.find((turn) => turn.turnId === turnId);
+    if (saved) return saved;
     const budget = this.host.turnBudget(session.id, turnId);
-    const messages = new Set(session.messages.filter((message) => message.turnId === turnId && message.role === "assistant").map((message) => message.id));
-    const last = session.usage.findLast((usage) => messages.has(usage.stepId));
-    const startedAt = validTime(start?.timestamp), finishedAt = validTime(end?.timestamp);
-    return {
-      sessionId: session.id, turnId, startedAt, finishedAt, durationMs: elapsed(startedAt, finishedAt),
-      outcome: end?.event_type === "turn.finished" ? end.payload.outcome : session.turnId === turnId ? session.status : "unknown",
-      models: budget.groups.map(({ modelId, providerId, role }) => ({ modelId, providerId, role })), usage: budget.totals,
-      context: last ? { estimatedTokens: last.contextEstimate ?? null, window: last.contextWindow ?? null } : null,
-      responseBytes: Buffer.byteLength(responseText(session.messages, turnId)),
-    };
+    return retainedTurnInfo(session, turnId, this.host.events(), this.host.snapshot().profileId, budget);
   }
   async query(query: ActivityQuery): Promise<ActivityResponse> {
     const session = this.session(query.sessionId);

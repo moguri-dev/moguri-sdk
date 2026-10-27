@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **65**, including
+Current source uses protocol **66**, including
+[saved turn, cache and live usage telemetry](architecture/chat-activity.md#retained-telemetry-follow-up-contract),
 [session reliability, streaming dictation and shared controls](architecture/session-reliability.md),
 [automatic Kupo and its shared capability inventory](architecture/automatic-kupo.md),
 [project Kanban continuation and provider-equivalent prices](architecture/project-kanban.md),
@@ -35,6 +36,10 @@ draft revision. `/continue-work` returns a typed route review before dispatch.
 `BoardConfig.githubSync` controls optional issue import and explicit column
 mapping, while `IssueBoard.githubSource` is service-owned provenance, never
 client-supplied authority. Older encrypted history and consent remain intact.
+Schema 66 adds the transactional `retained_telemetry_schema` marker and requires
+`Snapshot.sessionTelemetry`. Original events, encrypted grants and receipts are
+preserved. Exact original provider results may append same-call cache-category
+corrections using only the captured rate; unknown work and holds are not refunded.
 Schema 63 explicitly converges the independent automatic-Kupo schema 61 and
 session/GitHub schema 61, plus Kanban/pricing schema 62. Exact original markers,
 approvals, selected responses, encrypted history, receipts and held accounting
@@ -336,6 +341,23 @@ captured output; it cannot become complete process output or a success receipt.
 context evidence and all-role owning-turn budget totals. `activity.response`
 copies public assistant text only from the authenticated snapshot.
 
+`Snapshot.sessionTelemetry[sessionId]` already contains original `turns`, current
+`budget` or its explicit `budgetDiagnostic`, live `estimate`, and recorded
+`context`. These service-owned views are reconstructed from retained events,
+messages and original budget entries, updated through normal sequenced snapshot
+refresh, and scoped to the SDK profile. Opening a display needs no `activity.turn`,
+`budget.status` or `session.context` query. `activity.turn` reuses the saved view.
+Deleting a session removes this view; independently retained accounting survives.
+
+`UsageEstimate` separates estimated input/visible output and captured-rate USD
+from reported quantities and held capacity. Original turn windows do not change
+when the next working window is edited. Context uses the last visible model's
+retained input estimate plus its visible output; unsent draft text is excluded.
+`knownCacheReadTokens`/`knownCacheWriteTokens` and the corresponding unknown-call
+counts preserve partial totals without treating missing reports as zero.
+Explicit zero needs presence evidence; positive normalized counts do not depend
+on transport presence flags. No private role prompts or reasoning are exposed.
+
 `useSessionActivity` in `moguri/react` provides scoped, non-overlapping refresh,
 earlier-page loading and stale-response isolation. No refresh runs a model,
 tool, provider metadata lookup or terminal. Thought sources are already-public
@@ -414,6 +436,14 @@ their original encryption and identities. Local project names are safe unique
 identifiers; normalization never renames filesystem directories.
 
 ### Retained-state upgrades
+
+Protocol/database 66 atomically inserts `retained_telemetry_schema` and advances
+the version. Missing/corrupt current markers and premature older-lineage markers
+are rejected without repair or partial writes. The upgrade preserves original
+ciphertext, grants, receipts, totals and unknown holds. Startup recovery may
+append existing `budget.recorded` events for the same settled call only when
+its retained original model identity and token totals match exactly. It never
+infers absent zero counts, reprices with new rates or repeats a completed repair.
 
 Protocol/database 56 adds the strict transactional `browser_control_schema`
 marker and reviewed upgrade from an older running service. Native browser

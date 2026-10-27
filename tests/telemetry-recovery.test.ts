@@ -92,6 +92,7 @@ test("deleting source sessions and projects preserves independent measured calls
     const projectId = fixture.session().projectId, before = (await sdk.budgets.calls()).calls[0]!;
     assert.ok(before.stream?.streamMs); assert.equal(before.outputTokens, 12);
     await sdk.sessions.delete(fixture.sessionId, true);
+    await sdk.refresh(); assert.equal(sdk.getState().snapshot!.sessionTelemetry[fixture.sessionId], undefined);
     const project = (await sdk.projects.configuration(projectId)).configuration;
     await sdk.projects.remove(projectId, true, project.revision);
     assert.deepEqual((await sdk.budgets.calls()).calls[0], before);
@@ -100,6 +101,7 @@ test("deleting source sessions and projects preserves independent measured calls
     const current = await new MoguriSdk(restarted.connection).ready();
     try {
       assert.equal(current.getState().snapshot!.sessions.length, 0); assert.equal(current.getState().snapshot!.projects.length, 0);
+      assert.deepEqual(current.getState().snapshot!.sessionTelemetry, {});
       assert.deepEqual((await current.budgets.calls()).calls[0], before);
       const dashboard = await current.budgets.dashboard({ range: { kind: "days", days: 7 } });
       assert.equal(dashboard.totals.calls, 1); assert.equal(dashboard.totals.measuredStreamCalls, 1);

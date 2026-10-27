@@ -13,7 +13,7 @@ function fixture(): { store: EventStore; snapshot: Snapshot; session: Session } 
   ]);
   const snapshot: Snapshot = {
     ...projectEvents(store.events().map((event) => ({ ...event, timestamp: new Date(finished - (event.event_type === "session.created" ? 60_000 : 0)).toISOString() }))),
-    protocolVersion: PROTOCOL_VERSION, seq: store.events().at(-1)!.seq, profileId: "default",
+    protocolVersion: PROTOCOL_VERSION, seq: store.events().at(-1)!.seq, profileId: "default", sessionTelemetry: {},
     provider: { status: "disconnected", models: [], login: null, diagnostic: null }, capabilities: [],
   };
   snapshot.settings.values.retention.archiveCompleted = true;

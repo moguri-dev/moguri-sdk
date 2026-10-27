@@ -197,6 +197,11 @@ try {
       const turn:TurnInfo=(await sdk.activity.turn("generated-id","generated-turn")).info;void turn.context?.window;
       const response:string=sdk.activity.response("generated-id","generated-turn");void response;void useSessionActivity;
       ` : ""}
+      ${installedProtocol >= 66 ? `
+      const saved:import("moguri").SessionTelemetry|undefined=sdk.getState().snapshot?.sessionTelemetry["generated-id"];
+      const estimate:import("moguri").UsageEstimate|null|undefined=saved?.estimate;
+      void estimate?.outputTokens;void saved?.turns[0]?.usage.knownCacheReadTokens;void saved?.context?.outputEstimate;
+      ` : ""}
       ${installedProtocol >= 53 ? `
       const agentRead:AgentTerminalRead={action:"read",commandId:"generated-command",offset:0,limit:4096};void agentRead;
       const agentCommands=await sdk.agentTerminals.list("generated-id",{limit:20});void agentCommands.activity.entries[0]?.env;
@@ -1050,7 +1055,7 @@ try {
         }else if(String(body.messages[user]?.content).includes("Generated installed Guided question")&&!body.messages.slice(user+1).some(value=>value.role==="tool")){
           frame({role:"assistant",tool_calls:[{index:0,id:"generated-installed-guided-call",type:"function",function:{name:"ask_user",arguments:JSON.stringify({question:"Choose a generated installed approach?",choices:["Generated installed first","Generated installed second"],allowFreeform:false,recommendation:{choiceIndex:1,reason:"Generated installed solver recommendation."}})}}]});frame({},"tool_calls");
         }else{frame({role:"assistant",content:"Generated external budget response."});frame({},"stop");}
-        response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
+        response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42,...(PROTOCOL_VERSION>=66?{prompt_tokens_details:{cached_tokens:10}}:{})}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
       });
       await new Promise(resolve=>budgetServer.listen(0,"127.0.0.1",resolve));
       const generatedModel={id:"generated-external-budget",name:"Generated external budget model",api:"openai-completions",provider:"github-copilot",baseUrl:"http://127.0.0.1:"+budgetServer.address().port,reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:8192,maxTokens:128};
@@ -1220,6 +1225,17 @@ try {
         assert.equal(beta.routing.history(automatic.id)[0].classifierStepId,null);
         assert.equal(beta.routing.history(automatic.id)[0].plan.basis,"only-model");
         await beta.routing.configure(previousPolicy,beta.settings.get().revision);
+        if(PROTOCOL_VERSION>=66){
+          const saved=beta.getState().snapshot.sessionTelemetry[automatic.id];
+          assert.equal(saved.turns[0].usage.cacheReadTokens,10);assert.equal(saved.turns[0].usage.inputTokens,30);
+          assert.equal(saved.estimate.outputTokens,12);assert.equal(saved.estimate.estimatedCalls,0);assert.ok(saved.context.estimatedTokens>0);
+          assert.equal(sdk.getState().snapshot.sessionTelemetry[automatic.id],undefined);
+          const reopened=await sdk.profiles.open(beta.profileId);
+          try{assert.deepEqual(reopened.getState().snapshot.sessionTelemetry[automatic.id].turns,saved.turns);assert.deepEqual(reopened.getState().snapshot.sessionTelemetry[automatic.id].context,saved.context);}
+          finally{reopened.disconnect();}
+          assert.equal(generatedRequests.length,before+1);
+          console.log("Installed protocol-66 snapshots retain original turn/cache/context and captured-rate estimates across client reopen without detail queries, new model calls or foreign-profile data.");
+        }
         console.log("Installed protocol-61 Kupo catalogue, automatic default and capability inventory use the exact sole model through the real delivered worker without a classifier or extra permission.");
       }
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;

@@ -59,6 +59,7 @@ export interface BudgetTotals {
   heldUsd: number | null; unpricedCalls: number; providerReportedUsd: null; billedUsd: null; requestMs: number;
   inputTokens: number | null; outputTokens: number | null; cacheReadTokens: number | null; cacheWriteTokens: number | null;
   knownInputTokens: number; knownOutputTokens: number;
+  knownCacheReadTokens: number; knownCacheWriteTokens: number; unknownCacheReadCalls: number; unknownCacheWriteCalls: number;
   observedOutputTokensPerSecond: number | null; measuredStreamCalls: number; unmeasuredStreamCalls: number;
   observedStreamMs: number; observedOutputTokens: number; meanFirstOutputMs: number | null; firstOutputSamples: number;
 }
@@ -67,6 +68,10 @@ export interface BudgetStatus {
   limits: Array<{ scope: "session" | "profile" | "global"; sessionId?: string; tokens: number | null; usd: number | null }>;
   remainingTokens: number | null; remainingUsd: number | null;
   basis: "estimate"; warning: string; diagnostics: string[]; rate: BudgetRate | null;
+}
+export interface UsageEstimate {
+  inputTokens: number | null; outputTokens: number | null; estimatedUsd: number | null;
+  knownInputTokens: number; knownOutputTokens: number; knownEstimatedUsd: number; estimatedCalls: number;
 }
 export interface GlobalBudgetCapacity { limit: BudgetLimit | null; chargedTokens: number | null; chargedUsdMicros: number | null }
 export const BudgetCommandSchema = object({

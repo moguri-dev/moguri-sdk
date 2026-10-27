@@ -30,6 +30,7 @@ import { CopilotAdapter, KeyringCredentials, type ProviderAdapter, type Prepared
 import { validateTool, executeTool } from "./tools.ts";
 import { effectiveTools, repositoryTools } from "./tools.ts";
 import { sourceRoot } from "./repository-source.ts";
+import { recoverCachedUsage, RetainedTelemetry } from "./retained-telemetry.ts";
 import { catalogForModel, discoverTools, toolSchemaDigest } from "./tool-catalog.ts";
 import { CommandJobReadSchema, type ToolingQuery, type ToolingResponse } from "../../../packages/protocol/src/tooling.ts";
 import { SessionCoordination, coordinatedMessageContext } from "./session-coordination.ts";
@@ -147,6 +148,7 @@ interface NativeAdmission {
   config: QualifiedSandboxConfiguration; scope?: SandboxNetworkScope; prepared: Map<string, PreparedModel>; providerEpoch?: number;
 }
 export class ControlPlane extends EventEmitter {
+  private readonly retainedTelemetry = new RetainedTelemetry();
   get profileId(): string { return this.store.profileId; }
   private history: StoredEvent[];
   private projection;
@@ -468,6 +470,8 @@ export class ControlPlane extends EventEmitter {
     this.candidateCleanup.migrate();
     const legacyAccounting = this.platform.budgets.legacyEvents();
     if (legacyAccounting.length) this.commit(legacyAccounting);
+    const recoveredCache = recoverCachedUsage(this.snapshot(), this.history, (digest) => this.store.blob(digest));
+    if (recoveredCache.length) this.commit(recoveredCache);
     const legacyOperations = this.platform.telemetry.legacyEvents();
     if (legacyOperations.length) this.commit(legacyOperations);
     const interruptedRoles = this.platform.roles.recover();
@@ -543,8 +547,8 @@ export class ControlPlane extends EventEmitter {
   }
   snapshot(): Snapshot {
     const routing = this.routingAvailability();
-    return {
-      protocolVersion: PROTOCOL_VERSION, seq: this.history.at(-1)?.seq ?? 0, profileId: this.profileId,
+    const snapshot: Snapshot = {
+      protocolVersion: PROTOCOL_VERSION, seq: this.history.at(-1)?.seq ?? 0, profileId: this.profileId, sessionTelemetry: {},
       ...this.projection, provider: { ...this.provider.state, models: [...this.provider.state.models, routing.model] }, routingDiagnostics: routing.diagnostics, routingCapabilities: routing.capabilities,
       capabilities: [
         { env: "Local", ready: process.platform === "darwin", reason: process.platform === "darwin" ? "Runs directly on this Mac. Shell commands are not sandboxed." : "Local supervision is validated on macOS only in this checkpoint." },
@@ -552,6 +556,7 @@ export class ControlPlane extends EventEmitter {
         { env: "Remote", ready: this.remote.readiness.ready && this.remote.readiness.configDigest === frameDigest(this.projection.settings.values.remote), reason: this.remote.readiness.diagnostic },
       ],
     };
+    return { ...snapshot, sessionTelemetry: this.retainedTelemetry.snapshot(snapshot, this.history, this.profileHooks?.globalBudget()) };
   }
   private routingAvailability() {
     if (this.shuttingDown) return { ...kupoAvailability({ ...this.projection.settings.values.kupo, enabled: false }, [], false),
@@ -982,8 +987,8 @@ export class ControlPlane extends EventEmitter {
       apiModelId: prior?.apiModelId ?? entry?.apiModelId ?? undefined, source: prior?.source,
       role: prior?.role ?? entry?.role ?? (session?.kind === "side" ? "side" : session?.kind === "subagent" ? "subagent" : "solver"),
       inputTokens: request.usageReported ? message.usage.input : null, outputTokens: request.usageReported ? message.usage.output : null,
-      cacheReadTokens: request.usageReported && (stream?.cacheReadReported || stream === undefined && message.usage.cacheRead > 0) ? message.usage.cacheRead : null,
-      cacheWriteTokens: request.usageReported && (stream?.cacheWriteReported || stream === undefined && message.usage.cacheWrite > 0) ? message.usage.cacheWrite : null,
+      cacheReadTokens: request.usageReported && (stream?.cacheReadReported || message.usage.cacheRead > 0) ? message.usage.cacheRead : null,
+      cacheWriteTokens: request.usageReported && (stream?.cacheWriteReported || message.usage.cacheWrite > 0) ? message.usage.cacheWrite : null,
       ...normalizeStreamObservation(stream, request.generationMs),
       totalTokens: request.usageReported ? message.usage.totalTokens : null,
       estimatedUsd: null, providerReportedUsd: null, billedUsd: null, requestMs: request.generationMs,

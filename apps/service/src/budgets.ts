@@ -31,15 +31,15 @@ const category = (entries: BudgetEntry[], read: (entry: BudgetEntry) => number |
   if (known.some((value) => !integer(value))) throw new MoguriError("telemetry_invalid", "Recorded token categories are invalid. No rounded or zero-valued telemetry was invented.", 409);
   const total = known.reduce((total, value) => total + value, 0);
   if (!Number.isSafeInteger(total)) throw new MoguriError("telemetry_overflow", "Token category totals exceed safe precision.", 409);
-  return { total: known.length === entries.length ? total : null, known: total };
+  return { total: known.length === entries.length ? total : null, known: total, unknown: entries.length - known.length };
 };
 const generative = (entry: BudgetEntry) => !["decision", "steering", "unknown"].includes(entry.role);
 const usageMetrics = (usage?: Usage, reportedTokens?: number | null) => {
   const valid = usage !== undefined && reportedModelUsage(usage) && (reportedTokens === undefined || reportedTokens === usage.totalTokens);
   return {
     inputTokens: valid ? usage.totalTokens - usage.outputTokens : null, outputTokens: valid ? usage.outputTokens : null,
-    cacheReadTokens: valid && integer(usage.cacheReadTokens) && (usage.stream !== undefined || usage.cacheReadTokens > 0) ? usage.cacheReadTokens : null,
-    cacheWriteTokens: valid && integer(usage.cacheWriteTokens) ? usage.cacheWriteTokens : null,
+    cacheReadTokens: valid && integer(usage.cacheReadTokens) && (usage.stream?.cacheReadReported || usage.cacheReadTokens > 0) ? usage.cacheReadTokens : null,
+    cacheWriteTokens: valid && integer(usage.cacheWriteTokens) && (usage.stream?.cacheWriteReported || usage.cacheWriteTokens > 0) ? usage.cacheWriteTokens : null,
     stream: usage?.stream ?? null, telemetryDiagnostic: usage?.telemetryDiagnostic ?? null,
   };
 };
@@ -50,6 +50,7 @@ export function budgetTotals(entries: BudgetEntry[], plans: BudgetPlan[] = []): 
   if (!Number.isSafeInteger(knownReportedTokens) || !Number.isSafeInteger(estimatedMicros)) throw new MoguriError("budget_overflow", "Reported accounting exceeds safe numeric precision. Totals are unavailable; no rounded success or free usage was invented.", 409);
   const knownEstimatedUsd = estimatedMicros / 1_000_000;
   const input = category(entries, (entry) => entry.inputTokens), output = category(entries, (entry) => entry.outputTokens);
+  const cacheRead = category(entries, (entry) => entry.cacheReadTokens), cacheWrite = category(entries, (entry) => entry.cacheWriteTokens);
   const measured = entries.filter((entry) => generative(entry) && entry.status === "settled" && integer(entry.outputTokens) &&
     entry.stream && entry.stream.outputEvents > 1 && entry.stream.streamMs !== null && Number.isFinite(entry.stream.streamMs) && entry.stream.streamMs > 0);
   const observedStreamMs = measured.reduce((total, entry) => total + entry.stream!.streamMs!, 0), observedOutputTokens = measured.reduce((total, entry) => total + entry.outputTokens!, 0);
@@ -66,7 +67,8 @@ export function budgetTotals(entries: BudgetEntry[], plans: BudgetPlan[] = []): 
     heldUsd: (() => { const value = sum([sum(held, (entry) => entry.reservedUsdMicros), plannedUsdMicros], (value) => value); return value === null ? null : value / 1_000_000; })(),
     unpricedCalls: entries.filter((entry) => chargedUsd(entry) === null).length, providerReportedUsd: null, billedUsd: null,
     requestMs, inputTokens: input.total, outputTokens: output.total, knownInputTokens: input.known, knownOutputTokens: output.known,
-    cacheReadTokens: category(entries, (entry) => entry.cacheReadTokens).total, cacheWriteTokens: category(entries, (entry) => entry.cacheWriteTokens).total,
+    cacheReadTokens: cacheRead.total, cacheWriteTokens: cacheWrite.total,
+    knownCacheReadTokens: cacheRead.known, knownCacheWriteTokens: cacheWrite.known, unknownCacheReadCalls: cacheRead.unknown, unknownCacheWriteCalls: cacheWrite.unknown,
     observedOutputTokensPerSecond: observedStreamMs > 0 ? observedOutputTokens * 1000 / observedStreamMs : null,
     measuredStreamCalls: measured.length, unmeasuredStreamCalls: entries.length - measured.length, observedStreamMs, observedOutputTokens,
     meanFirstOutputMs: first.length ? firstMs / first.length : null, firstOutputSamples: first.length,
@@ -77,6 +79,16 @@ export const budgetCharges = (entries: BudgetEntry[], plans: BudgetPlan[] = []) 
   return { tokens: sum([sum(entries, chargedTokens), sum(held, (plan) => plan.tokens)], (value) => value),
     usdMicros: sum([sum(entries, chargedUsd), sum(held, (plan) => plan.usdMicros)], (value) => value) };
 };
+export function budgetModelGroups(entries: BudgetEntry[], plans: BudgetPlan[] = []) {
+  const grouped = new Map<string, { role: ModelRole; modelId: string; providerId: string | null; entries: BudgetEntry[]; plans: BudgetPlan[] }>();
+  for (const value of [...entries, ...plans]) {
+    const key = JSON.stringify([value.role, value.modelId, value.providerId]), group = grouped.get(key) ??
+      { role: value.role, modelId: value.modelId, providerId: value.providerId, entries: [], plans: [] };
+    if ("purpose" in value) group.plans.push(value); else group.entries.push(value);
+    grouped.set(key, group);
+  }
+  return [...grouped.values()].map(({ role, modelId, providerId, entries, plans }) => ({ role, modelId, providerId, totals: budgetTotals(entries, plans) }));
+}
 const DAY = 86_400_000;
 const dateText = (value: number) => new Date(value).toISOString().slice(0, 10);
 function utcDate(value: string): number {
@@ -110,7 +122,7 @@ function period(time: number, bucket: Exclude<BudgetBucket, "all">): { from: str
   return { from: dateText(start.getTime()), to: dateText(end.getTime() - DAY) };
 }
 type AccountingScope = Pick<BudgetEntry, "projectId" | "folderId" | "sessionId" | "ownerSessionId" | "turnId" | "ownerTurnId" | "env" | "modelId" | "providerId" | "role">;
-const matchesScope = (entry: AccountingScope, query: UsageFilters) => (query.projectId === undefined || entry.projectId === query.projectId) &&
+export const matchesScope = (entry: AccountingScope, query: UsageFilters) => (query.projectId === undefined || entry.projectId === query.projectId) &&
   (query.folderId === undefined || entry.folderId === query.folderId) && (query.sessionId === undefined || entry.ownerSessionId === query.sessionId || entry.sessionId === query.sessionId) &&
   (query.turnId === undefined || entry.turnId === query.turnId || entry.ownerTurnId === query.turnId) && (query.env === undefined || entry.env === query.env) &&
   (query.modelId === undefined || entry.modelId === query.modelId) && (query.providerId === undefined || entry.providerId === query.providerId) && (query.role === undefined || entry.role === query.role);
@@ -438,21 +450,14 @@ export class BudgetRuntime {
       return { type: query.type, calls: structuredClone(calls.slice(offset, end)), nextOffset: end < calls.length ? end : null, window, repositoryCoverage: repositoryAccounting };
     }
     const plans = matchesRepository(null, query) ? scopedPlans.filter((plan) => plan.status === "held") : [];
-    const grouped = new Map<string, { role: ModelRole; modelId: string; providerId: string | null; entries: BudgetEntry[]; plans: BudgetPlan[] }>();
-    const groupEntry = (value: BudgetEntry | BudgetPlan) => {
-      const key = JSON.stringify([value.role, value.modelId, value.providerId]), group = grouped.get(key) ?? { role: value.role, modelId: value.modelId, providerId: value.providerId, entries: [], plans: [] };
-      if ("purpose" in value) group.plans.push(value); else group.entries.push(value);
-      grouped.set(key, group);
-    };
-    for (const entry of entries) groupEntry(entry);
-    for (const plan of plans) groupEntry(plan);
+    const groups = budgetModelGroups(entries, plans);
     const prices = new Map<string, { rate: BudgetRate; entries: BudgetEntry[] }>();
     for (const entry of entries) if (entry.rate) {
       const rate = entry.rate, key = JSON.stringify(rate);
       const group = prices.get(key) ?? { rate, entries: [] }; group.entries.push(entry); prices.set(key, group);
     }
     if (prices.size > 2000) throw new MoguriError("telemetry_prices", "More than 2,000 distinct captured rates match. Choose a model or date filter; no price history was silently truncated.", 409);
-    const groups = [...grouped.values()], bucket = query.bucket ?? "month";
+    const bucket = query.bucket ?? "month";
     const breakdown = <K>(key: (value: BudgetEntry | BudgetPlan) => K) => {
       const values = new Map<K, { entries: BudgetEntry[]; plans: BudgetPlan[] }>();
       for (const value of [...entries, ...plans]) {
@@ -462,7 +467,7 @@ export class BudgetRuntime {
       }
       return [...values].map(([id, group]) => ({ id, totals: budgetTotals(group.entries, group.plans) }));
     };
-    return { type: query.type, totals: budgetTotals(entries, plans), groups: groups.slice(offset, end).map(({ role, modelId, providerId, entries, plans }) => ({ role, modelId, providerId, totals: budgetTotals(entries, plans) })), policy: snapshot.budgetPolicy, nextOffset: end < groups.length ? end : null,
+    return { type: query.type, totals: budgetTotals(entries, plans), groups: groups.slice(offset, end), policy: snapshot.budgetPolicy, nextOffset: end < groups.length ? end : null,
       projects: breakdown((entry) => entry.projectId).map(({ id, totals }) => ({ projectId: id, totals })),
       models: breakdown((entry) => entry.modelId).map(({ id, totals }) => ({ modelId: id, totals })),
       window, bucket, periods: periods(entries, bucket, bounds, plans), pricing: [...prices.values()].map(({ rate, entries }) => ({ rate: structuredClone(rate), calls: entries.length, estimatedUsd: budgetTotals(entries).estimatedUsd })), currency: "USD", repositoryCoverage: repositoryAccounting };

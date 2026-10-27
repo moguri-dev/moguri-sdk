@@ -61,6 +61,9 @@ test("global capacity changes refresh another live profile through content-free 
     await waitFor(() => fixture.sdk.getState().snapshot!.globalBudgetSequence! > before);
     assert.equal((await fixture.sdk.budgets.status(own.id!)).status.remainingTokens, 100_000 - 42);
     assert.equal(fixture.sdk.getState().snapshot!.budgetEntries.length, 0);
+    assert.equal(fixture.sdk.getState().snapshot!.sessionTelemetry[other.id!], undefined);
+    assert.equal(fixture.sdk.getState().snapshot!.sessionTelemetry[own.id!]?.budget?.remainingTokens, 100_000 - 42);
+    assert.equal(beta.getState().snapshot!.sessionTelemetry[other.id!]?.turns[0]?.usage.reportedTokens, 42);
     assert.ok(fixture.sdk.getState().events.every((event) => event.profile_id === "default"));
     assert.equal(JSON.stringify(fixture.sdk.getState()).includes("Generated Beta-only opaque-capacity input."), false);
   } finally { await fixture.close(); }

@@ -10,7 +10,7 @@ function snapshot(): Snapshot {
   const store = new EventStore(":memory:");
   try {
     store.commit([{ profile_id: "default", session_id: "generated-session", event_type: "session.created", payload: { title: "Generated power owner", controls: factoryControls() } }]);
-    const result: Snapshot = { ...projectEvents(store.events()), protocolVersion: PROTOCOL_VERSION, seq: 1, profileId: "default",
+    const result: Snapshot = { ...projectEvents(store.events()), sessionTelemetry: {}, protocolVersion: PROTOCOL_VERSION, seq: 1, profileId: "default",
       provider: { status: "disconnected", models: [], login: null, diagnostic: null }, capabilities: [] };
     result.settings.values.lifecycle = { keepAwake: true, tailMinutes: 2 };
     result.sessions[0]!.turnId = "generated-owned-turn"; result.sessions[0]!.status = "running";
