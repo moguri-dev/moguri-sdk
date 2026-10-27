@@ -187,3 +187,49 @@ tool-decision authority. They do not use a new automatic Max selection to
 manufacture that old consent. New automatic approvals and Max technical choices
 are qualified separately. Earlier failed/aborted runs with old toggle/hold/drag
 expectations are not counted as final passing qualification.
+
+## Final protocol-65 qualification
+
+The final executable tree at `0b5080f`, with the acknowledged-readiness test
+guards at `e7466b7`, passes the following complete local qualification.
+
+| Surface | Result |
+| --- | --- |
+| Clean install, type checks and production build | Pass; source audit reports zero vulnerabilities |
+| Complete source/service/worker/CLI/native-TUI suite | **1,630 passed, 14 existing platform/native skips, zero failures** across 1,644 cases in **1,369,419.11 ms** |
+| Complete hidden desktop suite | **220 passed, three existing native/packaged skips, zero failures** across 223 flows in **6.8 minutes** |
+| Actual packaged desktop | **11 passed** in **15.2 seconds**, including hold-to-talk, side controls/context, folder/session drops, file/console/plan scope, phase ordering and exact reviewed Git/worktree actions |
+| Independently packed SDK | All root/React/Node/MCP imports and declarations, audited install, captured-root operations, named-tool grants, immediate sides and actual shipped speech-host ownership/signal checks pass |
+| Actual installed worker | **12 passed**, including acknowledged continuation, complete budget transfer, failed receipts and control loss |
+| Final source and independent-consumer audits | **Zero vulnerabilities** |
+| Canonical ZIP/manifest and DMG | Pass the bounded production update consumer, signed-bundle identity and actual Finder geometry/background verification without opening Finder |
+
+The pinned protocol-65 Linux arm64 workload was built without cache and
+qualified with exact locked dependencies/native PTY/payload identities in
+**40,286.72 ms**. Final packaging reuses only that verified unchanged payload.
+This is not qualification of physical SendBox containment or an external Linux
+release host.
+
+The actual final ZIP is **779,784,650 bytes**. The separately generated installer
+`release/Moguri-0.30.0-alpha.1-session-65-macos-arm64.dmg` uses a distinct
+Session-65 volume label, has a valid native image checksum, and is
+**794,026,246 bytes**. Its mounted application tree exactly matches the canonical
+manifest. Its SHA-512 is:
+
+```text
+05419dd7fe62312ca7eb5703498fed6b60991c6faf432ebe8c3a5602f713cadcb8319618110f67be69ce7a3bb8cb4600047c0a5f9c167dfdbc9113356614290d
+```
+
+Qualification uses generated data, private temporary state, owned loopback
+services and hidden windows. It does not open a personal application/browser,
+record a microphone, download model weights, authenticate an account or perform
+live paid inference. The installer remains ad-hoc-signed development output,
+not notarized or installed into the user's Applications folder.
+An additional generated SDK smoke opens a real group User PTY in the selected
+member, verifies its captured binding and actual `pwd` output, then closes that
+exact console without a HOME fallback, model call or terminal replay.
+
+Non-blocking notices remain experimental OpenTUI FFI, the lazy Ghostty chunk
+size, the packager's skipped optional `.icon` format and deprecated transitive
+`whatwg-encoding`/`node-domexception` packages. CI remains restricted to pushes
+to `main`; an empty PR check list is not a claimed CI pass.
