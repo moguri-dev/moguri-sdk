@@ -40,6 +40,45 @@ information tooltips. Consequential warnings, actual status, errors and source
 review acknowledgements stay visible. Editing, revision conflicts and dirty
 navigation guards are unchanged.
 
+### Contextual action captions
+
+Settings buttons use the adjacent field, row or section as their subject.
+Linear key actions say **Store**, **Verify**, and **Remove**, not repeated
+credential instructions. Shortcut fields say **Record** and **Save** in both
+Keyboard shortcuts and Voice dictation; recording still names its actual field
+for assistive technology and preserves the same capture/Escape/Tab behavior.
+Credential forms, updates, storage, integrations, source reviews and retained
+record panels use the same concise verbs. Keep necessary consequences explicit:
+for example **Move and restart**, **Install and restart**, **Create and push**
+and **Commit on new branch**.
+
+Visible captions must remain part of the contextual accessible name. Native
+button semantics, precise target names and original state announcements remain
+intact. Long warnings, actual credential/account status, review details,
+consent checkboxes, partial outcomes and confirmation requirements are not
+replaced by the short caption. Existing icon-only actions remain icons except
+the specifically requested Linear **Remove** button.
+
+This is presentation-only reuse of React/Electron and the existing settings
+components under their current MIT/component notices. The installed
+Rolldown/Oxc parser performs lossless explicit-caption edits and audits the
+original controlled attributes. No dependency, service/SDK/TUI contract,
+protocol/schema, credential namespace, permission, budget, cancellation or
+restart behavior changes. Protocol 70 and its exact native worker remain
+unchanged. Generated native checks must verify visible copy, label-in-name,
+actual Linear storage/verification/removal, shortcut recording/cancellation,
+individual saves and the existing dirty/navigation gates.
+
+The prerequisite generated OAuth/streaming check passes in 1,074.62 ms
+(32.44 ms cancellation), SQLite in 71.65 ms (append p95 0.069 ms), PTY in
+159.09 ms (150.94 ms cancellation, zero survivors), OpenTUI in 1,072.40 ms,
+hidden Electron in 548.06 ms (8.11 ms frames) and filesystem/Git in 94.12 ms.
+Platform vector/graph and official MCP primitives pass too. The generic spike
+continues to report its broader live-account, Rust/Linux, signed-release,
+personal SendBox/SSH, quality and wider-initial-checkpoint gates as unqualified;
+these are not new readiness claims or a replacement for the executable setup
+inventory. No personal key, microphone, app or login is used.
+
 ### Explicit explanation rows
 
 Every settings information icon must share an explicit row with the heading,
