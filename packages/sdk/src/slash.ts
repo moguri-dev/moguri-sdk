@@ -24,7 +24,9 @@ export type SlashResult =
   | { kind: "profile"; profileId: string }
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
-  { name: "approve", description: "Approve the current action once or remember its exact session/project/global scope", argument: "[once|session|project|global] [exact|family]" },
+  { name: "approve", description: "Approve the current action once or remember a named tool/command in its exact scope", argument: "[once|session|project|global] [exact|family|tool]" },
+  { name: "folder-chat", description: "List project folders or create a Local chat with every explicitly captured member root", argument: "[FOLDER_ID]" },
+  { name: "folder-group", description: "Atomically name a navigation folder containing exact existing projects; no files are moved", argument: '{"name":"Folder","projectIds":["ID","ID"]}' },
   { name: "approvals", description: "Inspect or revoke this profile's remembered approvals", argument: "[revoke ID]" },
   { name: "work-item", description: "Pick a project Kanban card or GitHub issue", argument: "[kanban|CARD_ID|clear]" },
   { name: "kanban", description: "Open this project's special board chat or change shared visibility/source", argument: "[show|hide|source kanban|github-issues|github-prs|items [SOURCE] [PAGE]|work RUN|stop RUN|inspect RUN REV confirm-inspected]" },
@@ -140,6 +142,29 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "folder-group": {
+      const input: unknown = JSON.parse(command.argument);
+      if (!isRecord(input) || typeof input.name !== "string" || !Array.isArray(input.projectIds) ||
+        !input.projectIds.every((id) => typeof id === "string") || Object.keys(input).some((key) => key !== "name" && key !== "projectIds")) {
+        throw new ClientError("folder_group_input", 'Use /folder-group {"name":"Folder","projectIds":["ID","ID"]} with exact current-profile project IDs.');
+      }
+      const snapshot = sdk.getState().snapshot!, projects = input.projectIds.map((projectId) => {
+        if (!snapshot.projects.some((project) => project.id === projectId)) throw new ClientError("project_missing", "Every grouped project must belong to this profile. No foreign project or path was adopted.");
+        return { projectId, revision: snapshot.projectConfigurations.find((configuration) => configuration.projectId === projectId)?.revision ?? 0 };
+      });
+      return { kind: "text", text: JSON.stringify(await sdk.projects.group(input.name, projects), null, 2) };
+    }
+    case "folder-chat": {
+      const snapshot = sdk.getState().snapshot!, id = command.argument.trim();
+      if (!id) return { kind: "text", text: JSON.stringify(snapshot.projectFolders.map((folder) => ({ ...folder,
+        projects: snapshot.projectConfigurations.filter((configuration) => configuration.folderId === folder.id)
+          .sort((a, b) => a.order - b.order).map((configuration) => ({ id: configuration.projectId,
+            name: snapshot.projects.find((project) => project.id === configuration.projectId)?.name })) })), null, 2) };
+      const folder = snapshot.projectFolders.find((folder) => folder.id === id);
+      if (!folder) throw new ClientError("project_folder", "Choose an exact folder ID from /folder-chat. No previous project or first repository was substituted.");
+      const result = await sdk.sessions.createFolder(folder.id, `${folder.name} chat`, { env: "Local" });
+      return { kind: "session", sessionId: result.id!, side: false };
+    }
     case "prices": {
       if (!command.argument) return { kind: "text", text: JSON.stringify(await sdk.prices.catalog(), null, 2) };
       const [action, provider, extra] = command.argument.trim().split(/\s+/);
@@ -149,7 +174,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "approve": {
       const [scope = "once", match = "exact", extra] = command.argument.trim().split(/\s+/).filter(Boolean);
-      if (!session.pendingApproval || extra || !["once", "session", "project", "global"].includes(scope) || !["exact", "family"].includes(match) || scope === "once" && match !== "exact") throw new ClientError("approval_input", "Use /approve once, session|project|global [exact|family] for the actual pending action.");
+      if (!session.pendingApproval || extra || !["once", "session", "project", "global"].includes(scope) || !["exact", "family", "tool"].includes(match) || scope === "once" && match !== "exact") throw new ClientError("approval_input", "Use /approve once, session|project|global [exact|family|tool] for the actual pending action.");
       await sdk.approvals.respond(session.id, session.pendingApproval.id, true, scope === "once" ? undefined : parse(RememberApprovalSchema, { scope, match }));
       return { kind: "ok", message: scope === "once" ? "Approved this action." : `Approved and remembered in ${scope} scope. Hard policy still applies.` };
     }

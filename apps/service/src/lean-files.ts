@@ -75,7 +75,7 @@ export async function editProjectFile(root: string, args: { path: string; expect
     return { text: `File publication may have occurred: ${error instanceof Error ? error.message : "unconfirmed write"}. Inspect the source before retrying.`, isError: true, outcome: "partial" };
   }
 }
-export async function readFileSelection(root: string, args: Record<string, unknown>, policy: FolderPolicy) {
+export async function readFileSelection(root: string, args: Record<string, unknown>, policy: FolderPolicy, repository?: string) {
     const file = await readProjectFile(root, String(args.path), args.mode === "full" ? 128 * 1024 : 1024 * 1024);
     if (args.expectedDigest !== undefined && args.expectedDigest !== file.digest) throw new MoguriError("file_conflict", "The file changed since the requested source version. Call read_file without expectedDigest to read its current version, then use that response's sourceRef.expectedDigest for edits. No write or version substitution occurred.", 409);
     const instructions = (await repositoryInstructionLayers(root, { ...defaultProjectSettings(), deniedFolders: policy.denied, readOnlyFolders: policy.readOnly }, file.path)).filter((layer) => layer.depth > 0);
@@ -106,7 +106,7 @@ export async function readFileSelection(root: string, args: Record<string, unkno
       view = { ...file, text, view: "structural-preview", complete: shown.length === lines.length && shown.every((index) => lines[index]!.length <= 300),
         omittedLines: lines.length - shown.length, columnsBoundedAt: 300, diagnostic: "Deterministic definition/import/heading preview, not a semantic or complete code summary. Use exact line/byte reads before conclusions." };
     }
-    const text = JSON.stringify({ ...view, ...(instructions.length ? { instructions } : {}), sourceRef: { path: file.path, expectedDigest: file.digest },
+    const text = JSON.stringify({ ...view, ...(instructions.length ? { instructions } : {}), sourceRef: { path: file.path, expectedDigest: file.digest, ...(repository ? { repository } : {}) },
       sourceRetention: "retained-source" });
     if (text.length > 128 * 1024) throw new MoguriError("file_view_limit", "The complete selected text/instructions exceed the tool envelope. Select a smaller explicit view; no instructions were omitted.");
     return { text, rawText: file.text, rawComplete: true, isError: false, outcome: "completed" };

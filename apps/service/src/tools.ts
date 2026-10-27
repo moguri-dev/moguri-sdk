@@ -8,7 +8,7 @@ import { fetchNativePage, fetchPage } from "./web-page.ts";
 import { leanTools } from "./lean-tools.ts";
 import { discoveryTool, discoverTools } from "./tool-catalog.ts";
 import { boundedProgram, programSucceeded, editProjectFile, findProjectFiles, searchProjectFiles, queryProjectData, readFileSelection } from "./lean-files.ts";
-import { parse } from "../../../packages/protocol/src/core.ts";
+import { isRecord, parse } from "../../../packages/protocol/src/core.ts";
 import { EditFileSchema, FindFilesSchema, SearchFilesSchema, QueryDataSchema, ReadToolResultSchema } from "../../../packages/protocol/src/tooling.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import { performance } from "node:perf_hooks";
@@ -18,7 +18,8 @@ import type { OwnedDebugRuntime, DebugProcessOutcome } from "./owned-debug.ts";
 import { ProjectWorkReadSchema } from "../../../packages/protocol/src/kanban.ts";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
-export const tools: Tool[] = [
+export const repositoryTools = new Set([...fileTools, "run_command"]);
+const toolDefinitions: Tool[] = [
   discoveryTool,
   ...leanTools,
   { name: "read_tool_result", description: "Read an exact retained original tool result in this session using its source stepId/callId and UTF-8 page offset. Returns actual outcome and rawComplete; a retained fragment is not full output. Never reads private consoles, hooks or another session. Source deletion is final, not permission to replay the original effect.", parameters: ReadToolResultSchema },
@@ -60,9 +61,16 @@ export const tools: Tool[] = [
     parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }, { additionalProperties: false }),
   })),
 ];
-export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; metachat?: boolean; env?: Controls["env"]; pasteFiles?: boolean; documents?: boolean; coordinator?: boolean } = { project: true }): Tool[] {
+function repositoryParameters(parameters: Tool["parameters"]): Tool["parameters"] {
+  if ("anyOf" in parameters && Array.isArray(parameters.anyOf)) return { ...parameters, anyOf: parameters.anyOf.map(repositoryParameters) };
+  if (!("type" in parameters) || parameters.type !== "object" || !("properties" in parameters) || !isRecord(parameters.properties)) throw new Error("Repository-scoped tools need an explicit object schema.");
+  return { ...parameters, properties: { ...parameters.properties, repository: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) } };
+}
+export const tools: Tool[] = toolDefinitions.map((tool) => repositoryTools.has(tool.name) ? { ...tool, parameters: repositoryParameters(tool.parameters) } : tool);
+export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; multiRepository?: boolean; metachat?: boolean; env?: Controls["env"]; pasteFiles?: boolean; documents?: boolean; coordinator?: boolean } = { project: true }): Tool[] {
   if (readOnly) return [];
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
+    .filter((tool) => !scope.multiRepository || (!workspaceTools.has(tool.name) || repositoryTools.has(tool.name)) && !["mcp_gateway", "run_subagent", "session_control", "wait_session"].includes(tool.name))
     .filter((tool) => tool.name !== "fetch_page" || scope.env === "Sandbox")
     .filter((tool) => !["command_job", "create_issue", "project_work"].includes(tool.name) || scope.env === "Local")
     .filter((tool) => tool.name !== "diff_files" || scope.env !== "Sandbox")
@@ -117,14 +125,15 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
   if (!root && workspaceTools.has(call.name)) throw new MoguriError("project_required", "This chat has no workspace. No file or command operation was executed.");
   if (root && safety && fileTools.has(call.name)) await assertFolderAccess(root, String(call.arguments.path ?? "."), fileWriteTools.has(call.name), safety.folders);
   if (safety && (safety.folders.denied.length || safety.folders.readOnly.length) && ["run_command", "command_job", "mcp_gateway", "debug", "diff_files"].includes(call.name)) throw new MoguriError("folder_containment", "This host execution cannot enforce configured folder restrictions.", 403);
-  const args = call.arguments;
+  const { repository, ...args } = call.arguments;
+  const executionCall = repository === undefined ? call : { ...call, arguments: args };
   switch (call.name) {
     case "debug": {
       if (!debuggerOwner) throw new MoguriError("dap_owner", "DAP needs the original owning model turn. No adapter was started.");
       try { return await debuggerOwner.runtime.execute(root!, args, signal, started, debuggerOwner.ended); }
       catch (error) { if (error instanceof MoguriError && error.code === "tool_partial") return { text: error.message, isError: true, outcome: "partial" }; throw error; }
     }
-    case "sqlite_query": case "sqlite_transaction": case "inspect_document": case "write_document": case "edit_document": return executeDataTool(root!, call, signal, started, safety?.folders);
+    case "sqlite_query": case "sqlite_transaction": case "inspect_document": case "write_document": case "edit_document": return executeDataTool(root!, executionCall, signal, started, safety?.folders);
     case "web_search": return { text: JSON.stringify(await searchWeb(String(args.query), Number(args.limit ?? 5), safety?.env, signal)), isError: false, outcome: "completed" };
     case "web_fetch": {
       if (!safety?.env) throw new MoguriError("web_boundary", "Page fetching needs an explicit owning environment; no Local fallback.");
@@ -170,7 +179,7 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
     }
     case "fetch_page": return { text: JSON.stringify(await fetchNativePage(String(args.url), signal)), isError: false, outcome: "completed" };
     case "list_files": return { text: JSON.stringify((await listProjectFiles(root!, String(args.path))).filter((path) => !safety || !matchesFolder(path, safety.folders.denied))), isError: false, outcome: "completed" };
-    case "read_file": return readFileSelection(root!, args, safety?.folders ?? { denied: [], readOnly: [] });
+    case "read_file": return readFileSelection(root!, args, safety?.folders ?? { denied: [], readOnly: [] }, typeof repository === "string" ? repository : undefined);
     case "write_file": {
       signal.throwIfAborted();
       const effects = { attempted: false, written: false };

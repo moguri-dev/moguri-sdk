@@ -32,9 +32,9 @@ export const isManagedWorkspaceCommand = (value: unknown): value is ManagedWorks
 export const ManagedWorkspaceQuerySchema = Type.Union([
   object({ type: Type.Literal("workspace.discover"), projectId: id }),
   object({ type: Type.Literal("workspace.inspect"), workspaceId: id }),
-  object({ type: Type.Literal("session.git"), sessionId: id, diff: Type.Boolean() }),
-  object({ type: Type.Literal("session.files"), sessionId: id, path }),
-  object({ type: Type.Literal("session.file"), sessionId: id, path }),
+  object({ type: Type.Literal("session.git"), sessionId: id, diff: Type.Boolean(), repository: Type.Optional(id) }),
+  object({ type: Type.Literal("session.files"), sessionId: id, path, repository: Type.Optional(id) }),
+  object({ type: Type.Literal("session.file"), sessionId: id, path, repository: Type.Optional(id) }),
 ]);
 export type ManagedWorkspaceQuery = Static<typeof ManagedWorkspaceQuerySchema>;
 export const isManagedWorkspaceQuery = (value: unknown): value is ManagedWorkspaceQuery => Value.Check(ManagedWorkspaceQuerySchema, value);

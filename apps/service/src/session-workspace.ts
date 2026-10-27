@@ -37,7 +37,7 @@ export interface SessionWorkspaceHost {
   githubItem?(projectId: string, workspaceId: string | undefined, source: GithubWorkSource): Promise<Extract<GithubResponse, { type: "github.source" }>>;
   contextPreview(session: Session): Promise<ModelContextPreview>;
   startup(projectId: string | null): ResolvedControls;
-  project(session: Pick<Session, "projectId" | "workspaceId">): Project;
+  project(session: Pick<Session, "projectId" | "workspaceId" | "repositories">, repository?: string): Project;
   rootBusy(projectId: string, workspaceId: string | null): boolean;
   localRootBusy(root: string): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
@@ -166,22 +166,26 @@ export class SessionWorkspace {
     if (session.status === "archived") throw new MoguriError("archived", "Restore this session before opening or typing into its terminal.", 409);
     if (!["Local", "Remote"].includes(env) || !this.snapshot().policy.allowedEnvs.includes(env) || !this.snapshot().capabilities.find((capability) => capability.env === env)?.ready) throw new MoguriError("terminal_env", "No qualified terminal transport exists for this environment/policy; no Local fallback.", 409);
     if (env === "Remote" && session.workspaceId !== null) throw new MoguriError("terminal_remote_workspace", "Remote consoles require an explicitly mapped project, not an implicit Local worktree.", 409);
-    const project = session.projectId === null ? null : env === "Remote" ? this.project(session.projectId) : this.host.project(session);
+    if (session.repositories && (env !== "Local" || !explicitRoot)) throw new MoguriError("repository_required", "Select an explicit captured repository for this folder's console. HOME and common-parent fallback are forbidden.", 409);
+    const repository = session.repositories?.find((repository) => repository.root.root === explicitRoot);
+    if (session.repositories && !repository) throw new MoguriError("repository_scope", "This console root is not in the original captured folder set. No other directory was opened.", 409);
+    const project = repository ? this.host.project(session, repository.projectId) :
+      session.projectId === null ? null : env === "Remote" ? this.project(session.projectId) : this.host.project(session);
     if (!project && (env !== "Local" || !explicitRoot)) throw new MoguriError("project_required", "Select a project, or explicitly choose a Local root for this project-free user console. No previous root was reused.", 409);
     if (!project && explicitRoot && this.host.localRootBusy(explicitRoot)) throw new MoguriError("workspace_busy", "An owned writer holds this exact Local root. No project-free terminal was started.", 409);
-    if (project && explicitRoot !== undefined) throw new MoguriError("terminal_root", "Project consoles use their bound workspace. An explicit alternate root requires a separate global console.", 409);
+    if (project && explicitRoot !== undefined && !repository) throw new MoguriError("terminal_root", "Project consoles use their bound workspace. An explicit alternate root requires a separate global console.", 409);
     if (project && env === "Local" && this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
     const configuration = project ? this.projects.configuration(project.id) : null, script = scriptId ? configuration?.values.scripts.find((script) => script.id === scriptId) : undefined;
     if (scriptId && !script) throw new MoguriError("project_script", "Choose an existing explicitly configured project script.", 404);
     const remote = env === "Remote" ? this.host.remoteConsoles?.admission() : undefined, root = env === "Remote" ? configuration?.values.remotePath : project?.path ?? explicitRoot;
     if (env === "Remote" && !remote) throw new MoguriError("terminal_remote_unqualified", "Remote console admission is not wired on this service. No Local broker was selected.", 409);
     if (!root || !root.startsWith("/") || /[\0\r\n]/.test(root)) throw new MoguriError("terminal_root", "Configure this exact execution environment's absolute project root. No previous or Local root was substituted.", 409);
-    const scope = { profileId: this.snapshot().profileId, sessionId: session.id, projectId: project?.id ?? null, workspaceId: session.workspaceId, root };
+    const scope = { profileId: this.snapshot().profileId, sessionId: session.id, projectId: session.repositories ? null : project?.id ?? null, workspaceId: session.workspaceId, root };
     return { session, project, script, scope, remote, signature: frameDigest([scope, env, configuration?.revision ?? null, this.snapshot().policy.revision, script ?? null, remote ?? null]) };
   }
   private async terminalAdmission(sessionId: string, scriptId?: string, explicitRoot?: string) {
     const session = this.session(sessionId);
-    if (explicitRoot === undefined && session.projectId === null && session.controls.env === "Local") {
+    if (explicitRoot === undefined && session.projectId === null && !session.repositories && session.controls.env === "Local") {
       explicitRoot = this.defaultTerminalRoot();
     }
     if (explicitRoot !== undefined) {
@@ -266,6 +270,7 @@ export class SessionWorkspace {
         const siblings = explicit ? snapshot.sessions.filter((session) => session.projectId === command.projectId &&
           (session.parentSessionId ?? null) === command.parentSessionId &&
           (command.parentSessionId !== null || session.groupId === command.groupId) &&
+          (command.parentSessionId !== null || command.projectId !== null || (session.projectFolderId ?? null) === (command.projectFolderId ?? null)) &&
           (session.status === "archived") === command.archived) : snapshot.sessions.filter((session) => sessionOrderScope(session) === scope);
         const ids = new Set(ordered.map((session) => session.id));
         if (ids.size !== ordered.length || ids.size !== siblings.length || siblings.some((session) => !ids.has(session.id))) throw new MoguriError("session_order", "Reorder the complete current sibling set within one project, group, parent, pin and archive scope. Reload before trying again.", 409);
@@ -398,6 +403,8 @@ export class SessionWorkspace {
         if (command.type === "project.remove") return this.host.removeProject(project.id, finish, command.artifacts);
         if (command.type === "project.defaults") return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });
         if (command.type === "project.relocate") {
+          if (this.snapshot().sessions.some((session) => session.repositories?.some((repository) => repository.projectId === project.id) &&
+            (session.turnId || this.snapshot().blockedSessions.includes(session.id)))) throw new MoguriError("project_busy", "A folder session still owns this captured root or unconfirmed work. Settle and inspect that exact owner before relocating.", 409);
           if (this.snapshot().managedWorkspaces.some((workspace) => workspace.projectId === project.id && workspace.status !== "removed")) throw new MoguriError("managed_workspaces", "Remove managed worktrees explicitly before relocating their repository/common Git directory.", 409);
           if (this.snapshot().sessions.some((session) => session.projectId === project.id && session.turnId) || this.snapshot().terminals.some((terminal) => terminal.projectId === project.id && !["closed", "failed", "acknowledged"].includes(terminal.status)) || this.snapshot().jobs.some((job) => job.projectId === project.id && ["running", "waiting_input"].includes(job.status)) || this.snapshot().blockedProjects.includes(project.id)) throw new MoguriError("project_busy", "Finish owned work and inspect unconfirmed effects before changing the attached folder.");
           if (!isAbsolute(command.path)) throw new MoguriError("project_path", "Choose an absolute, existing folder.");
@@ -434,6 +441,20 @@ export class SessionWorkspace {
         this.project(command.projectId);
         if (existing && "projectId" in existing && existing.projectId !== command.projectId) throw new MoguriError("session_group", "Session groups cannot cross projects.");
         return finish([{ event_type: "session.group_saved", profile_id: this.snapshot().profileId, project_id: command.projectId, payload: { group: { ...group, projectId: command.projectId } } }], { id: group.id, revision: group.revision });
+      }
+      case "project.group": {
+        if (!command.name.trim()) throw new MoguriError("group_name", "Give this folder a non-empty name.");
+        const members = command.projects.map((entry) => {
+          this.project(entry.projectId);
+          const configuration = this.projects.configuration(entry.projectId);
+          this.revision(configuration.revision, entry.revision);
+          return configuration;
+        });
+        if (new Set(members.map((member) => member.projectId)).size !== members.length) throw new MoguriError("project_group", "Group distinct, exact projects. No duplicate member was adopted.");
+        const folder = { id: randomUUID(), name: command.name.trim(), order: Math.max(-1, ...this.snapshot().projectFolders.map((folder) => folder.order)) + 1, revision: 0 };
+        return finish([{ event_type: "project.folder_saved", profile_id: this.snapshot().profileId, payload: { folder } },
+          ...members.map((configuration, order): EventInput => ({ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: configuration.projectId,
+            payload: { configuration: { ...configuration, folderId: folder.id, order, revision: configuration.revision + 1 } } }))], { id: folder.id, revision: 0 });
       }
       case "session.browser": {
         const session = this.session(command.sessionId);

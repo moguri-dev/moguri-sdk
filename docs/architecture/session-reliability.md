@@ -8,7 +8,7 @@ named multi-repository folders, read-only side-chat parity and long retained
 conversations. It extends the existing service and SDK, not another agent loop.
 
 Reuse Node/SQLite/process primitives (MIT), TypeBox (MIT), React/OpenTUI (MIT),
-the existing Markdown renderer and icon library (MIT), maintained pi-ai (MIT)
+the existing Markdown renderer (MIT), Moguri-owned icons, maintained pi-ai (MIT)
 and the pinned local NeMo-Speech runtime with its separately accepted model
 license. No model weights, personal microphone, authentication or user
 application is exercised during qualification.
@@ -113,7 +113,7 @@ or automatic prompt submission for live desktop dictation. Legacy SDK batch
 uploads and explicitly reviewed file/native transcripts remain separate.
 
 `sessions.side` atomically opens an existing original side chat or creates one
-with complete effective parent context and inherited controls. Both clients
+with complete effective parent context and inherited controls. Both chat surfaces
 use the same composer, model/window/effort controls, activity Markdown, voice
 and queue. The service permanently enforces read-only mode; navigation nesting
 does not grant parent context or coordination.
@@ -127,3 +127,49 @@ selection, pre-admission release, cancellation, empty recognition, immediate
 side-chat parity, fuzzy names, custom swatch and Markdown reasoning. This is
 generated mechanical evidence, not physical microphone/model-quality or final
 whole-feature release qualification.
+
+## Captured folders and compact settings
+
+`project.group` uses the existing folder/configuration events in one transaction
+with every captured project revision. `session.create` accepts an exact folder
+member/revision set, captures canonical path/device/inode identities and rechecks
+membership before retaining the new session. The paired `projectFolderId` and
+`repositories` fields are immutable; `projectId` stays null. This does not turn a
+null project-free scope into a root or a common-parent grant. Schema 65 refuses
+older-labelled history containing either new scope field.
+
+The central managed-root resolver owns explicit filesystem/command selectors,
+client Files/Changes reads and user consoles. Model grants return the actual
+selected root, not the worker's nonexistent default. Standalone SDK tools use
+the same resolver, folder restrictions and permission context. Original roots
+are rechecked before authorization and their current member settings revision
+participates in the asynchronous guard.
+
+Every captured root participates in active/pending writer ownership and
+retained uncertainty. A single-project or foreign-profile writer cannot run
+through another member while the group owns it. Archive preserves unknown
+ownership; deletion/removal cannot erase it. Read-only sides preserve the exact
+root set and original parent context without acquiring writer tools. Folder
+session restarts retain queued/held work and identities without replay.
+Repository-specific GitHub/plan panels explicitly direct users to a member
+project chat; unqualified per-repo MCP, hooks, memory indexing, background jobs,
+publication and managed-worktree rebinding do not substitute a member.
+
+Native center drops attach session navigation or review a newly named project
+folder; edges retain shared ordering. Folder expansion and fuzzy search are
+presentation only. The shared grip control binds profile/entity scope and the
+complete original ID order, preserving current item objects and rejecting stale
+structure. It serves board-phase drafts and actual service-owned prompt queues,
+with Alt+Up/Down, focus restoration, pending gates and visible failures.
+Single booleans use switches, true multi-selects remain checkboxes and exclusive
+inspection/removal choices use dropdowns. Icon-only actions keep accessible
+names/tooltips and preserve destructive review.
+
+Focused source coverage includes actual cross-root model and SDK tools,
+member-specific remembered grants/restrictions, atomic stale grouping,
+single/group and cross-profile contention, cancellation and original-root
+restart quarantine. Hidden desktop flows exercise native center/edge drags,
+folder creation, explicit file/console selection and actual saved phase order.
+The speech suite additionally SIGKILLs a real generated control plane, observes
+its exact recognizer stop through the private host pipe, and restarts without
+reopening audio, replaying frames or creating inference/accounting entries.

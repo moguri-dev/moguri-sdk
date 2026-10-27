@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { EventStore } from "../apps/service/src/store.ts";
-import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
@@ -41,4 +41,18 @@ test("current reliability metadata is required and cannot be relabelled as older
       assert.throws(() => new EventStore(path, fixture.retentionKey), /session reliability.*(marker|lineage)/);
     } finally { await fixture.close(); }
   });
+});
+
+test("captured multi-repository history cannot be relabelled as schema 64 after removing its new marker", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready(), path = fixture.service.store.path;
+  try {
+    const folder = await sdk.projects.folder("Generated captured-root lineage");
+    const configuration = (await sdk.projects.configuration(fixture.session().projectId)).configuration;
+    await sdk.projects.organize(configuration.projectId, { folderId: folder.id!, order: 0, color: configuration.color }, configuration.revision);
+    await sdk.sessions.createFolder(folder.id!);
+    sdk.disconnect(); await fixture.service.close();
+    const raw = new DatabaseSync(path);
+    try { raw.exec("DELETE FROM retention_metadata WHERE id='session_reliability_schema'; PRAGMA user_version=64;"); } finally { raw.close(); }
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Session reliability history cannot be relabelled.*original schema marker/);
+  } finally { sdk.disconnect(); await fixture.close(); }
 });

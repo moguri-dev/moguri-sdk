@@ -100,16 +100,62 @@ or evidence that the session's work succeeded. Legacy missing draft remains
 unknown; project-free scope cannot inherit a root or authenticated account.
 The schema-54 marker upgrades transactionally without rewriting ciphertext.
 
+## Captured folder sessions, side chats and streamed speech
+
+`projects.group(name, [{ projectId, revision }, ...])` atomically creates a named
+navigation folder and moves the exact reviewed projects into it, without moving
+files. `sessions.createFolder(folderId, title?, overrides?)` captures the current
+member IDs/revisions and canonical path/device/inode identities. Its
+`Session.projectId` is null, with immutable paired `projectFolderId` and
+`repositories`. Null without those explicit fields remains project-free.
+
+The Local filesystem/command tools require an explicit `repository` ID or
+captured name for folder sessions. `workspaces.files(sessionId, path, repository)`,
+`file(sessionId, path, repository)` and `git(sessionId, diff, repository)` resolve the
+same bound root; `terminal.open` requires a captured member's exact root.
+Replaced directories, unknown/ambiguous selectors and unqualified transports
+fail without selecting a first member, common parent or HOME. All captured
+roots participate in writer admission, cancellation and uncertain-work
+quarantine, including across profiles. Per-member folder restrictions and
+project-scoped approval grants bind the actual selected repository.
+
+CLI/TUI/desktop share `/folder-group {"name":"Folder","projectIds":["ID","ID"]}`
+and `/folder-chat [FOLDER_ID]`; `/folder-chat` without an argument lists visible folders. The latter
+explicitly creates a Local folder chat, still subject to hard allowed-env
+policy. Per-project GitHub/plan, MCP, memory, hooks, background/publication and
+managed-worktree surfaces are not implicitly combined.
+
+`sessions.side(parentId)` atomically opens the original side conversation or
+creates one with inherited controls and captured full parent context. It never
+runs inference or grants write/coordination authority. The root set is inherited
+unchanged for folder sides. Navigation nesting alone does not grant context.
+
+Desktop dictation uses `voice.startCapture(sessionId, id?, { streaming: true })`,
+ordered `appendCapture(..., sequence, pcmBytes)`, volatile
+`readCapture(...): { text, revision }`, then `finishCapture(..., finalSequence)`.
+Finish acknowledges flush intent; await the original job separately for the
+exact completed transcript. Frames are mono 16-kHz PCM16, bounded per frame and
+capture, authenticated with the transient original nonce, never journaled.
+`DraftEditor.startDictation` guards the provisional insertion span against
+concurrent/foreign edits. Batch WAV upload and reviewed transcript insertion
+remain separate APIs. Reconnect/restart cannot replay PCM, and cancelling a
+retained partial job never acknowledges uncertain cleanup as successful.
+
 ## Remembered approvals and GitHub entry points
 
 `approvals.respond(sessionId, approvalId, allow, remember?)` atomically records
 the actual pending answer and optional `{ scope: "session" | "project" | "global",
-match: "exact" | "family" }` grant. Global means all projects in this profile,
+match: "exact" | "family" | "tool" }` grant. Global means all projects in this profile,
 not another profile or execution environment. `approvals.list()` and
 `approvals.revoke(id, expectedSettingsRevision?)` share settings revisions.
 Family grants accept only conservative simple commands; MCP grants bind the
 actual server configuration and schema. Callers cannot replace the pending
-command or supply a different grant target.
+command or supply a different grant target. Explicit `tool` matching permits new
+arguments to that same named tool only inside the chosen scope and environment.
+Execution requires an exact command or conservative family rather than a blanket
+execution-tool grant. `/approve project tool` uses the actual selected folder
+member, and `approvalProject(session, call.arguments.repository)` exposes that
+same unambiguous project identity for client choice controls.
 
 `sessions.autonomy(id, "Autopilot")` explicitly sets
 `controls.automaticApprovals: true`; Max does the same while requiring its

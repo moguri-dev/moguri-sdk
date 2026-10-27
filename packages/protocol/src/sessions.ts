@@ -50,6 +50,12 @@ export const defaultProjectConfiguration = (projectId: string): ProjectConfigura
   projectId, revision: 0, folderId: null, color: "#a8d7bc", order: 0, values: defaultProjectSettings(),
 });
 export interface NavigationFolder { id: string; name: string; order: number; revision: number }
+export const SessionRepositorySchema = object({
+  projectId: id, name: Type.String({ minLength: 1, maxLength: 128 }),
+  root: object({ root: path, device: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }), inode: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }) }),
+});
+export const SessionRepositoriesSchema = Type.Array(SessionRepositorySchema, { minItems: 1, maxItems: 1000 });
+export type SessionRepository = Static<typeof SessionRepositorySchema>;
 export interface SessionGroup extends NavigationFolder { projectId: string }
 export const ProjectCloneIntentSchema = object({
   version: Type.Literal(1), projectId: id, repository: Type.String({ minLength: 1, maxLength: 2048 }), path, parent: path,
@@ -73,7 +79,7 @@ export type SessionChanges = Static<typeof SessionChangesSchema>;
 export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema, confirmDetach: Type.Optional(Type.Literal(true)) }),
   object({ type: Type.Literal("session.reorder"), sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
-  object({ type: Type.Literal("session.reorder"), projectId: nullableId, parentSessionId: nullableId, groupId: nullableId, archived: Type.Boolean(),
+  object({ type: Type.Literal("session.reorder"), projectId: nullableId, parentSessionId: nullableId, groupId: nullableId, projectFolderId: Type.Optional(nullableId), archived: Type.Boolean(),
     sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.mode"), sessionId: id, expectedRevision: revision, mode: SessionModeSchema }),
   object({ type: Type.Literal("session.spawn"), sessionId: id, kind: Type.Union([Type.Literal("agent"), Type.Literal("side")]), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })) }),
@@ -90,6 +96,8 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("project.defaults"), projectId: id, expectedRevision: revision, branch: Type.String({ minLength: 1, maxLength: 200 }), confirmPush: Type.Literal(true) }),
   object({ type: Type.Literal("project.mcp.import"), projectId: id, expectedRevision: revision, confirmReview: Type.Literal(true), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("project.folder"), id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision }),
+  object({ type: Type.Literal("project.group"), name: Type.String({ minLength: 1, maxLength: 80 }),
+    projects: Type.Array(object({ projectId: id, revision }), { minItems: 2, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.group"), projectId: id, id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision }),
   object({ type: Type.Literal("session.browser"), sessionId: id, url: Type.String({ minLength: 1, maxLength: 2048 }) }),
   object({ type: Type.Literal("artifact.capture"), sessionId: id, path: Type.Optional(path) }),
@@ -109,8 +117,9 @@ export function compareSessions(a: { pinned: boolean; order?: number; createdAt:
   return Number(b.pinned) - Number(a.pinned) || (a.order ?? 0) - (b.order ?? 0) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
 }
 export const compareSessionOrder = compareSessions;
-export const sessionOrderScope = (session: { projectId: string | null; groupId: string | null; parentSessionId?: string; pinned: boolean; status: string }): string =>
-  JSON.stringify([session.projectId, session.groupId, session.parentSessionId ?? null, session.pinned, session.status === "archived"]);
+export const sessionOrderScope = (session: { projectId: string | null; groupId: string | null; projectFolderId?: string; parentSessionId?: string; pinned: boolean; status: string }): string =>
+  JSON.stringify([session.projectId, session.parentSessionId ? null : session.groupId, session.parentSessionId ?? null, session.pinned, session.status === "archived",
+    ...(!session.parentSessionId && session.projectFolderId ? [session.projectFolderId] : [])]);
 export function projectIdentifier(name: string, taken: Iterable<string> = []): string {
   const base = name.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "project";
   const names = new Set([...taken].map((value) => value.toLowerCase()));

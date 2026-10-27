@@ -140,6 +140,13 @@ export class MoguriSdk extends TransportClient {
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
     side: (sessionId: string) => this.command({ type: "session.side", sessionId }),
+    createFolder: (projectFolderId: string, title?: string, overrides?: ControlDefaults) => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot?.projectFolders.some((folder) => folder.id === projectFolderId)) throw new ClientError("project_folder", "Choose an existing folder in this profile.");
+      const folderProjects = snapshot.projectConfigurations.filter((configuration) => configuration.folderId === projectFolderId)
+        .sort((a, b) => a.order - b.order).map((configuration) => ({ projectId: configuration.projectId, revision: configuration.revision }));
+      return this.command({ type: "session.create", projectFolderId, folderProjects, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}) });
+    },
     configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
       const current = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.controls;
       const changed = controls.modelId !== null && Boolean(current && (controls.modelId !== current.modelId ||
@@ -179,7 +186,8 @@ export class MoguriSdk extends TransportClient {
     reorder: (...args: [sessionIds: string[]] | [projectId: string | null, parentSessionId: string | null, groupId: string | null, archived: boolean, sessions: { sessionId: string; revision: number }[]]) => {
       if (args.length === 1) return this.command({ type: "session.reorder", sessions: args[0].map((sessionId) => ({ sessionId, revision: this.sessionRevision(sessionId) })) });
       const [projectId, parentSessionId, groupId, archived, sessions] = args;
-      return this.command({ type: "session.reorder", projectId, parentSessionId, groupId, archived, sessions });
+      const projectFolderId = projectId === null && parentSessionId === null ? this.getState().snapshot?.sessions.find((session) => session.id === sessions[0]?.sessionId)?.projectFolderId : undefined;
+      return this.command({ type: "session.reorder", projectId, parentSessionId, groupId, archived, sessions, ...(projectFolderId ? { projectFolderId } : {}) });
     },
     rename: (sessionId: string, title: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes: { title }, expectedRevision }),
     mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
@@ -435,9 +443,9 @@ export class MoguriSdk extends TransportClient {
     bind: (sessionId: string, workspaceId: string | null, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.workspace", sessionId, workspaceId, expectedRevision }),
     remove: (workspaceId: string, expectedRevision: number, confirm: true) => this.command({ type: "workspace.remove", workspaceId, expectedRevision, confirm }),
     reconcile: (workspaceId: string, expectedRevision: number) => this.command({ type: "workspace.reconcile", workspaceId, expectedRevision }),
-    git: (sessionId: string, diff = true) => this.query({ type: "session.git", sessionId, diff }),
-    files: (sessionId: string, path = ".") => this.query({ type: "session.files", sessionId, path }),
-    file: (sessionId: string, path: string) => this.query({ type: "session.file", sessionId, path }),
+    git: (sessionId: string, diff = true, repository?: string) => this.query({ type: "session.git", sessionId, diff, ...(repository ? { repository } : {}) }),
+    files: (sessionId: string, path = ".", repository?: string) => this.query({ type: "session.files", sessionId, path, ...(repository ? { repository } : {}) }),
+    file: (sessionId: string, path: string, repository?: string) => this.query({ type: "session.file", sessionId, path, ...(repository ? { repository } : {}) }),
     wait: async (workspaceId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
       const workspace = this.getState().snapshot?.managedWorkspaces.find((value) => value.id === workspaceId);
       if (!workspace) throw new ClientError("workspace_missing", "Connect and choose an existing managed workspace.");
@@ -470,6 +478,7 @@ export class MoguriSdk extends TransportClient {
     acknowledge: (attentionIds: string[]) => this.command({ type: "attention.acknowledge", attentionIds }),
   };
   readonly projects = {
+    group: (name: string, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.group", name, projects }),
     add: (path: string, name?: string) => this.command({ type: "project.add", path, ...(name !== undefined ? { name } : {}) }),
     clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),
     configuration: (projectId: string) => this.query({ type: "project.configuration", projectId }),

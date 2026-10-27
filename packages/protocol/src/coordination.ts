@@ -60,7 +60,7 @@ export type CoordinationMetadata = Pick<Session, "id" | "title" | "kind" | "mode
 };
 export type CoordinationBinding = {
   profileId: string; projectId: string | null; workspaceId: string | null;
-} & ({ env: "Local"; root: string | null; fileIdentity: { device: string; inode: string } | null } |
+} & ({ env: "Local"; root: string | null; fileIdentity: { device: string; inode: string } | null; repositories?: import("./sessions.ts").SessionRepository[] } |
   { env: "Remote"; root: string | null; host: string; port: number; user: string; hostKey: string; workerDigest: string });
 export type CoordinationRead =
   | { action: "list"; links: (CoordinationLink & ({ parent: CoordinationMetadata; child: CoordinationMetadata } | { unavailable: string }))[]; nextOffset: number | null; authority: string }

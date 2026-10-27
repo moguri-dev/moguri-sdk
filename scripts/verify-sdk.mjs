@@ -63,6 +63,7 @@ try {
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
     ${installedProtocol >= 54 ? 'import {sessionIndicator,sessionIndicatorColors,sessionPrScope,sessionPullRequest,sessionPullRequestUrl,type SessionPrObservation} from "moguri";' : ""}
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
+    ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
@@ -74,6 +75,24 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 65 ? `
+      {
+      const grouped=await sdk.projects.group("Generated folder",[{projectId:"generated-first",revision:0},{projectId:"generated-second",revision:0}]);
+      const folderChat=await sdk.sessions.createFolder(grouped.id!,"Generated folder chat",{env:"Local"});
+      const sideChat=await sdk.sessions.side(folderChat.id!);
+      const captured:SessionRepository[]|undefined=sdk.getState().snapshot?.sessions.find(session=>session.id===folderChat.id)?.repositories;
+      void approvalProject({projectId:null,repositories:captured},"generated-first");
+      await sdk.workspaces.files(folderChat.id!,".","generated-first");
+      await sdk.workspaces.file(folderChat.id!,"generated.txt","generated-first");
+      await sdk.workspaces.git(folderChat.id!,true,"generated-first");
+      await sdk.approvals.respond(folderChat.id!,"generated-approval",true,{scope:"project",match:"tool"});
+      const capture=await sdk.voice.startCapture(sideChat.id!,undefined,{streaming:true});
+      await sdk.voice.appendCapture(sideChat.id!,capture.id,capture.token,1,new Uint8Array(6400));
+      const live=await sdk.voice.readCapture(sideChat.id!,capture.id,capture.token);void live.revision;
+      await sdk.voice.finishCapture(sideChat.id!,capture.id,capture.token,1);
+      void DraftEditor.prototype.startDictation;
+      }
+      ` : ""}
       ${installedProtocol >= 62 ? `
       const kanbanChat=await sdk.kanban.open("generated-project");
       const cards=await sdk.kanban.items("generated-project","github-issues",1,kanbanChat.id);
@@ -596,6 +615,36 @@ try {
       console.log("Installed Kanban SDK/runtime exposes one board chat, shared visibility/card bindings and public API-equivalent references without hidden inference or finite-limit consent.");
       }
       ` : ""}
+      ${installedProtocol >= 65 ? `{
+      const firstRoot=join(root,"generated-installed-group-first"),secondRoot=join(root,"generated-installed-group-second");
+      await mkdir(firstRoot);await mkdir(secondRoot);await writeFile(join(firstRoot,"generated-group.txt"),"Generated installed first-root source.");
+      const first=await sdk.projects.add(firstRoot),second=await sdk.projects.add(secondRoot);
+      const grouped=await sdk.projects.group("Generated installed group",[{projectId:first.id,revision:0},{projectId:second.id,revision:0}]);
+      const opened=await sdk.sessions.createFolder(grouped.id,"Generated installed folder chat");
+      const original=sdk.getState().snapshot.sessions.find(value=>value.id===opened.id);
+      assert.equal(original.projectId,null);assert.deepEqual(original.repositories.map(value=>value.projectId),[first.id,second.id]);
+      await assert.rejects(()=>sdk.workspaces.files(opened.id,"."),{code:"repository_required"});
+      assert.ok((await sdk.workspaces.files(opened.id,".",first.id)).entries.includes("generated-group.txt"));
+      const tool=(await sdk.tools.catalog(opened.id,"write_file")).tools.find(value=>value.name==="write_file");
+      const started=await sdk.tools.execute(opened.id,tool.name,{repository:second.id,path:"generated-external.txt",text:"Generated installed selected-root edit.",expectedDigest:"absent"},tool.schemaDigest);
+      const approval=sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).pendingApproval;
+      await sdk.approvals.respond(opened.id,approval.id,true,{scope:"project",match:"tool"});
+      assert.equal((await sdk.jobs.wait(started.id)).status,"completed");
+      assert.equal(await readFile(join(secondRoot,"generated-external.txt"),"utf8"),"Generated installed selected-root edit.");
+      const side=await sdk.sessions.side(opened.id),again=await sdk.sessions.side(opened.id);
+      assert.equal(side.id,again.id);
+      const question=sdk.getState().snapshot.sessions.find(value=>value.id===side.id);
+      assert.equal(question.mode,"read-only");assert.deepEqual(question.repositories,original.repositories);
+      assert.deepEqual(question.controls,original.controls);
+      await assert.rejects(()=>sdk.voice.readCapture(side.id,randomUUID(),randomUUID()),{code:"speech_capture_owner"});
+      await assert.rejects(()=>sdk.voice.appendCapture(side.id,randomUUID(),randomUUID(),1,new Uint8Array(2)),{code:"speech_capture_owner"});
+      const host=fileURLToPath(new URL("./node_modules/moguri/dist/speech-host.mjs",import.meta.url));
+      execFileSync(process.execPath,[host,process.execPath,"-e","setInterval(()=>{},1000)"],{input:"",timeout:10000});
+      const grant=sdk.approvals.list().find(value=>value.scope.kind==="project"&&value.scope.projectId===second.id);
+      await sdk.approvals.revoke(grant.id);
+      await sdk.sessions.delete(opened.id,true);
+      console.log("Installed protocol-65 typed root scopes, actual selected-root SDK edits, whole-tool grants, immediate read-only sides, private speech host and stream ownership gates pass without inference or audio capture.");
+      }` : ""}
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);

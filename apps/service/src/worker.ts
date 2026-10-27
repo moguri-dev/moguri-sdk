@@ -230,7 +230,7 @@ async function run(start: WorkerStart): Promise<void> {
             result = { text: approval.error ?? "The user denied this tool request. No operation was executed.", isError: true, outcome: "denied" };
           } else {
             try {
-              result = await executeTool(start.root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
+              result = await executeTool(approval.value.root === undefined ? start.root : approval.value.root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
                 (pid) => send({ kind: "process", stepId, callId: call.id, pid }),
                 (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders, env: start.env }, boundary.toolCatalog ?? boundary.tools,
                 debuggerRuntime ? { runtime: debuggerRuntime, ended: async (pid, outcome) => {
@@ -247,8 +247,9 @@ async function run(start: WorkerStart): Promise<void> {
           if (["read_file", "inspect_document"].includes(call.name) && !result.isError) {
             const view: unknown = JSON.parse(result.text);
             if (isRecord(view) && Array.isArray(view.instructions)) {
-              const refs = view.instructions.filter(isRecord).map((source) => `${String(source.path)}:${String(source.digest)}`);
-              view.instructions = view.instructions.filter((source) => isRecord(source) && !instructionSources.has(`${String(source.path)}:${String(source.digest)}`));
+              const prefix = `${String(call.arguments.repository ?? "")}:`;
+              const refs = view.instructions.filter(isRecord).map((source) => `${prefix}${String(source.path)}:${String(source.digest)}`);
+              view.instructions = view.instructions.filter((source) => isRecord(source) && !instructionSources.has(`${prefix}${String(source.path)}:${String(source.digest)}`));
               for (const ref of refs) instructionSources.add(ref);
               result.text = JSON.stringify(view);
             }

@@ -89,9 +89,27 @@ export class ManagedWorkspaces {
     const expected = join(realpathSync(this.stateDir), "worktrees", workspace.projectId, workspace.id);
     if (workspace.path !== expected) throw new MoguriError("workspace_ownership", "This path is not the exact owned workspace location. No deletion or fallback was attempted.", 409);
   }
-  project(session: Pick<Session, "projectId" | "workspaceId">): Project {
+  project(session: Pick<Session, "projectId" | "workspaceId" | "repositories">, repository?: string): Project {
+    if (session.repositories) {
+      if (session.projectId || session.workspaceId) throw new MoguriError("repository_scope", "A folder session cannot acquire an implicit single checkout or managed worktree.");
+      if (!repository) throw new MoguriError("repository_required", "Select an explicit repository from this session's captured folder roots. No first member, common parent or base checkout was substituted.", 409);
+      const selected = session.repositories.filter((binding) => binding.projectId === repository || binding.name === repository);
+      if (selected.length !== 1) throw new MoguriError("repository_scope", "Select exactly one original captured repository by ID or name. No foreign or renamed alias was adopted.", 409);
+      const binding = selected[0]!, project = this.host.project(binding.projectId);
+      if (project.path !== binding.root.root) throw new MoguriError("repository_changed", "The captured repository was relocated. Create a new folder session to review current roots; the original checkout was not substituted.", 409);
+      let metadata;
+      try { metadata = lstatSync(binding.root.root, { bigint: true }); }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR"].includes(String(error.code)))) throw error;
+        throw new MoguriError("repository_changed", "An original captured repository is unavailable. No replacement root was used.", 409);
+      }
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || realpathSync(binding.root.root) !== binding.root.root ||
+        String(metadata.dev) !== binding.root.device || String(metadata.ino) !== binding.root.inode) throw new MoguriError("repository_changed", "The captured repository directory identity changed. No newer, aliased or replacement root was used.", 409);
+      return project;
+    }
     if (!session.projectId) throw new MoguriError("project_required", "Select a project for this workspace capability. No previous root was reused.", 409);
     const project = this.host.project(session.projectId);
+    if (repository && repository !== project.id && repository !== project.name) throw new MoguriError("repository_scope", "This repository selector does not belong to the session's original project.", 409);
     if (!session.workspaceId) return project;
     const workspace = this.workspace(session.workspaceId);
     this.expectedPath(workspace);
@@ -106,8 +124,18 @@ export class ManagedWorkspaces {
     const project = this.project(session);
     return { id: profileIndexId(this.host.snapshot().profileId, session.workspaceId ?? project.id), path: project.path };
   }
-  leaseKey(session: Session): string | null { return session.projectId ? `${session.projectId}:${session.workspaceId ?? "base"}` : null; }
-  async assert(session: Pick<Session, "projectId" | "workspaceId">, signal?: AbortSignal): Promise<void> {
+  roots(session: Pick<Session, "projectId" | "workspaceId" | "repositories">): string[] {
+    return session.repositories ? session.repositories.map((repository) => repository.root.root) : session.projectId ? [this.project(session).path] : [];
+  }
+  leaseKey(session: Session): string | null {
+    return session.repositories ? `repositories:${JSON.stringify(session.repositories.map((binding) => binding.projectId).sort())}` :
+      session.projectId ? `${session.projectId}:${session.workspaceId ?? "base"}` : null;
+  }
+  async assert(session: Pick<Session, "projectId" | "workspaceId" | "repositories">, signal?: AbortSignal): Promise<void> {
+    if (session.repositories) {
+      for (const repository of session.repositories) { signal?.throwIfAborted(); this.project(session, repository.projectId); }
+      return;
+    }
     this.project(session);
     if (!session.workspaceId) return;
     const inspection = await this.inspect(session.workspaceId, signal);
@@ -142,6 +170,7 @@ export class ManagedWorkspaces {
     }
     if (query.type === "workspace.inspect") return { type: query.type, inspection: await this.inspect(query.workspaceId) };
     const session = this.session(query.sessionId);
+    if ((session.repositories || query.repository) && session.controls.env !== "Local") throw new MoguriError("repository_env", "Explicit multi-repository selection is currently Local-only. No execution transport or root was substituted.", 409);
     if (session.controls.env === "Sandbox") {
       if (!this.host.nativeRead) throw new MoguriError("sandbox_workspace", "This service has no qualified native file broker. No Local source root was read.", 409);
       const request: WorkspaceReadQuery = query.type === "session.git" ? { type: query.type, diff: query.diff } : { type: query.type, path: query.path };
@@ -156,7 +185,7 @@ export class ManagedWorkspaces {
       return result;
     }
     if (session.controls.env !== "Local") throw new MoguriError("workspace_env", "This file/Git surface has no qualified transport for the selected environment. No Local fallback.", 409);
-    const project = this.project(session), settings = this.settings().values(project.id);
+    const project = this.project(session, query.repository), settings = this.settings().values(project.id);
     if (query.type === "session.git") {
       const signal = AbortSignal.timeout(30_000), disabledFilters = await this.filters(project, signal);
       return { ...await this.settings().gitView(project, query.diff, signal, disabledFilters), type: query.type };
@@ -169,6 +198,7 @@ export class ManagedWorkspaces {
     taskBase?: { remote: string; ref: string; commit: string; sourceWorkspaceId: string | null; expectedUrl: string }): Promise<CommandResult> {
     if (command.type === "session.workspace") {
       const session = this.session(command.sessionId);
+      if (session.repositories) throw new MoguriError("repository_scope", "A folder session retains its exact root set. Start a single-project session to bind a managed worktree.", 409);
       if (session.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "Session changed. Reload before binding a workspace.", 409);
       if (session.turnId || session.messages.length || session.queue.length || session.status === "archived") throw new MoguriError("workspace_session", "Bind only a fresh idle session. Existing conversation/queued intent is not silently moved to another branch.", 409);
       if (command.workspaceId && session.controls.env !== "Local") throw new MoguriError("workspace_env", "Managed worktree location is currently qualified for Local only. No remote mapping is inferred.", 409);

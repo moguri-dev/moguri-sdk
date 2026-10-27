@@ -10,7 +10,7 @@ import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
 import { RememberApprovalSchema } from "./permissions.ts";
-import { defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema } from "./sessions.ts";
+import { defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema, SessionRepositoriesSchema, type SessionRepository } from "./sessions.ts";
 import type { ProviderConnection } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
 import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
@@ -73,7 +73,9 @@ export const CommandSchema = object({
   profileId: id,
   command: Type.Union([
     object({ type: Type.Literal("project.add"), path: Type.String({ minLength: 1, maxLength: 4096 }), name: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Za-z0-9_-]+$" })) }),
-    object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
+    object({ type: Type.Literal("session.create"), projectId: Type.Optional(Type.Union([id, Type.Null()])), projectFolderId: Type.Optional(id),
+      folderProjects: Type.Optional(Type.Array(object({ projectId: id, revision: Type.Integer({ minimum: 0 }) }), { minItems: 1, maxItems: 1000 })),
+      title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
     object({ type: Type.Literal("session.archive"), ...sessionId }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
@@ -194,6 +196,8 @@ export interface Session {
   pendingMode: SessionMode | null;
   kind: SessionKind;
   purpose?: "kanban";
+  projectFolderId?: string;
+  repositories?: SessionRepository[];
   pinned: boolean;
   order?: number;
   taskPlan?: TaskPlan;
@@ -249,7 +253,7 @@ export interface Connection {
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
   "project.added": { project: Project };
-  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; purpose?: "kanban"; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; workItemUrl?: string | null; githubSource?: GithubSessionOrigin; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
+  "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; purpose?: "kanban"; projectFolderId?: string; repositories?: SessionRepository[]; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; workItemUrl?: string | null; githubSource?: GithubSessionOrigin; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "coordination.linked": { link: CoordinationLink };
   "coordination.message": { message: CoordinationMessage };
   "coordination.delivered": { messageId: string; turnId: string; stepId: string };
@@ -1029,6 +1033,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "session.created") {
       if (!event.session_id) throw new Error("Invalid session.created event scope.");
+      const repositories = event.payload.repositories;
+      if (repositories || event.payload.projectFolderId) {
+        const inherited = event.payload.parentSessionId ? sessions.get(event.payload.parentSessionId) : undefined;
+        if (event.project_id || event.payload.workspaceId || !event.payload.projectFolderId || !projectFolders.has(event.payload.projectFolderId) ||
+          !Value.Check(SessionRepositoriesSchema, repositories) ||
+          new Set(repositories.map((repository) => repository.projectId)).size !== repositories.length ||
+          new Set(repositories.map((repository) => repository.name.toLowerCase())).size !== repositories.length ||
+          new Set(repositories.map((repository) => repository.root.root)).size !== repositories.length ||
+          inherited?.repositories && (inherited.projectFolderId !== event.payload.projectFolderId || JSON.stringify(inherited.repositories) !== JSON.stringify(repositories)) ||
+          !inherited?.repositories && repositories.some((repository) => projects.get(repository.projectId)?.path !== repository.root.root)) {
+          throw new MoguriError("session_repositories_corrupt", "The folder session lost its exact original project/root set. No member, common parent or replacement root was inferred.", 409);
+        }
+      }
       if (event.payload.purpose && (event.payload.purpose !== "kanban" || !event.project_id ||
         event.payload.workspaceId || event.payload.kind && event.payload.kind !== "agent" ||
         [...sessions.values()].some((session) => session.projectId === event.project_id && session.purpose === "kanban"))) {
@@ -1054,6 +1071,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         mode: event.payload.mode ?? (event.payload.readOnly ? "read-only" : "agent"), pendingMode: null,
         kind: event.payload.kind ?? (event.payload.readOnly ? "subagent" : "agent"), pinned: false, order: nextSessionOrder++, unread: false, groupId: null, archivedAt: null,
         ...(event.payload.purpose ? { purpose: event.payload.purpose } : {}),
+        ...(repositories ? { projectFolderId: event.payload.projectFolderId, repositories: structuredClone(repositories) } : {}),
         prUrl: event.payload.prUrl ?? null, prObservation: null, workItemId: event.payload.workItemId ?? null, workItemUrl: event.payload.workItemUrl ?? null,
         ...(origin ? { githubSource: structuredClone(origin) } : {}), browserUrl: null,
         suggestionSources: event.payload.suggestionSources,

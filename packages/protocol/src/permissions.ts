@@ -1,5 +1,11 @@
 import { Type, type Static } from "typebox";
 
+export function approvalProject(session: { projectId: string | null; repositories?: { projectId: string; name: string }[] }, repository: unknown): string | null {
+  if (session.projectId) return session.projectId;
+  const selected = session.repositories?.filter((binding) => binding.projectId === repository || binding.name === repository);
+  return selected?.length === 1 ? selected[0]!.projectId : null;
+}
+
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 export const RememberApprovalSchema = Type.Object({
