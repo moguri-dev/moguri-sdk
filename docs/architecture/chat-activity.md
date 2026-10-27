@@ -151,3 +151,64 @@ SendBox, quality and release exclusions remain explicitly unavailable. Tests
 must prove absent/zero/positive cache categories, live saved updates, immediate
 popover data without those detail queries, cross-chat/profile isolation,
 deletion, unknown cancellation, migration rollback and restart without replay.
+
+## Protocol-66 qualification
+
+The generated regression first reproduced a normalized 10-token cache report
+being discarded when transport presence flags were false. Hidden desktop tests
+reject `activity.turn`, `budget.status` and `session.context` detail queries:
+original turn information, cached input, captured-rate cost and context still
+open immediately, update while streaming and survive navigation/reload without
+another model request. Actual service restarts preserve the same observations,
+including unknown stopped-call holds and one-time exact-source cache repair.
+
+Final qualification uses the same rebuilt source/runtime and generated fixtures:
+
+| Surface | Result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Combined recovery, terminal, profile, legacy-evidence and deadline regressions | 98 passed |
+| Complete source/service/worker/CLI/native-TUI suite | 1,651 passed, 14 existing skips, zero failures; 1,665 cases in 1,437,731.03 ms |
+| Complete hidden desktop suite | 222 passed, three existing skips, zero failures; 225 flows in 7.4 minutes |
+| Actual packaged-app turn/cache/streaming/navigation/settings flows | 13 passed in 24.2 seconds |
+| Independently installed packed SDK | Browser-safe root/React, explicit Node/MCP, declarations, immutable profiles, saved telemetry and actual runtime/worker checks pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Fresh source, independent consumer and native workload audits | Zero vulnerabilities |
+
+Generated coverage also checks absent versus explicit-zero cache, partial known
+cache totals, all 61 model groups beyond dashboard pagination, deletion/profile
+isolation, atomic 65-to-66 rollback, unchanged ciphertext/receipts, final global
+capacity after shutdown and unknown legacy result formats. An indexed
+2,000-turn reconstruction took 12.78 ms in the focused recovery run; unchanged
+snapshots reuse the same view.
+
+Earlier failed runs are not counted as passing qualification. They exposed
+stopped-store reads, an unqualified legacy prototype result, a sub-millisecond
+timer-rounding assertion and a native settings teardown racing its renderer's
+save acknowledgement. The repaired deadline test checks the actual 10,000 ms
+configuration and real abort, without increasing the deadline or test timeout.
+The settings test waits for the real **Saved** status before closing; its
+three-repeat check and the complete final native suite pass.
+
+The final no-cache Linux arm64 workload retains locked dependencies, compiled
+native PTY and the exact protocol-66 payload. Its OCI digest is
+`sha256:09e6f9062daed94bcbe7c5e858709018bfa50359046b5060f8d9784326c083f0`.
+This is producer/image evidence, not physical SendBox or Linux-release proof.
+The actual 779,784,410-byte ZIP passes the bounded production update consumer.
+The canonical DMG passes native Finder geometry, icons/background and exact
+signed-bundle verification; the distinctly labelled copy has identical bytes
+and its own successful disk-image checksum verification:
+
+```text
+release/Moguri-0.30.0-alpha.1-telemetry-66-macos-arm64.dmg
+793982118 bytes
+SHA-512:
+5c020a58b2fdae340653c4d27f006897e0e33d3059c3c4c82ec28119742fd492b2bb26c53d3f2a755728642453d9697c5bd46b480c4e60053edb57de7e1b9eaa
+```
+
+The installer is local, ad-hoc-signed development output, not a notarized or
+uploaded release. No personal app, Finder, microphone, login or paid provider
+was used. Known non-blocking notices remain experimental OpenTUI FFI, the lazy
+Ghostty chunk, optional `.icon` format and transitive
+`whatwg-encoding`/`node-domexception` deprecations. Other physical/live-provider,
+Rust, public compound/family-quality and release exclusions remain unchanged.
