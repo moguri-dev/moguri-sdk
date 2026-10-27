@@ -341,6 +341,17 @@ captured output; it cannot become complete process output or a success receipt.
 context evidence and all-role owning-turn budget totals. `activity.response`
 copies public assistant text only from the authenticated snapshot.
 
+`conversationNavigation(snapshot, sessionId)` derives chronological
+`ConversationNavigationEntry` values from already retained public prompts and
+actual-user structured answers, without a query or mutation. Each opaque ID
+binds profile/session/source identity; `messageId` and `messageIndex` locate the
+original source, and answer entries retain `questionId`, question text and exact
+user answer. Original model `turnId` values are preserved. Missing sessions are
+explicit errors; tool approvals, queued prompts and model/decision-provider
+answers are excluded. The same browser-safe selector serves main/side desktop
+navigation and other SDK clients. No service endpoint or protocol change is
+required, so a matching protocol-66 service remains compatible.
+
 `Snapshot.sessionTelemetry[sessionId]` already contains original `turns`, current
 `budget` or its explicit `budgetDiagnostic`, live `estimate`, and recorded
 `context`. These service-owned views are reconstructed from retained events,

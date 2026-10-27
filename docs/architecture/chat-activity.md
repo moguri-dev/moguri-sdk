@@ -212,3 +212,37 @@ was used. Known non-blocking notices remain experimental OpenTUI FFI, the lazy
 Ghostty chunk, optional `.icon` format and transitive
 `whatwg-encoding`/`node-domexception` deprecations. Other physical/live-provider,
 Rust, public compound/family-quality and release exclusions remain unchanged.
+
+## Conversation turn navigation contract
+
+The compact desktop index navigates sent user prompts and model questions that
+have an actual `answer.actor: "user"`. Tool permissions, queued drafts,
+delegated notices, unanswered/cancelled questions and model/decision-provider
+answers are not user turns. Labels retain the original question and the
+user's exact chosen/custom answer; they grant no permission or further work.
+
+Reuse React/Electron and the existing SDK under their MIT notices, with the
+existing Node/component notices and SQLite public-domain authority. There is
+no new dependency, event, service endpoint, durable schema or migration.
+The browser-safe SDK selector derives ordered, profile/session-scoped anchors
+only from canonical public messages and structured question records. Original
+owning turn IDs remain unchanged; an answered question is a navigation point,
+not a new model turn. Desktop main/side transcripts use the same selector;
+other SDK clients can reuse it without introducing a second question model.
+
+Navigation is local presentation only. It must reveal older retained messages,
+focus and scroll the exact originating prompt/answer in its own transcript,
+preserve drafts and a user's historical scroll position during new output,
+and reset on session/profile changes. A narrow pane uses a compact rail with
+expandable previews, keyboard focus stays visible, and jumps do not animate
+or override reduced-motion preferences. Missing targets are explicit errors,
+not permission/model actions or substitution of another session.
+
+Before feature edits the generated macOS arm64/Node 26 baseline passes
+OAuth/streaming in 1,096.05 ms (32.65 ms cancellation), SQLite in 60.37 ms
+(append p95 0.053 ms), PTY in 158.43 ms (150.90 ms cancellation, zero survivors),
+OpenTUI in 1,068.34 ms, hidden Electron in 564.96 ms (8.06 ms scroll frames),
+and filesystem/Git in 87.62 ms. Live Copilot/ds4, Rust/Linux, signed/notarized
+release, physical SendBox, Kupo quality, System One, configured physical SSH
+and full-milestone attachment/default/budget gates remain explicitly
+FAIL/unavailable in this primitive spike; it does not broaden qualification.

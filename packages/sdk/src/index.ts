@@ -18,6 +18,7 @@ import { PRICE_PROVIDERS, type PriceProvider } from "../../protocol/src/pricing.
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
+export * from "./conversation.ts";
 export * from "./slash.ts";
 export { ClientError };
 export { DraftEditor } from "../../client/src/draft.ts";

@@ -23,6 +23,7 @@ try {
   execFileSync("npm", ["audit", "--audit-level=moderate"], { cwd: consumer, stdio: "inherit" });
   const installedSdk = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   const { PROTOCOL_VERSION: installedProtocol } = installedSdk;
+  const conversationNavigationAvailable = typeof installedSdk.conversationNavigation === "function";
   const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
   const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
@@ -201,6 +202,10 @@ try {
       const saved:import("moguri").SessionTelemetry|undefined=sdk.getState().snapshot?.sessionTelemetry["generated-id"];
       const estimate:import("moguri").UsageEstimate|null|undefined=saved?.estimate;
       void estimate?.outputTokens;void saved?.turns[0]?.usage.knownCacheReadTokens;void saved?.context?.outputEstimate;
+      ` : ""}
+      ${conversationNavigationAvailable ? `
+      const points:import("moguri").ConversationNavigationEntry[]=(await import("moguri")).conversationNavigation(sdk.getState().snapshot!,"generated-id");
+      void points[0]?.messageIndex;const answer=points.find(value=>value.kind==="answer");if(answer?.kind==="answer"){void answer.questionId;void answer.answer;}
       ` : ""}
       ${installedProtocol >= 53 ? `
       const agentRead:AgentTerminalRead={action:"read",commandId:"generated-command",offset:0,limit:4096};void agentRead;
@@ -438,7 +443,7 @@ try {
     import {homedir} from "node:os";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
@@ -1102,6 +1107,16 @@ try {
       assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===guided.id).status,"completed");
       assert.equal(beta.getState().snapshot.questions.find(value=>value.id===pending.id).answer.actor,"user");
       assert.equal(beta.getState().snapshot.questions.find(value=>value.id===pending.id).answer.text,pending.choices[0]);assert.equal(generatedRequests.length,4);
+      ${conversationNavigationAvailable ? `
+      const navigation=conversationNavigation(beta.getState().snapshot,guided.id);
+      assert.deepEqual(navigation.map(value=>value.kind),["prompt","answer"]);assert.equal(navigation[1].answer,pending.choices[0]);
+      assert.equal(navigation[1].questionId,pending.id);assert.equal(navigation[1].profileId,beta.profileId);
+      assert.throws(()=>conversationNavigation(sdk.getState().snapshot,guided.id),{code:"session_missing"});
+      const reopenedNavigation=await sdk.profiles.open(beta.profileId);
+      try{assert.deepEqual(conversationNavigation(reopenedNavigation.getState().snapshot,guided.id),navigation);}finally{reopenedNavigation.disconnect();}
+      assert.equal(generatedRequests.length,4);
+      console.log("Installed shared conversation navigation retains exact actual-user question choices, immutable source identities and owning-profile reopen without tool permissions or another model call.");
+      ` : ""}
       const guidedArtifact=beta.getState().snapshot.artifacts.find(value=>value.questionId===pending.id);
       assert.match((await beta.artifacts.read(guidedArtifact.id)).text,/Model recommendation \\(not a user answer\\)/);
       assert.deepEqual(beta.routing.policy(),defaultKupoSettings());
