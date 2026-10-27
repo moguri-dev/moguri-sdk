@@ -56,6 +56,8 @@ permission or model behavior changes. Outside settings, explanatory text
 remains ordinary readable content. Critical status, warnings, failures and
 review acknowledgements remain visible, and all existing preference handlers,
 save/dirty gates and cancellation semantics are preserved.
+Static readiness instructions remain plain text, not additional live status
+regions competing with the actual operation acknowledgement.
 
 The generated prerequisite passes OAuth/streaming in 1,078.24 ms (32.28 ms
 cancellation), SQLite in 64.12 ms (append p95 0.049 ms), PTY in 158.67 ms
