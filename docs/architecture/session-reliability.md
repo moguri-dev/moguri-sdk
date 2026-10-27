@@ -158,6 +158,57 @@ Tests must prove fixed/routed/queued side refresh, exact prior-input stability,
 typed source retention, unsupported images, compactions, profile/birth-parent
 isolation, concurrent main work, cancellation, failure, migration and restart.
 
+#### Protocol-67 side-context qualification
+
+The original generated failure proved the second side question omitted the
+main session's later turn. The repaired real controller/worker now sends main
+time one, main time two and earlier side exchanges exactly once on the next
+question, while preserving the original first-call bytes. Active side tool
+continuations stay frozen; held questions capture on explicit admission.
+
+| Surface | Final result |
+| --- | --- |
+| Strict types, production build and verifier syntax | Pass |
+| Focused context/source/compaction/schema coverage | 63 passed, followed by 50 expanded profile/cancellation/lineage cases |
+| Complete source/service/worker/CLI/native-TUI suite | 1,674 passed, 14 existing skips, zero failures; 1,688 cases in 1,463,358.58 ms |
+| Complete hidden desktop suite | 226 passed, three existing skips, zero failures; 229 flows in 7.6 minutes |
+| Actual packaged desktop | 19 passed in 45.6 seconds |
+| Independently installed packed SDK | Protocol-67 declarations, browser-safe root/React, explicit Node/MCP and actual main1/side1/main2/side2/reopen flow pass |
+| Actual installed-worker accounting/continuation probes | 12 passed |
+| Root, independent consumer and native workload audits | Zero vulnerabilities |
+
+Generated tests also prove exact child-owned pasted-file and document grants
+after parent deletion, unsupported-image preservation, the full refreshed
+working-window bound, finite budget refusal before a paid call, original-parent
+identity despite navigation relinking, profile isolation, unknown cancellation
+holds, atomic capture-append failure and 66-to-67 migration rollback without
+ciphertext, receipt, consent or accounting rewrites. A reviewed side compaction
+summarizes only its own exchanges; refreshed main context stays separate and
+its cost remains included in the complete estimates.
+
+The exact protocol-67 Linux arm64 payload was rebuilt without cache with locked
+dependencies and compiled native PTY. Its OCI digest is
+`sha256:ec3d22d7e440547ac4b464c1c249dccd019a8c0abe9147a064efe27583ffcabb`.
+This is producer/image evidence, not physical SendBox containment or an
+external Linux release qualification. The actual 779,789,947-byte ZIP passes
+the production update consumer; the styled canonical DMG retains the exact
+signed bundle and the labelled byte-identical copy passes disk-image checks:
+
+```text
+release/Moguri-0.30.0-alpha.1-side-context-67-macos-arm64.dmg
+794074567 bytes
+SHA-512:
+6c2d21c86b4dc945b95d2237a866257dab4e0beef7dec6aba28e6df4e047d9f3c817d3c17d7c2134afb3565b0d41b93f227c223d95d413088652b27482ce554b
+```
+
+The installer is local, ad-hoc-signed development output, not a notarized or
+uploaded release. No personal application or previously user-mounted image
+was replaced/opened. No real microphone, login or paid inference was used.
+Known non-blocking notices remain experimental OpenTUI FFI, the lazy Ghostty
+chunk, optional `.icon` format and transitive encoding/DOMException
+deprecations. Original physical/live-provider, Rust/Linux, quality and
+notarization exclusions remain unchanged.
+
 The current focused source checkpoint passes the original approval/schema
 lineages plus actual generated recognizer streaming, controller-pipe teardown,
 frame sequence/finalization, no-PCM/token retention and safe composer edits.
