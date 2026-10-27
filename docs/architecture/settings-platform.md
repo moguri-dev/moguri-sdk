@@ -40,6 +40,33 @@ information tooltips. Consequential warnings, actual status, errors and source
 review acknowledgements stay visible. Editing, revision conflicts and dirty
 navigation guards are unchanged.
 
+### Explicit explanation rows
+
+Every settings information icon must share an explicit row with the heading,
+toggle, field, disclosure or table title it explains, not a trailing standalone
+row. Heading icons center on their title; wrapped control labels keep help on
+the first control line. Native labels and disclosure structure stay intact:
+help buttons are separate from toggle labels and summaries, so opening help
+does not toggle a preference or expand/collapse its subject.
+
+Reuse React/Electron (MIT), the existing contextual SettingsHelp/InfoTip and
+native tooltip/keyboard behavior, plus the installed Rolldown/Oxc JSX parser
+for mechanical refactoring. No dependency, service API, durable schema,
+permission or model behavior changes. Outside settings, explanatory text
+remains ordinary readable content. Critical status, warnings, failures and
+review acknowledgements remain visible, and all existing preference handlers,
+save/dirty gates and cancellation semantics are preserved.
+
+The generated prerequisite passes OAuth/streaming in 1,078.24 ms (32.28 ms
+cancellation), SQLite in 64.12 ms (append p95 0.049 ms), PTY in 158.67 ms
+(151.22 ms cancellation, zero survivors), OpenTUI in 1,066.71 ms, hidden
+Electron in 544.30 ms (8.01 ms frames) and filesystem/Git in 92.90 ms.
+Native geometry must prove actual title/control alignment at wide and narrow
+widths, correct hover/focus/Escape behavior, unchanged toggle state when help
+is used and no orphan icon across settings categories. Physical/live-provider,
+Rust/Linux, SendBox, quality, notarization and full-milestone exclusions remain
+unchanged.
+
 Settings / Confirmations also owns default-on child-session detachment review.
 The same review applies to drag-out, Detach and the parent selector's None
 choice. Remembering an opt-out saves only this profile's interactions preference;
