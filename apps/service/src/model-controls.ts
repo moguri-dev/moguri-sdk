@@ -1,7 +1,7 @@
 import { getSupportedThinkingLevels, hasApi, normalizeContext, type Api, type Context, type Model, type Message } from "@earendil-works/pi-ai";
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { estimateContextTokens, estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
-import { modelContextWindows, MoguriError, type ModelInfo, type ModelOptions, type ModelWindowCapability, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
+import { modelContextWindows, supportsModelContextWindow, MoguriError, type ModelInfo, type ModelOptions, type ModelWindowCapability, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 
 const CONTEXT_HEADROOM = 4096;
 export function supportedThinking(model: Model<Api>): ThinkingEffort[] {
@@ -12,7 +12,7 @@ export function validateModelOptions(model: (ModelWindowCapability & Pick<ModelI
   if (!options) return;
   if (!model) throw new MoguriError("model_options", "Choose an available model before configuring its context or thinking.");
   if (options.contextWindow !== undefined && options.contextWindow > model.contextWindow) throw new MoguriError("model_context", "The working context cannot exceed the selected model's supported maximum.");
-  if (options.contextWindow !== undefined && !modelContextWindows(model).values.includes(options.contextWindow)) throw new MoguriError("model_context", "This working window is not offered by the selected model. Choose a supported window explicitly; saved settings and history were not clamped or discarded.", 409);
+  if (options.contextWindow !== undefined && !supportsModelContextWindow(model, options.contextWindow)) throw new MoguriError("model_context", "This working window is not supported by the selected model. Use a whole-token ceiling within its allowed range or an actual provider-declared window; saved settings and history were preserved.", 409);
   if (options.thinkingEffort !== undefined && !model.thinkingLevels?.includes(options.thinkingEffort)) throw new MoguriError("model_thinking", "This thinking effort is not supported by the selected model's actual transport. No fallback was applied.");
 }
 export const estimateMessageContext = (messages: readonly Message[]): number => messages.reduce((total, message) => total + estimateMessageTokens(message), 0);

@@ -59,6 +59,7 @@ try {
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
+    ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -211,6 +212,11 @@ try {
       const commands:import("moguri").SlashSuggestion[]=await sdk.commands.list("generated-id");
       void commands[0]?.kind;await sdk.sessions.askSide("generated-id","Generated typed side question.",0);
       await sdk.skills.use("generated-id","generated-skill","a".repeat(64),0,"Generated task.");
+      ` : ""}
+      ${installedProtocol >= 69 ? `
+      const exactWindow:boolean=supportsModelContextWindow({contextWindow:32769},24577);void exactWindow;
+      await sdk.slash("generated-id","/thinking low","tui");await sdk.slash("generated-id","/effort default","desktop");
+      await sdk.slash("generated-id","/context-window 24577","cli");
       ` : ""}
       ${conversationNavigationAvailable ? `
       const points:import("moguri").ConversationNavigationEntry[]=(await import("moguri")).conversationNavigation(sdk.getState().snapshot!,"generated-id");
@@ -1306,6 +1312,24 @@ try {
           console.log("Installed protocol-68 SDK retains side-draft isolation and complete builtins-first fresh skill commands with actual selected-source grants and no additional model call.");
         }
         console.log("Installed protocol-67 side questions refresh exact retained main history once per new turn, retain original side exchanges and read-only model controls across profile-owned reopen without extra model calls.");
+      }
+      if(PROTOCOL_VERSION>=69){
+        const before=generatedRequests.length,previous=structuredClone(betaProvider.state.models),maximum=generatedModel.contextWindow;
+        try{
+          generatedModel.contextWindow=32769;betaProvider.state.models[0].contextWindow=32769;
+          betaProvider.onChange();await beta.models.refresh();
+          const tuned=await beta.sessions.create(null,"Generated installed tuning shortcuts",{modelId:generatedModel.id});
+          await beta.slash(tuned.id,"/thinking default","tui");await beta.slash(tuned.id,"/effort default","desktop");
+          for(const [argument,tokens] of [["24577",24577],["min",8192],["half",16384],["max",32769]]){
+            await beta.slash(tuned.id,"/context-window "+argument,"cli");
+            assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===tuned.id).controls.modelOptions.contextWindow,tokens);
+          }
+          await assert.rejects(()=>beta.slash(tuned.id,"/context-window 32770"),/context|window|ceiling/i);
+          await assert.rejects(()=>beta.slash(tuned.id,"/thinking low"),/not supported/i);
+          await beta.slash(tuned.id,"/context-window 8192");
+          assert.equal(generatedRequests.length,before);
+          console.log("Installed protocol-69 shortcuts preserve exact/min/half/max context ceilings, real unsupported-effort errors and profile-owned model controls without inference.");
+        }finally{generatedModel.contextWindow=maximum;betaProvider.state.models=previous;betaProvider.onChange();await beta.models.refresh();}
       }
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
       await sdk.profiles.globalBudget({basis:"estimate",tokens:rootCharges},0,true);

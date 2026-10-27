@@ -4,6 +4,50 @@ This user-requested slice preserves the dark Operate interface and one shared
 SDK/service authority. It replaces redundant composer rows with labeled icon
 controls and progressive disclosure, not new client-only execution behavior.
 
+## Direct tuning slash commands
+
+`/thinking LEVEL` and `/effort LEVEL` share the existing explicit model-option
+command. `default` removes only the effort override. Both preserve the working
+window and other controls, use actual transport-supported levels and retain
+the existing actual-user model/effort preference. `/context-window` accepts an
+exact integer token count or `min`, `half`, `max`, preserving effort without
+changing that model-selection preference.
+
+For models without declared discrete windows, exact working ceilings range
+from the existing 8,192-token minimum to the model maximum. The maximum/half
+menu entries remain presets, not a claim that intermediate local admission
+ceilings are unsupported by the transport. `half` floors half the supported
+maximum; it never clamps a smaller result up to the minimum. Provider-declared
+sets remain authoritative: min/max select their actual endpoints, and exact
+or half quantities outside that set fail explicitly. The desktop displays a
+valid exact selected ceiling without marking it stale or dropping it from the
+menu. Kupo does not acquire fixed-role overrides.
+
+Reuse TypeBox/React/Electron and the maintained pi-ai estimator/clamp under
+their existing MIT/component notices; no dependency or provider call is added.
+The browser-safe protocol helper, SDK, CLI/TUI and desktop share one acceptance
+rule. Existing `session.configured` and `model.selection_remembered` events
+provide persistence; no new durable field or event format is needed.
+Protocol 69 performs a metadata-only upgrade so a healthy older service cannot
+silently retain the old preset-only validation. Ciphertext, grants, receipts,
+budgets, source identities and existing controls remain unchanged.
+
+Malformed input, missing/fixed-model selection, unsupported declared windows,
+concurrent revisions and active-turn changes fail without substituting values
+or starting inference. An overfull next request still stops with all history
+retained; no context truncation, automatic compaction, paid retry or budget
+increase is introduced. Tests must cover exact transmitted/retained windows,
+all shortcuts, sibling-option preservation, discrete-provider restrictions,
+cross-client display, failure and actual restart/upgrade without replay.
+
+The generated prerequisite passes OAuth/streaming in 1,088.14 ms (31.73 ms
+cancellation), SQLite in 69.55 ms (append p95 0.063 ms), PTY in 159.68 ms
+(151.98 ms cancellation, zero survivors), OpenTUI in 1,044.19 ms, hidden
+Electron in 575.47 ms (8.32 ms frames), and filesystem/Git in 89.21 ms.
+The maintained supported/ignored effort transport probe passes in 81.89 ms.
+Physical/live-provider, Rust/Linux, SendBox, quality, notarization and
+full-milestone exclusions remain unchanged.
+
 ## Cascading menus and complete slash discovery
 
 The owner supplies reference screenshots for a compact Model/Effort/Context

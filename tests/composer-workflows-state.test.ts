@@ -10,7 +10,7 @@ test("schema 67 composer upgrade is atomic and preserves existing ciphertext and
   const fixture = await setupFixture(), path = fixture.service.store.path;
   let reopened: EventStore | undefined;
   try {
-    assert.equal(PROTOCOL_VERSION, 68);
+    assert.ok(PROTOCOL_VERSION >= 68);
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
@@ -21,7 +21,7 @@ test("schema 67 composer upgrade is atomic and preserves existing ciphertext and
     try { assert.equal(interrupted.prepare("PRAGMA user_version").get()?.user_version, 67); assert.deepEqual(retainedCiphertextRows(interrupted), original); interrupted.exec("DROP TRIGGER generated_composer_failure"); }
     finally { interrupted.close(); }
     reopened = new EventStore(path, fixture.retentionKey);
-    assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, 68);
+    assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(retainedCiphertextRows(reopened.db), original);
     reopened.close(); reopened = new EventStore(path, fixture.retentionKey);
     assert.deepEqual(retainedCiphertextRows(reopened.db), original);

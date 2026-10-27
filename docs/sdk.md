@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **68**, including
+Current source uses protocol **69**, including
+[direct effort and exact context-window shortcuts](architecture/model-controls.md#direct-tuning-slash-commands),
 [cascading model controls and complete slash discovery](architecture/model-controls.md#cascading-menus-and-complete-slash-discovery),
 [per-question refreshed side context](architecture/session-reliability.md#per-question-side-context),
 [saved turn, cache and live usage telemetry](architecture/chat-activity.md#retained-telemetry-follow-up-contract),
@@ -1978,8 +1979,13 @@ No compound kupo, quality calibration, Remote generation or Sandbox is enabled.
 ### Model context and thinking
 
 `sessions.modelOptions(sessionId, options, observedRevision?)` stores optional
-`contextWindow` and `thinkingEffort` alongside the session controls. The working
-window cannot exceed the selected model's fixed maximum. It is enforced against
+`contextWindow` and `thinkingEffort` alongside the session controls. Without
+provider-declared discrete restrictions, the working window accepts exact
+integer token ceilings from 8,192 through the selected model's fixed maximum.
+An actual `supportedContextWindows` list remains an exact allowed set.
+`supportsModelContextWindow(model, tokens)` is the shared browser-safe validator;
+`modelContextWindows(model).values` gives menu presets or the actual declared
+set, not an exhaustive list for unrestricted models. The window is enforced against
 the maintained library's labeled context estimate and output/headroom sizing,
 not represented as exact tokenization or a finite spend cap. Oversized estimates
 stop before inference without silently dropping or compacting history.
@@ -1997,6 +2003,17 @@ Desktop puts these settings in the model-name popover. TUI uses
 `session model-settings options.json --session ID --revision N` and
 `session context --session ID`. Changes require an idle session; running turns
 retain their selected settings and every step records effective provenance.
+
+Shared `sdk.slash`, desktop and TUI also accept `/thinking LEVEL` and
+`/effort LEVEL`; `default` clears only effort. `/context-window TOKENS|min|half|max`
+preserves effort without changing the remembered model choice. `min` is 8,192
+for an unrestricted model or its smallest declared window; `max` is its largest
+supported window; `half` floors half that maximum and rejects an unsupported
+result instead of rounding or clamping. Invalid/stale/running-turn changes
+preserve controls and history, never infer or substitute another model, and
+use the existing revision-bound `session.configure` transaction. Protocol 69
+advances metadata only; no new event format or retained-content rewrite is
+required.
 
 To enable memory, clone `sdk.settings.get().values`, set `memory.enabled`, then
 call `settings.update` with the observed revision. `memory.index(projectId)`

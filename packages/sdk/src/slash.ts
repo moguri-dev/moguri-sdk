@@ -8,6 +8,7 @@ import { RememberApprovalSchema } from "../../protocol/src/permissions.ts";
 import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol/src/application-updates.ts";
 import { continueWorkInput, KanbanSourceSchema, kanbanPreferences, type ContinueWorkReview } from "../../protocol/src/kanban.ts";
 import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
+import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } from "../../protocol/src/model.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -109,6 +110,9 @@ export const slashCommands = [
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
   { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
   { name: "models", description: "Choose an available model" },
+  { name: "thinking", description: "Set this model's supported thinking effort, preserving its context window", argument: "LEVEL|default" },
+  { name: "effort", description: "Set thinking effort; same as /thinking", argument: "LEVEL|default" },
+  { name: "context-window", description: "Set an exact working token ceiling or its supported min/half/max, preserving effort", argument: "TOKENS|min|half|max" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or Kupo", argument: "[EXACT_MODEL_ID]" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
@@ -264,6 +268,27 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "capability":
     case "containment":
     case "cache": return workspaceFeatureSlash(sdk, session, command.name, command.argument);
+    case "thinking":
+    case "effort": {
+      const effort = command.argument.trim().toLowerCase();
+      if (!effort || /\s/.test(effort)) throw new ClientError("model_effort_input", "Use /thinking LEVEL or /effort LEVEL with one supported effort, or default to clear only the effort override.");
+      const { thinkingEffort: _, ...other } = session.controls.modelOptions ?? {};
+      const options = effort === "default" ? other : parse(ModelOptionsSchema, { ...other, thinkingEffort: effort });
+      await sdk.sessions.modelOptions(session.id, options, session.revision, true);
+      return { kind: "ok", message: `Thinking effort set to ${effort === "default" ? "the model default" : effort}. The context window and other controls were preserved.` };
+    }
+    case "context-window": {
+      const model = sdk.getState().snapshot?.provider.models.find((entry) => entry.id === session.controls.modelId);
+      if (!model || model.synthetic) throw new ClientError("model_context_model", "Choose an available fixed model before setting its context window. Kupo owns each actual role's tuning; no model was substituted.");
+      const windows = modelContextWindows(model), maximum = windows.values[0], argument = command.argument.trim().toLowerCase();
+      if (maximum === undefined) throw new ClientError("model_context", "The selected model offers no working window at or above 8192 tokens. No setting or history was changed.");
+      const tokens = argument === "min" ? windows.source === "provider" ? windows.values.at(-1)! : MIN_WORKING_CONTEXT :
+        argument === "half" ? Math.floor(maximum / 2) : argument === "max" ? maximum : /^\d+$/.test(argument) ? Number(argument) : Number.NaN;
+      if (!supportsModelContextWindow(model, tokens)) throw new ClientError("model_context_input",
+        `Use /context-window TOKENS|min|half|max. Allowed ${windows.source === "provider" ? `provider-declared token counts: ${windows.values.join(", ")}` : `whole-token ceilings: ${MIN_WORKING_CONTEXT} through ${maximum}`}. An unsupported half is not clamped; no settings or history were changed.`);
+      await sdk.sessions.modelOptions(session.id, { ...session.controls.modelOptions, contextWindow: tokens }, session.revision, false);
+      return { kind: "ok", message: `Context window set to ${tokens.toLocaleString("en-US")} tokens. Thinking effort and other controls were preserved; history was not truncated.` };
+    }
     case "model-settings": {
       if (!command.argument) return { kind: "text", text: JSON.stringify({ options: session.controls.modelOptions ?? {}, context: (await sdk.sessions.context(session.id)).context }, null, 2) };
       if (command.argument === "reset") {
