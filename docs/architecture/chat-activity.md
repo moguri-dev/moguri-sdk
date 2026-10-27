@@ -234,7 +234,8 @@ not a new model turn. Desktop main/side transcripts use the same selector;
 other SDK clients can reuse it without introducing a second question model.
 
 Navigation is local presentation only. It must reveal older retained messages,
-focus and scroll the exact originating prompt/answer in its own transcript,
+scroll the exact originating prompt/answer in its own transcript and keep the
+selected index item focused,
 preserve drafts and a user's historical scroll position during new output,
 and reset on session/profile changes. A narrow pane uses a compact rail with
 expandable previews, keyboard focus stays visible, and jumps do not animate
@@ -296,3 +297,41 @@ Ad-hoc development signing, known notices and all physical/live-provider,
 Linux-release and notarization exclusions remain unchanged. No installed
 personal application, Finder, real microphone, personal login or paid inference
 was used.
+
+## Compact turn and action controls
+
+The user requests a number-free collapsed rail: plain turn blocks show prompt/
+question previews on hover or keyboard focus. A little left chevron expands
+the list and a right chevron collapses it. Clicking a block expands complete
+original prompt/question/choice details, keeps the clicked item focused and
+reveals its exact transcript position; clicking that same selected item again
+collapses. Both long histories and long individual details scroll in the list,
+not the page. Keyboard Enter/Space and Escape stay equivalent, and no new
+model action, cross-session source, smooth scroll or reduced-motion exception
+is introduced.
+
+Reuse React/Electron (MIT), the browser-safe SDK, existing Tooltip/SettingsAction
+helpers and shared theme/switch tokens. Node/component and SQLite public-domain
+terms remain unchanged; no dependencies, domain events, endpoints, durable
+schema or migration are added. CLI/TUI/service context, approval, source
+retention, accounting and cancellation behavior are unchanged.
+
+MCP/Linear credential and unavailable session-USD-limit removal use icon-only
+Close controls with explicit accessible names/tooltips. Proposal-file and
+text/image/document-preview removal use icon-only Trash controls, preserving
+their exact disabled/error and user-only mutation behavior. PR draft creation,
+GitHub issue import, Agent output following and all-project suggestion scope
+use the shared switch appearance and native checkbox keyboard behavior.
+All "Do not ask again" flags, multi-select lists and exact review/consent
+acknowledgements remain checkboxes; no confirmation is weakened or inferred.
+
+Before feature edits the generated macOS arm64/Node 26 baseline passes
+OAuth/streaming in 1,077.86 ms (30.75 ms cancellation), SQLite in 63.71 ms
+(append p95 0.058 ms), PTY in 159.92 ms (152.10 ms cancellation, zero survivors),
+OpenTUI in 1,027.92 ms, hidden Electron in 584.28 ms (8.23 ms scroll frames),
+and filesystem/Git in 89.18 ms. Live Copilot/ds4, Rust/Linux, signed/notarized
+release, physical SendBox, Kupo quality, System One, configured physical SSH
+and full-milestone gates remain explicitly FAIL/unavailable in this primitive.
+Generated tests must prove exact block/arrow/preview/reclick/focus behavior,
+bounded list scrolling, complete details, narrow main/side isolation, real
+removal/toggle effects and unchanged acknowledgement semantics.
