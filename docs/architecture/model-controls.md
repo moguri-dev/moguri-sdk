@@ -48,6 +48,58 @@ The maintained supported/ignored effort transport probe passes in 81.89 ms.
 Physical/live-provider, Rust/Linux, SendBox, quality, notarization and
 full-milestone exclusions remain unchanged.
 
+### Tuning shortcut qualification
+
+The final stable application source is `32d227d`. All three built-in names
+appear before skills in shared discovery/help and use the existing typed,
+revision-bound settings path. Generated checks cover exact 24,577-token
+requests, the floored half of 32,769, the 8,192 minimum, actual declared
+endpoints, unsupported half rejection, retained sibling options and
+effort-only remembered selection. Invalid, stale and active-turn requests
+preserve the original controls; model-free configuration and real service
+restart do not add inference. The metadata-only 68-to-69 upgrade also passes
+failure/reopen with identical encrypted rows and receipts.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Focused shortcut/options/defaults/upgrade checks | 42 passed in 7,508.80 ms |
+| Native composer/default controls | 10 passed in 14.4 seconds |
+| Actual native TUI shortcut input | Pass without inference |
+| Complete source/service/worker/recovery/CLI/native-TUI suite | 1,690 passed, 14 existing skips, zero failures; 1,704 cases in 1,457,307.79 ms |
+| Complete hidden desktop suite | 232 passed, three existing skips, zero failures; 235 flows in 8.0 minutes |
+| Actual packaged-app critical flows | 38 passed in 1.7 minutes |
+| Independently installed packed SDK | All entrypoints/declarations and the protocol-69 exact/min/half/max/effort probe pass without another model call |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source, independent-consumer and native-workload audits | Zero vulnerabilities |
+| No-cache Linux arm64 worker payload/native PTY | Pass in 54,149.06 ms with exact protocol-69 inputs |
+| Production ZIP/manifest consumer | Pass; 779,823,329 bytes in 114,636.36 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+Earlier red runs are not passing evidence. The tiny-model fixture needed its
+actual output bound reduced to 128 tokens before it could legitimately select
+Kupo; its former full-window output declaration correctly failed availability.
+No application gate, deadline, confirmation or history-retention check was
+weakened to make it pass.
+
+The verified worker identity is
+`docker.io/library/moguri-worker@sha256:6c253fd7d1e8af016c43155998a915501dc9145170e97cfadf5579e583c4df61`.
+The current labelled local development installer is:
+
+```text
+release/Moguri-0.30.0-alpha.1-model-shortcuts-69-macos-arm64.dmg
+794080040 bytes
+SHA-512:
+0576433b85957db9ef9cccf5be2ae0ee27a998acc30c3255a9751844272115156b8c9338cf3f94b60249b1d5a32a78e3ce0f55bdfc69a6082c8070e506d87782
+```
+
+The installer is ad-hoc-signed development output, not a notarized or uploaded
+release. No installed personal app, Finder, real microphone, personal login
+or paid inference was used. Experimental OpenTUI FFI, lazy Ghostty chunk,
+optional `.icon` and transitive deprecation notices remain non-blocking.
+Physical SendBox, external Linux, live-provider, quality and full-milestone
+exclusions remain unchanged. CI remains main-push-only, not a passing PR check.
+
 ## Cascading menus and complete slash discovery
 
 The owner supplies reference screenshots for a compact Model/Effort/Context
