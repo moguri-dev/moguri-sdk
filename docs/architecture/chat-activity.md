@@ -335,3 +335,65 @@ and full-milestone gates remain explicitly FAIL/unavailable in this primitive.
 Generated tests must prove exact block/arrow/preview/reclick/focus behavior,
 bounded list scrolling, complete details, narrow main/side isolation, real
 removal/toggle effects and unchanged acknowledgement semantics.
+
+### Protocol-68 composer and compact-control qualification
+
+The compact controls and cascading model/slash workflows share one stable
+production build. Application source is retained in `d97e6e2` and `f8e6dc5`;
+later acknowledgement corrections change only generated tests. The final
+menus, unavailable-Kupo explanation, complete built-ins-first/skills-last list,
+exact selected skill and atomic `/side PROMPT` run against both the rebuilt
+renderer and the actual packaged app. Generated screenshots were inspected.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Fresh maintained model-option/context transport probe | Pass in 93.16 ms; actual Responses/Anthropic low effort and provider-controlled Completions |
+| Complete source/service/worker/recovery/CLI/native-TUI suite | 1,682 passed, 14 existing skips, zero failures; 1,696 cases in 1,362,876.05 ms |
+| Complete hidden desktop suite | 231 passed, three existing skips, zero failures; 234 flows in 7.3 minutes |
+| Actual packaged-app critical flows | 37 passed in 1.6 minutes |
+| Actual packaged narrow-menu keyboard/save/resize repetition | 10 passed in 13.2 seconds |
+| Focused saved profile/turn accounting | 33 passed in 15.54 seconds |
+| Focused complete native TUI | 35 passed, one existing skip, zero failures in 45.47 seconds |
+| Independently installed packed SDK | All browser-safe root/React, explicit Node/MCP, declarations, fresh skill and atomic side workflows pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source, independent-consumer and native-workload audits | Zero vulnerabilities |
+| No-cache Linux arm64 worker payload/native PTY | Pass in 40,152.87 ms with exact protocol-68 inputs |
+| Actual production ZIP/manifest consumer | Pass; 779,802,669 bytes in 113,653.04 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+Source coverage includes complete paginated skill discovery, fresh digest
+refusal without replacing drafts, actual-user selection without inference or
+permission, exact main-draft consumption while retaining an existing side
+draft, atomic side creation/queue rollback and missing-receipt restart without
+another model call. The 67-to-68 marker upgrade preserves original ciphertext,
+receipts, grants and accounting; corrupt, missing and premature markers fail
+without repair or deleting state. Existing parent-context refresh, permissions,
+finite-budget, cancellation and profile-isolation checks remain enabled.
+
+Earlier failed runs are not passing evidence. Native checks now wait for the
+connected service, saved/enabled controls and the actual 840-pixel renderer
+width before keyboard input. The profile test waits for the reconciled saved
+capacity, not an earlier reservation notification. TUI review waits for the
+actual proposed record, not identical summary text already visible in retained
+history. No timeout was increased, confirmation weakened, unload guard removed
+or application behavior changed to accommodate those fixture races.
+
+The verified worker identity is
+`docker.io/library/moguri-worker@sha256:c5e16ad5d3e289510cb65a87bff3c0064b37975e886d056e0efc11d5749e6ef4`.
+The labelled development installer retains the exact canonical image:
+
+```text
+release/Moguri-0.30.0-alpha.1-composer-menus-68-macos-arm64.dmg
+794062813 bytes
+SHA-512:
+3e3fd34342ca9a2dc56162f718ab9019a9f9a2ea9b32ec49644a96912164c6769673897c91e0b86d3a0cabd5aceca61a8529042b3573e247a5f844b5bd400ae7
+```
+
+This is local ad-hoc-signed development output, not a notarized or uploaded
+release. No installed personal app, Finder, real microphone, personal login
+or paid inference was used. Known experimental OpenTUI FFI, lazy Ghostty
+chunk, optional `.icon` and transitive `whatwg-encoding`/`node-domexception`
+notices remain non-blocking. Physical SendBox, live-provider, external Linux,
+quality and full-milestone exclusions are unchanged. CI remains main-push-only;
+an empty PR check list is not a CI-pass claim.

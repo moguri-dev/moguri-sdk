@@ -43,6 +43,11 @@ FAIL/unavailable. Generated source and native tests must cover actual selection,
 keyboard/submenu bounds, unavailable tooltips, save failure, full slash ordering,
 source drift, atomic side routing, draft isolation and restart without replay.
 
+The [protocol-68 qualification](chat-activity.md#protocol-68-composer-and-compact-control-qualification)
+records the final complete source/desktop runs, actual packaged menus and
+slash/side flows, independent SDK install, exact installer identity and
+unchanged physical/live-provider exclusions.
+
 ## Reuse and Phase 0
 
 Reuse React/native popovers, existing SVG icons and the maintained pi-ai
