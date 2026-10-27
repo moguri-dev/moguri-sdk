@@ -153,6 +153,61 @@ readiness, authentication/capability failures, cancellation/process teardown,
 terminal-error ordering, held final replies, migration/restart and mic state
 in the real hidden composer. No personal microphone or real weights are used.
 
+#### Protocol-71 readiness qualification
+
+The application source is `f059c3c`. Four regressions reproduce before the
+repair: a real C stdio wrapper holds the recognizer's readiness line while its
+authenticated listener is ready; a failed recognizer is replaced by the
+generic missing-lease error; an in-flight poll cancels the original final
+receipt; and Ctrl+Space replaces the mic with a stop square. The repaired
+native buffered-start case completes in 392.41 ms without increasing the
+sixty-second readiness bound. The client final wait instead respects the
+already-existing whole-service recording/flush lease.
+
+Generated coverage verifies exact authenticated capability metadata,
+unauthorized/redirect/oversize/missing-ASR rejection, startup cancellation,
+original terminal failures, ordered PCM and one final commit, partial-cleanup
+retention, foreign-owner refusal, crash recovery and lossless 70-to-71
+metadata migration. Existing crash/upload tests now assert the exact retained
+original failure rather than a generic missing-owner sentence; no ownership,
+process, deadline or no-replay assertion was relaxed.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Focused speech/capture/PCM/draft/host/recovery/import checks | 45 passed in 11,079.64 ms |
+| Focused actual hidden dictation/side-context flows | Eight passed in 15.3 seconds |
+| Complete source/service/worker/recovery/CLI/native-TUI suite | 1,714 passed, 14 existing skips, zero failures; 1,728 cases in 1,478,146.31 ms |
+| Complete hidden desktop suite | 240 passed, three existing skips; 243 flows in 8.0 minutes |
+| Actual packaged-app mic/cold-start/restart/composer flows | 35 passed in 1.3 minutes |
+| Independently installed packed SDK | All entrypoints/declarations and actual installed delayed/no-stdout recognition, retained transcript restart and original failure probes pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source, independent-consumer and fresh Linux-workload audits | Zero vulnerabilities |
+| No-cache Linux arm64 payload/native PTY | Pass in 45,193.99 ms with exact protocol-71 inputs |
+| Production ZIP/manifest consumer | Pass; 779,827,942 bytes in 112,925.79 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+Before feature edits, generated OAuth/streaming passed in 1,091.24 ms
+(30.76 ms cancellation), SQLite in 64.90 ms (append p95 0.058 ms), PTY in
+159.23 ms (151.44 ms cancellation, zero survivors), OpenTUI in 1,063.26 ms,
+hidden Electron in 549.88 ms (8.29 ms frames) and filesystem/Git in 93.19 ms.
+Broader generic live-account, Rust/Linux-host, physical SendBox/SSH,
+signed-release and model-quality gates remain unqualified by those primitive
+probes; current executable capabilities remain the setup inventory's authority.
+
+The labelled development installer is
+`release/Moguri-0.30.0-alpha.1-dictation-readiness-71-macos-arm64.dmg`
+(794,075,476 bytes), SHA-512
+`9a7b00408c82a5416a4a20b820ef4a01ab1e146d5c4c9af409fc0543a7299520612958575814de57aec2ca99476fc75dcce69cda733a9b09cb4f0bc193901ef6`.
+Its native workload is
+`docker.io/library/moguri-worker@sha256:a7024db63cceebb5b33cbbc4ce79dfcc8b81383226b16266b8ff1b04fe2dda19`.
+This is ad-hoc-signed, not notarized or uploaded. Generated audio/recognizers
+qualify transport and ownership, not the user's microphone, real model
+accuracy or cold-start speed. No personal app, Finder, login, keychain, audio
+or weights were used. Existing experimental FFI, lazy Ghostty, optional
+`.icon` and encoding/DOMException notices remain non-blocking. CI stays
+main-push-only; no empty working-branch check list is called a CI pass.
+
 `sessions.side` atomically opens an existing original side chat or creates one
 with complete effective parent context and inherited controls. Both chat surfaces
 use the same composer, model/window/effort controls, activity Markdown, voice
