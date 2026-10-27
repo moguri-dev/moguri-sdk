@@ -79,6 +79,56 @@ personal SendBox/SSH, quality and wider-initial-checkpoint gates as unqualified;
 these are not new readiness claims or a replacement for the executable setup
 inventory. No personal key, microphone, app or login is used.
 
+### Concise action qualification
+
+Source `5ff2d75` shortens 151 static actions and their stateful counterparts,
+including shortcut recording, budget saves, profile forms, OAuth and source
+review controls. Exact contextual names retain label-in-name accessibility.
+A lossless JSX check confirms all **838 original controlled actions/fields
+across 41 components** keep the exact callbacks, values, disabled states and
+consent gates. Linear's requested text Remove button replaces its icon wrapper
+with the same native button type and unchanged removal callback.
+
+Generated native regressions first reproduce the three verbose-caption cases.
+The final tests use the real secret backend shim and intercepted Linear
+verification endpoint: Store makes no account request, Verify requests the
+actual stored identity once, and keyboard Remove clears only that key.
+Shortcut Record captures a chord without saving it until Save; Escape cancels
+recording, both settings locations agree, and unrelated bindings stay intact.
+Visible captions remain in their exact accessible names across the visited
+settings sections. No selector update changes a functional assertion.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Focused settings/shortcut/integration source checks | 19 passed in 1,318.88 ms |
+| Focused native concise-action/credential/shortcut/help checks | Seven passed in 13.9 seconds |
+| Complete hidden desktop suite | 239 passed, three existing skips, zero failures; 242 flows in 7.9 minutes |
+| Actual packaged-app settings/integration/review flows | 35 passed in 1.6 minutes |
+| Native help geometry | 34 sections, 200 renderings at widths 1,280/860; maximum offset one CSS pixel against the strict two-pixel bound |
+| Independently installed packed SDK | All entrypoints, declarations and actual runtime checks pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source and independent-consumer audits | Zero vulnerabilities |
+| Production ZIP/manifest consumer | Pass; 779,847,600 bytes in 112,930.49 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+No backend source or schema changed, and no new complete backend run is
+claimed. The exact protocol-70 worker remains SHA-256
+`8d7086958be7137be3b0408c3a6e4d05cd07379c3345e5eab4f7b9094450f75d`,
+with the existing verified native image
+`docker.io/library/moguri-worker@sha256:6b95e0eeef1d89bfb0b0912087703f07c2b56b94d096afd3008d4f3137d32874`.
+Temporary audit/refactoring utilities were removed. Generated screenshots were
+inspected; no personal app, Finder, login, keychain, microphone or paid provider
+was used. Existing experimental FFI, lazy Ghostty, optional `.icon` and
+transitive encoding/DOMException notices remain non-blocking.
+
+The retained development installer is
+`release/Moguri-0.30.0-alpha.1-settings-actions-70-macos-arm64.dmg`
+(794,055,608 bytes), SHA-512
+`a9d96d7eda95df010117f84d4045c8ca0f494880dbddae9b429a538e3215d058bcb2836a8f79aa5644e1bc2b6915b76bc2cb36e851b2f591562ce01f71daff2d`.
+It is ad-hoc-signed, not notarized or uploaded. Main-push-only CI is unchanged;
+an empty working-branch check list is not a CI-pass claim.
+
 ### Explicit explanation rows
 
 Every settings information icon must share an explicit row with the heading,
@@ -149,7 +199,7 @@ This UI-only slice does not relabel an earlier complete backend run as new.
 
 The retained worker is
 `docker.io/library/moguri-worker@sha256:6c253fd7d1e8af016c43155998a915501dc9145170e97cfadf5579e583c4df61`.
-The current local development installer is:
+That earlier local development installer is:
 
 ```text
 release/Moguri-0.30.0-alpha.1-settings-info-69-macos-arm64.dmg
