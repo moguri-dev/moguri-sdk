@@ -58,7 +58,10 @@ test("global capacity changes refresh another live profile through content-free 
     const before = fixture.sdk.getState().snapshot!.globalBudgetSequence!;
     await fixture.send(beta, other.id!, "Generated Beta-only opaque-capacity input.");
     await waitFor(() => fixture.session(beta, other.id!).status === "completed");
-    await waitFor(() => fixture.sdk.getState().snapshot!.globalBudgetSequence! > before);
+    await waitFor(() => {
+      const saved = fixture.sdk.getState().snapshot!;
+      return saved.globalBudgetSequence! > before && saved.sessionTelemetry[own.id!]?.budget?.remainingTokens === 100_000 - 42;
+    });
     assert.equal((await fixture.sdk.budgets.status(own.id!)).status.remainingTokens, 100_000 - 42);
     assert.equal(fixture.sdk.getState().snapshot!.budgetEntries.length, 0);
     assert.equal(fixture.sdk.getState().snapshot!.sessionTelemetry[other.id!], undefined);
