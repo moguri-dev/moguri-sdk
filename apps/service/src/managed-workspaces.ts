@@ -3,7 +3,7 @@ import { mkdir, lstat, realpath } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 import {
-  MoguriError, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
+  MoguriError, defaultProjectSettings, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
   type ManagedWorkspaceCommand, type ManagedWorkspaceQuery, type ManagedWorkspaceResponse, type EventInput, type CommandResult, type CapabilityJob, type GitWorkspaceRegistration,
 } from "../../../packages/protocol/src/index.ts";
 import { runProgram } from "./program.ts";
@@ -15,6 +15,7 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 import { pullRequestLink } from "./project-integrations.ts";
 import { gitReadFilters } from "./project-git.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
+import { assertChatHome, homeWorkspace } from "./chat-workspace.ts";
 
 interface Host {
   snapshot(): Snapshot;
@@ -124,18 +125,28 @@ export class ManagedWorkspaces {
     const project = this.project(session);
     return { id: profileIndexId(this.host.snapshot().profileId, session.workspaceId ?? project.id), path: project.path };
   }
-  roots(session: Pick<Session, "projectId" | "workspaceId" | "repositories">): string[] {
-    return session.repositories ? session.repositories.map((repository) => repository.root.root) : session.projectId ? [this.project(session).path] : [];
+  filesystem(session: Session, repository?: string) {
+    if (homeWorkspace(session)) {
+      if (repository) throw new MoguriError("repository_scope", "Home is not an implicit Git repository. Select a project or use an explicitly targeted approved command.", 409);
+      return { root: assertChatHome(session.homeRoot!), settings: defaultProjectSettings(), project: undefined };
+    }
+    const project = this.project(session, repository);
+    return { root: project.path, settings: this.settings().values(project.id), project };
+  }
+  roots(session: Pick<Session, "projectId" | "workspaceId" | "repositories" | "homeRoot"> & Partial<Pick<Session, "controls">>): string[] {
+    return session.repositories ? session.repositories.map((repository) => repository.root.root) : session.projectId ? [this.project(session).path] :
+      session.homeRoot && session.controls?.env === "Local" ? [session.homeRoot.root] : [];
   }
   leaseKey(session: Session): string | null {
     return session.repositories ? `repositories:${JSON.stringify(session.repositories.map((binding) => binding.projectId).sort())}` :
       session.projectId ? `${session.projectId}:${session.workspaceId ?? "base"}` : null;
   }
-  async assert(session: Pick<Session, "projectId" | "workspaceId" | "repositories">, signal?: AbortSignal): Promise<void> {
+  async assert(session: Pick<Session, "projectId" | "workspaceId" | "repositories" | "homeRoot"> & Partial<Pick<Session, "controls">>, signal?: AbortSignal): Promise<void> {
     if (session.repositories) {
       for (const repository of session.repositories) { signal?.throwIfAborted(); this.project(session, repository.projectId); }
       return;
     }
+    if (!session.projectId && session.homeRoot && session.controls?.env === "Local") { assertChatHome(session.homeRoot); return; }
     this.project(session);
     if (!session.workspaceId) return;
     const inspection = await this.inspect(session.workspaceId, signal);
@@ -185,14 +196,15 @@ export class ManagedWorkspaces {
       return result;
     }
     if (session.controls.env !== "Local") throw new MoguriError("workspace_env", "This file/Git surface has no qualified transport for the selected environment. No Local fallback.", 409);
-    const project = this.project(session, query.repository), settings = this.settings().values(project.id);
     if (query.type === "session.git") {
+      const project = this.project(session, query.repository);
       const signal = AbortSignal.timeout(30_000), disabledFilters = await this.filters(project, signal);
       return { ...await this.settings().gitView(project, query.diff, signal, disabledFilters), type: query.type };
     }
-    await assertFolderAccess(project.path, query.path, false, folderPolicy(settings));
-    if (query.type === "session.files") return { type: query.type, path: query.path, entries: (await listProjectFiles(project.path, query.path)).filter((entry) => !matchesFolder(entry, settings.deniedFolders)) };
-    return { type: query.type, ...await readProjectFile(project.path, query.path) };
+    const { root, settings } = this.filesystem(session, query.repository);
+    await assertFolderAccess(root, query.path, false, folderPolicy(settings));
+    if (query.type === "session.files") return { type: query.type, path: query.path, entries: (await listProjectFiles(root, query.path)).filter((entry) => !matchesFolder(entry, settings.deniedFolders)) };
+    return { type: query.type, ...await readProjectFile(root, query.path) };
   }
   async execute(command: ManagedWorkspaceCommand, finish: WorkspaceFinish,
     taskBase?: { remote: string; ref: string; commit: string; sourceWorkspaceId: string | null; expectedUrl: string }): Promise<CommandResult> {

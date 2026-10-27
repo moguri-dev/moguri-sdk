@@ -115,7 +115,8 @@ navigation folder and moves the exact reviewed projects into it, without moving
 files. `sessions.createFolder(folderId, title?, overrides?)` captures the current
 member IDs/revisions and canonical path/device/inode identities. Its
 `Session.projectId` is null, with immutable paired `projectFolderId` and
-`repositories`. Null without those explicit fields remains project-free.
+`repositories`. Null without those explicit fields remains project-free;
+ordinary Local chats may separately retain `homeRoot`, never a synthetic project.
 
 The Local filesystem/command tools require an explicit `repository` ID or
 captured name for folder sessions. `workspaces.files(sessionId, path, repository)`,
@@ -1408,13 +1409,36 @@ validated commands used by both clients.
 ### Project-free chats and reviewed configuration
 
 `sessions.create()` or `sessions.create(null)` creates a real project-free chat.
-Raw `session.create` also permits an omitted/null `projectId`. No model workspace
-root, project-file attachments, agent commands or repository memory is available, and failure
-quarantines only the affected general chat. Scope cannot be reassigned by a
-navigation selection. Explicit global MCPs remain subject to normal approvals.
-Separate explicit user consoles do not change that model boundary. Autopilot may
-be selected without a project or preexisting allow rule; this adds no tool
-permissions, and undelegated operations still require human review.
+Raw `session.create` also permits an omitted/null `projectId`. Protocol 72
+captures `Session.homeRoot` (canonical path/device/inode) for ordinary Local
+chats, matching their private console default without creating a project.
+`sessions.home(sessionId, expectedRevision?)` explicitly binds a legacy chat
+once; the SDK prepares legacy Home on explicit file/catalogue/MCP use. Reopening,
+changing defaults or navigating never moves the binding. Files and commands
+use existing scoped executors and approval policy, not another checkout or a
+state-directory fallback. Private role owners and non-Local transports do not
+adopt controller Home.
+
+`workspaces.home(sessionId)` reads the captured binding and current independently
+retained writers; `Snapshot.chatWriters` retains original profile/session/turn,
+root, revision, background jobs and actual active/settled/unconfirmed/acknowledged
+states. `workspaces.acknowledgeHomeWriter(sessionId, writerId, expectedRevision,
+true)` is an actual-user inspection action for that exact original Home.
+Acknowledgement is risk acceptance, not process cleanup, a tool grant or queue
+resumption. Unknown ownership survives source deletion and unloaded-profile
+recovery. Model-only chats stay parallel; actual overlapping writes serialize.
+
+`workspaces.files/file`, `tools.catalog/execute`, `agentTerminals.list/read`
+and shared `/home` work across SDK/CLI/TUI/desktop. Commands start fresh PTYs
+in Home, never private User-console state. Browser control still needs its
+actual attached native host/user toggle and normal exact tool approval.
+Explicitly targeted `gh --repo owner/repo` or `git -C /selected/checkout` commands
+can perform repository work; native project pickers/publication, repository
+memory and project-file capture still require real project ownership.
+No account/login or project association is inferred. Home-dependent MCP grants
+bind the new exact directory identity and require fresh review rather than
+reusing an older null-root resource grant. Explicit automatic approval remains
+separate from hard denials, read-only modes, allowed environments and budgets.
 
 ```ts
 const general = await sdk.sessions.create(null);

@@ -7,14 +7,16 @@ import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 import { localRootsOverlap } from "./project-clone.ts";
+import { assertChatHome, homeChat, homeDirectoryTool, homeWorkspace, homeWriteTool } from "./chat-workspace.ts";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
   canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
-  type SessionMode, type ControlDefaults, type RememberApproval,
+  type SessionMode, type ControlDefaults, type RememberApproval, type ChatWriter,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
@@ -110,6 +112,8 @@ interface Run {
   repositoryContext?: string;
   yieldedTo?: string;
   root: string | null;
+  chatWriterId?: string;
+  homeUncertain?: boolean;
   roots?: string[];
   mcpDispatches?: Map<string, McpDispatch>;
   hooks?: { bindings: HookBinding[]; done: Set<string>; calls: Map<string, HookBinding> };
@@ -140,7 +144,9 @@ export interface ProfileHooks {
 }
 interface ExternalRun {
   sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
-  policyRevision: number; permissionRevision: number; abort: AbortController; started: boolean;
+  policyRevision: number; permissionRevision: number; abort: AbortController; started: boolean; done: boolean;
+  executing?: boolean; chatWriterId?: string; homeUncertain?: boolean;
+  localRoots?: string[];
   execute: (signal: AbortSignal) => Promise<unknown>;
   remoteMcpId?: string;
   remoteRoot?: string;
@@ -174,6 +180,7 @@ export class ControlPlane extends EventEmitter {
   readonly winddowns: Winddowns;
   readonly decisions: Decisions;
   private externalRuns = new Map<string, ExternalRun>();
+  private readonly externalEffects = new Set<ExternalRun>();
   private writerReservations = new Map<string, string>();
   private deletingSessions = new Set<string>();
   private deletingProjects = new Set<string>();
@@ -354,8 +361,9 @@ export class ControlPlane extends EventEmitter {
       },
       remoteConsoles: new RemoteConsoles(this.remote),
       globalBudget: this.profileHooks ? () => this.profileHooks!.globalBudget() : undefined,
-      foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false,
-      localRootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => this.ownedWriteRoots(ownerSessionId, exceptJobId, permitRebaseRecovery).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
+      foreignRootBusy: (root) => this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false,
+      localRootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => this.ownedWriteRoots(ownerSessionId, exceptJobId, permitRebaseRecovery)
+        .some((owned) => !owned.startsWith("remote/") && localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
       cloneRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).some((owned) => localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
       sharedGlobals: Boolean(this.profileHooks),
     }, platformOptions);
@@ -486,6 +494,9 @@ export class ControlPlane extends EventEmitter {
     if (interruptedWinddowns.length) this.commit(interruptedWinddowns);
     const interruptedDecisions = this.decisions.recover();
     if (interruptedDecisions.length) this.commit(interruptedDecisions);
+    const interruptedHome = this.projection.chatWriters.filter((writer) => writer.status === "active");
+    if (interruptedHome.length) this.commit(interruptedHome.map((writer) => this.chatWriterEvent({ ...writer, revision: writer.revision + 1,
+      status: "unconfirmed", updatedAt: new Date().toISOString(), diagnostic: "The original Home writer lost its control-plane owner. Inspect its actual processes and files; no command, cleanup or replacement was replayed." })));
     await this.platform.recover();
     this.projectWork.recover();
     const interruptedStages = this.sandboxWorkspaces.recover();
@@ -680,22 +691,31 @@ export class ControlPlane extends EventEmitter {
     const reserved = new Set(this.writerReservations.values());
     const roots = [...this.runs.values()].filter((run) => {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
-      return session && session.id !== exceptSessionId && !run.yieldedTo && (Boolean(run.planSave) || session.kind === "agent" && (session.mode === "agent" || reserved.has(session.id)));
+      return session && session.id !== exceptSessionId && !run.yieldedTo && (!homeChat(session) || Boolean(run.chatWriterId)) &&
+        (Boolean(run.planSave) || session.kind === "agent" && (session.mode === "agent" || reserved.has(session.id)));
     }).flatMap((run) => {
       if (!run.executionId) return run.roots ?? (run.root ? [run.root] : []);
       const execution = this.projection.executions.find((value) => value.id === run.executionId);
       if (!execution) throw new MoguriError("remote_ownership", "An active writer lost its exact execution/root identity. No alternative root was used.", 409);
       const key = remoteRootLease(execution.target, execution.workspace); return key ? [key] : [];
     });
+    for (const writer of this.projection.chatWriters) if (writer.status === "active" || writer.status === "unconfirmed") {
+      if (writer.status === "active" && writer.sessionId === exceptSessionId &&
+        (this.runs.get(writer.sessionId)?.turnId === writer.turnId || this.externalRuns.get(writer.sessionId)?.turnId === writer.turnId ||
+          writer.backgroundJobs.some((id) => this.projection.jobs.some((job) => job.id === id && job.sessionId === writer.sessionId &&
+            job.parentTurnId === writer.turnId && job.commandJob?.root === writer.root.root && ["running", "waiting_input"].includes(job.status))))) continue;
+      roots.push(writer.root.root);
+    }
     for (const session of this.projection.sessions) if (session.id !== exceptSessionId && session.repositories && session.kind === "agent" &&
       (this.projection.blockedSessions.includes(session.id) || session.turnId && !this.runs.has(session.id) && session.mode === "agent")) {
       roots.push(...session.repositories.map((repository) => repository.root.root));
     }
     for (const run of this.externalRuns.values()) {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
-      if (session?.id !== exceptSessionId && session?.controls.env === "Local") roots.push(...this.platform.managed.roots(session));
+      if (session?.id !== exceptSessionId && session?.controls.env === "Local" && (!homeChat(session) || run.chatWriterId)) roots.push(...run.localRoots ?? this.platform.managed.roots(session));
       if (session?.id !== exceptSessionId && run.remoteRoot) roots.push(run.remoteRoot);
     }
+    for (const owner of this.externalEffects) if (!this.externalRuns.has(owner.sessionId)) roots.push(...owner.localRoots ?? []);
     for (const job of this.projection.jobs) if (job.commandJob && (job.status === "running" || job.status === "waiting_input" || job.status === "partial" && !job.commandJob.inspected)) {
       if (job.sessionId === exceptSessionId && job.status === "running") continue;
       roots.push(job.commandJob.root);
@@ -745,7 +765,12 @@ export class ControlPlane extends EventEmitter {
       await this.platform.managed.assert(session);
       return `\n<reviewed-multi-repository-scope>\nThe actual user selected this exact Local root set. Every workspace tool must explicitly select repository by the listed ID or captured name. There is no common-parent/default checkout. Respect each repository's instructions and hard restrictions; grouping grants no other roots. Project-specific MCP, hooks, background jobs and repository publication are not qualified on this multi-root transport.\n${JSON.stringify(repositories).replaceAll("<", "\\u003c")}\n</reviewed-multi-repository-scope>`;
     }
-    if (!session.projectId) return "";
+    if (!session.projectId) {
+      if (!homeWorkspace(session)) return "";
+      const root = session.homeRoot!.root;
+      return `\n<project-free-local-workspace>\n${JSON.stringify({ root, projectId: null, boundary: "Local host, not a sandbox",
+        instructions: "Ordinary chat tools can read/write files and run approved commands here without a selected project. Home is not an implicit Git repository. Never borrow a previous project, enumerate Home automatically or silently authenticate. For GitHub operations use an explicitly targeted approved gh --repo owner/repo command, and git -C for an explicitly selected checkout. Interactive browser tools are available through mcp_gateway builtin discovery and browser_status; the actual user must open Browser and enable Agent control. Project-specific knowledge, continuation and publication still require a real project." }).replaceAll("<", "\\u003c")}\n</project-free-local-workspace>`;
+    }
     if (session.controls.env === "Sandbox") {
       const workspace = await this.sandboxWorkspaces.assert(session), settings = this.platform.sessions.projects.values(session.projectId);
       const run = this.runs.get(session.id);
@@ -1127,7 +1152,8 @@ export class ControlPlane extends EventEmitter {
       frameDigest([this.platform.server(String(call.arguments.serverId), session.projectId),
         call.arguments.serverId === "builtin" ? this.projection.registry.filter((entry) => entry.projectId === session.projectId && entry.kind === "script" && entry.enabled)
           .map((entry) => [entry.id, entry.contentDigest]).sort(([a], [b]) => String(a).localeCompare(String(b))) : null,
-        session.controls.env === "Remote" ? [this.projection.settings.values.remote, cached?.helperDigest, this.remote.readiness.workerDigest] : null]) : undefined;
+        session.controls.env === "Remote" ? [this.projection.settings.values.remote, cached?.helperDigest, this.remote.readiness.workerDigest] : null,
+        ...(homeWorkspace(session) && homeDirectoryTool(call) ? [{ homeRoot: session.homeRoot }] : [])]) : undefined;
     return { sessionId: session.id, projectId: this.toolScope(session, call).project?.id ?? session.projectId, env: session.controls.env, autonomy: session.controls.autonomy,
       automaticApprovals: session.controls.automaticApprovals === true, ...(mcpBinding ? { mcpBinding } : {}), ...(cached ? { mcpSchemaDigest: cached.digest } : {}) };
   }
@@ -1137,11 +1163,82 @@ export class ControlPlane extends EventEmitter {
     const project = session.repositories ? workspace ? this.platform.managed.project(session, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined) : undefined :
       session.projectId ? this.platform.managed.project(session, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined) : undefined;
     const native = this.runs.get(session.id)?.sandboxExecutionId;
-    const root = native ? this.sandboxExecution(native).root : session.controls.env === "Remote" ? this.remoteWorkspace(session) : project?.path ?? null;
+    const root = native ? this.sandboxExecution(native).root : session.controls.env === "Remote" ? this.remoteWorkspace(session) :
+      project?.path ?? (homeWorkspace(session) ? homeDirectoryTool(call) ? assertChatHome(session.homeRoot!) : session.homeRoot!.root : null);
     return { project, root, settings: this.platform.sessions.projects.values(project?.id ?? null) };
   }
   private authorization(session: Session, call: ToolCall, root: string | null) {
     return authorizeTool(this.projection.settings.values, call, root, this.permissionContext(session, call));
+  }
+  private chatWriterEvent(writer: ChatWriter): EventInput {
+    return { event_type: "chat.writer_recorded", profile_id: this.profileId, payload: { writer } };
+  }
+  private chatWriter(id: string): ChatWriter {
+    const writer = this.projection.chatWriters.find((writer) => writer.id === id);
+    if (!writer) throw new MoguriError("chat_writer_missing", "The actual Home writer lost its independently retained original identity. No root or cleanup was inferred.", 409);
+    return writer;
+  }
+  private async claimHomeWriter(run: Run | ExternalRun, call: ToolCall): Promise<void> {
+    const session = this.session(run.sessionId);
+    if (!homeWorkspace(session) || !homeWriteTool(call)) return;
+    const root = session.homeRoot!, signature = () => {
+      const current = this.session(run.sessionId);
+      return frameDigest([current.revision, current.homeRoot, this.projection.policy.revision, this.projection.settings.permissionRevision, this.providerEpoch]);
+    }, original = signature();
+    for (;;) {
+      run.abort.signal.throwIfAborted();
+      if (run.done || signature() !== original) throw new MoguriError("chat_writer_stale", "The original session, Home or permission policy changed while waiting. No write was admitted.", 409);
+      assertChatHome(root);
+      if (run.homeUncertain) throw new MoguriError("chat_writer_unconfirmed", "This Home writer has an unconfirmed tool effect or cleanup. Stop and inspect the original owner before any new write.", 409);
+      if (run.chatWriterId) {
+        const writer = this.chatWriter(run.chatWriterId);
+        if (writer.status !== "active" || writer.turnId !== run.turnId || frameDigest(writer.root) !== frameDigest(root)) throw new MoguriError("chat_writer_unconfirmed", "The original Home writer no longer owns this exact active turn/root. No replacement was adopted.", 409);
+        return;
+      }
+      if (this.projection.chatWriters.some((writer) => writer.status === "unconfirmed" && localRootsOverlap(writer.root.root, root.root))) {
+        throw new MoguriError("chat_writer_unconfirmed", "An original Home writer has unknown process/file effects. Inspect its retained owner and explicitly acknowledge that exact Home risk; a new chat or Autopilot cannot clear it.", 409);
+      }
+      if (this.projection.projects.some((project) => this.projection.blockedProjects.includes(project.id) && localRootsOverlap(project.path, root.root)) ||
+        this.projection.managedWorkspaces.some((workspace) => this.projection.blockedWorkspaces.includes(workspace.id) && localRootsOverlap(workspace.path, root.root))) {
+        throw new MoguriError("workspace_unconfirmed", "An overlapping project/worktree has unconfirmed ownership or effects. Inspect and resume that original workspace; a Home command cannot bypass its quarantine.", 409);
+      }
+      if (!this.ownedWriteRoots(session.id).some((held) => !held.startsWith("remote/") && localRootsOverlap(held, root.root)) &&
+        !this.profileHooks?.foreignRootBusy(this.profileId, root.root, true)) {
+        const now = new Date().toISOString(), writer: ChatWriter = { id: randomUUID(), profileId: this.profileId, sessionId: session.id,
+          turnId: run.turnId, root, revision: 0, status: "active", startedAt: now, updatedAt: now, backgroundJobs: [], diagnostic: null };
+        this.commit([this.chatWriterEvent(writer)]);
+        run.chatWriterId = writer.id; return;
+      }
+      await delay(30, undefined, { signal: run.abort.signal });
+    }
+  }
+  private finishHomeWriter(run: Run | ExternalRun): EventInput[] {
+    if (!run.chatWriterId) return [];
+    const writer = this.chatWriter(run.chatWriterId);
+    if (writer.status !== "active") return [];
+    const jobs = this.projection.jobs.filter((job) => job.sessionId === writer.sessionId && job.parentTurnId === writer.turnId && job.commandJob?.root === writer.root.root);
+    const uncertain = run.homeUncertain || "granted" in run && [...run.granted].some((id) => { const call = run.calls.get(id); return call && homeWriteTool(call); }) ||
+      jobs.some((job) => !["running", "waiting_input"].includes(job.status) && (job.status === "partial" || !job.resultDigest));
+    const active = jobs.some((job) => ["running", "waiting_input"].includes(job.status));
+    return [this.chatWriterEvent({ ...writer, revision: writer.revision + 1, updatedAt: new Date().toISOString(),
+      status: uncertain ? "unconfirmed" : active ? "active" : "settled", backgroundJobs: jobs.map((job) => job.id),
+      diagnostic: uncertain ? "An approved Home tool or original command job has unconfirmed effects/cleanup. Its exact root stays owned independently of this chat." :
+        active ? "The original bounded background command still owns this Home after its model turn." : null })];
+  }
+  private settleHomeBackgroundWriters(): void {
+    const events: EventInput[] = [];
+    for (const writer of this.projection.chatWriters) {
+      if (writer.status !== "active" || !writer.backgroundJobs.length || this.runs.get(writer.sessionId)?.turnId === writer.turnId ||
+        this.externalRuns.get(writer.sessionId)?.turnId === writer.turnId) continue;
+      const jobs = writer.backgroundJobs.map((id) => this.projection.jobs.find((job) => job.id === id));
+      if (jobs.some((job) => job && ["running", "waiting_input"].includes(job.status))) continue;
+      const uncertain = jobs.some((job) => !job || job.sessionId !== writer.sessionId || job.parentTurnId !== writer.turnId ||
+        job.commandJob?.root !== writer.root.root || job.status === "partial" || !job.resultDigest);
+      events.push(this.chatWriterEvent({ ...writer, revision: writer.revision + 1, updatedAt: new Date().toISOString(),
+        status: uncertain ? "unconfirmed" : "settled", diagnostic: uncertain ?
+          "The original Home background job/result or process cleanup is missing/unconfirmed. Source deletion cannot release this independent root owner." : null }));
+    }
+    if (events.length) this.commit(events);
   }
   private rememberApproval(session: Session, call: ToolCall, remember?: RememberApproval): EventInput[] {
     if (!remember) return [];
@@ -1188,6 +1285,7 @@ export class ControlPlane extends EventEmitter {
       ...(pasteFiles.length ? { pasteFiles } : {}),
       ...(documents.length ? { documents } : {}),
       ...(parent.repositories ? { repositories: parent.repositories, projectFolderId: parent.projectFolderId } : {}),
+      ...(homeChat(parent) && parent.controls.env === "Local" ? { homeRoot: parent.homeRoot ?? this.platform.sessions.homeRoot() } : {}),
       workspaceId: parent.workspaceId,
       prUrl: parent.prUrl, workItemId: parent.workItemId,
     } }, ...coordination], { id });
@@ -1275,11 +1373,13 @@ export class ControlPlane extends EventEmitter {
       await this.platform.sessions.terminals.closeSession(session.id);
     }
     const deadline = Date.now() + 6500;
-    const active = () => sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) || this.decisions.owns(session.id) ||
+    const active = () => sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) ||
+      [...this.externalEffects].some((owner) => owner.sessionId === session.id) || this.decisions.owns(session.id) ||
       this.nativeAdmissions.has(session.id) || this.sandboxWorkspaces.owns(session.id)) ||
       this.projection.executions.some((execution) => sessions.some((session) => session.id === execution.sessionId) && this.remote.owns(execution.id));
     while (active() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-    if (sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) || this.decisions.owns(session.id) ||
+    if (sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) ||
+      [...this.externalEffects].some((owner) => owner.sessionId === session.id) || this.decisions.owns(session.id) ||
       this.nativeAdmissions.has(session.id) || this.sandboxWorkspaces.owns(session.id))) throw new MoguriError("cleanup_unconfirmed", "Owned work has not settled. Nothing was deleted; inspect processes first.", 409);
     if (this.projection.terminals.some((terminal) => sessions.some((session) => session.id === terminal.sessionId) && terminal.status === "unconfirmed")) throw new MoguriError("cleanup_unconfirmed", "A previous terminal has unconfirmed cleanup. Inspect and acknowledge it before deletion.", 409);
     if (this.projection.jobs.some((job) => sessions.some((session) => session.id === job.sessionId) && job.commandJob && job.status === "partial" && !job.commandJob.inspected)) throw new MoguriError("cleanup_unconfirmed", "An original command/watch job has unconfirmed effects or cleanup. Inspect and acknowledge its exact root before deleting its owner.", 409);
@@ -1401,6 +1501,10 @@ export class ControlPlane extends EventEmitter {
         "This original Remote MCP command already owns an intent/result. Inspect it; no connector or tool was replayed.", 409);
     }
     session = this.eligibleExternal(session.id, call);
+    if (homeChat(session) && session.controls.env === "Local" && !session.homeRoot && homeDirectoryTool(call)) {
+      this.commit([this.event(session, "session.home_bound", { root: this.platform.sessions.homeRoot() })]);
+      session = this.eligibleExternal(session.id, call);
+    }
     const admission = this.admissionSignature(session);
     const captured = await this.platform.repositories.capture(session, AbortSignal.timeout(5000));
     session = this.eligibleExternal(session.id, call);
@@ -1414,7 +1518,8 @@ export class ControlPlane extends EventEmitter {
     const jobId = randomUUID();
     const approvalId = randomUUID();
     const scope = { profile_id: this.profileId, project_id: session.projectId, session_id: session.id, turn_id: turnId, step_id: stepId };
-    const external: ExternalRun = { sessionId: session.id, turnId, stepId, jobId, call, approvalId, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision, abort: new AbortController(), execute, started: false };
+    const external: ExternalRun = { sessionId: session.id, turnId, stepId, jobId, call, approvalId, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision, abort: new AbortController(), execute, started: false, done: false,
+      localRoots: session.controls.env === "Local" && (!homeChat(session) || homeWriteTool(call)) ? this.platform.managed.roots(session) : [] };
     let remoteIntent: RemoteMcpCall | undefined;
     if (remote) {
       if (!identity) throw new MoguriError("remote_mcp_intent", "Remote MCP canonical identity disappeared before retention.", 409);
@@ -1461,9 +1566,19 @@ export class ControlPlane extends EventEmitter {
   }
   private executeExternal(external: ExternalRun): void {
     external.started = true;
-    const session = this.session(external.sessionId);
-    this.commit([this.event(session, "tool.started", { call: external.call }, external.stepId), this.event(session, "job.progress", { jobId: external.jobId, progress: "Running approved MCP tool", status: "running" }, external.stepId)]);
-    void external.execute(external.abort.signal).then((result) => {
+    this.commit([this.event(this.session(external.sessionId), "job.progress", { jobId: external.jobId, progress: "Waiting for the approved tool's exact execution root", status: "running" }, external.stepId)]);
+    const execute = async () => {
+      await this.claimHomeWriter(external, external.call);
+      const session = this.session(external.sessionId);
+      await this.assertCurrentTool(session, external.call, false);
+      external.abort.signal.throwIfAborted();
+      if (external.done || session.turnId !== external.turnId || this.projection.policy.revision !== external.policyRevision ||
+        this.projection.settings.permissionRevision !== external.permissionRevision) throw new MoguriError("tool_stale", "The original external approval, turn or policy changed before dispatch. No replacement was started.", 409);
+      this.commit([this.event(session, "tool.started", { call: external.call }, external.stepId), this.event(session, "job.progress", { jobId: external.jobId, progress: "Running approved tool", status: "running" }, external.stepId)]);
+      external.executing = true; this.externalEffects.add(external);
+      return external.execute(external.abort.signal);
+    };
+    void execute().then((result) => {
       if (external.abort.signal.aborted || !this.externalRuns.has(external.sessionId)) return;
       const failed = result !== null && typeof result === "object" && "isError" in result && result.isError === true;
       const browser = external.call.arguments.serverId === "builtin" && isBrowserTool(String(external.call.arguments.tool)) && isRecord(result);
@@ -1472,13 +1587,14 @@ export class ControlPlane extends EventEmitter {
       this.finishExternal(external, outcome, failed ? "The MCP tool did not complete. Inspect its original outcome; no automatic retry." : null, result);
     }).catch((error: unknown) => {
       if (!this.externalRuns.has(external.sessionId)) return;
-      const outcome = error instanceof MoguriError && error.code === "remote_mcp_stopped" ? "stopped" : error instanceof MoguriError && error.code === "remote_mcp_failed" ? "failed" : "partial";
+      const outcome = !external.executing ? external.abort.signal.aborted ? "stopped" : "failed" :
+        error instanceof MoguriError && error.code === "remote_mcp_stopped" ? "stopped" : error instanceof MoguriError && error.code === "remote_mcp_failed" ? "failed" : "partial";
       const call = external.remoteMcpId ? this.mcpCall(external.remoteMcpId, external.sessionId) : null;
       const result = call?.resultDigest ? parse(RemoteMcpExecutionResultSchema, JSON.parse(this.store.blob(call.resultDigest))).result : undefined;
       this.finishExternal(external, outcome, error instanceof MoguriError ? error.message : "External MCP result/effects are unconfirmed; no automatic retry.", result);
     }).catch((error: unknown) => {
       console.error("External MCP settlement persistence failed:", error instanceof MoguriError ? error.code : "mcp_settlement");
-    });
+    }).finally(() => { external.executing = false; this.externalEffects.delete(external); this.wake(); });
   }
   private finishExternal(external: ExternalRun, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null, result?: unknown, decision?: "denied"): void {
     if (!this.externalRuns.has(external.sessionId)) return;
@@ -1487,14 +1603,16 @@ export class ControlPlane extends EventEmitter {
     const text = result === undefined ? diagnostic ?? "Tool was not executed." : nativeResult && typeof nativeResult.text === "string" ? nativeResult.text : JSON.stringify(result);
     const call = external.remoteMcpId ? this.mcpCall(external.remoteMcpId, external.sessionId) : null;
     const mcpEvents = call && call.phase !== "settled" ? [this.mcpEvent({ ...call, revision: call.revision + 1, phase: "settled", status: decision ?? outcome, diagnostic, updatedAt: new Date().toISOString() })] : [];
+    external.homeUncertain = outcome === "partial" && external.executing === true;
     this.commit([
       ...mcpEvents,
+      ...this.finishHomeWriter(external),
       this.event(session, "tool.completed", { call: external.call, text: text.slice(0, MAX_TEXT), isError: outcome !== "completed", outcome: decision ?? outcome,
         ...(nativeResult && typeof nativeResult.rawText === "string" ? { rawDigest: this.store.putBlob(nativeResult.rawText), rawComplete: nativeResult.rawComplete === true } : {}) }, external.stepId),
       this.event(session, "job.finished", { jobId: external.jobId, status: outcome === "stopped" ? "cancelled" : outcome, resultDigest: result === undefined ? null : this.store.putBlob(JSON.stringify(result)), error: diagnostic }, external.stepId),
       this.event(session, "turn.finished", { outcome, diagnostic }, external.stepId),
     ]);
-    this.externalRuns.delete(external.sessionId);
+    external.done = true; this.externalRuns.delete(external.sessionId);
     if (outcome === "partial" || outcome === "failed") this.paused.add(session.id);
     queueMicrotask(() => this.pumpAll());
   }
@@ -1508,7 +1626,7 @@ export class ControlPlane extends EventEmitter {
     const draft = this.platform.inputs.normalizePaste(session.draft.text, session.draft.attachments, false);
     if (draft.text || draft.attachments.length) messages.push(this.contextItem(draft));
     const settings = this.platform.sessions.projects.values(project?.id);
-    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project || session.repositories), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: draft.attachments.some((item) => item.kind === "paste_file") || this.hasPasteFiles(session), documents: draft.attachments.some((item) => item.kind === "document") || this.hasDocuments(session) });
+    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project || session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: draft.attachments.some((item) => item.kind === "paste_file") || this.hasPasteFiles(session), documents: draft.attachments.some((item) => item.kind === "document") || this.hasDocuments(session) });
     const systemPrompt = await this.platform.effectivePrompt(session);
     const windows = model && !model.synthetic ? modelContextWindows(model) : null;
     return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools: tools.length ? catalogForModel(tools, []) : [] }), contextWindow: model ? session.controls.modelOptions?.contextWindow ?? windows?.values[0] ?? null : null, modelMaximum: model?.contextWindow ?? null, source: "estimated" as const, windows };
@@ -1516,7 +1634,7 @@ export class ControlPlane extends EventEmitter {
   private nativeCatalog(session: Session) {
     const configuration = this.platform.sessions.projects.values(session.projectId);
     return effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode,
-      folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env,
+      folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env,
         pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session) });
   }
   private toolingQuery(query: ToolingQuery): ToolingResponse | Promise<ToolingResponse> {
@@ -2015,6 +2133,29 @@ export class ControlPlane extends EventEmitter {
     }
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
     const finish = this.commandFinish(envelope.id, commandDigest);
+    if (command.type === "session.home") {
+      const session = this.session(command.sessionId);
+      if (!homeChat(session) || session.controls.env !== "Local") throw new MoguriError("chat_home_scope", "Only an ordinary project-free Local chat can bind Home. No private role, project or other Env was changed.", 403);
+      if (session.homeRoot) { assertChatHome(session.homeRoot); return finish([], { revision: session.revision }); }
+      this.revision(session.revision, command.expectedRevision);
+      if (session.turnId || session.status === "archived") throw new MoguriError("chat_home_busy", "Finish the original turn or restore the chat before binding its immutable Home.", 409);
+      return finish([this.event(session, "session.home_bound", { root: this.platform.sessions.homeRoot() })], { revision: session.revision + 1 });
+    }
+    if (command.type === "chat.writer.acknowledge") {
+      const session = this.session(command.sessionId), writer = this.projection.chatWriters.find((writer) => writer.id === command.writerId);
+      if (!homeWorkspace(session) || !writer || writer.status !== "unconfirmed" || writer.revision !== command.expectedRevision ||
+        frameDigest(writer.root) !== frameDigest(session.homeRoot)) throw new MoguriError("chat_writer_inspection", "Inspect this exact retained Home writer and unchanged directory before acknowledging risk. No other root or owner was released.", 409);
+      assertChatHome(writer.root);
+      if (this.runs.get(writer.sessionId)?.turnId === writer.turnId || this.externalRuns.get(writer.sessionId)?.turnId === writer.turnId ||
+        [...this.externalEffects].some((owner) => owner.sessionId === writer.sessionId && owner.turnId === writer.turnId) ||
+        this.projection.jobs.some((job) => job.sessionId === writer.sessionId &&
+        job.parentTurnId === writer.turnId && job.commandJob && ["running", "waiting_input"].includes(job.status))) {
+        throw new MoguriError("chat_writer_running", "The original writer still owns running work. Stop and inspect that actual owner before acknowledging risk.", 409);
+      }
+      const result = finish([this.chatWriterEvent({ ...writer, revision: writer.revision + 1, status: "acknowledged", updatedAt: new Date().toISOString(),
+        inspection: { sessionId: session.id, actor: "user" }, diagnostic: "The actual user acknowledged inspection of this exact Home writer. This is risk acceptance, not proof that unknown processes stopped or files were rolled back." })], { id: writer.id });
+      this.wake(); return result;
+    }
     if (command.type === "workflow.start") {
       const current = this.session(command.sessionId), text = `/${command.kind}${command.prompt ? ` ${command.prompt}` : ""}`;
       if (!command.prompt.isWellFormed()) throw new MoguriError("workflow_text", "Workflow prompts need lossless Unicode.");
@@ -2056,7 +2197,8 @@ export class ControlPlane extends EventEmitter {
           !this.nativeCatalog(current).some((tool) => tool.name === call.name)) throw new MoguriError("tool_schema", "Tool authority changed after approval. No effect was executed.", 409);
         const scope = this.toolScope(current, call);
         return executeTool(scope.root, call, signal, () => {}, () => {}, (input) => this.platform.delegate(current, input, signal),
-          { mode: current.mode, folders: folderPolicy(scope.settings), env: current.controls.env }, this.nativeCatalog(current));
+          { mode: current.mode, folders: folderPolicy(scope.settings), env: current.controls.env,
+            homeRoot: homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined }, this.nativeCatalog(current));
       }, { id: envelope.id, digest: commandDigest });
       return finish([], { id });
     }
@@ -2118,6 +2260,7 @@ export class ControlPlane extends EventEmitter {
         const changeSet = command.workspaceId ? this.projection.changeSets.find((value) => value.workspaceId === command.workspaceId) : undefined;
         return finish([{ event_type: "session.created", profile_id: this.profileId, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...startup,
           ...(repositories ? { repositories, projectFolderId: command.projectFolderId } : {}), workspaceId: command.workspaceId ?? null,
+          ...(!projectId && !repositories && startup.controls.env === "Local" ? { homeRoot: this.platform.sessions.homeRoot() } : {}),
           workItemId: changeSet?.issueId ?? null, prUrl: changeSet?.prUrl ?? null } }], { id });
       }
       case "provider.login": {
@@ -2271,18 +2414,27 @@ export class ControlPlane extends EventEmitter {
           approval.policyRevision !== this.projection.policy.revision ||
           session.pendingApproval?.permissionRevision !== this.projection.settings.permissionRevision) throw new MoguriError("approval_stale", "This approval expired, was cancelled, or was already answered.", 409);
         validateTool(approval.call);
-        const scope = this.toolScope(session, approval.call), configuration = scope.settings;
+        const scope = command.allow ? this.toolScope(session, approval.call) : { root: null, settings: this.platform.sessions.projects.values(session.projectId) };
+        const configuration = scope.settings;
         const mode = run.yieldedTo || session.pendingMode === "read-only" ? "read-only" : session.mode;
         const hook = run.hooks?.calls.get(approval.call.id);
         if (command.allow && hook) this.platform.extensions.assertHook(session, hook);
-        if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session), coordinator: Boolean(run.yieldedTo && session.mode === "agent" && session.pendingMode !== "read-only") }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
+        if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session), coordinator: Boolean(run.yieldedTo && session.mode === "agent" && session.pendingMode !== "read-only") }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
+        if (command.allow) {
+          await this.claimHomeWriter(run, approval.call);
+          await this.assertCurrentTool(session, approval.call);
+          if (run.done || run.abort.signal.aborted || run.approval?.id !== approval.id ||
+            session.pendingApproval?.permissionRevision !== this.projection.settings.permissionRevision ||
+            approval.policyRevision !== this.projection.policy.revision) throw new MoguriError("approval_stale", "The original approval changed while waiting for its exact writer root. No tool was started.", 409);
+        }
         const remembered = this.rememberApproval(session, approval.call, command.remember);
         const events: EventInput[] = [...remembered, this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
         if (command.allow) events.push(this.event(session, "tool.started", { call: approval.call }, run.stepId));
         finish(events);
         run.approval = undefined;
         if (command.allow) this.grantTool(run, approval.call.id);
-        this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow: command.allow, mode, folders: folderPolicy(configuration), root: scope.root } });
+        this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow: command.allow, mode, folders: folderPolicy(configuration), root: scope.root,
+          homeRoot: command.allow && homeWorkspace(session) && homeDirectoryTool(approval.call) ? session.homeRoot : undefined } });
         return {};
       }
     }
@@ -2301,7 +2453,8 @@ export class ControlPlane extends EventEmitter {
     const captured = this.platform.inputs.normalizePaste(input.text, input.attachments);
     const item = { id: randomUUID(), ...captured, delivery, ...(delivery === "steer" ? { targetTurnId: session.turnId! } : {}),
       ...(held ? { held: true } : {}), ...(workflow ? { workflow: { kind: workflow } } : {}) };
-    finish([this.event(session, "queue.enqueued", { item }),
+    finish([...(homeChat(session) && session.controls.env === "Local" && !session.homeRoot ? [this.event(session, "session.home_bound", { root: this.platform.sessions.homeRoot() })] : []),
+      this.event(session, "queue.enqueued", { item }),
       ...(delivery === "interrupt" && session.turnId ? [this.event(session, "queue.reordered", { messageIds: [item.id, ...session.queue.map((item) => item.id)] })] : []),
       ...(consumeDraft ? [this.event(session, "draft.saved", { text: "", attachments: [] })] : [])], { id: item.id });
     if (!held) this.paused.delete(session.id);
@@ -2387,7 +2540,8 @@ export class ControlPlane extends EventEmitter {
   private hasDocuments(session: Session): boolean { return this.platform.inputs.admittedDocuments(session.id).length > 0; }
   private pumpAll(): void {
     if (this.shuttingDown) return;
-    for (const session of this.projection.sessions) {
+    this.settleHomeBackgroundWriters();
+    for (let session of this.projection.sessions) {
       if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.removingSession(session.id) || session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
       if (session.kind === "subagent" && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
@@ -2399,6 +2553,10 @@ export class ControlPlane extends EventEmitter {
       let sideContext: SideContext | undefined;
       try {
         this.assertOrdinaryTurn(session);
+        if (homeChat(session) && session.controls.env === "Local" && !session.homeRoot) {
+          this.commit([this.event(session, "session.home_bound", { root: this.platform.sessions.homeRoot() })]);
+          session = this.session(session.id);
+        }
         if (item.origin) this.coordination.assertTask(session.id, item.origin);
         this.available(session.controls, true, session); this.imageModel(session, item.attachments);
         this.fileModel(session, item.attachments, item.text);
@@ -2526,7 +2684,7 @@ export class ControlPlane extends EventEmitter {
         const child = nativeExecution ? this.sandbox.launch(nativeExecution, (changes) => this.sandboxStatus(nativeExecution!.id, changes)) :
           execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
         const run: Run = { sessionId: current.id, turnId, child, root: nativeExecution && current.projectId ? nativeExecution.stage.workspace :
-          !generation && !roleSequence && !compound && current.controls.env === "Local" ? project?.path ?? null : null, executionId: execution?.id, sandboxExecutionId: nativeExecution?.id,
+          !generation && !roleSequence && !compound && current.controls.env === "Local" ? project?.path ?? (homeWorkspace(current) ? current.homeRoot!.root : null) : null, executionId: execution?.id, sandboxExecutionId: nativeExecution?.id,
           ...(current.repositories && !compaction && !generation && !roleSequence && !compound ? { roots: current.repositories.map((repository) => repository.root.root) } : {}),
           abort: new AbortController(), calls: new Map(), granted: new Set(), scopedReadPolicies: new Map(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, roleSequence, compound, planSave, mcpControl };
         if (nativeAdmission) { run.nativePrepared = nativeAdmission.prepared; run.nativeProviderEpoch = nativeAdmission.providerEpoch; }
@@ -2600,7 +2758,7 @@ export class ControlPlane extends EventEmitter {
             if (!run.done && !run.planSave?.terminal && !run.mcpControl?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: generation || roleSequence || compound ? null : nativeExecution ? nativeExecution.root : execution ? execution.workspace : project?.path ?? null, context, env: current.controls.env,
+        this.reply(run, { kind: "start", root: generation || roleSequence || compound ? null : nativeExecution ? nativeExecution.root : execution ? execution.workspace : run.root, context, env: current.controls.env,
           readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation) || Boolean(roleSequence) || Boolean(compound),
           ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && current.controls.modelId === KUPO_MODEL_ID &&
             this.projection.settings.values.kupo.workflow === "auto" ? { automaticKupo: true as const } : {}),
@@ -2639,7 +2797,7 @@ export class ControlPlane extends EventEmitter {
     }
     if (session.repositories) {
       const roots = this.platform.managed.roots(session), busy = this.ownedWriteRoots(session.id);
-      if (roots.some((root) => busy.includes(root) || this.profileHooks?.foreignRootBusy(this.profileId, root)) ||
+      if (roots.some((root) => busy.some((held) => !held.startsWith("remote/") && localRootsOverlap(held, root)) || this.profileHooks?.foreignRootBusy(this.profileId, root, true)) ||
         session.repositories.some((repository) => this.platform.artifacts.isBusy(repository.projectId))) return true;
       return this.projection.sessions.some((other) => other.id !== session.id && other.turnId && other.controls.env === "Local" &&
         other.kind === "agent" && other.mode === "agent" && !this.runs.get(other.id)?.yieldedTo &&
@@ -2647,7 +2805,8 @@ export class ControlPlane extends EventEmitter {
     }
     if (session.projectId === null) return false;
     const root = session.controls.env === "Remote" ? remoteRootLease(this.remote.assertReady(), this.remoteWorkspace(session)) : this.platform.managed.project(session).path;
-    if (root && (this.profileHooks?.foreignRootBusy(this.profileId, root) || this.ownedWriteRoots(session.id).includes(root) || remoteRootQuarantined(this.projection, root))) return true;
+    if (root && (this.profileHooks?.foreignRootBusy(this.profileId, root, session.controls.env === "Local") ||
+      this.ownedWriteRoots(session.id).some((held) => session.controls.env === "Local" ? !held.startsWith("remote/") && localRootsOverlap(held, root) : held === root) || remoteRootQuarantined(this.projection, root))) return true;
     if (this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) return true;
     const key = this.platform.managed.leaseKey(session)!;
     return this.projection.sessions.some((other) => other.id !== session.id && this.platform.managed.leaseKey(other) === key && other.turnId && other.kind === "agent" && other.mode === "agent" && !this.runs.get(other.id)?.yieldedTo) ||
@@ -2670,7 +2829,7 @@ export class ControlPlane extends EventEmitter {
     const policy = this.projection.policy.revision;
     if (typeof call.arguments.path === "string" && isPasteFilePath(call.arguments.path)) this.platform.inputs.scopedFile(current.id, call.arguments.path);
     if (isDocumentTool(call.name) && call.name !== "list_documents") this.platform.inputs.scopedDocument(current.id, String(call.arguments.attachmentId));
-    if (current.controls.env === "Local" && (current.projectId || current.repositories)) await this.platform.managed.assert(current);
+    if (current.controls.env === "Local" && (current.projectId || current.repositories || homeWorkspace(current) && homeDirectoryTool(call))) await this.platform.managed.assert(current);
     const nativeRun = this.runs.get(current.id)?.sandboxExecutionId;
     if (nativeRun) {
       const native = this.sandboxExecution(nativeRun);
@@ -2683,6 +2842,7 @@ export class ControlPlane extends EventEmitter {
     const execution = this.projection.executions.find((value) => value.id === this.runs.get(current.id)?.executionId);
     if (execution && (execution.workspace !== root || execution.configDigest !== frameDigest(this.projection.settings.values.remote))) throw new MoguriError("remote_changed", "Remote workspace/target changed after turn admission. No new effect was authorized in the old worker.", 409);
     await assertSessionTool(current, root, scope.settings, call, current.controls.env === "Local");
+    if (homeWorkspace(current) && homeDirectoryTool(call)) assertChatHome(current.homeRoot!);
     if (hook) this.platform.extensions.assertHook(this.session(current.id), hook);
     if (this.session(current.id).revision !== current.revision || configuration && this.platform.sessions.projects.configuration(configuration.projectId).revision !== configuration.revision ||
       this.projection.settings.permissionRevision !== permission || this.projection.policy.revision !== policy) throw new MoguriError("policy_changed", "Session or project policy changed during authorization. No new effect was admitted.", 409);
@@ -3270,7 +3430,7 @@ export class ControlPlane extends EventEmitter {
         const project = this.projection.projects.find((project) => project.id === current.projectId);
         const projectSettings = this.platform.sessions.projects.values(project?.id);
         const effectiveMode = run.yieldedTo ? "read-only" : current.mode;
-        const solverTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", effectiveMode, folderPolicy(projectSettings), { project: Boolean(project || current.repositories), multiRepository: Boolean(current.repositories), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current), coordinator: Boolean(run.yieldedTo && current.mode === "agent" && current.pendingMode !== "read-only") });
+        const solverTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", effectiveMode, folderPolicy(projectSettings), { project: Boolean(project || current.repositories), workspace: homeWorkspace(current), multiRepository: Boolean(current.repositories), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current), coordinator: Boolean(run.yieldedTo && current.mode === "agent" && current.pendingMode !== "read-only") });
         const selectedTools = (request.loadedTools ?? []).filter((name) => solverTools.some((tool) => tool.name === name));
         const solverInterface = solverTools.length ? catalogForModel(solverTools, selectedTools) : [];
         let tools = phase === "router" || kupoPhase === "gate" || kupoPhase === "critic" ? [] : solverInterface;
@@ -3700,10 +3860,10 @@ export class ControlPlane extends EventEmitter {
         if (run.approval) throw new Error("Another tool approval is already pending.");
         validateTool(request.call);
         if (!run.declaredTools.has(request.call.name)) throw new MoguriError("tool_unavailable", "This capability was not enabled or declared for this turn.");
-        const scope = this.toolScope(session, request.call), project = scope.project;
+        const scope = this.toolScope(session, request.call);
         await this.assertCurrentTool(session, request.call);
         const authorization = this.authorization(session, request.call, run.sandboxExecutionId ? this.sandboxExecution(run.sandboxExecutionId).root :
-          session.controls.env === "Remote" ? this.remoteWorkspace(session) : project?.path ?? null);
+          session.controls.env === "Remote" ? this.remoteWorkspace(session) : scope.root);
         if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
         if (session.controls.autonomy === "Autopilot Max") this.decisions.capability(session.controls.env);
         const recommendation = session.controls.autonomy === "Guided" ? session.messages.findLast((message) => message.role === "assistant" && message.id === request.stepId)?.text.trim().slice(0, 1200) : undefined;
@@ -3724,9 +3884,13 @@ export class ControlPlane extends EventEmitter {
           return;
         }
         if (authorization.decision === "allow" && !hookRequiresHuman || ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config") {
+          await this.claimHomeWriter(run, request.call);
+          await this.assertCurrentTool(session, request.call);
+          if (run.done || run.abort.signal.aborted) throw new MoguriError("tool_stopping", "The original owner stopped before tool dispatch. No replacement was started.", 409);
           this.grantTool(run, request.call.id);
           this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
-          this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(scope.settings), root: scope.root } });
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(scope.settings), root: scope.root,
+            homeRoot: homeWorkspace(session) && homeDirectoryTool(request.call) ? session.homeRoot : undefined } });
           return;
         }
         run.approval = { ...approval, requestId: request.requestId };
@@ -3736,6 +3900,7 @@ export class ControlPlane extends EventEmitter {
     }
     if (request.kind === "tool.complete") {
       const hook = run.hooks?.calls.get(request.call.id);
+      if (run.chatWriterId && homeWriteTool(request.call) && ["partial", "unconfirmed"].includes(request.outcome)) run.homeUncertain = true;
       run.calls.delete(request.call.id);
       run.granted.delete(request.call.id);
       const completed = this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
@@ -3801,12 +3966,13 @@ export class ControlPlane extends EventEmitter {
         return;
       }
       this.commit([this.event(this.session(sessionId), "turn.stop_requested", queueHold), this.event(this.session(sessionId), "turn.stop_acknowledged", {})]);
+      const dispatched = external.executing === true;
       if (external.remoteMcpId) {
         const call = this.mcpCall(external.remoteMcpId, external.sessionId);
-        if (call.phase !== "settled") this.updateMcp(call, { phase: "settled", status: external.started ? "partial" : "stopped",
-          diagnostic: external.started ? "External MCP cancellation requested; exact effects remain unconfirmed." : "External MCP stopped before worker/access dispatch." });
+        if (call.phase !== "settled") this.updateMcp(call, { phase: "settled", status: dispatched ? "partial" : "stopped",
+          diagnostic: dispatched ? "External MCP cancellation requested; exact effects remain unconfirmed." : "External MCP stopped before worker/access dispatch." });
       }
-      this.finishExternal(external, external.started ? "partial" : "stopped", external.started ? "External MCP cancellation requested; remote effects and process cleanup may be unconfirmed." : "Unstarted external MCP request cancelled.");
+      this.finishExternal(external, dispatched ? "partial" : "stopped", dispatched ? "External tool cancellation requested; actual effects and process cleanup may be unconfirmed." : "Approved external tool stopped before execution dispatch. No effect was started.");
       return;
     }
     const run = this.runs.get(sessionId);
@@ -4018,6 +4184,7 @@ export class ControlPlane extends EventEmitter {
       ...roleEvents,
       ...compoundEvents,
       ...compactionEvents,
+      ...this.finishHomeWriter(run),
       ...[...(run.mcpDispatches?.values() ?? [])].map((dispatch) => {
         const call = this.mcpCall(dispatch.id, run.sessionId); dispatch.access = [];
         return this.mcpEvent({ ...call, revision: call.revision + 1, phase: "settled", status: "unconfirmed", updatedAt: new Date().toISOString(),
@@ -4055,7 +4222,7 @@ export class ControlPlane extends EventEmitter {
     const native = this.sandbox.close();
     const local = await Promise.allSettled([candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.platform.close(options)]);
     const deadline = Date.now() + 6000;
-    while ((this.runs.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    while ((this.runs.size || this.externalEffects.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);
     const settled = [...local, ...stopped], failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Controller cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "controller_cleanup");

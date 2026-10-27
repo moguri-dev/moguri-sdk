@@ -405,6 +405,21 @@ export class EventStore {
         throw new Error("Missing or invalid model preference schema marker. State was preserved.");
       }
       if (version < 71) this.db.exec("PRAGMA user_version=71;");
+      if (version < 72) {
+        if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='chat_home_schema'").get()) {
+          throw new Error("Premature Home-backed chat schema marker. State was preserved without relabelling.");
+        }
+        if (this.events().some((event) => event.event_type === "session.home_bound" || event.event_type === "chat.writer_recorded" ||
+          event.event_type === "session.created" && event.payload.homeRoot !== undefined)) {
+          throw new Error("Home-backed chat history cannot be relabelled without its original schema marker. State was preserved.");
+        }
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('chat_home_schema','1');
+          PRAGMA user_version=72; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='chat_home_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid Home-backed chat schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {

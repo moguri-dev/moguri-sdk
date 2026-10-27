@@ -14,7 +14,7 @@ test("the 69-to-70 availability upgrade is atomic and never rewrites retained hi
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id='model_preferences_schema'; PRAGMA user_version=69; CREATE TRIGGER generated_availability_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='model_preferences_schema' BEGIN SELECT RAISE(ABORT,'Generated availability migration interruption'); END;"); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('chat_home_schema','model_preferences_schema'); PRAGMA user_version=69; CREATE TRIGGER generated_availability_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='model_preferences_schema' BEGIN SELECT RAISE(ABORT,'Generated availability migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated availability migration interruption/);
     const interrupted = new DatabaseSync(path);

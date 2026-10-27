@@ -2,7 +2,7 @@ import { fork } from "node:child_process";
 import { resolve } from "node:path";
 import { isRecord, type Connection } from "../../packages/protocol/src/index.ts";
 
-export async function launchRuntimeChild(input: { stateDir: string; vaultPath: string; modelId: string; baseUrl: string; projectWork?: boolean; nativeCommand?: string[]; holdNativeResult?: boolean; holdNativePublication?: "before" | "after-first"; holdUserPlan?: "approval" | "result"; holdUserMcp?: "authorization" | "result"; holdTerminalInput?: boolean; rawTerminal?: boolean; holdMemory?: boolean; holdMemoryStream?: boolean; planBudgetOnStart?: boolean; holdGeneration?: "before-admission" | "before-result"; holdCandidate?: "stage-before" | "stage-after-first" | "apply-before" | "apply-after-first" }) {
+export async function launchRuntimeChild(input: { stateDir: string; vaultPath: string; modelId: string; baseUrl: string; homeRoot?: string; projectWork?: boolean; nativeCommand?: string[]; holdNativeResult?: boolean; holdNativePublication?: "before" | "after-first"; holdUserPlan?: "approval" | "result"; holdUserMcp?: "authorization" | "result"; holdTerminalInput?: boolean; rawTerminal?: boolean; holdMemory?: boolean; holdMemoryStream?: boolean; planBudgetOnStart?: boolean; holdGeneration?: "before-admission" | "before-result"; holdCandidate?: "stage-before" | "stage-after-first" | "apply-before" | "apply-after-first" }) {
   const child = fork(resolve("tests/fixtures/runtime-child.ts"), [], { execPath: process.execPath, execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   let heldExecution: string | null = null;

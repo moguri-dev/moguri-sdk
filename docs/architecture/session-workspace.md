@@ -39,8 +39,13 @@ session/project identities for one independently owned **Global terminal** per
 profile, not a synthetic chat or inherited project. A profile-default query
 discloses the canonical home directory; the user explicitly opens that root.
 Protocol 59 defaults new project-free session consoles to configured HOME,
-separate from model workspace authority; callers may still explicitly choose
-a different Local root. HOME is never Moguri's state-directory fallback.
+without granting model permissions. Protocol 72 separately binds ordinary
+Local chats to the same captured canonical Home/device/inode for approved
+agent execution; [Home ownership and recovery](project-free-execution.md)
+remain distinct from private console input/output. Bound chats keep their
+original Home after defaults change. Callers may explicitly choose a different
+private Local console root without moving the model binding. HOME is never
+Moguri's state-directory fallback.
 Existing project consoles keep their exact bound
 worktree. Remote bindings still require real session/project/peer identities.
 The existing profile-owned broker authenticates all consoles; no PID guessing,

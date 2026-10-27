@@ -803,9 +803,14 @@ qualification and model-provider boundaries are unchanged.
 ## D18. OAuth and reviewed metachat
 
 **Decision.** The [engagement contract](engagement.md) adds true nullable project
-scope, not a hidden shared workspace. No-project chats have no workspace file,
-command, terminal or repository-memory authority and no fake project writer
-lease. Both clients consume the same typed SDK.
+scope, not a synthetic project. The explicit protocol-72
+[Home amendment](project-free-execution.md) gives ordinary project-free Local
+chats a captured canonical Home/device/inode for approved file/command tools,
+matching their existing user-console default. It grants no permissions,
+repository identity, indexing, project publication or non-Local fallback.
+Model-only chats stay parallel; actual Home writers retain independent
+profile/root ownership through failed cleanup, source deletion and restart.
+Private roles stay root-less/tool-less. All clients consume the same typed SDK.
 
 Reuse the official MIT-licensed MCP SDK for OAuth discovery, registration,
 S256 PKCE and resource-bound exchange/refresh. Owned loopback callbacks require

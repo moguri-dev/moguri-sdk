@@ -38,6 +38,7 @@ export const slashCommands = [
   { name: "performance", description: "Measure and improve current-code performance without changing outcomes", argument: "[PROMPT]" },
   { name: "debug", description: "Debug current code and the session-owned app/logs, using approved DAP when available", argument: "[PROMPT]" },
   { name: "tools", description: "Discover the actual scoped typed tool catalogue without inference", argument: "[OFFSET] [QUERY]" },
+  { name: "home", description: "Inspect this Local chat's captured Home and original writer ownership", argument: "[status|acknowledge WRITER_ID REVISION confirm-inspected]" },
   { name: "tool", description: "Admit an exact approved Local user tool job; model-only capabilities stay blocked", argument: "NAME SCHEMA_SHA ARGUMENTS_JSON" },
   { name: "tool-result", description: "Page one exact retained original result without replay", argument: "STEP_ID CALL_ID [UTF8_OFFSET]" },
   { name: "state", description: "Query service-backed todo/memory views, not raw storage", argument: "SELECT_SQL" },
@@ -222,7 +223,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       else throw new ClientError("kanban_input", "Use /kanban [show|hide|source SOURCE|items [SOURCE] [PAGE]|work RUN|stop RUN|inspect RUN REV confirm-inspected].");
       return { kind: "ok", message: "Shared project Kanban preference saved. No model, sync or scheduled work was started." };
     }
-    case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
+    case "home": case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
       return toolingSlash(sdk, session.id, command.name, command.argument);
     case "review": case "security": case "performance": case "debug": {
       const consume = !session.draft.text || session.draft.text.trim() === text.trim();

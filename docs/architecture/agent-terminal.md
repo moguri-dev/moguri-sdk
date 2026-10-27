@@ -40,9 +40,13 @@ reads an exact command result in bounded UTF-8 pages. It requires the owning
 turn's exact tool approval/delegation and a fresh policy/mode check. Output
 is untrusted data, never permission, an instruction or proof of command success.
 Private role owners remain tool-less.
-The model capability requires an attached workspace, like command execution;
-project-free chats do not receive an unusable terminal schema. User SDK/CLI
-inspection can still read retained records without executing a workspace tool.
+The model capability requires an actual execution scope: a selected workspace,
+or the protocol-72 [captured Home](project-free-execution.md) of an ordinary
+project-free Local chat. Such chats receive real command/Agent-read capabilities
+without becoming projects. Unbound non-Local chats and private roles gain no
+Local root. User SDK/CLI inspection can still read retained records without
+executing a filesystem tool; browser/status/readback does not require the
+original Home directory to remain usable.
 
 This is a per-command agent terminal, not a persistent interactive shell.
 Each approved command owns its existing PTY; subsequent commands do not inherit

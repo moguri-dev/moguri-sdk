@@ -18,6 +18,7 @@ import { frameDigest } from "./worker-wire.ts";
 import type { RemoteConsoles } from "./remote-terminals.ts";
 import { canAutoArchive } from "./session-lifecycle.ts";
 import { KeepAwake, type PowerDriver } from "./keep-awake.ts";
+import { assertChatHome, captureChatHome } from "./chat-workspace.ts";
 
 export type WorkspaceFinish = ((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => CommandResult) & { intent?: { id: string; digest: string } };
 export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number; power?: PowerDriver }
@@ -39,7 +40,7 @@ export interface SessionWorkspaceHost {
   startup(projectId: string | null): ResolvedControls;
   project(session: Pick<Session, "projectId" | "workspaceId" | "repositories">, repository?: string): Project;
   rootBusy(projectId: string, workspaceId: string | null): boolean;
-  localRootBusy(root: string): boolean;
+  localRootBusy(root: string, ownerSessionId?: string): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   nativeRead?(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   remotePlanBinding(session: Session): PlanBinding;
@@ -137,6 +138,7 @@ export class SessionWorkspace {
     if (!isAbsolute(root) || /[\0\r\n]/.test(root)) throw new MoguriError("terminal_root", "Configured HOME must be an absolute Local directory. No state-directory or project fallback was used.");
     return root;
   }
+  homeRoot() { return captureChatHome(this.defaultTerminalRoot()); }
   private async globalTerminal(root: string, cols: number, rows: number, intent: NonNullable<WorkspaceFinish["intent"]>): Promise<TerminalState> {
     if (!isAbsolute(root)) throw new MoguriError("terminal_root", "Choose an explicit absolute directory for the global Local console.");
     const canonical = await realpath(root);
@@ -161,7 +163,7 @@ export class SessionWorkspace {
     this.globalOpening = work;
     try { return await work; } finally { if (this.globalOpening === work) this.globalOpening = undefined; }
   }
-  private terminalContext(sessionId: string, scriptId?: string, explicitRoot?: string) {
+  private terminalContext(sessionId: string, scriptId?: string, explicitRoot?: string, retainedConsole = false) {
     const session = this.session(sessionId), env = session.controls.env;
     if (session.status === "archived") throw new MoguriError("archived", "Restore this session before opening or typing into its terminal.", 409);
     if (!["Local", "Remote"].includes(env) || !this.snapshot().policy.allowedEnvs.includes(env) || !this.snapshot().capabilities.find((capability) => capability.env === env)?.ready) throw new MoguriError("terminal_env", "No qualified terminal transport exists for this environment/policy; no Local fallback.", 409);
@@ -172,7 +174,7 @@ export class SessionWorkspace {
     const project = repository ? this.host.project(session, repository.projectId) :
       session.projectId === null ? null : env === "Remote" ? this.project(session.projectId) : this.host.project(session);
     if (!project && (env !== "Local" || !explicitRoot)) throw new MoguriError("project_required", "Select a project, or explicitly choose a Local root for this project-free user console. No previous root was reused.", 409);
-    if (!project && explicitRoot && this.host.localRootBusy(explicitRoot)) throw new MoguriError("workspace_busy", "An owned writer holds this exact Local root. No project-free terminal was started.", 409);
+    if (!project && explicitRoot && !retainedConsole && this.host.localRootBusy(explicitRoot, session.id)) throw new MoguriError("workspace_busy", "Another or unconfirmed owned writer holds this Local root. Inspect its actual owner before opening an independent console.", 409);
     if (project && explicitRoot !== undefined && !repository) throw new MoguriError("terminal_root", "Project consoles use their bound workspace. An explicit alternate root requires a separate global console.", 409);
     if (project && env === "Local" && this.host.rootBusy(project.id, session.workspaceId)) throw new MoguriError("workspace_busy", "An owned install or artifact publication owns this root. No terminal was started.", 409);
     const configuration = project ? this.projects.configuration(project.id) : null, script = scriptId ? configuration?.values.scripts.find((script) => script.id === scriptId) : undefined;
@@ -186,7 +188,7 @@ export class SessionWorkspace {
   private async terminalAdmission(sessionId: string, scriptId?: string, explicitRoot?: string) {
     const session = this.session(sessionId);
     if (explicitRoot === undefined && session.projectId === null && !session.repositories && session.controls.env === "Local") {
-      explicitRoot = this.defaultTerminalRoot();
+      explicitRoot = session.homeRoot ? assertChatHome(session.homeRoot) : this.defaultTerminalRoot();
     }
     if (explicitRoot !== undefined) {
       if (!isAbsolute(explicitRoot)) throw new MoguriError("terminal_root", "Choose an explicit absolute Local console root.");
@@ -212,7 +214,7 @@ export class SessionWorkspace {
     const session = this.session(terminal.sessionId), binding = terminal.binding;
     if (!binding || terminal.env !== session.controls.env || session.status === "archived" || !this.snapshot().policy.allowedEnvs.includes(binding.env)) throw new MoguriError("terminal_root_changed", "This retained terminal no longer has its original allowed execution environment/policy. No input/resize was sent.", 409);
     if (binding.env === "Local") {
-      const current = this.terminalContext(terminal.sessionId, undefined, session.projectId === null ? binding.root : undefined);
+      const current = this.terminalContext(terminal.sessionId, undefined, session.projectId === null ? binding.root : undefined, true);
       if (current.remote || binding.digest !== terminalBinding(current.scope).digest) throw new MoguriError("terminal_root_changed", "The retained Local root changed. No input/resize or replacement was sent.", 409);
     } else {
       const owner = this.snapshot().terminalOwners.find((owner) => owner.id === terminal.ownerId), target = this.snapshot().settings.values.remote;
@@ -264,6 +266,8 @@ export class SessionWorkspace {
   }
   async execute(command: SessionWorkspaceCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     switch (command.type) {
+      case "session.home": case "chat.writer.acknowledge":
+        throw new MoguriError("chat_home_authority", "Home binding and original writer inspection require the owning control-plane command path.", 403);
       case "session.reorder": {
         const snapshot = this.snapshot(), ordered = command.sessions.map((entry) => this.session(entry.sessionId));
         const explicit = "projectId" in command, scope = sessionOrderScope(ordered[0]!);

@@ -15,7 +15,7 @@ test("protocol 70 dictation repair advances only metadata and recovers without r
     const original = retainedCiphertextRows(fixture.service.store.db);
     sdk.disconnect(); await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("PRAGMA user_version=70"); } finally { raw.close(); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id='chat_home_schema'; PRAGMA user_version=70"); } finally { raw.close(); }
     const exec = DatabaseSync.prototype.exec;
     const fault = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
       if (/PRAGMA user_version=71/.test(sql)) throw new Error("Generated dictation metadata interruption");

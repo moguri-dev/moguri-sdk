@@ -5,6 +5,15 @@ import type { SlashResult } from "./slash.ts";
 
 export async function toolingSlash(sdk: MoguriSdk, sessionId: string, name: string, argument: string): Promise<SlashResult> {
   const result = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+  if (name === "home") {
+    const parts = argument.trim().split(/\s+/).filter(Boolean);
+    if (!parts.length || parts.length === 1 && parts[0] === "status") return result(await sdk.workspaces.home(sessionId));
+    if (parts.length === 4 && parts[0] === "acknowledge" && /^\d+$/.test(parts[2]!) && Number.isSafeInteger(Number(parts[2])) && parts[3] === "confirm-inspected") {
+      await sdk.workspaces.acknowledgeHomeWriter(sessionId, parts[1]!, Number(parts[2]), true);
+      return { kind: "ok", message: "Recorded actual-user inspection of that exact Home writer. This is risk acceptance, not cleanup proof, tool permission or queue resumption." };
+    }
+    throw new ClientError("home_arguments", "Use /home [status], or /home acknowledge WRITER_ID REVISION confirm-inspected only after inspecting its exact original files/processes.");
+  }
   if (name === "tools") {
     const match = argument.match(/^(?:(\d+)(?:\s+|$))?([\s\S]*)$/)!;
     return result(await sdk.tools.catalog(sessionId, match[2] ?? "", Number(match[1] ?? 0)));

@@ -94,6 +94,7 @@ import { SkillGateway, type SkillGatewayOptions } from "./skill-gateway.ts";
 import { selectedSkillEvents } from "./skill-selection.ts";
 import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gateway.ts";
 import { dashboardOverview } from "./dashboard.ts";
+import { homeChat, homeWorkspace } from "./chat-workspace.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -278,7 +279,7 @@ export class PlatformRuntime {
       retainArtifact: (session, path, text) => this.artifacts.capture(session, path, text),
       project: (session, repository) => this.managed.project(session, repository),
       rootBusy: (projectId, workspaceId) => this.workspace.isBusy(projectId, workspaceId) || this.artifacts.isBusy(projectId, workspaceId) || this.candidates.isBusy(projectId, workspaceId) || this.nativePublications.isBusy(projectId, workspaceId) || this.engagement.writeRoots().includes(this.managed.project({ projectId, workspaceId }).path) || host.foreignRootBusy(this.managed.project({ projectId, workspaceId }).path),
-      localRootBusy: host.localRootBusy,
+      localRootBusy: (root, sessionId) => host.localRootBusy(root, undefined, false, sessionId),
       wake: host.wake,
       githubItem: async (projectId, workspaceId, source) => {
         const value = await this.github.query({ type: "github.source", scope: { env: "Local", projectId, ...(workspaceId ? { workspaceId } : {}) }, source });
@@ -367,7 +368,7 @@ export class PlatformRuntime {
     this.repositories = new RepositoryTelemetry({
       snapshot: () => this.snapshot(), scope: host.repositoryScope, git: host.repositoryGit,
       remoteRead: host.remoteRepository,
-      lookupRoot: (session) => session.controls.env === "Local" ? this.managed.project(session).path : stateDir,
+      lookupRoot: (session) => session.controls.env === "Local" ? this.managed.filesystem(session).root : stateDir,
       commit: (events) => this.host.commit(events),
       job: (session, execute, settled) => this.job("repository.refresh", session.projectId, session.id, (signal, _progress, id) => execute(signal, id), settled),
     }, this.workspace.integrations);
@@ -764,8 +765,11 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
           return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
         }
         if (!this.snapshot().policy.allowedEnvs.includes("Local") || session && (session.controls.env !== "Local" || server && (session.mode !== "agent" || session.kind !== "agent"))) throw new MoguriError("mcp_env", "MCP discovery has no qualified transport under this environment/read-only policy. No Local fallback.", 403);
-        const root = session?.projectId ? this.managed.project(session).path : join(this.stateDir, "gateway-workspace");
-        await mkdir(root, { recursive: true, mode: 0o700 });
+        if (server && session && homeChat(session) && !session.homeRoot) throw new MoguriError("chat_home_unbound", "Bind this original Local chat's Home through session.home before workspace-dependent MCP discovery. No state-directory or previous-project root was substituted.", 409);
+        const workingRoot = session?.projectId ? this.managed.project(session).path : session && homeWorkspace(session) ?
+          server ? this.managed.filesystem(session).root : session.homeRoot!.root : undefined;
+        const root = workingRoot ?? join(this.stateDir, "gateway-workspace");
+        if (!workingRoot) await mkdir(root, { recursive: true, mode: 0o700 });
         const tools = (await this.gateway.tools(server, root, AbortSignal.timeout(20_000), await this.scripts(session?.projectId), session?.id))
           .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page" || Boolean(session) && isBrowserTool(tool.name))
           .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
@@ -847,22 +851,22 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       if (active) active.abort.abort();
       return { id: job.id, status: job.status, stopRequested: Boolean(active), diagnostic: "A stop request is not acknowledgement or rollback; inspect the final job result." };
     }
-    if (!input.command || !input.timeoutMs || session.controls.env !== "Local" || !session.projectId || !session.turnId) throw new MoguriError("command_boundary", "Watch start needs an approved Local workspace/owning turn, exact command and bounded timeout. No transport or root fallback.");
+    if (!input.command || !input.timeoutMs || session.controls.env !== "Local" || !session.projectId && !homeWorkspace(session) || !session.turnId) throw new MoguriError("command_boundary", "Watch start needs an approved Local workspace/Home and owning turn, exact command and bounded timeout. No transport or root fallback.");
     if (this.snapshot().jobs.filter((job) => job.kind === "command.watch" && job.status === "running").length >= 2) throw new MoguriError("command_limit", "Two original command/watch jobs already own this profile. Stop one explicitly first.");
     const original = this.host.events().findLast((event) => event.event_type === "tool.started" && event.session_id === session.id && event.turn_id === session.turnId && event.payload.call.id === call.id);
     if (!original?.step_id) throw new MoguriError("command_authority", "No original approved tool start owns this command. No process was launched.");
     const id = createHash("sha256").update(JSON.stringify([session.id, session.turnId, original.step_id, call.id])).digest("hex");
     if (this.snapshot().jobs.some((job) => job.id === id)) return { id, admission: "already-recorded", diagnostic: "Original command intent exists; no process was replayed." };
-    const root = this.managed.project(session).path, command = input.command, timeout = input.timeoutMs;
+    const root = this.managed.filesystem(session).root, command = input.command, timeout = input.timeoutMs;
     this.job("command.watch", session.projectId, session.id, async (jobSignal) => {
       const current = this.session(session.id);
-      if (current.controls.env !== "Local" || this.managed.project(current).path !== root || !this.snapshot().policy.allowedEnvs.includes("Local") && !current.localFinishing) throw new MoguriError("command_scope", "Command scope changed before process dispatch. No fallback or process was started.");
+      if (current.controls.env !== "Local" || this.managed.filesystem(current).root !== root || !this.snapshot().policy.allowedEnvs.includes("Local") && !current.localFinishing) throw new MoguriError("command_scope", "Command scope changed before process dispatch. No fallback or process was started.");
       await assertSessionTool(current, root, this.sessions.projects.values(current.projectId), call);
       const tail = { text: "", bytes: 0, startedAt: performance.now(), pid: null as number | null };
       this.commandTails.set(id, tail);
       return runCommand(root, command, timeout, jobSignal, (text) => { tail.bytes += Buffer.byteLength(text); tail.text = commandTail(tail.text + text); },
         (pid) => { tail.pid = pid; });
-    }, () => { this.commandTails.delete(id); }, (job) => {
+    }, () => { this.commandTails.delete(id); this.host.wake(); }, (job) => {
       job.commandJob = { root, command, timeoutMs: timeout, callId: call.id, env: "Local" };
       this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { job } }]);
     }, session.workspaceId ?? undefined, undefined, id);
@@ -1413,7 +1417,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     const serverId = String(args.serverId);
     const server = this.server(serverId, session.projectId);
     const project = session.projectId ? this.managed.project(session) : undefined;
-    await assertSessionTool(this.session(session.id), project?.path ?? null, this.sessions.projects.values(session.projectId), { id: "gateway-policy", name: "mcp_gateway", arguments: args });
+    await assertSessionTool(this.session(session.id), project?.path ?? session.homeRoot?.root ?? null, this.sessions.projects.values(session.projectId), { id: "gateway-policy", name: "mcp_gateway", arguments: args });
     let prepared: unknown;
     const input = isRecord(args.arguments) ? args.arguments : {};
     if (serverId === "builtin" && isBrowserTool(String(args.tool))) {
@@ -1428,7 +1432,9 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       prepared = query.tool === "search_memory" ? await this.memorySearch(session.id, query.query, 6, signal) :
         await this.memoryGraph(session.id, query.path, signal);
     }
-    const root = project?.path ?? join(this.stateDir, "gateway-workspace"); await mkdir(root, { recursive: true, mode: 0o700 });
+    const workingRoot = project?.path ?? (homeWorkspace(session) ? server ? this.managed.filesystem(session).root : session.homeRoot!.root : undefined);
+    const root = workingRoot ?? join(this.stateDir, "gateway-workspace");
+    if (!workingRoot) await mkdir(root, { recursive: true, mode: 0o700 });
     return this.gateway.operate({ action: "call", server, root, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared, scripts: await this.scripts(project?.id) }, signal, session.id);
   }
   async delegate(session: Session, call: ToolCall, signal: AbortSignal): Promise<{ text: string; isError: boolean; outcome: string }> {

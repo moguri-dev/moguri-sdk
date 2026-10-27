@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { realpath, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { BROWSER_MCP_TOOLS, DraftEditor, MoguriSdk, type Session } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
@@ -12,7 +11,7 @@ async function send(sdk: MoguriSdk, session: Session, text: string) {
   const editor = new DraftEditor(sdk, session.id, session.draft);
   try { editor.edit(text); await editor.send("queue"); } finally { editor.dispose(); }
 }
-test("a project-free chat keeps its model workspace root-less even when its private user console starts in HOME", mac, async () => {
+test("a project-free Local chat shares its captured Home directory with its private console without acquiring a project or its instructions", mac, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await writeFile(join(fixture.project, "AGENTS.md"), "Generated bound-project-only instructions.");
@@ -24,7 +23,8 @@ test("a project-free chat keeps its model workspace root-less even when its priv
     await assert.rejects(() => sdk.command({ type: "attachment.add", sessionId: session.id, path: "fixture.txt", expectedRevision: 0 }), /Select a project/);
     const opened = await sdk.terminal.open(session.id), terminal = (await sdk.terminal.read(opened.id!)).terminal;
     assert.equal(terminal.sessionId, session.id); assert.equal(terminal.projectId, null);
-    assert.equal(terminal.binding?.root, await realpath(homedir()));
+    assert.equal(terminal.binding?.root, await realpath(fixture.home));
+    assert.equal(session.homeRoot?.root, terminal.binding?.root);
     await sdk.terminal.close(opened.id!);
     await assert.rejects(() => sdk.plans.read(session.id), /Select a project/);
     await assert.rejects(() => sdk.slash(session.id, "/diff", "tui"), /Select a project/);
@@ -38,7 +38,13 @@ test("a project-free chat keeps its model workspace root-less even when its priv
     const request = fixture.requests[0]!;
     assert.equal(JSON.stringify(request.messages).includes(fixture.project), false);
     assert.equal(JSON.stringify(request.messages).includes("Generated bound-project-only instructions."), false);
-    assert.equal(/read_file|write_file|run_command|memory_search|propose_skill/.test(JSON.stringify(request.tools)), false);
+    for (const name of ["read_file", "write_file", "run_command", "read_agent_terminal"]) {
+      assert.equal((await sdk.tools.catalog(session.id, name)).tools.some((tool) => tool.name === name), true);
+    }
+    for (const name of ["memory_search", "propose_skill", "create_issue", "project_work"]) {
+      assert.equal((await sdk.tools.catalog(session.id, name)).tools.some((tool) => tool.name === name), false);
+    }
+    assert.ok(JSON.stringify(request.messages).includes(session.homeRoot!.root));
     assert.equal(fixture.service.controller.snapshot().sessions.find((value) => value.id === session.id)?.usage.length, 1);
     await assert.rejects(() => sdk.sessions.organize(session.id, { parentSessionId: fixture.sessionId }), /scope|project/i);
   } finally { sdk.disconnect(); await fixture.close(); }
@@ -74,7 +80,7 @@ test("project-free sessions run independently and a failed one quarantines neith
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("project-free Autopilot is selectable without tool grants and still cannot acquire workspace authority", mac, async () => {
+test("project-free Autopilot delegates applicable captured-Home tools without creating a project or stored permission grants", mac, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const created = await sdk.sessions.create(null), current = () => sdk.getState().snapshot!.sessions.find((session) => session.id === created.id)!;
@@ -83,7 +89,9 @@ test("project-free Autopilot is selectable without tool grants and still cannot 
     assert.deepEqual(sdk.settings.get()!.values.permissions, { defaultDecision: "ask", tools: [], commands: [] });
     await send(sdk, current(), "Generated project-free Autopilot question.");
     await waitFor(() => fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)?.status === "completed");
-    assert.equal(/read_file|write_file|run_command/.test(JSON.stringify(fixture.requests[0]?.tools)), false);
+    assert.equal((await sdk.tools.catalog(created.id!, "run_command")).tools.some((tool) => tool.name === "run_command"), true);
+    assert.equal(current().homeRoot?.root, await realpath(fixture.home));
+    assert.equal(JSON.stringify(fixture.requests[0]?.messages).includes(fixture.project), false);
     assert.equal(current().projectId, null);
   } finally { sdk.disconnect(); await fixture.close(); }
 });

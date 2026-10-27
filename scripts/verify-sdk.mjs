@@ -137,6 +137,13 @@ try {
       await sdk.skills.read("generated-id","a".repeat(64),"generated-session");
       await sdk.suggestions.preview(null,true);
       ` : ""}
+      ${installedProtocol >= 72 ? `
+      await sdk.sessions.home("generated-home-session");
+      const typedHome=await sdk.workspaces.home("generated-home-session");
+      void typedHome.root.device;void typedHome.root.inode;void typedHome.writers[0]?.turnId;void typedHome.writers[0]?.inspection?.actor;
+      void sdk.getState().snapshot?.chatWriters[0]?.backgroundJobs;
+      await sdk.workspaces.acknowledgeHomeWriter("generated-home-session","generated-home-writer",1,true);
+      ` : ""}
       ${installedProtocol >= 58 ? `
       const nativeCatalogue=await sdk.tools.catalog("generated-id","file");
       void nativeCatalogue.tools[0]?.parameters;void nativeCatalogue.tools[0]?.schemaDigest;
@@ -464,12 +471,12 @@ try {
     import {createHash,randomUUID} from "node:crypto";
     import {createServer} from "node:http";
     import {fileURLToPath} from "node:url";
-    import {homedir} from "node:os";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
     import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
+    const generatedHome=join(root,"generated-chat-home");await mkdir(generatedHome,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
     const git=(args,cwd=project)=>execFileSync("git",["--no-pager","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",...args],{cwd,encoding:"utf8"});
     git(["init","--initial-branch=main"]);git(["add","--","generated.ts"]);
@@ -481,13 +488,13 @@ try {
     const remoteVault={read:async id=>remoteSecrets.get(id)??null,write:async(id,value)=>{remoteSecrets.set(id,value);},remove:async id=>{remoteSecrets.delete(id);}};
     let repositoryLookups=0,sessionPrLookups=0;
     const repositoryMetadata={id:42,name:"example",full_name:"generated/example",html_url:"https://github.com/generated/example",owner:{login:"generated",type:"Organization"},private:false,visibility:"public",license:{spdx_id:"MIT"},description:"GENERATED_UNRETAINED_REPOSITORY_BODY"};
-    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{
+    const platform={terminal:{defaultRoot:generatedHome,vault:remoteVault,executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{
       if(String(url)==="https://api.github.com/repos/generated/example/pulls/7"){sessionPrLookups++;return Response.json({number:7,html_url:"https://github.com/generated/example/pull/7",state:"open",draft:true,merged:false,merged_at:null});}
       assert.equal(String(url),"https://api.github.com/repos/generated/example");repositoryLookups++;return Response.json(repositoryMetadata);
     }}};
     const runtime=await createRuntime({stateDir:join(root,"state"),retentionKey:Buffer.alloc(32,0x67),platform,profiles:{
       provider:id=>{if(!providers.has(id))providers.set(id,makeProvider());return providers.get(id);},
-      platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
+      platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id),scopedVault={read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}};return{...(id==="default"?platform:{}),terminal:{...platform.terminal,vault:scopedVault},vault:scopedVault};}
     }});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
     ${installedProtocol >= 38 ? `
@@ -851,7 +858,7 @@ try {
         await writeFile(join(directory,"candidate.txt"),original);
         git(["init","--initial-branch=main"],directory);git(["add","--","candidate.txt"],directory);
         git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated installed candidate base"],directory);
-        const options={stateDir:join(root,"candidate-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x68)};
+        const options={stateDir:join(root,"candidate-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x68),platform:{terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
         let candidateRuntime=await createRuntime(options),candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
         try{
           let budgetOwnerId=null;
@@ -914,8 +921,42 @@ try {
       }
       const general=await sdk.sessions.create();
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
+      if(PROTOCOL_VERSION>=72)assert.equal((await sdk.workspaces.home(general.id)).root.root,await realpath(generatedHome));
       if(PROTOCOL_VERSION>=57)assert.equal((await sdk.candidates.eligibility(general.id)).eligible,false);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
+      if(PROTOCOL_VERSION>=72&&process.platform==="darwin"){
+        const homeOptions={stateDir:join(root,"home-execution-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x72),
+          platform:{terminal:{...platform.terminal,defaultRoot:generatedHome,vault:remoteVault}}};
+        let homeRuntime=await createRuntime(homeOptions),homeSdk=await connectMoguri({stateDir:homeOptions.stateDir,autoStart:false});
+        try{
+          const created=await homeSdk.sessions.create(null,"Generated installed Home chat"),homeId=created.id;
+          await homeSdk.sessions.autonomy(homeId,"Autopilot");
+          const bound=(await homeSdk.workspaces.home(homeId)).root;
+          assert.equal(bound.root,await realpath(generatedHome));assert.equal(homeSdk.getState().snapshot.projects.length,0);
+          const fileTool=(await homeSdk.tools.catalog(homeId,"write_file")).tools.find(tool=>tool.name==="write_file");
+          const written=await homeSdk.tools.execute(homeId,fileTool.name,{path:"generated-installed-home.txt",text:"GENERATED_INSTALLED_HOME\\n",expectedDigest:"absent"},fileTool.schemaDigest);
+          assert.equal((await homeSdk.jobs.wait(written.id)).status,"completed");
+          assert.equal((await homeSdk.workspaces.file(homeId,"generated-installed-home.txt")).text,"GENERATED_INSTALLED_HOME\\n");
+          const commandTool=(await homeSdk.tools.catalog(homeId,"run_command")).tools.find(tool=>tool.name==="run_command");
+          const command=await homeSdk.tools.execute(homeId,commandTool.name,{command:"pwd",timeoutMs:2000},commandTool.schemaDigest);
+          assert.equal((await homeSdk.jobs.wait(command.id)).status,"completed");
+          const agent=(await homeSdk.agentTerminals.list(homeId)).activity.entries[0];
+          assert.ok((await homeSdk.agentTerminals.read(homeId,agent.id)).content.text.includes(bound.root));
+          assert.equal(homeSdk.getState().snapshot.chatWriters.filter(writer=>writer.status==="settled").length,2);
+          const tui=await homeSdk.slash(homeId,"/home","tui");assert.equal(tui.kind,"text");assert.deepEqual(JSON.parse(tui.text).root,bound);
+          const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
+          const view=JSON.parse((await promisify(execFile)(process.execPath,[cli,"home","status","--session",homeId],{env:{...process.env,MOGURI_STATE_DIR:homeOptions.stateDir}})).stdout);
+          assert.deepEqual(view.root,bound);assert.deepEqual(view.writers,[]);
+          homeSdk.disconnect();await homeRuntime.close();
+          const alternate=join(root,"generated-alternate-home");await mkdir(alternate);
+          homeRuntime=await createRuntime({...homeOptions,platform:{terminal:{...homeOptions.platform.terminal,defaultRoot:alternate}}});
+          homeSdk=await connectMoguri({stateDir:homeOptions.stateDir,autoStart:false});
+          assert.deepEqual((await homeSdk.workspaces.home(homeId)).root,bound);
+          assert.equal((await homeSdk.workspaces.file(homeId,"generated-installed-home.txt")).text,"GENERATED_INSTALLED_HOME\\n");
+          assert.equal(homeSdk.getState().snapshot.sessions.find(session=>session.id===homeId).projectId,null);
+          console.log("Installed protocol-72 SDK/CLI/shared TUI execute approved Home files and commands without a project, read actual Agent output, retain exact writer settlement and preserve the original Home across changed-default restart without inference.");
+        }finally{homeSdk.disconnect();await homeRuntime.close();}
+      }
       assert.equal((await sdk.remote.status()).remote.ready,false);
       if(PROTOCOL_VERSION>=17&&process.env.MOGURI_GENERATED_REMOTE){
         const target=JSON.parse(process.env.MOGURI_GENERATED_REMOTE),remoteDirectory=join(root,"generated-remote-workspace");
@@ -1439,7 +1480,7 @@ try {
         const model={id:"generated-installed-proposal",name:"Generated installed proposal model",api:"openai-completions",provider:"github-copilot",baseUrl:"http://127.0.0.1:"+server.address().port,reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:16384,maxTokens:256};
         const provider={...makeProvider(),state:{status:"connected",models:[{id:model.id,name:model.name,contextWindow:model.contextWindow,maxTokens:model.maxTokens,imageInput:false}],login:null,diagnostic:null},
           prepare:async id=>{assert.equal(id,model.id);return{model,auth:{apiKey:"generated-installed-only",baseUrl:model.baseUrl}};}};
-        const options={stateDir:join(root,"generation-state"),retentionKey:Buffer.alloc(32,0x79),provider};
+        const options={stateDir:join(root,"generation-state"),retentionKey:Buffer.alloc(32,0x79),provider,platform:{terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
         generationRuntime=await createRuntime(options);generationSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
         const proof=await qualifyCandidateGeneration({sdk:generationSdk,node:process.execPath,cli:${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},
           directory:join(root,"generated-installed-generation"),stateDir:options.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests});
@@ -1492,7 +1533,7 @@ try {
     if(PROTOCOL_VERSION>=26&&process.env.MOGURI_GENERATED_GITHUB){
       const observed=JSON.parse(process.env.MOGURI_GENERATED_GITHUB),state=join(root,"generated-metadata-state"),remoteRoot=await realpath(join(root,"generated-remote-workspace"));
       git(["remote","add","origin","https://github.com/generated/example.git"],remoteRoot);
-      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x73),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault}}};
+      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x73),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault},terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
       let metadataRuntime=await createRuntime(options),metadataSdk=await connectMoguri({stateDir:state,autoStart:false});
       try{
         const metadataProject=await metadataSdk.command({type:"project.add",path:project}),session=await metadataSdk.sessions.create(metadataProject.id);
@@ -1515,7 +1556,7 @@ try {
     }
     if(PROTOCOL_VERSION>=27&&process.env.MOGURI_GENERATED_REMOTE){
       const state=join(root,"generated-memory-state"),remoteRoot=await realpath(join(root,"generated-remote-workspace"));
-      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x75),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault}}};
+      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x75),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault},terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
       let memoryRuntime=await createRuntime(options),memorySdk=await connectMoguri({stateDir:state,autoStart:false});
       try{
         const memoryProject=await memorySdk.command({type:"project.add",path:project}),session=await memorySdk.sessions.create(memoryProject.id);
@@ -1549,7 +1590,7 @@ try {
       const consoleRoot=join(root,"generated-console-project-"+mode),consoleState=join(root,"generated-console-state-"+mode),keys=new Map();
       await mkdir(consoleRoot);
       const vault={read:async id=>keys.get(id)??null,write:async(id,value)=>{keys.set(id,value);},remove:async id=>{keys.delete(id);}};
-      const options={stateDir:consoleState,retentionKey:Buffer.alloc(32,0x71),provider:makeProvider(),platform:{remote:{vault,modelsVault:vault},terminal:{vault,executable:"/bin/sh",args:["-c","printf 'GENERATED_INSTALLED_CONSOLE_READY\\\\n'; exec cat"]}}};
+      const options={stateDir:consoleState,retentionKey:Buffer.alloc(32,0x71),provider:makeProvider(),platform:{remote:{vault,modelsVault:vault},terminal:{vault,defaultRoot:generatedHome,executable:"/bin/sh",args:["-c","printf 'GENERATED_INSTALLED_CONSOLE_READY\\\\n'; exec cat"]}}};
       let consoleRuntime=await createRuntime(options),consoleSdk=await connectMoguri({stateDir:consoleState,autoStart:false});
       try{
         const project=await consoleSdk.command({type:"project.add",path:consoleRoot}),session=await consoleSdk.sessions.create(project.id);
@@ -1584,7 +1625,7 @@ try {
         await consoleSdk.terminal.close(opened.id);
         if(PROTOCOL_VERSION>=53&&mode==="Local"){
           const global=await consoleSdk.terminal.openGlobal(),globalState=(await consoleSdk.terminal.read(global.id)).terminal;
-          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(PROTOCOL_VERSION>=59?homedir():consoleState));
+          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(PROTOCOL_VERSION>=59?generatedHome:consoleState));
           const globalCli=JSON.parse((await invoke(["terminal","read",global.id])).stdout);assert.equal(globalCli.terminal.id,global.id);
           const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
           await consoleSdk.sessions.delete(session.id,true);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);

@@ -87,7 +87,7 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly tools = {
-    catalog: (sessionId: string, query = "", offset = 0) => this.query({ type: "tooling.catalog", sessionId, query, offset }),
+    catalog: async (sessionId: string, query = "", offset = 0) => { await this.prepareHome(sessionId); return this.query({ type: "tooling.catalog", sessionId, query, offset }); },
     execute: (sessionId: string, name: string, args: Record<string, unknown>, schemaDigest: string) => this.command({ type: "tooling.execute", sessionId, name, arguments: args, schemaDigest }),
     result: (sessionId: string, stepId: string, callId: string, offset = 0) => this.query({ type: "tooling.result", sessionId, input: { stepId, callId, offset } }),
     command: (sessionId: string, jobId: string, offset = 0, targetSessionId?: string) => this.query({ type: "tooling.command", sessionId, input: { jobId, offset, ...(targetSessionId ? { targetSessionId } : {}) } }),
@@ -105,6 +105,11 @@ export class MoguriSdk extends TransportClient {
     start: (sessionId: string, kind: import("../../protocol/src/workflows.ts").WorkflowKind, prompt = "", expectedDraftRevision?: number) =>
       this.command({ type: "workflow.start", sessionId, kind, prompt, ...(expectedDraftRevision !== undefined ? { consumeDraft: { expectedRevision: expectedDraftRevision } } : {}) }),
   };
+  private async prepareHome(id: string): Promise<void> {
+    const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
+    if (session && session.projectId === null && !session.repositories && !session.readOnly && ["agent", "side"].includes(session.kind) &&
+      session.controls.env === "Local" && !session.homeRoot) await this.sessions.home(id, session.revision);
+  }
   private sessionRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");
@@ -148,6 +153,7 @@ export class MoguriSdk extends TransportClient {
   readonly sessions = {
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
+    home: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.home", sessionId, expectedRevision }),
     side: (sessionId: string) => this.command({ type: "session.side", sessionId }),
     askSide: (sessionId: string, prompt: string, expectedDraftRevision?: number) => this.command({ type: "session.side.prompt", sessionId, prompt,
       ...(expectedDraftRevision === undefined ? {} : { expectedDraftRevision }) }),
@@ -470,6 +476,17 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly workspaces = {
+    home: async (sessionId: string) => {
+      await this.prepareHome(sessionId);
+      const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
+      if (!snapshot || !session?.homeRoot || session.projectId !== null || session.controls.env !== "Local" || session.readOnly ||
+        !["agent", "side"].includes(session.kind)) throw new ClientError("chat_home_scope", "Choose an ordinary project-free Local chat to inspect its captured Home. No other environment or root was substituted.");
+      const root = session.homeRoot;
+      return { root, writers: snapshot.chatWriters.filter((writer) => ["active", "unconfirmed"].includes(writer.status) &&
+        writer.root.root === root.root && writer.root.device === root.device && writer.root.inode === root.inode) };
+    },
+    acknowledgeHomeWriter: (sessionId: string, writerId: string, expectedRevision: number, confirmInspection: true) =>
+      this.command({ type: "chat.writer.acknowledge", sessionId, writerId, expectedRevision, confirmInspection }),
     discover: (projectId: string) => this.query({ type: "workspace.discover", projectId }),
     create: (projectId: string, branch: string, options: { baseRef?: string; issueId?: string; prUrl?: string } = {}) => this.command({ type: "workspace.create", projectId, branch, ...options }),
     inspect: (workspaceId: string) => this.query({ type: "workspace.inspect", workspaceId }),
@@ -477,8 +494,8 @@ export class MoguriSdk extends TransportClient {
     remove: (workspaceId: string, expectedRevision: number, confirm: true) => this.command({ type: "workspace.remove", workspaceId, expectedRevision, confirm }),
     reconcile: (workspaceId: string, expectedRevision: number) => this.command({ type: "workspace.reconcile", workspaceId, expectedRevision }),
     git: (sessionId: string, diff = true, repository?: string) => this.query({ type: "session.git", sessionId, diff, ...(repository ? { repository } : {}) }),
-    files: (sessionId: string, path = ".", repository?: string) => this.query({ type: "session.files", sessionId, path, ...(repository ? { repository } : {}) }),
-    file: (sessionId: string, path: string, repository?: string) => this.query({ type: "session.file", sessionId, path, ...(repository ? { repository } : {}) }),
+    files: async (sessionId: string, path = ".", repository?: string) => { await this.prepareHome(sessionId); return this.query({ type: "session.files", sessionId, path, ...(repository ? { repository } : {}) }); },
+    file: async (sessionId: string, path: string, repository?: string) => { await this.prepareHome(sessionId); return this.query({ type: "session.file", sessionId, path, ...(repository ? { repository } : {}) }); },
     wait: async (workspaceId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
       const workspace = this.getState().snapshot?.managedWorkspaces.find((value) => value.id === workspaceId);
       if (!workspace) throw new ClientError("workspace_missing", "Connect and choose an existing managed workspace.");
@@ -716,7 +733,10 @@ export class MoguriSdk extends TransportClient {
     oauthClear: (serverId: string, sessionId?: string) => this.command({ type: "mcp.oauth.clear", serverId, ...(sessionId ? { sessionId } : {}) }),
     oauthClient: (serverId: string, clientId: string, issuer: string, clientSecret?: string, sessionId?: string, redirectUri?: string) => this.command({ type: "mcp.oauth.client", serverId, clientId, issuer, ...(clientSecret ? { clientSecret } : {}), ...(sessionId ? { sessionId } : {}), ...(redirectUri ? { redirectUri } : {}) }),
     oauthStatus: (authorizationId: string) => this.query({ type: "mcp.oauth.status", authorizationId }),
-    tools: (serverId = "builtin", query = "", offset = 0, sessionId?: string) => this.query({ type: "mcp.tools", serverId, query, offset, ...(sessionId ? { sessionId } : {}) }),
+    tools: async (serverId = "builtin", query = "", offset = 0, sessionId?: string) => {
+      if (sessionId && serverId !== "builtin") await this.prepareHome(sessionId);
+      return this.query({ type: "mcp.tools", serverId, query, offset, ...(sessionId ? { sessionId } : {}) });
+    },
     auth: (serverId: string, sessionId?: string) => this.query({ type: "mcp.auth", serverId, ...(sessionId ? { sessionId } : {}) }),
     setToken: (serverId: string, token: string, sessionId?: string) => this.command({ type: "mcp.token.set", serverId, token, ...(sessionId ? { sessionId } : {}) }),
     clearToken: (serverId: string, sessionId?: string) => this.command({ type: "mcp.token.clear", serverId, ...(sessionId ? { sessionId } : {}) }),

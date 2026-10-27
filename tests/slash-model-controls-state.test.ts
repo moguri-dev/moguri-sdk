@@ -14,7 +14,7 @@ test("schema 68 tuning qualification upgrades only metadata, preserves encrypted
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id='model_preferences_schema'; PRAGMA user_version=68"); } finally { raw.close(); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('chat_home_schema','model_preferences_schema'); PRAGMA user_version=68"); } finally { raw.close(); }
     const exec = DatabaseSync.prototype.exec;
     const fault = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
       if (/PRAGMA user_version=69/.test(sql)) throw new Error("Generated model-tuning metadata interruption");

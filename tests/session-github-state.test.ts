@@ -74,7 +74,7 @@ async function privateWorkflow59Fixture() {
   await sdk.sessions.autonomy(fixture.sessionId, "Autopilot"); sdk.disconnect(); await fixture.service.close();
   const raw = new DatabaseSync(fixture.service.store.path);
   try {
-    raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','workspace_experience_schema','session_navigation_schema','session_github_convergence_schema'); PRAGMA user_version=59; COMMIT;");
+    raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','workspace_experience_schema','session_navigation_schema','session_github_convergence_schema'); PRAGMA user_version=59; COMMIT;");
   } finally { raw.close(); }
   return fixture;
 }
