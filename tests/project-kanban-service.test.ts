@@ -219,7 +219,7 @@ test("automatic Kupo publishes only its selected original task response and stop
   const router = await fixtureProvider({ maxOutputTokens: 128, respond: (_request, index) => ({ text: JSON.stringify(index === 1 ?
     { pattern: "cascade", modelId: solverId, escalationId: router.modelId, complexity: "moderate", confidence: 0.95, reason: "Generated task route, not publication authority." } :
     { verdict: "pass", reason: "Generated response review, not user approval." }) }) });
-  const solver = await fixtureProvider({ exposeModels: true, maxOutputTokens: 128, toolBatches: [
+  const solver = await fixtureProvider({ modelId: "generated-kanban-task-solver-api", exposeModels: true, maxOutputTokens: 128, toolBatches: [
     [{ name: "run_command", args: { command: "printf 'generated routed task\\n' > routed-task.txt && git add -- routed-task.txt && git -c commit.gpgsign=false commit --no-gpg-sign -m 'Generated routed task'", timeoutMs: 15000 } }],
     [{ name: "project_work", args: { action: "publish", title: "Generated routed task PR", body: "Generated routed task details." } },
       { name: "run_command", args: { command: "printf 'must not execute' > forbidden-routed-publication.txt", timeoutMs: 15000 } }],

@@ -27,7 +27,7 @@ advertised API ID as well as availability after asynchronous credential work.
 The ordinary boundary rechecks that exact metadata again after asynchronous
 repository attribution, immediately before reservation and `model.started`.
 An upstream API literally named `kupo` remains distinct from the synthetic
-router's concrete ID.
+`kupo` selection.
 
 The selectable catalog contains only enabled, available, selected offerings.
 The management inventory still exposes disabled/configured entries and clear
@@ -63,6 +63,70 @@ PTY in 159.20 ms (151.32 ms cancellation, zero survivors), OpenTUI in
 in 93.69 ms. The generated configured-provider/startup probe also passes.
 Physical SendBox/SSH, live-provider, Rust/Linux, family/quality, notarization
 and full-milestone exclusions remain explicitly unchanged.
+
+### Availability qualification
+
+The application source is `b350dd5`. Eighteen focused availability,
+compiled-CLI/shared-TUI and migration cases pass in 2,963.63 ms. Generated
+checks reduce 21 models to three, reject disabled slash/raw/new-session
+selections, retain exactly one source across provider disable/removal/restart,
+preserve credentials and profile isolation, and reject concurrent revisions.
+Unqualified SSH inventory makes no discovery or secret read. An actual
+upstream ID named `kupo` does not become the synthetic router.
+
+Held preparation, already-prepared results and final repository attribution
+are tested before the atomic reservation/start. A lost or mismatched source
+dispatches zero requests and retains no invented model charge. Disabling
+after admission instead retains the actual 42-token completion. The
+69-to-70 migration recovers from interrupted insertion with identical
+encrypted rows and receipts; missing, corrupt and prematurely retained
+markers fail without repair.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Complete source/service/worker/recovery/CLI/native-TUI run | 1,705 passed, 14 existing skips and three stale fixture expectations; 1,722 cases in 1,458,435.93 ms |
+| Final fixture-only source requalification | All 39 affected Kanban/SSH/search/availability/client/migration cases pass in 27,666.31 ms, including all three previous failures; application source and bundles remain unchanged |
+| Complete hidden desktop suite | 236 passed, three existing skips; 239 flows in 8.0 minutes |
+| Actual packaged-app critical flows | 35 passed in 1.3 minutes |
+| Native help geometry | 34 sections, 200 renderings at widths 1,280/860; maximum offset one CSS pixel against the strict two-pixel bound |
+| Independently installed packed SDK | All entrypoints/declarations and the actual protocol-70 21-to-3, source-exclusivity and disabled-slash probes pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source, independent-consumer and native-workload audits | Zero vulnerabilities |
+| No-cache Linux arm64 worker payload/native PTY | Pass in 52,231.74 ms with exact protocol-70 inputs |
+| Production ZIP/manifest consumer | Pass; 779,846,671 bytes in 121,369.00 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+Earlier failing runs are not passing evidence: asynchronous controlled
+switches now show the pending intent without resetting the click, and errors
+restore the actual saved state. Multi-role fixtures declare distinct
+generated API IDs where they really simulate different models; an intentional
+same-model loopback offering uses the actual explicit source choice. No
+duplicate guard, revision check, timeout or ownership boundary was weakened.
+The missing prepared-API and post-attribution checks were reproduced before
+their fixes.
+
+The complete source run is not described as a fresh zero-failure run. Its
+three obsolete expectations were the separate Kanban solver reusing the
+router's API ID, a Remote test expecting two simultaneous sources, and the
+search list omitting the new provider destination. Only those generated
+fixtures/expectations changed afterwards. The final rerun exercises every
+case in all three affected files plus the full new availability suite.
+The Remote regression still proves its environment rejection before the
+explicit source switch; no assertion or source-exclusivity check was relaxed.
+
+The labelled development installer is
+`release/Moguri-0.30.0-alpha.1-model-availability-70-macos-arm64.dmg`
+(794,057,880 bytes), SHA-512
+`3096360a5d00726e93f9ec065c90235e2977cb9e185f7c49b3cd3337774a47c9fdbea052cf5aca4b8d5612570d5d390af03d764c1c3399d628baf70dad74cf32`.
+Its bundled worker is
+`docker.io/library/moguri-worker@sha256:6b95e0eeef1d89bfb0b0912087703f07c2b56b94d096afd3008d4f3137d32874`.
+This is ad-hoc-signed development output, not a notarized or uploaded release.
+No installed personal app, Finder, login, OS keychain, microphone or paid
+provider was used. Existing experimental OpenTUI FFI, lazy Ghostty chunk,
+optional `.icon` and transitive encoding/DOMException notices remain
+non-blocking; audits report no vulnerability. CI stays main-push-only, and
+empty working-branch checks are not a CI-pass claim.
 
 ## Direct tuning slash commands
 

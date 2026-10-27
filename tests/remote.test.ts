@@ -85,23 +85,30 @@ test("an SSH disconnect retains late model usage without replay, duplicate infer
   } finally { await fixture.close(); }
 });
 
-test("configured remote-local endpoints are discovered through SSH and remain distinct from host-local and Copilot models", native, async () => {
-  const fixture = await remoteFixture();
+test("configured remote-local endpoints are discovered through SSH with one explicit source and the actual environment binding", native, async () => {
+  const fixture = await remoteFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const settings = structuredClone(fixture.controller.snapshot().settings.values);
     settings.remote!.allowCopilot = false;
     settings.remote!.models = [{ id: "generated", name: "Generated remote endpoint", baseUrl: fixture.baseUrl, enabled: true, auth: "none", models: [{ id: fixture.modelId, name: "Generated remote model", contextWindow: fixture.contextWindow, maxTokens: 256, imageInput: false }] }];
     await fixture.controller.dispatch(envelope({ type: "settings.update", settings, expectedRevision: fixture.controller.snapshot().settings.revision, acknowledgePromptRisk: false }));
-    await fixture.probe();
+    await fixture.probe(); await sdk.refresh();
+    const offerings = sdk.models.catalogue().models.find((model) => model.apiModelId === fixture.modelId)!.offerings;
+    assert.equal(offerings.length, 2);
+    assert.equal(new Set(offerings.map((offering) => offering.model.id)).size, 2);
+    assert.equal(fixture.controller.snapshot().provider.models.filter((model) => !model.synthetic).length, 0);
+    await sdk.models.selectSource(fixture.modelId, fixture.modelId);
     await assert.rejects(() => fixture.select(), /not.*approved.*environment|not.*discovered/i);
-    const model = fixture.controller.snapshot().provider.models.find((model) => model.id.startsWith("remote."))!;
+    const model = offerings.find((offering) => offering.model.id.startsWith("remote."))!.model;
     assert.ok(model); assert.deepEqual(model.environments, ["Remote"]);
+    await sdk.models.selectSource(fixture.modelId, model.id);
+    assert.deepEqual(fixture.controller.snapshot().provider.models.filter((model) => !model.synthetic).map((model) => model.id), [model.id]);
     await fixture.select(model.id); await fixture.send("generated remote-local answer");
     await waitFor(() => fixture.session().status === "completed");
     assert.equal(fixture.requests.length, 1); assert.equal(fixture.headers[0], undefined);
     assert.equal(fixture.session().usage[0]?.modelId, model.id); assert.equal(fixture.session().usage[0]?.apiModelId, fixture.modelId);
     assert.equal(fixture.session().usage[0]?.source, "local");
-  } finally { await fixture.close(); }
+  } finally { sdk.disconnect(); await fixture.close(); }
 });
 test("SSH model connectivity is checked before paid inference and cannot fall back to the local controller", native, async () => {
   const fixture = await remoteFixture({ exposeModels: false });
