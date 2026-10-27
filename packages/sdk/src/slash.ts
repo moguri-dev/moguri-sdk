@@ -63,7 +63,7 @@ export const slashCommands = [
   { name: "agent", description: "Return to agent mode at the next safe steer boundary" },
   { name: "rename", description: "Rename this session", argument: "NAME" },
   { name: "reorder-sessions", description: "Set the exact shared order of one complete sibling section", argument: "SESSION_ID..." },
-  { name: "side", description: "Open parallel, question-only context" },
+  { name: "side", description: "Open the read-only side chat and optionally send it a question using current main context", argument: "[PROMPT]" },
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
   { name: "terminal", aliases: ["termnial"], description: "Open this session's Ghostty terminal at its project worktree or configured HOME", desktopOnly: true },
   { name: "clone", description: "Explicitly clone a repository into a new Local project folder without inference", argument: '{\"repository\":\"URL\",\"path\":\"ABSOLUTE_NEW_PATH\"} confirm-clone' },
@@ -888,11 +888,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!command.argument.trim()) throw new ClientError("slash_arguments", "Use /reorder-sessions followed by every sibling session ID in the desired order.");
       await sdk.sessions.reorder(command.argument.trim().split(/\s+/));
       return { kind: "ok", message: "Shared sibling order saved. No session was reparented or resumed." };
-    case "side":
+    case "side": {
+      const result = command.argument ? await sdk.sessions.askSide(sessionId, command.argument,
+        session.draft.text.trim() === text.trim() ? session.draft.revision : undefined) : await sdk.sessions.side(sessionId);
+      return { kind: "session", sessionId: result.id!, side: true };
+    }
     case "subsession": {
-      const side = command.name === "side";
-      const result = side && !command.argument ? await sdk.sessions.side(sessionId) : await sdk.sessions.spawn(sessionId, side ? "side" : "agent", command.argument || undefined);
-      return { kind: "session", sessionId: result.id!, side };
+      const result = await sdk.sessions.spawn(sessionId, "agent", command.argument || undefined);
+      return { kind: "session", sessionId: result.id!, side: false };
     }
     case "terminal":
       if (command.argument === "global") throw new ClientError("terminal_removed", "Global Terminal was removed. Use the selected session terminal; existing consoles remain inspectable through /terminals list/read/close.");
@@ -992,7 +995,17 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       await sdk.prompts.release(sessionId, command.argument, session.queueRevision); return { kind: "ok", message: "Released for admission." };
     }
     case "settings": return { kind: "panel", panel: "Settings" };
-    case "help": return { kind: "text", text: slashCommands.map((entry) => `/${entry.name}${"argument" in entry ? ` ${entry.argument}` : ""}  ${entry.description}`).join("\n") };
-    default: throw new ClientError("unknown_slash", "Unknown shared slash command. Use /help.");
+    case "help": {
+      const skills = (await sdk.commands.list(sessionId)).filter((entry) => entry.kind === "skill");
+      return { kind: "text", text: [...slashCommands.map((entry) => `/${entry.name}${"argument" in entry ? ` ${entry.argument}` : ""}  ${entry.description}`),
+        ...skills.map((entry) => `/${entry.name}  Skill / ${entry.skill.sourceName}: ${entry.description}`)].join("\n") };
+    }
+    default: {
+      const matches = (await sdk.commands.list(sessionId)).filter((entry) => entry.kind === "skill" && entry.name === command.name);
+      if (matches.length !== 1 || matches[0]?.kind !== "skill") throw new ClientError("unknown_slash", matches.length > 1 ? "Multiple skills share this name. Select its exact source from the slash list." : "Unknown shared slash command. Use /help.");
+      const selected = matches[0].skill;
+      await sdk.skills.use(sessionId, selected.id, selected.digest, session.draft.revision, command.argument);
+      return { kind: "ok", message: `Skill ${selected.name} added to this draft as untrusted guidance. No model or permission was started.` };
+    }
   }
 }

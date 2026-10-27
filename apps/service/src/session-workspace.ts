@@ -319,6 +319,7 @@ export class SessionWorkspace {
         return this.host.mode(session, command.mode, finish);
       }
       case "session.spawn": return this.host.spawn(this.session(command.sessionId), command.kind, command.title, finish);
+      case "session.side.prompt": throw new MoguriError("side_prompt_authority", "Side prompt admission needs the owning control plane's atomic source/draft transaction. No client-only send was substituted.", 409);
       case "session.side": {
         const parent = this.session(command.sessionId);
         const existing = this.snapshot().sessions.findLast((session) => session.parentSessionId === parent.id && session.createdParentSessionId === parent.id &&

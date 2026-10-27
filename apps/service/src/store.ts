@@ -128,6 +128,9 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version < 68 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='composer_workflows_schema'").get()) {
+        throw new Error("Invalid pre-68 composer workflow lineage marker. State was preserved.");
+      }
       if (version < 67 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='side_context_schema'").get()) {
         throw new Error("Invalid pre-67 side context lineage marker. State was preserved.");
       }
@@ -374,6 +377,17 @@ export class EventStore {
       }
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='side_context_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid side context schema marker. State was preserved.");
+      }
+      if (version < 68) {
+        if (this.events().some((event) => (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && event.payload.item.sidePromptOrigin !== undefined)) {
+          throw new Error("Composer side prompt history cannot be relabelled without its original schema marker. State was preserved.");
+        }
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('composer_workflows_schema','1');
+          PRAGMA user_version=68; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='composer_workflows_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid composer workflow schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }

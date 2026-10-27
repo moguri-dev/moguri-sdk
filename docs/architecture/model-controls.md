@@ -4,6 +4,45 @@ This user-requested slice preserves the dark Operate interface and one shared
 SDK/service authority. It replaces redundant composer rows with labeled icon
 controls and progressive disclosure, not new client-only execution behavior.
 
+## Cascading menus and complete slash discovery
+
+The owner supplies reference screenshots for a compact Model/Effort/Context
+window menu and side submenus. Reuse React/Electron/native popovers (MIT),
+existing icons/tooltips, pi-ai option/size primitives (MIT), browser-safe SDK
+and Node/component notices. No new dependency or metadata/inference call is
+introduced by model selection. Kupo stays an ordinary synthetic model choice;
+an unavailable entry has a separate focusable explanation tooltip. Only actual
+qualified working windows/efforts are selectable, pending saves and failures
+remain owned by the composer, and private model evidence reads stay explicit.
+
+Slash discovery is scrollable and complete: built-in commands first, followed
+by explicitly enabled installed/configured skills in the current profile/
+session. Source discovery stays off unless configured; fresh gateway pages
+bind one exact catalog digest. Selecting a skill loads its reviewed digest as
+untrusted user-selected guidance, not a permission or an automatic paid turn.
+Source errors remain visible while built-ins remain usable.
+
+Protocol 68 adds atomic `/side PROMPT` admission and fresh gateway-skill loading
+through existing command/event paths. A side send binds the original parent
+and exact source draft revision when consumed, preserves an existing side
+draft, creates/reuses only its original read-only side and atomically enqueues
+the exact prompt/source grants before opening that panel. Failure, cancellation,
+restart and lost receipts never infer a send, model success or a second call.
+Normal parent/side model, Env, permission, context and budget gates remain final.
+The schema upgrade preserves encrypted history, grants, receipts and accounting;
+new side queue items retain exact command-origin digests so missing receipts
+cannot replay an admitted question. No old state is rewritten or deleted.
+
+Before feature edits the generated macOS arm64/Node 26 baseline passes
+OAuth/streaming in 1,083.68 ms (30.76 ms cancellation), SQLite in 63.95 ms
+(append p95 0.057 ms), PTY in 159.27 ms (152.12 ms cancellation, zero survivors),
+OpenTUI in 1,038.00 ms, hidden Electron in 558.50 ms (8.28 ms scroll frames),
+and filesystem/Git in 90.86 ms. Physical/live-provider, Rust/Linux, SendBox,
+quality, signed/notarized release and full-milestone gates remain explicitly
+FAIL/unavailable. Generated source and native tests must cover actual selection,
+keyboard/submenu bounds, unavailable tooltips, save failure, full slash ordering,
+source drift, atomic side routing, draft isolation and restart without replay.
+
 ## Reuse and Phase 0
 
 Reuse React/native popovers, existing SVG icons and the maintained pi-ai

@@ -1185,6 +1185,43 @@ export class ControlPlane extends EventEmitter {
       prUrl: parent.prUrl, workItemId: parent.workItemId,
     } }, ...coordination], { id });
   }
+  private askSide(command: Extract<CommandEnvelope["command"], { type: "session.side.prompt" }>, finish: WorkspaceFinish): CommandResult {
+    const source = this.session(command.sessionId), text = command.prompt;
+    const intent = finish.intent;
+    if (!intent) throw new MoguriError("side_prompt_intent", "The side question has no original command identity. No model was started.", 409);
+    const previous = this.history.find((event) => event.event_type === "queue.enqueued" && event.payload.item.id === intent.id);
+    if (previous?.event_type === "queue.enqueued") {
+      if (previous.payload.item.sidePromptOrigin?.sessionId !== source.id || previous.payload.item.sidePromptOrigin.commandDigest !== intent.digest) throw new MoguriError("idempotency_conflict", "This side command ID has different original inputs. No question was replayed.", 409);
+      const previousId = previous.session_id;
+      if (!previousId || !this.projection.sessions.some((session) => session.id === previousId)) throw new MoguriError("side_prompt_deleted", "The original side destination was deleted. Its missing receipt cannot authorize another question.", 409);
+      return finish([], { id: previousId });
+    }
+    if (!text.trim() || !text.isWellFormed()) throw new MoguriError("side_prompt", "Write a lossless non-empty side question. No prompt or source was replaced.");
+    if (source.status === "archived") throw new MoguriError("archived", "Restore the original session before opening its side question.");
+    const consume = command.expectedDraftRevision !== undefined;
+    if (consume) {
+      this.revision(source.draft.revision, command.expectedDraftRevision!);
+      if (source.draft.text.trim().match(/^\/side\s+([\s\S]*)$/)?.[1] !== text) throw new MoguriError("side_prompt_draft", "The exact /side draft changed. No unrelated prompt or attachment was consumed.", 409);
+      this.platform.inputs.assertDraftReady(source.id);
+    }
+    const attachments = consume ? source.draft.attachments : [];
+    this.attachments(source, attachments);
+    const existing = source.kind === "side" ? source : this.projection.sessions.findLast((session) => session.parentSessionId === source.id &&
+      session.createdParentSessionId === source.id && session.kind === "side" && session.status !== "archived");
+    const destination = existing ?? source;
+    this.assertOrdinaryTurn(destination); this.available(destination.controls, true, destination);
+    this.imageModel(destination, attachments); this.fileModel(destination, attachments, text);
+    if (existing && (existing.queue.length >= 100 || this.blocked(existing))) throw new MoguriError("side_prompt_blocked", "The original side queue is full or needs explicit recovery. Its draft and this main prompt were preserved.", 409);
+    const item = { id: intent.id, text, attachments, delivery: "queue" as const, sidePromptOrigin: { sessionId: source.id, commandDigest: intent.digest } };
+    const enqueue: WorkspaceFinish = (events, result = {}) => {
+      const id = existing?.id ?? result.id;
+      if (!id) throw new MoguriError("side_prompt_owner", "The original side owner was not acknowledged. No prompt was dispatched.", 409);
+      return finish([...events, { event_type: "queue.enqueued", profile_id: this.profileId, project_id: source.projectId, session_id: id, payload: { item } },
+        ...(consume ? [this.event(source, "draft.saved", { text: "", attachments: [] })] : [])], { id });
+    };
+    const result = existing ? enqueue([], { id: existing.id }) : this.spawnUser(source, "side", undefined, enqueue);
+    this.paused.delete(result.id!); this.pumpAll(); return result;
+  }
   private descendants(id: string): Session[] {
     const values = [this.session(id)];
     for (let index = 0; index < values.length; index++) {
@@ -2019,6 +2056,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "session.delete" && !this.projection.sessions.some((session) => session.id === command.sessionId) &&
       this.candidateCleanup.sessionDeleted(command.sessionId)) return finish([], { id: command.sessionId });
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
+    if (command.type === "session.side.prompt") return this.askSide(command, finish);
     if (isKanbanCommand(command)) return this.projectWork.execute(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);

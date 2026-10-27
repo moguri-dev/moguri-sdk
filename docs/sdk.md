@@ -5,7 +5,8 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **67**, including
+Current source uses protocol **68**, including
+[cascading model controls and complete slash discovery](architecture/model-controls.md#cascading-menus-and-complete-slash-discovery),
 [per-question refreshed side context](architecture/session-reliability.md#per-question-side-context),
 [saved turn, cache and live usage telemetry](architecture/chat-activity.md#retained-telemetry-follow-up-contract),
 [session reliability, streaming dictation and shared controls](architecture/session-reliability.md),
@@ -146,6 +147,20 @@ full input/window/budget admission. Private roles, unsent drafts and held main
 queues are excluded; no paid retry, truncation or alternate parent is used.
 The same behavior applies to SDK, TUI and desktop callers. Protocol/schema 67
 adds its atomic metadata marker without rewriting legacy captures or receipts.
+
+`sessions.askSide(parentId, prompt, expectedDraftRevision?)` atomically reuses or
+creates that read-only side and enqueues the original question without replacing
+its saved draft. When a main `/side ...` draft is consumed, the exact revision,
+prompt and attachments are bound in the same transaction. Retained queue command
+origin prevents a lost receipt from replaying admitted work. The slash result
+opens the side panel; ordinary model/budget/Env/permission gates still apply.
+
+`commands.list(sessionId, signal?)` returns complete `SlashSuggestion` values,
+built-ins before fresh enabled gateway skills, paging one exact catalog digest.
+`skills.use(sessionId, id, digest, expectedDraftRevision, replacementText?)`
+loads only the exact fresh source and retains actual-user `skill.used` provenance
+and encrypted grants. It is guidance, never a tool permission or paid call.
+Installed and configured skills share the same bounded selection path.
 
 Desktop dictation uses `voice.startCapture(sessionId, id?, { streaming: true })`,
 ordered `appendCapture(..., sequence, pcmBytes)`, volatile
@@ -460,6 +475,11 @@ their original encryption and identities. Local project names are safe unique
 identifiers; normalization never renames filesystem directories.
 
 ### Retained-state upgrades
+
+Protocol/database 68 requires `composer_workflows_schema` and exact retained
+side-prompt command origin. Marker/version insertion is atomic; failure leaves
+the old state reopenable, current corruption is not repaired, and original
+ciphertext, grants, receipts and accounting are unchanged.
 
 Protocol/database 67 atomically adds `side_context_schema` and rejects missing,
 corrupt or prematurely relabelled markers. Older ciphertext, receipts, creation

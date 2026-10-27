@@ -91,6 +91,7 @@ import { ChatActivity } from "./chat-activity.ts";
 import { isActivityQuery } from "../../../packages/protocol/src/activity.ts";
 import { cloneProject, prepareProjectClone } from "./project-clone.ts";
 import { SkillGateway, type SkillGatewayOptions } from "./skill-gateway.ts";
+import { selectedSkillEvents } from "./skill-selection.ts";
 import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gateway.ts";
 import { dashboardOverview } from "./dashboard.ts";
 
@@ -1129,7 +1130,17 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }
     if (isGithubCommand(command)) return this.github.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
-    if (isExtensionCommand(command)) return this.extensions.execute(command, finish);
+    if (isExtensionCommand(command)) {
+      if (command.type === "skill.use" && !this.snapshot().registry.some((entry) => entry.id === command.capabilityId)) {
+        const startedAt = new Date().toISOString(), start = performance.now();
+        const selected = await this.skills.query({ type: "skills.read", sessionId: command.sessionId, skillId: command.capabilityId, expectedDigest: command.expectedDigest });
+        if (selected.type !== "skills.read") throw new MoguriError("skill_response", "The exact selected skill changed response type. No guidance was substituted.", 409);
+        const session = this.session(command.sessionId);
+        return finish(selectedSkillEvents(this.store, session, { id: selected.skill.id, name: selected.skill.name, body: selected.body },
+          command.expectedDraftRevision, startedAt, start, command.replacementText), { revision: session.draft.revision + 1 });
+      }
+      return this.extensions.execute(command, finish);
+    }
     if (isKnowledgeCommand(command)) return this.knowledge.execute(command, finish);
     if (isDecisionCommand(command)) return this.host.decisionCommand(command, finish);
     if (isWinddownCommand(command)) return this.host.winddownCommand(command, finish);

@@ -5,6 +5,7 @@ import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, C
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
+import { listSlashCommands } from "./slash-catalog.ts";
 import { responseText, type ActivityCursor } from "../../protocol/src/activity.ts";
 import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../protocol/src/knowledge.ts";
 import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../protocol/src/extensions.ts";
@@ -20,6 +21,7 @@ export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
 export * from "./conversation.ts";
 export * from "./slash.ts";
+export * from "./slash-catalog.ts";
 export { ClientError };
 export { DraftEditor } from "../../client/src/draft.ts";
 export type { DraftDictation } from "../../client/src/draft.ts";
@@ -30,6 +32,7 @@ export const attachmentStatus = (attachment: Attachment): string => attachment.k
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
+  readonly commands = { list: (sessionId: string, signal?: AbortSignal) => listSlashCommands(this, sessionId, signal) };
   readonly browser = {
     state: (sessionId: string) => this.query({ type: "browser.state", sessionId }),
     host: {
@@ -141,6 +144,8 @@ export class MoguriSdk extends TransportClient {
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
     side: (sessionId: string) => this.command({ type: "session.side", sessionId }),
+    askSide: (sessionId: string, prompt: string, expectedDraftRevision?: number) => this.command({ type: "session.side.prompt", sessionId, prompt,
+      ...(expectedDraftRevision === undefined ? {} : { expectedDraftRevision }) }),
     createFolder: (projectFolderId: string, title?: string, overrides?: ControlDefaults) => {
       const snapshot = this.getState().snapshot;
       if (!snapshot?.projectFolders.some((folder) => folder.id === projectFolderId)) throw new ClientError("project_folder", "Choose an existing folder in this profile.");
@@ -287,6 +292,9 @@ export class MoguriSdk extends TransportClient {
     overview: (filters: Omit<DashboardQuery, "type"> = {}) => this.query({ type: "dashboard.overview", ...filters }),
   };
   readonly skills = {
+    use: (sessionId: string, skillId: string, expectedDigest: string, expectedDraftRevision: number, replacementText?: string) =>
+      this.command({ type: "skill.use", sessionId, capabilityId: skillId, expectedDigest, expectedDraftRevision,
+        ...(replacementText === undefined ? {} : { replacementText }) }),
     find: (query = "", options: { sessionId?: string; sourceId?: string; offset?: number; expectedCatalogDigest?: string; signal?: AbortSignal } = {}) => {
       const { signal, ...filters } = options;
       return this.query({ type: "skills.find", query, offset: 0, ...filters }, signal);

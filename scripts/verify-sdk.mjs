@@ -207,6 +207,11 @@ try {
       const source:import("moguri").SideContext|undefined=sdk.getState().snapshot?.sessions[0]?.sideContext;
       void source?.parentSessionId;void source?.throughSeq;void source?.contextDigest;void source?.documents[0]?.summary;
       ` : ""}
+      ${installedProtocol >= 68 ? `
+      const commands:import("moguri").SlashSuggestion[]=await sdk.commands.list("generated-id");
+      void commands[0]?.kind;await sdk.sessions.askSide("generated-id","Generated typed side question.",0);
+      await sdk.skills.use("generated-id","generated-skill","a".repeat(64),0,"Generated task.");
+      ` : ""}
       ${conversationNavigationAvailable ? `
       const points:import("moguri").ConversationNavigationEntry[]=(await import("moguri")).conversationNavigation(sdk.getState().snapshot!,"generated-id");
       void points[0]?.messageIndex;const answer=points.find(value=>value.kind==="answer");if(answer?.kind==="answer"){void answer.questionId;void answer.answer;}
@@ -1282,6 +1287,24 @@ try {
         try{assert.deepEqual(reopened.getState().snapshot.sessions.find(value=>value.id===side.id).sideContext,retained.sideContext);assert.ok(!sdk.getState().snapshot.sessions.some(value=>value.id===side.id));}
         finally{reopened.disconnect();}
         assert.equal(generatedRequests.length,before+4);
+        if(PROTOCOL_VERSION>=68){
+          const draft=beta.getState().snapshot.sessions.find(value=>value.id===side.id).draft;
+          await beta.command({type:"draft.save",sessionId:side.id,expectedRevision:draft.revision,text:"Generated installed side draft preserved.",attachments:[]});
+          await beta.sessions.askSide(parent.id,"Generated installed atomic slash side prompt.");
+          for(let n=0;n<400&&beta.getState().snapshot.sessions.find(value=>value.id===side.id).status!=="completed";n++)await new Promise(resolve=>setTimeout(resolve,20));
+          assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===side.id).draft.text,"Generated installed side draft preserved.");
+          assert.equal(generatedRequests.length,before+5);
+          const directory=join(root,"generated-installed-command-skills");await mkdir(directory);
+          await writeFile(join(directory,"SKILL.md"),"---\\nname: generated-installed-slash-skill\\ndescription: Generated installed command guidance\\n---\\nUse generated fixtures only.\\n");
+          const settings=beta.settings.get();await beta.settings.update({...settings.values,skillSources:[{id:"generated-installed-slashes",name:"Generated installed slash source",kind:"local",enabled:true,path:directory}]},settings.revision);
+          const catalog=await beta.commands.list(parent.id),skill=catalog.find(value=>value.kind==="skill");
+          assert.equal(catalog[0].kind,"builtin");assert.ok(skill);assert.ok(catalog.slice(catalog.findIndex(value=>value.kind==="skill")).every(value=>value.kind==="skill"));
+          const original=beta.getState().snapshot.sessions.find(value=>value.id===parent.id).draft;
+          await beta.skills.use(parent.id,skill.skill.id,skill.skill.digest,original.revision,"Generated installed skill task.");
+          assert.match(beta.getState().snapshot.sessions.find(value=>value.id===parent.id).draft.text,/Generated installed skill task/);
+          assert.equal(generatedRequests.length,before+5);
+          console.log("Installed protocol-68 SDK retains side-draft isolation and complete builtins-first fresh skill commands with actual selected-source grants and no additional model call.");
+        }
         console.log("Installed protocol-67 side questions refresh exact retained main history once per new turn, retain original side exchanges and read-only model controls across profile-owned reopen without extra model calls.");
       }
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;

@@ -59,7 +59,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 67;
+export const PROTOCOL_VERSION = 68;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -169,6 +169,7 @@ export interface QueueItem {
   mode?: SessionMode;
   origin?: CoordinationTaskOrigin;
   workflow?: { kind: WorkflowKind };
+  sidePromptOrigin?: { sessionId: string; commandDigest: string };
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; stepId?: string; outcome: string; env?: Controls["env"] }

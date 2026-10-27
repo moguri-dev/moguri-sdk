@@ -61,7 +61,8 @@ export const ExtensionCommandSchema = Type.Union([
   object({ type: Type.Literal("hook.import"), projectId: id, definition: HookDefinitionSchema }),
   object({ type: Type.Literal("marketplace.install"), input: MarketplaceInputSchema, expectedDigest: hash, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("capability.rollback"), capabilityId: id, expectedRevision: revision, contentDigest: hash, confirm: Type.Literal(true) }),
-  object({ type: Type.Literal("skill.use"), sessionId: id, capabilityId: id, expectedDigest: hash, expectedDraftRevision: revision }),
+  object({ type: Type.Literal("skill.use"), sessionId: id, capabilityId: id, expectedDigest: hash, expectedDraftRevision: revision,
+    replacementText: Type.Optional(Type.String({ maxLength: 128 * 1024 })) }),
 ]);
 export type ExtensionCommand = Static<typeof ExtensionCommandSchema>;
 export const isExtensionCommand = (value: unknown): value is ExtensionCommand => Value.Check(ExtensionCommandSchema, value);
