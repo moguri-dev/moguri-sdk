@@ -69,6 +69,63 @@ is used and no orphan icon across settings categories. Physical/live-provider,
 Rust/Linux, SendBox, quality, notarization and full-milestone exclusions remain
 unchanged.
 
+### Settings help alignment qualification
+
+Source `9c4862f` and `9f9e9e8` require every SettingsHelp caller to supply its
+actual title/control target. The original screenshot's heading offset
+reproduces at 3.4375 CSS pixels, with an update explanation on its own row.
+The final shared layout removes inherited button minima and margin/baseline
+heuristics. It measures **34 settings sections and 196 rendered explanations**
+at 1,280 and 860 pixels wide, with a **one-CSS-pixel maximum offset** against a
+strict two-pixel acceptance bound. Generated before/after screenshots were
+inspected. Clicking/focusing help cannot change its switch or native disclosure.
+
+A lossless JSX/attribute check verifies all **773 original controlled fields,
+actions and handlers across 34 components** remain unchanged. Actual state
+messages remain readable; static readiness instructions are not duplicate live
+regions. Ordinary non-settings explanations remain text. No runtime dependency,
+service/SDK API, protocol, schema, credential, permission or budget path changes.
+The existing protocol-69 native worker remains byte-identical.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Focused settings/domain checks | 26 passed in 5,103.28 ms |
+| Focused native settings/save/copy/notification/update checks | 17 passed in 27.2 seconds |
+| Final Remote/MCP/terminal/geometry regressions | 11 passed in 32.4 seconds |
+| Complete final hidden desktop suite | 234 passed, three existing skips, zero failures; 237 flows in 7.8 minutes |
+| Actual packaged-app settings/Remote/controlled-workflow flows | 47 passed in 2.0 minutes |
+| Independently installed packed SDK | All entrypoints, declarations and actual runtime checks pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source and independent-consumer audits | Zero vulnerabilities |
+| Production ZIP/manifest consumer | Pass; 779,823,858 bytes in 114,704.80 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+Earlier failed runs are not passing evidence. The final regression preserves
+Remote operation announcements as the one live status, locates consolidated
+SSH guidance by its actual heading and waits for the peer SDK's original
+terminal receipt instead of assuming renderer readiness updated every client.
+No deadline, ownership check, disclosure guard or test timeout was weakened.
+This UI-only slice does not relabel an earlier complete backend run as new.
+
+The retained worker is
+`docker.io/library/moguri-worker@sha256:6c253fd7d1e8af016c43155998a915501dc9145170e97cfadf5579e583c4df61`.
+The current local development installer is:
+
+```text
+release/Moguri-0.30.0-alpha.1-settings-info-69-macos-arm64.dmg
+794075713 bytes
+SHA-512:
+5fab86b662d823b1377a716fca295b2c0dc83023eeeeff5d3d1d2ddbfac5906b23707d599ceddede4c7c085645399c6f58d56eeac5f095844c334903fc7db203
+```
+
+The installer is ad-hoc-signed development output, not a notarized or uploaded
+release. No installed personal app, Finder, real microphone, personal login
+or paid inference was used. Experimental OpenTUI FFI, lazy Ghostty chunk,
+optional `.icon` and transitive deprecation notices remain non-blocking.
+Physical SendBox, external Linux, live-provider, quality and full-milestone
+exclusions remain unchanged. CI remains main-push-only, not a passing PR check.
+
 Settings / Confirmations also owns default-on child-session detachment review.
 The same review applies to drag-out, Detach and the parent selector's None
 choice. Remembering an opt-out saves only this profile's interactions preference;
