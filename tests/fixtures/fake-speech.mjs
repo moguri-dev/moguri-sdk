@@ -28,7 +28,18 @@ if (process.argv.includes("--unconfirmed-output")) {
 } else if (process.argv.includes("serve")) {
   const { createServer } = await import("node:http");
   const { WebSocketServer } = await import("ws");
-  const server = createServer((_, response) => response.end("{}")), sockets = new WebSocketServer({ noServer: true });
+  const server = createServer((request, response) => {
+    if (request.url === "/ready") {
+      response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ ready: true, device: argument("--backend"), capabilities: ["asr"] }));
+    } else if (request.url === "/v1/models") {
+      if (process.argv.includes("--reject-readiness")) { response.writeHead(401).end(); return; }
+      if (process.argv.includes("--redirect-readiness")) { response.writeHead(302, { Location: "https://generated-forbidden.invalid/models" }).end(); return; }
+      if (request.headers.authorization !== `Bearer ${process.env.NEMO_SPEECH_HTTP_API_KEY}`) { response.writeHead(401).end(); return; }
+      if (process.argv.includes("--oversized-readiness")) { response.writeHead(200).end("x".repeat(128 * 1024)); return; }
+      response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ object: "list",
+        data: process.argv.includes("--no-asr-readiness") ? [] : [{ id: "generated-local-recognizer", object: "model", owned_by: "local", capability: "transcription", device: argument("--backend") }] }));
+    } else response.writeHead(404).end();
+  }), sockets = new WebSocketServer({ noServer: true });
   server.on("upgrade", (request, socket, head) => {
     if (request.headers.authorization !== `Bearer ${process.env.NEMO_SPEECH_HTTP_API_KEY}`) { socket.destroy(); return; }
     sockets.handleUpgrade(request, socket, head, (connection) => {
@@ -55,10 +66,12 @@ if (process.argv.includes("--unconfirmed-output")) {
     });
   });
   const port = Number(argument("--port"));
-  server.listen(port, "127.0.0.1", () => {
+  const listen = () => server.listen(port, "127.0.0.1", () => {
     ready();
-    console.log(JSON.stringify({ event: "listener.ready", transport: "http", url: `http://127.0.0.1:${port}/`, capabilities: ["asr"] }));
+    if (!process.argv.includes("--buffered-ready")) console.log(JSON.stringify({ event: "listener.ready", transport: "http", url: `http://127.0.0.1:${port}/`, capabilities: ["asr"] }));
   });
+  if (process.argv.includes("--listener-delay")) setTimeout(listen, Number(argument("--listener-delay")));
+  else listen();
   process.on("SIGTERM", () => { for (const socket of sockets.clients) socket.terminate(); server.close(() => process.exit(0)); });
 } else if (live) {
   const hold = setInterval(() => {}, 1000);

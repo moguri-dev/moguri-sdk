@@ -991,6 +991,10 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (!isRecord(result) || result.source !== "local" || typeof result.text !== "string" || typeof result.revision !== "number" || !Number.isSafeInteger(result.revision)) throw new MoguriError("speech_result", "The original result is not a streamed local transcript.");
         return { id: request.id, accepted: true, text: result.text, revision: result.revision };
       }
+      if (!lease && job?.kind === "voice.capture" && job.sessionId === session.id && ["failed", "partial", "cancelled"].includes(job.status)) {
+        throw new MoguriError(job.status === "partial" ? "speech_partial" : "speech_capture_failed",
+          job.error ?? `The original local dictation ${job.status}. No audio or ASR work was replayed.`, 409);
+      }
       if (!lease || lease.sessionId !== session.id || ["upload", "append", "finish"].includes(request.action) && lease.consumed || job?.kind !== "voice.capture" || job.status !== "running") throw new MoguriError("speech_capture_owner", "This original client capture is missing, consumed or no longer running. No audio or ASR work was replayed.", 409);
       const supplied = Buffer.from(request.token), actual = Buffer.from(lease.token);
       if (supplied.length !== actual.length || !timingSafeEqual(supplied, actual)) throw new MoguriError("speech_capture_scope", "This audio does not own the original capture lease. No input was accepted.", 403);
@@ -1052,11 +1056,12 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         try {
           signal.throwIfAborted(); progress("Waiting for the explicitly selected client microphone. Raw audio is transient and never sent to a model.");
           if (stream) {
-            progress("Streaming local dictation. Recognized words appear in the owning composer; release to flush.");
+            progress("Preparing the local streaming model. Audio stays in the original bounded capture.");
             const recognition = await this.voice.stream(id, settings, signal, (text) => {
               if (!signal.aborted && stream.text !== text) { stream.text = text; stream.revision++; }
             });
             try {
+              progress("Streaming local dictation. Recognized words appear in the owning composer; release to flush.");
               for (;;) {
                 signal.throwIfAborted();
                 const frame = stream.frames.shift();
@@ -1077,9 +1082,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
           clearTimeout(deadline); signal.removeEventListener("abort", cancelled);
           for (const frame of stream?.frames ?? []) frame.fill(0);
           if (stream) stream.frames.length = 0;
-          this.voiceCaptures.delete(id);
         }
-      }, undefined, undefined, undefined, undefined, request.id);
+      }, () => this.voiceCaptures.delete(request.id), undefined, undefined, undefined, request.id);
     } catch (error) { this.voiceCaptures.delete(request.id); throw error; }
     return { id: request.id, token: lease.token, ...(request.streaming ? { streaming: true } : {}) };
   }

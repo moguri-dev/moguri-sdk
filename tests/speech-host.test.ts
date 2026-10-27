@@ -99,7 +99,7 @@ test("an actual control-plane SIGKILL reaps its generated realtime recognizer an
     assert.equal(jobs.length, 1); assert.equal(jobs[0]?.id, capture.id);
     assert.ok(jobs[0] && !["running", "waiting_input", "completed"].includes(jobs[0].status));
     assert.equal(jobs[0]?.resultDigest, null);
-    await assert.rejects(() => sdk!.voice.appendCapture(capture.sessionId, capture.id, capture.token, 2, new Uint8Array(6400)), /original|missing|running/i);
+    await assert.rejects(() => sdk!.voice.appendCapture(capture.sessionId, capture.id, capture.token, 2, new Uint8Array(6400)), { message: jobs[0]!.error! });
     assert.equal(await readFile(marker, "utf8"), originalMarker);
     assert.equal(alive(nativePid), false);
     assert.equal(provider.requests.length, 0);

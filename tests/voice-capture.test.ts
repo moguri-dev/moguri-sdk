@@ -60,6 +60,20 @@ test("the original capture can be cancelled after its client disconnects without
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("failed recognition remains the original owned capture error rather than a misleading missing lease", async () => {
+  const { fixture, sdk } = await captureFixture(["--fail-with-diagnostic"]);
+  try {
+    const lease = await sdk.voice.startCapture(fixture.sessionId, undefined, { streaming: true });
+    const result = await sdk.jobs.wait(lease.id);
+    assert.equal(result.status, "failed"); assert.match(result.error!, /Generated recognizer could not initialize/);
+    await assert.rejects(() => sdk.voice.readCapture(fixture.sessionId, lease.id, lease.token), { message: result.error! });
+    await assert.rejects(() => sdk.voice.appendCapture(fixture.sessionId, lease.id, lease.token, 1, new Uint8Array(6400)), { message: result.error! });
+    const other = await sdk.sessions.create(null);
+    await assert.rejects(() => sdk.voice.readCapture(other.id!, lease.id, lease.token), /original.*capture/i);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
 test("streamed client capture returns partial text before release and commits one exact final transcript without retaining PCM", async () => {
   const { fixture, sdk } = await captureFixture();
   try {

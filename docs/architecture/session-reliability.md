@@ -112,6 +112,47 @@ the terminal job event arrives before the HTTP reply. There is no Insert step
 or automatic prompt submission for live desktop dictation. Legacy SDK batch
 uploads and explicitly reviewed file/native transcripts remain separate.
 
+### Native listener readiness and capture finalization
+
+The microphone remains a microphone while recording, including Ctrl+Space and
+configured pointer/keyboard push-to-talk. Its pressed/recording state reflects
+the owning capture; the icon does not disappear into a stop-square glyph.
+Release still flushes the same bounded input, never another capture or a chat
+submission.
+
+The pinned NeMo-Speech.cpp 0.2.0 `serve` implementation prints `listener.ready`
+with unflushed C stdout before entering its listener. A pipe may retain that
+line while the authenticated server is already ready. Readiness must therefore
+use a bounded, authenticated `GET /v1/models` on the exact owned loopback
+listener and require its transcription capability. Startup output remains
+bounded diagnostic/protocol data, not the sole readiness acknowledgement.
+Never scan hosts, use a public/cloud endpoint, replay audio, download weights,
+change the selected backend or merely raise the existing sixty-second startup
+bound to hide this mismatch.
+The pinned source is commit
+`47f43763bb40ec463150dd8d9a788c54f3728bdb`:
+[listener output](https://github.com/NVIDIA/NeMo-Speech.cpp/blob/47f43763bb40ec463150dd8d9a788c54f3728bdb/app/serve.cpp#L672-L681)
+and [authenticated model inventory](https://github.com/NVIDIA/NeMo-Speech.cpp/blob/47f43763bb40ec463150dd8d9a788c54f3728bdb/server/http/http_server.cpp#L447-L466).
+
+Keep the original capture's terminal error instead of replacing it with a
+generic missing-lease error. Foreign session/nonce checks and no-replay
+refusals remain authoritative. Release stops progress polling; an already
+in-flight poll cannot cancel finalization or replace its actual final receipt.
+Service progress distinguishes cold model preparation from ready streaming.
+The client final wait covers the original service recording/flush deadline,
+not an assumed already-warm recognizer.
+
+Reuse Node process/HTTP/timer primitives and ws under their existing MIT
+notices, and the pinned Apache-2.0 native runtime with separately accepted
+OpenMDW model terms. Add no dependency, model download, audio retention or new
+durable event/field. Protocol 71 uses a metadata-only upgrade so an existing
+healthy protocol-70 service cannot retain the old broken startup behavior;
+encrypted rows, grants, receipts, budgets, models and preferences stay intact.
+Generated tests must include actual native buffered stdout, delayed listener
+readiness, authentication/capability failures, cancellation/process teardown,
+terminal-error ordering, held final replies, migration/restart and mic state
+in the real hidden composer. No personal microphone or real weights are used.
+
 `sessions.side` atomically opens an existing original side chat or creates one
 with complete effective parent context and inherited controls. Both chat surfaces
 use the same composer, model/window/effort controls, activity Markdown, voice

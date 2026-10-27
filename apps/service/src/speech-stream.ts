@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { stripVTControlCharacters } from "node:util";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import WebSocket from "ws";
 import { isRecord, MoguriError } from "../../../packages/protocol/src/core.ts";
 import { MAX_SPEECH_SAMPLES } from "../../../packages/protocol/src/audio.ts";
@@ -16,6 +17,28 @@ export interface SpeechStream {
   append(bytes: Uint8Array): Promise<void>;
   finish(): Promise<{ text: string }>;
   cancel(): Promise<void>;
+}
+
+async function verifyListener(response: Response, signal: AbortSignal): Promise<void> {
+  if (!response.body) throw new MoguriError("speech_protocol", "The private recognizer returned no authenticated model inventory.");
+  const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      const part = await reader.read(); if (part.done) break;
+      bytes += part.value.byteLength;
+      if (bytes > 64 * 1024) { await reader.cancel(); throw new MoguriError("speech_protocol", "The private recognizer exceeded its bounded model inventory."); }
+      chunks.push(part.value);
+    }
+  } finally { reader.releaseLock(); }
+  let inventory: unknown;
+  try { inventory = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))); }
+  catch { throw new MoguriError("speech_protocol", "The private recognizer returned malformed authenticated model metadata."); }
+  if (!isRecord(inventory) || inventory.object !== "list" || !Array.isArray(inventory.data) || inventory.data.length > 64 ||
+    !inventory.data.some((model) => isRecord(model) && typeof model.id === "string" && model.id.length > 0 && model.id.length <= 512 && model.capability === "transcription")) {
+    throw new MoguriError("speech_protocol", "The exact authenticated listener has no ready transcription model. No other recognizer was selected.");
+  }
 }
 
 export async function startSpeechServer(executable: string, prefix: string[], model: string, backend: string, signal: AbortSignal, own?: (server: SpeechServer) => void): Promise<SpeechServer> {
@@ -70,16 +93,43 @@ export async function startSpeechServer(executable: string, prefix: string[], mo
         if (event.transport !== "http" || event.url !== `${origin}/` || !Array.isArray(event.capabilities) || !event.capabilities.includes("asr")) {
           ready.reject(new MoguriError("speech_protocol", "The recognizer did not confirm the exact owned loopback ASR listener. No other endpoint was used.")); continue;
         }
-        ready.resolve(owner);
       }
     }
   });
   const abort = () => ready.reject(signal.reason ?? new DOMException("Streaming recognition cancelled.", "AbortError"));
   signal.addEventListener("abort", abort, { once: true });
   const deadline = setTimeout(() => ready.reject(new MoguriError("speech_timeout", `The local streaming model did not become ready within sixty seconds.${detail() ? ` ${detail()}` : ""}`)), 60_000);
+  // The pinned native runtime can buffer its readiness line while HTTP is already serving.
+  const probing = new AbortController(), probeSignal = AbortSignal.any([signal, probing.signal]);
+  const probe = (async () => {
+    for (;;) {
+      probeSignal.throwIfAborted();
+      const requestSignal = AbortSignal.any([probeSignal, AbortSignal.timeout(1000)]);
+      let response: Response;
+      try {
+        response = await fetch(`${origin}/v1/models`, { headers: { Authorization: `Bearer ${key}` }, redirect: "error", signal: requestSignal });
+      } catch (error) {
+        probeSignal.throwIfAborted();
+        if (!(error instanceof TypeError && isRecord(error.cause) && error.cause.code === "ECONNREFUSED") &&
+          !(error instanceof Error && error.name === "TimeoutError")) {
+          throw new MoguriError("speech_listener", "The exact private recognizer could not acknowledge its authenticated readiness. No endpoint was substituted.");
+        }
+        await delay(100, undefined, { signal: probeSignal }); continue;
+      }
+      if (response.status === 503) { await response.body?.cancel(); await delay(100, undefined, { signal: probeSignal }); continue; }
+      if (response.status !== 200) {
+        await response.body?.cancel();
+        throw new MoguriError("speech_listener", `The exact private recognizer readiness returned HTTP ${response.status}. No different credential or endpoint was used.`);
+      }
+      await verifyListener(response, requestSignal);
+      probeSignal.throwIfAborted();
+      if (owner.closed) throw new MoguriError("speech_server", "The original recognizer stopped before readiness was acknowledged.");
+      ready.resolve(owner); return;
+    }
+  })().catch((error: unknown) => { if (!probing.signal.aborted) ready.reject(error); });
   try { signal.throwIfAborted(); return await ready.promise; }
   catch (error) { await close(); throw error; }
-  finally { clearTimeout(deadline); signal.removeEventListener("abort", abort); }
+  finally { clearTimeout(deadline); signal.removeEventListener("abort", abort); probing.abort(); await probe; }
 }
 
 export async function openSpeechStream(server: SpeechServer, language: string, signal: AbortSignal, changed: (text: string) => void): Promise<SpeechStream> {

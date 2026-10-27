@@ -683,6 +683,43 @@ try {
       await sdk.sessions.delete(opened.id,true);
       console.log("Installed protocol-65 typed root scopes, actual selected-root SDK edits, whole-tool grants, immediate read-only sides, private speech host and stream ownership gates pass without inference or audio capture.");
       }` : ""}
+      ${installedProtocol >= 71 ? `
+      {
+        const speechBytes=Buffer.from("Generated installed buffered-readiness recognizer weights.");
+        const speechState=join(root,"generated-installed-speech");
+        const speechProvider=()=>({state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>{},cancel:async()=>{},logout:async()=>{},
+          login:()=>{throw new Error("Generated speech probe forbids personal login");},prepare:async()=>{throw new Error("Generated speech probe forbids inference");}});
+        const speechOptions=(args=[])=>({stateDir:speechState,retentionKey:Buffer.alloc(32,0x68),provider:speechProvider(),platform:{speech:{
+          executable:process.execPath,prefixArgs:[${JSON.stringify(resolve("tests/fixtures/fake-speech.mjs"))},...args],
+          model:{id:"generated-installed-speech",revision:"generated",filename:"generated-installed-speech.gguf",bytes:speechBytes.length,
+            sha256:createHash("sha256").update(speechBytes).digest("hex"),license:"Generated fixture only"},fetch:async()=>new Response(speechBytes)}}});
+        let speechRuntime=await createRuntime(speechOptions(["--buffered-ready","--listener-delay","200"]));
+        let speechSdk=await connectMoguri({stateDir:speechState,autoStart:false});
+        try{
+          const owner=await speechSdk.sessions.create(null,"Generated installed speech owner");
+          await speechSdk.jobs.wait((await speechSdk.voice.download(true)).id);
+          const lease=await speechSdk.voice.startCapture(owner.id,undefined,{streaming:true});
+          const pcm=new Uint8Array(6400).fill(1);
+          await speechSdk.voice.appendCapture(owner.id,lease.id,lease.token,1,pcm);
+          await speechSdk.voice.finishCapture(owner.id,lease.id,lease.token,1);
+          assert.equal((await speechSdk.jobs.wait(lease.id)).status,"completed");
+          assert.equal(await speechSdk.voice.transcript(owner.id,lease.id),"Generated local dictation.");
+          const retained=JSON.stringify(speechSdk.getState().events);
+          assert.ok(!retained.includes(lease.token));assert.ok(!retained.includes(Buffer.from(pcm).toString("base64")));
+          assert.equal(speechSdk.getState().snapshot.budgetEntries.length,0);
+          speechSdk.disconnect();await speechRuntime.close();
+          speechRuntime=await createRuntime(speechOptions(["--fail-with-diagnostic"]));
+          speechSdk=await connectMoguri({stateDir:speechState,autoStart:false});
+          assert.equal(await speechSdk.voice.transcript(owner.id,lease.id),"Generated local dictation.");
+          const failedLease=await speechSdk.voice.startCapture(owner.id,undefined,{streaming:true});
+          const failed=await speechSdk.jobs.wait(failedLease.id);
+          assert.equal(failed.status,"failed");assert.match(failed.error,/Generated recognizer could not initialize/);
+          await assert.rejects(()=>speechSdk.voice.readCapture(owner.id,failedLease.id,failedLease.token),{message:failed.error});
+          await assert.rejects(()=>speechSdk.voice.startCapture(owner.id,lease.id,{streaming:true}),/already exists|identity/i);
+          console.log("Installed protocol-71 service/SDK uses delayed authenticated readiness without a stdout event, retains the exact final transcript across restart, preserves original capture errors and never replays PCM or inference.");
+        }finally{speechSdk.disconnect();await speechRuntime.close();}
+      }
+      ` : ""}
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);

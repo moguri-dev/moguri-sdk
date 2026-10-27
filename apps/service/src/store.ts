@@ -404,6 +404,7 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_preferences_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid model preference schema marker. State was preserved.");
       }
+      if (version < 71) this.db.exec("PRAGMA user_version=71;");
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {

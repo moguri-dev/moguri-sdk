@@ -49,7 +49,8 @@ test("restart removes only recognized private staged clips and never reattaches 
     restarted = await startService({ stateDir: directory, provider: fixture.provider, retentionKey: fixture.retentionKey, platform: fixture.platform });
     current = await new MoguriSdk(restarted.connection).ready();
     assert.deepEqual(await readdir(spool), []);
-    await assert.rejects(() => current!.voice.uploadCapture(fixture.sessionId, capture.id, capture.token, encodeSpeechWav(new Float32Array(160))), /original.*capture/i);
+    const original = restarted.controller.snapshot().jobs.find((job) => job.id === capture.id)!;
+    await assert.rejects(() => current!.voice.uploadCapture(fixture.sessionId, capture.id, capture.token, encodeSpeechWav(new Float32Array(160))), { message: original.error! });
     await assert.rejects(() => current!.voice.startCapture(fixture.sessionId, capture.id), /already exists|identity/i);
     assert.equal(fixture.requests.length, 0);
   } finally { current?.disconnect(); fixture.sdk.disconnect(); await restarted?.close(); await fixture.close(); }
