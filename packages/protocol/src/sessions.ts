@@ -19,6 +19,31 @@ const nullableId = Type.Union([id, Type.Null()]);
 export const SessionModeSchema = Type.Union([Type.Literal("agent"), Type.Literal("read-only")]);
 export type SessionMode = Static<typeof SessionModeSchema>;
 export type SessionKind = "agent" | "side" | "subagent" | "metachat";
+export const SessionChildrenActionSchema = Type.Union([Type.Literal("archive"), Type.Literal("delete"), Type.Literal("detach")]);
+export type SessionChildrenAction = Static<typeof SessionChildrenActionSchema>;
+export const SessionChildrenReviewSchema = object({
+  action: SessionChildrenActionSchema,
+  expected: Type.Array(object({ sessionId: id, parentSessionId: id }), { maxItems: 1000 }),
+});
+export type SessionChildrenReview = Static<typeof SessionChildrenReviewSchema>;
+export interface SessionTreeNode { id: string; parentSessionId?: string }
+export function sessionSubtree<T extends SessionTreeNode>(sessions: readonly T[], sessionId: string): T[] {
+  const root = sessions.find((session) => session.id === sessionId);
+  if (!root) return [];
+  const result = [root], visited = new Set([root.id]);
+  for (let index = 0; index < result.length; index++) {
+    for (const child of sessions) if (child.parentSessionId === result[index]!.id && !visited.has(child.id)) {
+      visited.add(child.id); result.push(child);
+    }
+  }
+  return result;
+}
+export function sessionChildBindings<T extends SessionTreeNode>(sessions: readonly T[], sessionId: string): SessionChildrenReview["expected"] {
+  return sessionSubtree(sessions, sessionId).slice(1).map((session) => {
+    if (!session.parentSessionId) throw new Error("An attached child session must retain its parent identity.");
+    return { sessionId: session.id, parentSessionId: session.parentSessionId };
+  }).sort((a, b) => a.sessionId.localeCompare(b.sessionId));
+}
 export const ProjectSettingsSchema = object({
   repo: object({
     upstream: Type.String({ minLength: 1, maxLength: 100 }), mainBranch: Type.String({ minLength: 1, maxLength: 200 }),
@@ -104,7 +129,7 @@ export const SessionWorkspaceCommandSchema = Type.Union([
     expectedDraftRevision: Type.Optional(revision) }),
   object({ type: Type.Literal("session.from-work"), projectId: id, workspaceId: Type.Optional(id), issueId: Type.Optional(id),
     prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })), github: Type.Optional(GithubSessionSourceSchema) }),
-  object({ type: Type.Literal("session.delete"), sessionId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("session.delete"), sessionId: id, expectedRevision: revision, confirm: Type.Literal(true), children: Type.Optional(SessionChildrenReviewSchema) }),
   object({ type: Type.Literal("queue.release"), sessionId: id, messageId: id, expectedRevision: revision }),
   object({ type: Type.Literal("project.organize"), projectId: id, expectedRevision: revision, folderId: nullableId, color: Type.String({ pattern: "^#[a-fA-F0-9]{6}$" }), order: Type.Integer({ minimum: 0 }) }),
   object({ type: Type.Literal("project.reorder"), folderId: nullableId, projects: Type.Array(object({ projectId: id, revision }), { minItems: 1, maxItems: 1000 }) }),

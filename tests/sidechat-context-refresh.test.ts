@@ -3,7 +3,7 @@ import test from "node:test";
 import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import sharp from "sharp";
-import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
+import { DraftEditor, MoguriSdk, sessionChildBindings } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { generatedDocx } from "./fixtures/documents.ts";
@@ -105,7 +105,9 @@ test("later main paste-file grants are independently retained by the exact side 
     assert.deepEqual(fixture.service.controller.platform.inputs.admittedFiles(side.id!), [file]);
     assert.deepEqual(fixture.service.controller.platform.inputs.admittedDocuments(side.id!), [document]);
     assert.ok(fixture.service.store.db.prepare("SELECT scope FROM blob_payloads WHERE digest=? AND scope LIKE ?").get(file.digest, `%/session/${side.id}`));
-    await sdk.sessions.delete(fixture.sessionId, true);
+    await sdk.sessions.delete(fixture.sessionId, true, fixture.session().revision, {
+      action: "detach", expected: sessionChildBindings(sdk.getState().snapshot!.sessions, fixture.sessionId),
+    });
     assert.equal(fixture.service.store.blob(file.digest), source);
     assert.equal(fixture.service.store.blob(saved.contextDigest), context);
     assert.deepEqual(fixture.service.controller.platform.inputs.admittedFiles(side.id!), [file]);

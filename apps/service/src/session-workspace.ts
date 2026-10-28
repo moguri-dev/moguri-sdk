@@ -4,7 +4,8 @@ import { basename, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import {
   MAX_TEXT, githubItemIdentity, MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
-  type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact,
+  type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact, type SessionChildrenReview,
+  sessionChildBindings, sessionSubtree,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
 import type { ForgetRequest } from "./store.ts";
@@ -28,7 +29,7 @@ export interface SessionWorkspaceHost {
   invalidate(sessionId?: string): void;
   mode(session: Session, mode: SessionMode, finish: WorkspaceFinish): CommandResult;
   spawn(session: Session, kind: "agent" | "side", title: string | undefined, finish: WorkspaceFinish): CommandResult;
-  deleteSession(session: Session, finish: WorkspaceFinish): Promise<CommandResult>;
+  deleteSession(session: Session, finish: WorkspaceFinish, children?: SessionChildrenReview, requireChildReview?: boolean): Promise<CommandResult>;
   removeProject(id: string, finish: WorkspaceFinish, artifacts?: ProjectArtifactChoice): Promise<CommandResult>;
   retainArtifact(session: Session, path: string, text: string): RetainedArtifact;
   job(kind: string, projectId: string, execute: (signal: AbortSignal) => Promise<unknown>): string;
@@ -103,17 +104,33 @@ export class SessionWorkspace {
       for (const session of this.snapshot().sessions) {
         const snapshot = this.snapshot(), current = snapshot.sessions.find((value) => value.id === session.id);
         if (current && canAutoArchive(snapshot, current, now)) {
-          this.host.commit([this.event(current, { profile_id: snapshot.profileId, event_type: "session.archived", payload: {} })]);
-          newlyArchived.add(current.id);
-          archived++;
+          const tree = sessionSubtree(snapshot.sessions, current.id), children = tree.slice(1);
+          const disposition = snapshot.settings.values.retention.archiveChildren;
+          if ((children.length > 0 && !disposition) || disposition === "detach" && children.some((child) => child.parentSessionId === current.id && child.kind === "subagent")) continue;
+          const targets = disposition === "archive" ? tree : [current];
+          const detach = disposition === "detach" ? children.filter((child) => child.parentSessionId === current.id)
+            .map((child) => this.event(child, { profile_id: snapshot.profileId, event_type: "session.organized", payload: { changes: { parentSessionId: null } } })) : [];
+          this.host.commit([...detach, ...targets.flatMap((target) => [
+            ...(target.queue.length ? [this.event(target, { profile_id: snapshot.profileId, event_type: "queue.held", payload: { messageIds: target.queue.map((item) => item.id) } })] : []),
+            this.event(target, { profile_id: snapshot.profileId, event_type: "session.archived", payload: {} }),
+          ])]);
+          for (const target of targets) newlyArchived.add(target.id);
+          archived += targets.length;
         }
       }
       for (const session of this.snapshot().sessions) {
-        const policy = this.snapshot().settings.values.retention;
+        const snapshot = this.snapshot(), current = snapshot.sessions.find((value) => value.id === session.id);
+        const policy = snapshot.settings.values.retention;
         if (!policy.deleteArchived) break;
-        if (newlyArchived.has(session.id) || session.status !== "archived" || !session.archivedAt || Date.parse(session.archivedAt) > now - policy.afterDays * 86400_000) continue;
-        await this.host.deleteSession(session, (events, result = {}, forget) => { this.host.commit(events, forget); return result; });
-        deleted++;
+        if (!current || newlyArchived.has(current.id) || current.status !== "archived" || !current.archivedAt ||
+          Date.parse(current.archivedAt) > now - policy.afterDays * 86400_000) continue;
+        const children = sessionSubtree(snapshot.sessions, current.id).slice(1), disposition = policy.deleteChildren;
+        if ((children.length > 0 && !disposition) || disposition === "detach" && children.some((child) => child.parentSessionId === current.id && child.kind === "subagent")) continue;
+        const review: SessionChildrenReview | undefined = children.length ? {
+          action: disposition!, expected: sessionChildBindings(snapshot.sessions, current.id),
+        } : undefined;
+        await this.host.deleteSession(current, (events, result = {}, forget) => { this.host.commit(events, forget); return result; }, review);
+        deleted += 1 + (review?.action === "delete" ? children.length : 0);
       }
       return { deleted, archived };
     } finally { this.cleaning = false; }
@@ -332,7 +349,7 @@ export class SessionWorkspace {
       }
       case "session.delete": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
-        return this.host.deleteSession(session, finish);
+        return this.host.deleteSession(session, finish, command.children, true);
       }
       case "session.from-work": {
         const project = this.project(command.projectId);

@@ -156,7 +156,7 @@ export class ChatActivity {
         question.turnId === operation.turnId && question.stepId === operation.stepId && question.callId === original.call.id && question.status === "open") : undefined;
       const output = unambiguous ? original.result : null;
       const entry: ActivityEntry = {
-        id: operation.id, sessionId: session.id, turnId: operation.turnId, stepId: operation.stepId, messageId: null,
+        id: operation.id, sessionId: session.id, turnId: operation.turnId, stepId: operation.stepId, messageId: unambiguous ? original.call.id : null,
         sequence: original?.first.seq ?? operation.sourceSeq, updatedSequence: Math.max(original?.updatedSequence ?? 0, operation.sourceSeq), source: "tool", actor: operation.actor, ...description,
         env: operation.env, ...(unambiguous ? { toolName: original.call.name } : {}),
         status: original?.ambiguous ? "unknown" : question ? "waiting_input" : operation.outcome,

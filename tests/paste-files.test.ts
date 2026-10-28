@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
+import { DraftEditor, MoguriSdk, sessionChildBindings } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { textFilePage } from "../apps/service/src/files.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
@@ -208,7 +208,9 @@ test("explicit child context copies retain their own scoped file grant after sou
     await fixture.send(text); await fixture.terminal();
     const file = fixture.session().messages.find((message) => message.role === "user")!.attachments![0]!;
     const side = await sdk.sessions.spawn(fixture.sessionId, "side", "Generated inherited file");
-    await sdk.sessions.delete(fixture.sessionId, true);
+    await sdk.sessions.delete(fixture.sessionId, true, fixture.session().revision, {
+      action: "detach", expected: sessionChildBindings(sdk.getState().snapshot!.sessions, fixture.sessionId),
+    });
     assert.deepEqual((await sdk.attachments.read(side.id!, file.id)).content, { kind: "text", text });
     assert.equal(fixture.service.controller.platform.inputs.scopedFile(side.id!, file.path).digest, file.digest);
     assert.equal(fixture.requests.length, 1);

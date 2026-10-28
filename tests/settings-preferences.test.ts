@@ -12,6 +12,8 @@ test("legacy nested settings normalize without changing explicit retention or en
   assert.equal(defaults.retention.afterDays, 7);
   assert.equal(defaults.retention.archiveCompleted, false);
   assert.equal(defaults.retention.archiveAfterDays, 7);
+  assert.equal(defaults.retention.archiveChildren, undefined);
+  assert.equal(defaults.retention.deleteChildren, undefined);
   const legacy = normalizeSettings({
     ...defaults, appearance: { theme: "light" }, voice: { language: "it-IT", backend: "cpu" },
     retention: { deleteArchived: true, afterDays: 91 }, permissions: { tools: [], commands: [] },
@@ -23,6 +25,8 @@ test("legacy nested settings normalize without changing explicit retention or en
   assert.equal(legacy.retention.afterDays, 91);
   assert.equal(legacy.retention.deleteArchived, true);
   assert.equal(legacy.retention.archiveCompleted, false);
+  assert.equal(legacy.retention.archiveChildren, undefined);
+  assert.equal(legacy.retention.deleteChildren, undefined);
   assert.equal(legacy.permissions.defaultDecision, "ask");
   assert.deepEqual(parse(SettingsSchema, legacy), legacy);
 });

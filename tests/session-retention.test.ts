@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { MoguriSdk } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, sessionChildBindings } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { writeLegacyState } from "./fixtures/legacy-state.ts";
 
@@ -107,7 +107,9 @@ test("deleting active work settles cancellation and detaches surviving user chil
     await fixture.send("generated slow deletion");
     await waitFor(() => fixture.requests.length === 1);
     await sdk.sessions.mode(fixture.sessionId, "read-only");
-    await sdk.sessions.delete(fixture.sessionId, true);
+    await sdk.sessions.delete(fixture.sessionId, true, fixture.session().revision, {
+      action: "detach", expected: sessionChildBindings(sdk.getState().snapshot!.sessions, fixture.sessionId),
+    });
     const snapshot = sdk.getState().snapshot!;
     assert.equal(snapshot.sessions.some((session) => session.id === fixture.sessionId), false);
     const survivingChild = snapshot.sessions.find((session) => session.id === child.id);

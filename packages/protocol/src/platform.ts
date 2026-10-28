@@ -162,6 +162,8 @@ export const SettingsSchema = object({
     deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }),
     archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
     confirmArchive: Type.Optional(Type.Boolean()), confirmDelete: Type.Optional(Type.Boolean()),
+    archiveChildren: Type.Optional(Type.Union([Type.Literal("archive"), Type.Literal("detach")])),
+    deleteChildren: Type.Optional(Type.Union([Type.Literal("delete"), Type.Literal("detach")])),
   }),
   artifacts: object({ retainAnswers: Type.Boolean() }),
   budgets: BudgetSettingsSchema,
