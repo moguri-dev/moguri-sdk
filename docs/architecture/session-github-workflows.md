@@ -78,6 +78,32 @@ Generated service and hidden desktop regressions compare successful issue
 listing with a held PR list across a real completed model turn, then verify
 real root, mode, permission and archival invalidation remains enforced.
 
+The protocol-74 follow-up passed types/build, **74 focused Node checks**,
+**seven hidden source-desktop flows** and **seven actual packaged-app flows**.
+The installed packed SDK passed its independent install/audit/runtime checks
+and all **12 actual worker continuation probes**. A separate exact regression
+ran the packaged Node 26.12.0, SDK and service runtime: one held PR-list request
+survived one real generated completed model turn, returned its complete original
+body/account, and sent no retry or live authenticated request.
+
+Source, external-consumer and no-cache workload audits found **zero
+vulnerabilities**. The protocol-74 immutable image is
+`docker.io/library/moguri-worker@sha256:0dff889f4ef2ed1c1fa10ad5fa26a37c98197a92e84ca40993f645414fdadb8f`.
+Its build preserved the tested compiled worker bytes. The **779,888,697-byte**
+ZIP passed the production update consumer in **114,088.94 ms**; private DMG
+layout/signature verification opened neither Finder nor the application.
+The byte-identical development installer is
+`release/Moguri-0.30.0-alpha.1-pr-list-74-macos-arm64.dmg`,
+**794,068,251 bytes**, SHA-512:
+
+```text
+8cf47c3677b137b473c1ee0a4f768ec1de790940e575a330ec6a028691aa724b5f35350785c7dfcd63375e55352516cdf6c960aea1ddac3ec932ace9bae71aac
+```
+
+These are focused bug-fix results, not a relabelled complete suite, live account,
+new VM/Linux qualification or notarized release. Existing FFI, lazy Ghostty
+chunk, optional `.icon` and upstream deprecation notices remain unchanged.
+
 Protocol/schema 61 preserves existing events and settings. Older grants
 are not inferred, and old autonomy selections are not silently upgraded into
 broader permission. New automatic approvals require the retained
