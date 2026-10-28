@@ -10,15 +10,26 @@ import { startService } from "../apps/service/src/server.ts";
 import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY } from "./fixture.ts";
 
-for (const schema of ["current", "automatic-61"] as const) test(`actual ${schema} controller SIGKILL during gate or selected-response approval never replays paid calls or proposed tools`, { skip: process.platform !== "darwin", timeout: 35_000 }, async () => {
+for (const schema of ["current", "automatic-61"] as const) test(`actual ${schema} controller SIGKILL during gate or selected-response approval never replays paid calls or proposed tools`, { skip: process.platform !== "darwin", timeout: 35_000 }, async (t) => {
   for (const phase of ["gate", "selected"] as const) {
     const child = fork(fileURLToPath(new URL("./fixtures/kupo-child.ts", import.meta.url)), [], { execArgv: ["--import", "tsx"], stdio: ["ignore", "pipe", "pipe", "ipc"] });
     const provider = await fixtureProvider({ responseMode: "text" });
     let errors = "", directory: string | undefined, service: Awaited<ReturnType<typeof startService>> | undefined, sdk: MoguriSdk | undefined;
+    const abort = () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); };
+    t.signal.addEventListener("abort", abort, { once: true });
     child.stderr?.on("data", (data) => { errors = (errors + data).slice(-8192); });
     try {
       const ready = new Promise<unknown>((resolve, reject) => {
-        child.once("message", resolve); child.once("error", reject);
+        child.on("message", (message: unknown) => {
+          if (isRecord(message) && message.stage === "created") {
+            if (typeof message.directory !== "string" || !basename(message.directory).startsWith("moguri-generated-")) {
+              reject(new Error("Generated Kupo controller reported an invalid temporary root.")); return;
+            }
+            directory = message.directory; return;
+          }
+          resolve(message);
+        });
+        child.once("error", reject);
         child.once("exit", () => reject(new Error(`Generated Kupo controller exited before the owned phase: ${errors}`)));
       });
       child.send({ phase }); const value = await ready;
@@ -54,6 +65,7 @@ for (const schema of ["current", "automatic-61"] as const) test(`actual ${schema
       assert.equal(await readFile(join(project, "fixture.txt"), "utf8"), "generated original\n");
       await assert.rejects(() => access(join(project, "unselected.txt")), { code: "ENOENT" });
     } finally {
+      t.signal.removeEventListener("abort", abort);
       sdk?.disconnect(); await service?.close(); await provider.close();
       if (child.exitCode === null && child.signalCode === null) { const exited = once(child, "exit"); child.kill("SIGKILL"); await exited; }
       if (directory) await rm(directory, { recursive: true, force: true });

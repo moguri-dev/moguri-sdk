@@ -1,6 +1,6 @@
 # Native operations and scoped website approvals
 
-Ordinary native file reads, searches, queries and edits should not prompt under
+Ordinary native file reads, searches, queries and edits run without prompts under
 the factory Manual/Guided policy. Arbitrary scripts and website access outside
 approved hosts still require actual approval or existing user delegation.
 Explicit Autopilot/Max retains automatic approval, never hard-policy overrides.
@@ -23,25 +23,29 @@ Agent-browser tools, not network confinement of approved Local scripts.
 Remote cannot inherit Local grants. Sandbox uses its actual enforced host
 scope; tool approval cannot broaden its firewall or select another transport.
 
-Exact bare DNS names permit default-port HTTPS.
-Exact HTTP(S) origins retain their scheme and port, including explicitly
-reviewed loopback preview origins. Credentials, paths, query/fragment tricks,
+Exact bare DNS names permit default-port HTTPS. Exact HTTPS origins retain
+their scheme and port; loopback HTTP origins additionally support Browser
+previews. Public page/search tools retain their public-HTTPS destination guard.
+Credentials, paths, query/fragment tricks,
 malformed hosts and wildcard rules are rejected. Private-address,
 control-plane, browser-lease and no-credential boundaries still apply.
 
 Native operations use deterministic known capabilities, not a leading-word
 guess about arbitrary shell strings. A configured external MCP, user script,
-debug evaluation or process launch does not become safe because it claims a
+debug evaluation or arbitrary process does not become safe because it claims a
 read-only annotation. Explicit stricter user review/deny rules are retained.
 Automatic native operations record policy provenance, not fabricated user
-approval or another paid decision-model call.
+approval or another paid decision-model call. After waiting for an actual
+writer root, automatic admission rechecks the original policy/permission
+revision and authorization basis before retaining `tool.started`.
 
 ## Network admission and redirects
 
 The service captures the approved initial origin plus effective host rules
 before dispatch. Normal Local/Remote web requests and native browser requests
-receive that exact bounded authority. Each redirect/main-frame navigation
-must remain inside it; an allowed initial URL cannot launder an unreviewed
+receive that exact bounded authority. Each redirect, main-frame navigation,
+browser subresource and WebSocket request must remain inside it; an allowed
+initial URL cannot launder an unreviewed
 destination. A blocked redirect reports its actual destination and outcome,
 without replay or automatic cross-host approval. Explicit Autopilot keeps its
 broader approval, while public-address and hard firewall rules remain enforced.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { waitFor, type GeneratedProviderOptions } from "./fixture.ts";
+import { reviewNativeTools, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { generatedAdvice, setupDecisions } from "./fixtures/decisions-api.ts";
 import { mkdir, realpath, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -38,6 +38,7 @@ test("Max cannot pay for decisions on human-only requests or hard denials, even 
   for (const denied of [false, true]) await t.test(denied ? "hard denial wins" : "human-only request", async () => {
     const f = await setupDecisions({ delegated: denied, advice: { replyText: generatedAdvice("allow", 1) } });
     try {
+      if (!denied) await reviewNativeTools(f, ["read_file"]);
       if (denied) {
         const settings = structuredClone(f.sdk.settings.get()!.values);
         settings.permissions.tools.push({ id: "generated-exact-denial", tool: "read_file", decision: "deny", pathPrefix: "fixture.txt" });

@@ -1,11 +1,13 @@
 import { isRecord } from "../../packages/sdk/src/index.ts";
-import { waitFor } from "../fixture.ts";
+import { reviewNativeTools, waitFor } from "../fixture.ts";
 import { routedFixture } from "./single-routing.ts";
 
 process.once("message", (value: unknown) => {
   void (async () => {
     if (!isRecord(value) || value.phase !== "gate" && value.phase !== "selected") throw new Error("Choose a generated Kupo controller-loss phase.");
     const fixture = await routedFixture({ configured: false });
+    process.send?.({ stage: "created", directory: fixture.directory });
+    await reviewNativeTools(fixture, ["write_file"]);
     fixture.options.respond = (_request, index) => index === 1 ? { text: JSON.stringify({
       pattern: "cascade", modelId: fixture.solverId, escalationId: fixture.modelId, complexity: "moderate", confidence: 0.95, reason: "Generated original crash-recovery routing advice.",
     }) } : value.phase === "gate" ? { hold: true } : { text: JSON.stringify({ verdict: "pass", reason: "Generated crash-recovery gate advice." }) };
