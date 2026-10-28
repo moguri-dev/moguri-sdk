@@ -8,14 +8,16 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
-import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { appendLegacyProjectFreeSession, assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema 15 preserves both profiles' ciphertexts, receipts and grants while adding visible automatic Kupo without inference", async () => {
   const fixture = await profileFixture();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const { client: beta, profile } = await fixture.create("Generated routing migration Beta");
-    const first = await fixture.sdk.sessions.create(null, "Generated Default routing migration"), second = await beta.sessions.create(null, "Generated Beta routing migration");
+    const control = await fixture.service.profiles.control(profile.id);
+    const first = await appendLegacyProjectFreeSession(fixture.sdk, fixture.service.controller, "Generated Default routing migration"),
+      second = await appendLegacyProjectFreeSession(beta, control, "Generated Beta routing migration");
     const artifact = await beta.artifacts.create(second.id!, { kind: "decision", name: "Generated old routing note", text: "Generated unchanged retained routing bytes." });
     for (const id of ["default", profile.id]) {
       const control = await fixture.service.profiles.control(id), settings = structuredClone(control.snapshot().settings);

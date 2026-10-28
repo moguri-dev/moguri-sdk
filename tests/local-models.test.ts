@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { MoguriSdk, type LocalEndpoint } from "../packages/sdk/src/index.ts";
 import { localModelId } from "../apps/service/src/model-registry.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { appendLegacyProjectFreeSession, assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { SecretStreamRedactor, redactSecrets } from "../apps/service/src/secret-redactor.ts";
 
@@ -107,7 +107,7 @@ test("startup preferences preserve precedence/provenance and existing sessions a
     assert.deepEqual(session.controls.modelOptions, { contextWindow: 16384 });
     assert.equal(session.defaults?.sources.modelId, "global"); assert.equal(session.defaults?.sources.modelOptions, "project"); assert.equal(session.defaults?.sources.autonomy, "session");
     assert.equal(fixture.session().controls.modelId, null);
-    const general = await sdk.sessions.create(null);
+    const general = await appendLegacyProjectFreeSession(sdk, fixture.service.controller, "Generated inherited pre-Home chat");
     assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === general.id)?.defaults?.sources.autonomy, "profile");
     sdk.disconnect(); await writeLegacyState(fixture.service, 6);
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });

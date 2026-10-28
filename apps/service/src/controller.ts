@@ -104,6 +104,7 @@ interface Run {
   granted: Set<string>;
   scopedReadPolicies: Map<string, string>;
   approval?: { id: string; requestId: string; call: ToolCall; policyRevision: number };
+  approvalResponse?: string;
   chain: Promise<void>;
   stopTimer?: ReturnType<typeof setTimeout>;
   done: boolean;
@@ -2413,6 +2414,7 @@ export class ControlPlane extends EventEmitter {
         if (!run || !approval || approval.id !== command.approvalId || run.abort.signal.aborted ||
           approval.policyRevision !== this.projection.policy.revision ||
           session.pendingApproval?.permissionRevision !== this.projection.settings.permissionRevision) throw new MoguriError("approval_stale", "This approval expired, was cancelled, or was already answered.", 409);
+        if (run.approvalResponse) throw new MoguriError("approval_stale", "Another actual response already owns this approval admission. Stop the turn to cancel it; no second answer was accepted.", 409);
         validateTool(approval.call);
         const scope = command.allow ? this.toolScope(session, approval.call) : { root: null, settings: this.platform.sessions.projects.values(session.projectId) };
         const configuration = scope.settings;
@@ -2420,22 +2422,25 @@ export class ControlPlane extends EventEmitter {
         const hook = run.hooks?.calls.get(approval.call.id);
         if (command.allow && hook) this.platform.extensions.assertHook(session, hook);
         if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session), coordinator: Boolean(run.yieldedTo && session.mode === "agent" && session.pendingMode !== "read-only") }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
-        if (command.allow) {
-          await this.claimHomeWriter(run, approval.call);
-          await this.assertCurrentTool(session, approval.call);
-          if (run.done || run.abort.signal.aborted || run.approval?.id !== approval.id ||
-            session.pendingApproval?.permissionRevision !== this.projection.settings.permissionRevision ||
-            approval.policyRevision !== this.projection.policy.revision) throw new MoguriError("approval_stale", "The original approval changed while waiting for its exact writer root. No tool was started.", 409);
-        }
-        const remembered = this.rememberApproval(session, approval.call, command.remember);
-        const events: EventInput[] = [...remembered, this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
-        if (command.allow) events.push(this.event(session, "tool.started", { call: approval.call }, run.stepId));
-        finish(events);
-        run.approval = undefined;
-        if (command.allow) this.grantTool(run, approval.call.id);
-        this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow: command.allow, mode, folders: folderPolicy(configuration), root: scope.root,
-          homeRoot: command.allow && homeWorkspace(session) && homeDirectoryTool(approval.call) ? session.homeRoot : undefined } });
-        return {};
+        run.approvalResponse = approval.id;
+        try {
+          if (command.allow) {
+            await this.claimHomeWriter(run, approval.call);
+            await this.assertCurrentTool(session, approval.call);
+            if (run.done || run.abort.signal.aborted || run.approval?.id !== approval.id ||
+              session.pendingApproval?.permissionRevision !== this.projection.settings.permissionRevision ||
+              approval.policyRevision !== this.projection.policy.revision) throw new MoguriError("approval_stale", "The original approval changed while waiting for its exact writer root. No tool was started.", 409);
+          }
+          const remembered = this.rememberApproval(session, approval.call, command.remember);
+          const events: EventInput[] = [...remembered, this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
+          if (command.allow) events.push(this.event(session, "tool.started", { call: approval.call }, run.stepId));
+          finish(events);
+          run.approval = undefined;
+          if (command.allow) this.grantTool(run, approval.call.id);
+          this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow: command.allow, mode, folders: folderPolicy(configuration), root: scope.root,
+            homeRoot: command.allow && homeWorkspace(session) && homeDirectoryTool(approval.call) ? session.homeRoot : undefined } });
+          return {};
+        } finally { if (run.approvalResponse === approval.id) run.approvalResponse = undefined; }
       }
     }
   }
@@ -2967,21 +2972,24 @@ export class ControlPlane extends EventEmitter {
     if (advice.type !== "decisions.read" || advice.advice?.answers.action?.type !== "choice") throw new MoguriError("decision_result", "No exact retained choice exists. No action.", 409);
     const choice = advice.advice.answers.action.choice;
     if (choice === "askUser") { this.decisions.reject(record.id, "The decision provider explicitly escalated. The actual pending user interaction remains unanswered."); return; }
+    const allow = choice === "allow";
+    if (allow) await this.claimHomeWriter(run, call);
     await this.assertCurrentTool(this.session(session.id), call);
-    const current = this.session(session.id), approval = run.approval;
-    if (run.done || run.abort.signal.aborted || this.runs.get(current.id) !== run || approval?.id !== source.approvalId) {
+    const current = this.session(session.id), approval = run.approval, scope = this.toolScope(current, call);
+    if (run.done || run.abort.signal.aborted || this.runs.get(current.id) !== run || run.approvalResponse || approval?.id !== source.approvalId) {
       this.decisions.reject(record.id, "The human or actual owner settled the original request before advice. No stale action."); return;
     }
-    const authorization = authorizeTool(this.projection.settings.values, call, run.root);
+    const authorization = this.authorization(current, call, scope.root);
     if (authorization.decision !== "allow" || authorization.ruleId !== source.delegationId) {
       this.decisions.reject(record.id, "The exact existing user delegation was revoked or denied. No model authority."); return;
     }
-    const allow = choice === "allow", mode = current.pendingMode === "read-only" ? "read-only" : current.mode;
+    const mode = current.pendingMode === "read-only" ? "read-only" : current.mode;
     this.decisions.apply(record.id, choice, [this.event(current, "tool.decided", { approvalId: approval.id, allow, actor: "decision-provider", ruleId: source.delegationId, decisionId: record.id, decisionOrigin: decisionEvidence(record) }, source.parentStepId),
       ...(allow ? [this.event(current, "tool.started", { call }, source.parentStepId)] : [])]);
     run.approval = undefined;
     if (allow) this.grantTool(run, call.id);
-    this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow, mode, folders: folderPolicy(this.platform.sessions.projects.values(current.projectId)) } });
+    this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow, mode, folders: folderPolicy(scope.settings), root: scope.root,
+      homeRoot: allow && homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined } });
   }
   private async reviewTechnicalQuestion(run: Run, question: UserQuestion, delegationId: string): Promise<void> {
     const source: Extract<DecisionSource, { kind: "question" }> = { kind: "question", parentStepId: question.stepId, callId: question.callId,

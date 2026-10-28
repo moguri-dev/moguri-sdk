@@ -47,6 +47,10 @@ writer intent before the first actual workspace-writing tool is admitted;
 wait cancellably for overlapping owned roots rather than paying for another
 model retry. Actual filesystem/command work keeps the same captured root,
 permission revision and cancellation ownership through final acknowledgement.
+An actual user response owns its one-shot admission before asynchronous root
+checks; a competing answer cannot consume the same approval. Legacy bounded
+Max advice uses the same Home claim, fresh authorization and executor binding,
+and cannot override an actual human response while waiting for the root.
 Read-only browsing and model calls do not become filesystem writers.
 The exact already-authenticated private User console remains usable for actual
 user inspection after Agent cancellation. Its original root/Env/owner and
@@ -116,3 +120,9 @@ replacement and cancellation. Three hidden Electron flows pass in 7.9 seconds,
 including actual private-console inspection and actual-user acknowledgement
 without queue resumption. These are generated fixtures, not a live-account or
 personal-home qualification.
+
+The completed grant-path follow-up passes 107 focused cases in 15,185.64 ms.
+This includes the original concurrent-answer regression, real bounded-Max
+Home writes, cancellable shared-root waits and a human denial racing the
+decision provider, plus genuine root-less pre-Home fixtures for old schema
+migrations. No actual Home binding is stripped or relabelled as older history.

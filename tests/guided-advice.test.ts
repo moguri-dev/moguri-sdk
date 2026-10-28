@@ -7,7 +7,7 @@ import { MoguriSdk, parse, UserQuestionSchema, type UserQuestion } from "../pack
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
-import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { appendLegacyProjectFreeSession, assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 20_000 };
 test("a model's recommendation schema cannot forge trusted advice provenance or a user answer", () => {
@@ -117,9 +117,11 @@ test("schema 14 upgrades both profiles without changing encrypted grants, receip
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const { client: beta, profile } = await fixture.create("Generated advice migration Beta");
-    const first = await fixture.sdk.sessions.create(null, "Generated Default advice migration"), second = await beta.sessions.create(null, "Generated Beta advice migration");
+    const control = await fixture.service.profiles.control(profile.id);
+    const first = await appendLegacyProjectFreeSession(fixture.sdk, fixture.service.controller, "Generated Default advice migration"),
+      second = await appendLegacyProjectFreeSession(beta, control, "Generated Beta advice migration");
     const document = await beta.artifacts.create(second.id!, { kind: "decision", name: "Generated scoped legacy note", text: "Generated retained Beta legacy bytes." });
-    const control = await fixture.service.profiles.control(profile.id), questionId = randomUUID();
+    const questionId = randomUUID();
     const question: UserQuestion = { id: questionId, sessionId: second.id!, projectId: null, workspaceId: null, turnId: randomUUID(), stepId: randomUUID(), callId: "generated-legacy-advice", modelId: fixture.providers[1]!.modelId,
       question: "Generated legacy question?", choices: ["Generated legacy choice"], allowFreeform: false, sourceEventId: null, revision: 0, createdAt: "2026-01-01T00:00:00Z", status: "open", answer: null, diagnostic: null };
     control.store.commit([{ event_type: "question.asked", profile_id: profile.id, session_id: second.id!, payload: { question } },
