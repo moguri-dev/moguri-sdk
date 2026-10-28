@@ -4,6 +4,7 @@ import { RemoteTargetSchema } from "../../../packages/protocol/src/execution.ts"
 import { McpServerSchema } from "../../../packages/protocol/src/config.ts";
 import { frameDigest } from "./worker-wire.ts";
 import { remoteFingerprint } from "./remote.ts";
+import { BUILTIN_FILE_SEARCH_LIMITS } from "./gateway-tools.ts";
 
 export interface RemoteMcpScope {
   profileId: string; sessionId: string; projectId: string; root: string; target: RemoteTarget; workerDigest: string;
@@ -24,8 +25,8 @@ export const RemoteMcpIntentSchema = Type.Object({
 export const remoteMcpPeer = (target: Pick<RemoteTarget, "host" | "port" | "user" | "hostKey">) => frameDigest(["moguri-remote-mcp-peer-v1", target.host, target.port, target.user, target.hostKey]);
 export function mcpResource(server: McpServerConfig | null) {
   if (!server) return { id: "builtin", name: "Moguri foundational tools", transport: "builtin" as const, auth: "none" as const,
-    resource: "Remote grep_logs/fetch_page and opt-in search_memory/memory_graph for the captured SSH repository, with actual-host source checks. No transferred Local script or implicit host path.",
-    digest: frameDigest(["moguri-mcp-resource-v1", "builtin", ["grep_logs", "fetch_page", "search_memory", "memory_graph"]]) };
+    resource: "Remote literal grep_logs up to 1 MiB, fetch_page and opt-in search_memory/memory_graph for the captured SSH repository, with actual-host source checks. No transferred Local script or implicit host path.",
+    digest: frameDigest(["moguri-mcp-resource-v2", "builtin", ["grep_logs", "fetch_page", "search_memory", "memory_graph"], { fileSearch: BUILTIN_FILE_SEARCH_LIMITS }]) };
   const transport = server.transport;
   let resource: string;
   if (transport.type === "http") {

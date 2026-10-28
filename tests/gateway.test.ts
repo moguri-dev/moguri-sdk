@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -12,7 +13,7 @@ import { CallToolResultSchema, ListToolsRequestSchema } from "@modelcontextproto
 import { MoguriSdk, DraftEditor, isRecord } from "../packages/sdk/src/index.ts";
 import { createGatewayMcpServer } from "../packages/sdk/src/mcp-server.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
-import type { SecretVault } from "../apps/service/src/gateway.ts";
+import { McpGateway, type SecretVault } from "../apps/service/src/gateway.ts";
 
 class GeneratedVault implements SecretVault {
   values = new Map<string, string>();
@@ -20,6 +21,52 @@ class GeneratedVault implements SecretVault {
   async write(id: string, value: string) { this.values.set(id, value); }
   async remove(id: string) { this.values.delete(id); }
 }
+test("the builtin MCP file search supports a selective README beyond the full-read envelope", async () => {
+  const root = await mkdtemp(join(tmpdir(), "moguri-mcp-readme-")), gateway = new McpGateway(new GeneratedVault()), signal = new AbortController().signal;
+  try {
+    await writeFile(join(root, "README.md"), `${"Generated README source line.\n".repeat(6000)}Generated exact crate search target.\n`);
+    const tool = (await gateway.tools(null, root, signal)).find((tool) => tool.name === "grep_logs")!;
+    const result = await gateway.operate({ action: "call", server: null, root, tool: tool.name, arguments: { path: "README.md", query: "exact crate search target" }, schemaDigest: tool.digest }, signal);
+    assert.ok(isRecord(result)); assert.notEqual(result.isError, true);
+    const content = CallToolResultSchema.parse(result).content.find((content) => content.type === "text");
+    assert.ok(content?.type === "text");
+    const selected = JSON.parse(content.text);
+    assert.equal(selected.matches[0]?.line, 6001); assert.equal(selected.matches[0]?.text, "Generated exact crate search target.");
+    const missing = await gateway.operate({ action: "call", server: null, root, tool: tool.name, arguments: { path: "README.md", query: "Generated absent section" }, schemaDigest: tool.digest }, signal);
+    const missingText = CallToolResultSchema.parse(missing).content.find((content) => content.type === "text");
+    assert.ok(missingText?.type === "text"); assert.deepEqual(JSON.parse(missingText.text).matches, []);
+    await writeFile(join(root, "oversized.txt"), "a".repeat(1024 * 1024 + 1));
+    await assert.rejects(() => gateway.operate({ action: "call", server: null, root, tool: tool.name, arguments: { path: "oversized.txt", query: "a" }, schemaDigest: tool.digest }, signal), /1024 KiB/);
+  } finally { await gateway.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("the builtin MCP file search bounds long matching lines without losing the match or hiding omissions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "moguri-mcp-long-lines-")), gateway = new McpGateway(new GeneratedVault()), signal = new AbortController().signal;
+  try {
+    await writeFile(join(root, "long.txt"), `${"\u0001".repeat(350_000)}GENERATED_MATCH near the end.\n`);
+    await writeFile(join(root, "many.txt"), `GENERATED_MATCH ${"x".repeat(3000)}\n`.repeat(120));
+    await writeFile(join(root, "unicode.txt"), `${"\u{1f4a0}".repeat(1500)}GENERATED_MATCH ${"\u00e9".repeat(1100)}\n`);
+    const tool = (await gateway.tools(null, root, signal)).find((tool) => tool.name === "grep_logs")!;
+    const selected = [];
+    for (const path of ["long.txt", "many.txt", "unicode.txt"]) {
+      const result = await gateway.operate({ action: "call", server: null, root, tool: tool.name, arguments: { path, query: "GENERATED_MATCH" }, schemaDigest: tool.digest }, signal);
+      const text = CallToolResultSchema.parse(result).content.find((content) => content.type === "text");
+      assert.ok(text?.type === "text");
+      assert.ok(Buffer.byteLength(text.text) < 128 * 1024);
+      selected.push(JSON.parse(text.text));
+    }
+    const [long, many, unicode] = selected;
+    assert.equal(long.complete, false); assert.equal(long.matches[0]?.clipped, true);
+    assert.match(long.matches[0]?.text, /GENERATED_MATCH near the end/);
+    assert.equal(long.matches[0]?.offset, 350_000);
+    assert.equal(many.matches.length, 100); assert.equal(many.omittedRows, 20); assert.equal(many.complete, false);
+    assert.ok(many.matches.every((match: { text: string; clipped: boolean }) => Array.from(match.text).length <= 1000 && match.clipped));
+    assert.equal(unicode.matches[0]?.offset, 6000); assert.equal(Array.from(unicode.matches[0]?.text).length, 1000);
+    assert.equal(unicode.matches[0]?.text.includes("\ufffd"), false); assert.equal(unicode.matches[0]?.clipped, true);
+    await assert.rejects(() => gateway.operate({ action: "call", server: null, root, tool: tool.name, arguments: { path: "unicode.txt", query: "\udca0" }, schemaDigest: tool.digest }, signal), /lossless Unicode/);
+  } finally { await gateway.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("a real stdio MCP is discovered through the native gateway and credentials never enter settings/events", async () => {
   const vault = new GeneratedVault();
   const fixture = await setupFixture({ platform: { vault } });

@@ -76,7 +76,8 @@ export async function editProjectFile(root: string, args: { path: string; expect
   }
 }
 export async function readFileSelection(root: string, args: Record<string, unknown>, policy: FolderPolicy, repository?: string) {
-    const file = await readProjectFile(root, String(args.path), args.mode === "full" ? 128 * 1024 : 1024 * 1024);
+    const paged = args.offset !== undefined || args.limit !== undefined || args.search !== undefined;
+    const file = await readProjectFile(root, String(args.path), args.mode === "full" && !paged ? 128 * 1024 : 1024 * 1024);
     if (args.requireExactVersion === true && args.expectedDigest === undefined) throw new MoguriError("file_version", "An exact-version read needs an original expectedDigest. Use an ordinary read to obtain the current source reference.");
     const refreshed = args.expectedDigest !== undefined && args.expectedDigest !== file.digest;
     if (refreshed && args.requireExactVersion === true) throw new MoguriError("file_conflict", "The explicitly pinned file version changed. Read the current source without requireExactVersion, or inspect the original retained result. No write occurred.", 409);
@@ -85,7 +86,7 @@ export async function readFileSelection(root: string, args: Record<string, unkno
     const instructions = (await repositoryInstructionLayers(root, { ...defaultProjectSettings(), deniedFolders: policy.denied, readOnlyFolders: policy.readOnly }, file.path)).filter((layer) => layer.depth > 0);
     const lines = file.text.split("\n");
     let view: Record<string, unknown> = { ...file, view: "full", complete: true };
-    if (args.offset !== undefined || args.limit !== undefined || args.search !== undefined) view = { ...file, ...textFilePage(file.text, selection), complete: false, view: "byte-page" };
+    if (paged) view = { ...file, ...textFilePage(file.text, selection), complete: false, view: "byte-page" };
     else if (args.mode === "lines") {
       const start = Number(args.startLine ?? 1), end = Number(args.endLine ?? start + 99);
       if (start > lines.length || end < start) throw new MoguriError("file_lines", "Select an ascending existing 1-based line range.");

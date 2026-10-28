@@ -9,7 +9,7 @@ import { MoguriSdk, PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { appendLegacyAutopilot, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
-test("protocol 74 refreshes the GitHub read service without rewriting schema-73 state or website grants", async () => {
+for (const version of [73, 74]) test(`the new service preserves schema-${version} ciphertext, events and website grants`, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let reopened: EventStore | undefined;
   try {
@@ -17,7 +17,7 @@ test("protocol 74 refreshes the GitHub read service without rewriting schema-73 
     const original = retainedCiphertextRows(fixture.service.store.db), events = fixture.service.store.events(), path = fixture.service.store.path;
     sdk.disconnect(); await fixture.service.close();
     const previous = new DatabaseSync(path);
-    try { previous.exec("PRAGMA user_version=73;"); } finally { previous.close(); }
+    try { previous.exec(`PRAGMA user_version=${version};`); } finally { previous.close(); }
     reopened = new EventStore(path, fixture.retentionKey);
     assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(retainedCiphertextRows(reopened.db), original); assert.deepEqual(reopened.events(), events);

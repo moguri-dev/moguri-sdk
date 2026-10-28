@@ -39,7 +39,7 @@ const toolDefinitions: Tool[] = [
     proposal: Type.Optional(ConfigurationSpecSchema),
   }, { additionalProperties: false }) },
   { name: "list_files", description: "List one directory relative to this session's approved workspace, or Home in a project-free Local chat. Protected paths and symlinks are excluded.", parameters: Type.Object({ path }, { additionalProperties: false }) },
-  { name: "read_file", description: "Read the current permitted UTF-8 workspace file up to 1 MiB, with a disclosed structural preview for large files. Project-free Local paths are relative to captured Home. An optional stale expectedDigest refreshes the read explicitly and restarts byte continuation at zero; sourceVersion reports the change. Use requireExactVersion only to pin an original digest deliberately. Copy the returned fresh sourceRef.expectedDigest for write_file/edit_file; writes still reject stale versions. mode full supports 128 KiB; outline/lines and UTF-8 offset/limit/search avoid whole-file injection. Applicable nested instructions are complete. Immutable moguri-attachment/ID.txt snapshots support bounded byte paging/search through their controller broker, not host paths.", parameters: Type.Object({ path,
+  { name: "read_file", description: "Read the current permitted UTF-8 workspace file up to 1 MiB, with a structural preview for large files. Project-free Local paths are relative to captured Home. search is literal, not regex; no match is a successful empty result. offset/limit/search select at most 16 KiB even with mode full; only an unpaged full read is capped at 128 KiB. Use search_files for regex or larger sources. A stale optional expectedDigest refreshes explicitly and restarts byte continuation; sourceVersion reports it. requireExactVersion deliberately pins a digest. Copy fresh sourceRef.expectedDigest for write_file/edit_file; stale writes still fail. Nested instructions are complete. Immutable moguri-attachment/ID.txt snapshots use bounded byte paging/search through their controller broker, not host paths.", parameters: Type.Object({ path,
     offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 1024 * 1024 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 16 * 1024 })),
     search: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     mode: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("full"), Type.Literal("outline"), Type.Literal("lines")])),
@@ -95,7 +95,12 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
 }
 export function validateTool(call: ToolCall): void {
   const tool = tools.find((tool) => tool.name === call.name);
-  if (!tool || !Value.Check(tool.parameters, call.arguments)) throw new MoguriError("invalid_tool", "Unknown tool or invalid arguments. No operation was executed.");
+  if (!tool) throw new MoguriError("invalid_tool", "Unknown tool. Discover the permitted catalogue before retrying. No operation was executed.");
+  if (!Value.Check(tool.parameters, call.arguments)) {
+    const errors = Value.Errors(tool.parameters, call.arguments);
+    const detail = errors.slice(0, 5).map((error) => `${error.schemaPath.replace(/^#\/properties/, "")}: ${error.message}`).join("; ").slice(0, 1600);
+    throw new MoguriError("invalid_tool", `Invalid arguments for ${tool.name}: ${detail}${errors.length > 5 ? "; additional schema errors omitted" : ""}. Correct the named fields or rediscover the schema; repeating the unchanged request cannot fix it. No operation was executed.`);
+  }
   if (leanTools.some((tool) => tool.name === call.name)) {
     const pending: { value: unknown; depth: number }[] = [{ value: call.arguments, depth: 0 }], seen = new Set<object>();
     let nodes = 0;

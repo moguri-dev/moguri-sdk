@@ -139,7 +139,7 @@ within the owning turn. They remain untrusted instructions beneath hard policy.
 
 | Capability | Actual behavior and bounds |
 | --- | --- |
-| `read_file` | Whole-source SHA-256; files up to 1 MiB with structural/line/byte/literal views. A stale optional digest refreshes explicitly and restarts byte continuation; `requireExactVersion` deliberately pins instead. Writes still require the returned fresh digest. Automatic previews above 16 KiB or 200 lines; explicit full reads remain at most 128 KiB. Previews are not AST or semantic summaries. |
+| `read_file` | Whole-source SHA-256; files up to 1 MiB with structural/line/byte/literal views. A stale optional digest refreshes explicitly and restarts byte continuation; `requireExactVersion` deliberately pins instead. Writes still require the returned fresh digest. Automatic previews above 16 KiB or 200 lines; explicit unpaged full reads remain at most 128 KiB. Byte paging/literal search takes precedence over full mode and returns at most 16 KiB. Previews are not AST or semantic summaries. |
 | `edit_file` | Ordered unique old/new replacements, exact source digest and one atomic publication; up to 1 MiB edited text. No ambiguous matching, fuzzy replacement or silently rewritten EOLs. |
 | `find_files` | Bounded `rg` inventories, applicable ancestor/nested `.gitignore`/`.ignore`/`.rgignore`, glob pages and explicit incomplete coverage. Intersect ordinary inventory with glob inventory because explicit ripgrep globs override ignore rules. Global ignore/config injection stays disabled. |
 | `search_files` | Actual Rust-regex/literal ripgrep, path/glob/case/context selectors. Compact rows are bounded by UTF-8 bytes; only permitted match/context records enter retained source, including for literal metacharacters in denied folder names. |
@@ -161,6 +161,45 @@ identity with UTF-8 paging. `rawComplete` describes retained source coverage,
 not semantic completeness or successful execution. Source deletion removes
 access; missing data never authorizes replay. Raw digests enter the normal
 encrypted retention-reference transaction.
+
+### Bounded file-search recovery, protocol 75
+
+Selective `read_file` requests previously applied the 128-KiB whole-read cap
+when `mode: "full"` accompanied `search`, `offset` or `limit`, despite returning
+a bounded selection. Source admission now follows that selection precedence:
+up to 1 MiB of source, at most 16 KiB of selected text. Actual unpaged full
+reads retain their 128-KiB limit. No match is a successful empty literal-search
+result; regex and larger sources use `search_files`. Write CAS, pinned reads,
+protected paths, nested instructions and exact retained source do not change.
+
+Builtin MCP `grep_logs` now uses the same 1-MiB source bound rather than the
+smaller full-read default. Results contain at most 100 matching-line excerpts
+of 1,000 Unicode code points each. Long excerpts start at their first match,
+so a match near the end is not silently discarded. Each excerpt carries its
+original UTF-8 byte `offset` and `clipped` flag; `omittedRows` and `complete`
+disclose selection coverage. This is a bounded match result, not a retained
+complete file. Page the exact source with `read_file` when needed. Invalid
+Unicode queries and oversized/binary/protected sources remain explicit errors.
+
+Known native-tool argument failures retain `invalid_tool` and report bounded
+schema field/type/range diagnostics without echoing submitted values or
+arbitrary input-property names. Unknown tool names are not echoed either.
+Invalid requests execute nothing; corrected requests remain possible, including
+after a genuine source or policy change. No blanket retry suppression, silent
+clamping, synthetic success or automatic model/permission change is added.
+
+The Remote builtin resource uses a new digest binding the actual source,
+line and character limits. Previous two-tool and four-tool grants remain
+retained but cannot authorize the expanded resource without fresh user review.
+Protocol/schema 75 forces the established matching-owner service-upgrade path;
+its metadata-only migration preserves ciphertext, event identities, receipts,
+website grants and accounting. No durable payload/event schema changes or
+additional dependencies are introduced. TUI, desktop and SDK share the service
+behavior and original failure/cancellation outcomes.
+
+Generated README, long-line and actual-worker regressions reproduce the
+incorrect limits and prove bounded recovery. They do not reconstruct the exact
+cause of failures in a deleted conversation.
 
 ### Structured documents and SQL
 

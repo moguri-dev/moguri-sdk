@@ -46,16 +46,18 @@ test("prepared memory cannot change exact scope/query/tool or use a Local bindin
   } finally { await f.close(); }
 });
 
-test("a retained two-tool builtin grant cannot silently authorize the expanded memory resource", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("retained builtin grants cannot silently authorize expanded memory or file-search limits", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
   const f = await remoteMemoryFixture();
   try {
     const preview = (await f.sdk.mcp.remotePreview(f.sessionId, "builtin")).preview, settings = structuredClone(f.sdk.settings.get()!.values);
     if (!settings.remote) throw new Error("Generated SSH target is absent.");
-    settings.remote.mcpGrants = [{ serverId: "builtin", peerDigest: preview.peerDigest,
-      resourceDigest: frameDigest(["moguri-mcp-resource-v1", "builtin", ["grep_logs", "fetch_page"]]), forwardAccess: false }];
-    await f.sdk.settings.update(settings, f.sdk.settings.get()!.revision); await f.sdk.remote.probe();
-    assert.equal((await f.sdk.mcp.remotePreview(f.sessionId, "builtin")).preview.granted, false);
-    await assert.rejects(() => f.sdk.mcp.tools("builtin", "memory", 0, f.sessionId), { code: "remote_mcp_grant" });
+    for (const tools of [["grep_logs", "fetch_page"], ["grep_logs", "fetch_page", "search_memory", "memory_graph"]]) {
+      settings.remote.mcpGrants = [{ serverId: "builtin", peerDigest: preview.peerDigest,
+        resourceDigest: frameDigest(["moguri-mcp-resource-v1", "builtin", tools]), forwardAccess: false }];
+      await f.sdk.settings.update(settings, f.sdk.settings.get()!.revision); await f.sdk.remote.probe();
+      assert.equal((await f.sdk.mcp.remotePreview(f.sessionId, "builtin")).preview.granted, false);
+      await assert.rejects(() => f.sdk.mcp.tools("builtin", "memory", 0, f.sessionId), { code: "remote_mcp_grant" });
+    }
     assert.equal(f.requests.length, 0);
   } finally { await f.close(); }
 });

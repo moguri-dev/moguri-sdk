@@ -2228,7 +2228,17 @@ or changes to anonymous/bearer auth. Project operations must include the bound
 session ID, including outward auth-status queries.
 
 The curated internal MCP exposes `grep_logs`, `fetch_page`, `search_memory` and
-`memory_graph`. Page fetching requires approved HTTPS, pins the resolved public
+`memory_graph`. `grep_logs` searches a literal string in one UTF-8 source up to
+1 MiB, returning at most 100 matching lines and 1,000 characters per line.
+Results disclose original byte offsets, clipped excerpts, omitted rows and
+coverage; no match is a successful empty result. Native `read_file` pages exact
+source, while `search_files` supports regex/larger sources. Selective
+`read_file` arguments take precedence over `mode: "full"`: the 128-KiB source
+cap applies only to actual unpaged full reads. Protocol 75 also returns
+actionable, value-free schema diagnostics for invalid native-tool arguments.
+The changed Remote builtin resource requires fresh user review; older resource
+grants are preserved, not silently broadened.
+Page fetching requires approved HTTPS, pins the resolved public
 destination, rejects private networks/unsafe redirects and bounds extraction.
 Tool descriptions, annotations, output and model recommendations remain
 untrusted data, never permission grants.

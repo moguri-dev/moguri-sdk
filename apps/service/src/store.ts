@@ -435,6 +435,7 @@ export class EventStore {
         throw new Error("Missing or invalid native website policy schema marker. State was preserved.");
       }
       if (version < 74) this.db.exec("PRAGMA user_version=74;");
+      if (version < 75) this.db.exec("PRAGMA user_version=75;");
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {

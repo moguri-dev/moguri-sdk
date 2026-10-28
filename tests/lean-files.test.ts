@@ -3,8 +3,57 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { executeTool } from "../apps/service/src/tools.ts";
+import { executeTool, validateTool } from "../apps/service/src/tools.ts";
 import { digest } from "../apps/service/src/store.ts";
+
+test("invalid search arguments identify the offending field and limit without echoing private input", () => {
+  assert.throws(() => validateTool({ id: "generated-invalid-search", name: "read_file",
+    arguments: { path: "generated-private-name.txt", search: "GENERATED_PRIVATE_QUERY", limit: 32768 } }),
+  (error: unknown) => {
+    assert.ok(error instanceof Error && "code" in error && error.code === "invalid_tool");
+    assert.match(error.message, /read_file/); assert.match(error.message, /\/limit/); assert.match(error.message, /16384/);
+    assert.equal(error.message.includes("generated-private-name"), false); assert.equal(error.message.includes("GENERATED_PRIVATE_QUERY"), false);
+    return true;
+  });
+  for (const [arguments_, field] of [
+    [{ path: "generated-private-name.txt", limit: null }, "/limit"],
+    [{ limit: 512 }, "path"],
+    [{ path: "generated-private-name.txt", GENERATED_PRIVATE_KEY: "GENERATED_PRIVATE_VALUE" }, "additional"],
+    [{ path: "", limit: -1, offset: -1, search: "", mode: "GENERATED_PRIVATE_MODE" }, "additional schema errors omitted"],
+  ] as const) {
+    assert.throws(() => validateTool({ id: "generated-invalid-field", name: "read_file", arguments: arguments_ }), (error: unknown) => {
+      assert.ok(error instanceof Error && "code" in error && error.code === "invalid_tool");
+      assert.ok(error.message.includes(field));
+      assert.ok(error.message.length < 2000);
+      assert.equal(error.message.includes("generated-private-name"), false);
+      assert.equal(error.message.includes("GENERATED_PRIVATE"), false);
+      return true;
+    });
+  }
+  assert.throws(() => validateTool({ id: "generated-unknown", name: "GENERATED_PRIVATE_UNKNOWN", arguments: {} }), (error: unknown) => {
+    assert.ok(error instanceof Error && "code" in error && error.code === "invalid_tool");
+    assert.match(error.message, /Unknown tool/); assert.equal(error.message.includes("GENERATED_PRIVATE"), false);
+    return true;
+  });
+});
+
+test("a bounded README search keeps its selective limit even when full mode is also requested", async () => {
+  const root = await mkdtemp(join(tmpdir(), "moguri-readme-search-"));
+  const source = `${"Generated README source line.\n".repeat(6000)}## Crates\nGenerated selected crate documentation.\n`;
+  const run = (args: Record<string, unknown>) => executeTool(root, { id: "generated-readme", name: "read_file", arguments: { path: "README.md", ...args } },
+    new AbortController().signal, () => {}, () => {}, undefined, { mode: "read-only", env: "Local", folders: { denied: [], readOnly: [] } });
+  try {
+    await writeFile(join(root, "README.md"), source);
+    const result = await run({ mode: "full", search: "## Crates", limit: 512 });
+    const view = JSON.parse(result.text);
+    assert.equal(result.isError, false); assert.match(view.text, /selected crate documentation/);
+    assert.equal(view.sourceRef.expectedDigest, digest(source));
+    assert.equal(result.rawText, source);
+    const missing = JSON.parse((await run({ mode: "full", search: "Generated absent section", limit: 512 })).text);
+    assert.equal(missing.text, ""); assert.equal(missing.matchOffset, null);
+    await assert.rejects(() => run({ mode: "full" }), { code: "file_limit" });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("lean edits are exact, atomic, conflict-safe and obey read-only/folder restrictions", async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-lean-files-"));
