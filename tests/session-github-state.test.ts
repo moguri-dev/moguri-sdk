@@ -6,7 +6,7 @@ import { request } from "node:http";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { appendLegacyAutopilot, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema 58 upgrades without changing ciphertext or silently broadening saved Autopilot permissions", async () => {
@@ -139,6 +139,7 @@ test("remembered approvals and explicit automatic consent survive an actual serv
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined, restored: MoguriSdk | undefined;
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.configure(); await fixture.send("generated tool before restart");
     const pending = await waitFor(() => fixture.session().pendingApproval);
     await sdk.approvals.respond(fixture.sessionId, pending.id, true, { scope: "project", match: "exact" });

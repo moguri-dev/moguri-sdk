@@ -5,7 +5,7 @@ import { writeFile } from "node:fs/promises";
 import sharp from "sharp";
 import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { generatedDocx } from "./fixtures/documents.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 
@@ -64,6 +64,7 @@ test("main progress while a side read waits does not change that turn's captured
   const fixture = await setupFixture({ respond: (_body, index) => index === 2 ? { tool: { name: "read_file", args: { path: "fixture.txt" } } } : { text: "Generated frozen side-context reply." } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.configure(); await fixture.send("Generated MAIN_BEFORE_SIDE_TOOL."); await fixture.terminal();
     const side = await sdk.sessions.side(fixture.sessionId);
     await ask(sdk, side.id!, "Generated SIDE_NEEDS_READ.");

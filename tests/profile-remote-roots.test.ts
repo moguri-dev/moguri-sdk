@@ -8,7 +8,7 @@ import { remoteRootLease } from "../apps/service/src/remote.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
-import { waitFor } from "./fixture.ts";
+import { reviewNativeTools, waitFor } from "./fixture.ts";
 
 async function sharedRemoteFixture(holdAfterTool = false) {
   const secrets = new Map<string, Map<string, string>>();
@@ -145,6 +145,7 @@ test("a pending read-only restriction does not release the active writer before 
 test("an acknowledged read-only boundary wakes the other profile while the original read-only turn continues", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
   const fixture = await sharedRemoteFixture(true), first = fixture.sessions[0]!, second = fixture.sessions[1]!;
   try {
+    await reviewNativeTools(first.client, ["read_file"]);
     await fixture.send(first.client, first.id, "generated tool before acknowledged read-only boundary");
     await waitFor(() => fixture.session(first.client, first.id).pendingApproval);
     await fixture.send(second.client, second.id, "Generated write after actual mode acknowledgement.");
