@@ -277,6 +277,11 @@ verification. The
 [default release pins](managed-sandbox.md#default-sendbox-024) preserve older
 selected versions, signed history and separate setup approval.
 
+The [separate current physical qualification](sendbox-0.2.4-qualification.md)
+now records the exact 0.2.4/protocol-76 macOS path, actual Meta delegation,
+generated metered worker/tools and original VM absence. It does not qualify
+all Env/control combinations or complete the remaining failure-hardening gates.
+
 ## D11. kupo synthetic model and routing
 
 **Decision.** Users can select a fixed model or **Kupo** (`kupo` in the SDK).
