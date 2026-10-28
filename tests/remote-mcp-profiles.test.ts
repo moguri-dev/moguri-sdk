@@ -19,6 +19,7 @@ test("pending external Remote MCP approvals lease the actual pinned root across 
     const sessions: Array<{ client: typeof f.sdk; id: string; digest: string }> = [];
     for (const [index, client] of [f.sdk, beta.client].entries()) {
       const settings = structuredClone(client.settings.get()!.values);
+      settings.permissions.tools.push({ id: "generated-strict-mcp-review", tool: "mcp_gateway", pathPrefix: "", decision: "ask" });
       settings.remote = { ...ssh.target, id: `generated-mcp-alias-${index}`, name: `Generated MCP alias ${index}`, stateDir: join(sshRoot, `runs-${index}`), allowCopilot: false };
       await client.settings.update(settings, client.settings.get()!.revision);
       const project = await client.command({ type: "project.add", path: index ? localB : localA });
