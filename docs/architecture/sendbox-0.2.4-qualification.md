@@ -12,6 +12,12 @@ esbuild, pi-ai and Node-PTY are MIT-licensed; SendBox is Apache-2.0. No new
 dependency, worker loop, client-only state, durable event, schema or protocol is
 introduced by qualification tooling.
 
+Retained desktop runs previously called every captured entry exact, even when
+the 0.2.4 default delegated Meta ranges. Their inspection text now identifies
+the captured release and distinguishes configured rules from the complete
+effective destination scope, including the shared-cloud caveat. This changes
+disclosure, not policy, permissions or historical 0.2.3 semantics.
+
 Bind qualification to the actual source commit, current compiled payload,
 protocol, immutable workload image, release archive/attestation, installed
 host/guest bytes, trust root and release sequence. Missing physical prerequisites
