@@ -2229,7 +2229,8 @@ session ID, including outward auth-status queries.
 
 The curated internal MCP exposes `grep_logs`, `fetch_page`, `search_memory` and
 `memory_graph`. `grep_logs` searches a literal string in one UTF-8 source up to
-1 MiB, returning at most 100 matching lines and 1,000 characters per line.
+1 MiB, returning at most 100 matching lines and 1,000 characters per line,
+within 12,000 bytes of complete serialized MCP output rather than cut JSON.
 Results disclose original byte offsets, clipped excerpts, omitted rows and
 coverage; no match is a successful empty result. Native `read_file` pages exact
 source, while `search_files` supports regex/larger sources. Selective

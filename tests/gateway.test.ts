@@ -44,27 +44,52 @@ test("the builtin MCP file search bounds long matching lines without losing the 
   const root = await mkdtemp(join(tmpdir(), "moguri-mcp-long-lines-")), gateway = new McpGateway(new GeneratedVault()), signal = new AbortController().signal;
   try {
     await writeFile(join(root, "long.txt"), `${"\u0001".repeat(350_000)}GENERATED_MATCH near the end.\n`);
-    await writeFile(join(root, "many.txt"), `GENERATED_MATCH ${"x".repeat(3000)}\n`.repeat(120));
+    await writeFile(join(root, "many.txt"), "GENERATED_MATCH short line.\n".repeat(120));
     await writeFile(join(root, "unicode.txt"), `${"\u{1f4a0}".repeat(1500)}GENERATED_MATCH ${"\u00e9".repeat(1100)}\n`);
+    await writeFile(join(root, "wide.txt"), `GENERATED_MATCH ${"\u{1f4a0}".repeat(1500)}\n`.repeat(100));
     const tool = (await gateway.tools(null, root, signal)).find((tool) => tool.name === "grep_logs")!;
     const selected = [];
-    for (const path of ["long.txt", "many.txt", "unicode.txt"]) {
+    for (const path of ["long.txt", "many.txt", "unicode.txt", "wide.txt"]) {
       const result = await gateway.operate({ action: "call", server: null, root, tool: tool.name, arguments: { path, query: "GENERATED_MATCH" }, schemaDigest: tool.digest }, signal);
       const text = CallToolResultSchema.parse(result).content.find((content) => content.type === "text");
       assert.ok(text?.type === "text");
-      assert.ok(Buffer.byteLength(text.text) < 128 * 1024);
+      assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 12000);
       selected.push(JSON.parse(text.text));
     }
-    const [long, many, unicode] = selected;
+    const [long, many, unicode, wide] = selected;
     assert.equal(long.complete, false); assert.equal(long.matches[0]?.clipped, true);
     assert.match(long.matches[0]?.text, /GENERATED_MATCH near the end/);
     assert.equal(long.matches[0]?.offset, 350_000);
     assert.equal(many.matches.length, 100); assert.equal(many.omittedRows, 20); assert.equal(many.complete, false);
-    assert.ok(many.matches.every((match: { text: string; clipped: boolean }) => Array.from(match.text).length <= 1000 && match.clipped));
+    assert.ok(many.matches.every((match: { clipped: boolean }) => !match.clipped));
     assert.equal(unicode.matches[0]?.offset, 6000); assert.equal(Array.from(unicode.matches[0]?.text).length, 1000);
     assert.equal(unicode.matches[0]?.text.includes("\ufffd"), false); assert.equal(unicode.matches[0]?.clipped, true);
+    assert.ok(wide.matches.length > 0 && wide.matches.length < 100); assert.equal(wide.omittedRows, 100 - wide.matches.length);
+    assert.equal(wide.resultBytesBoundedAt, 12000); assert.equal(wide.complete, false);
+    assert.ok(wide.matches.every((match: { text: string; clipped: boolean }) => Array.from(match.text).length === 1000 && match.clipped));
     await assert.rejects(() => gateway.operate({ action: "call", server: null, root, tool: tool.name, arguments: { path: "unicode.txt", query: "\udca0" }, schemaDigest: tool.digest }, signal), /lossless Unicode/);
   } finally { await gateway.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("a wide builtin MCP search reaches the next model request as intact bounded JSON", async () => {
+  const call = { serverId: "builtin", tool: "grep_logs", arguments: { path: "wide.txt", query: "GENERATED_MATCH" }, schemaDigest: "a".repeat(64) };
+  const f = await setupFixture({ mcpCall: call }), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    await writeFile(join(f.project, "wide.txt"), `GENERATED_MATCH ${"\u{1f4a0}".repeat(1500)}\n`.repeat(100));
+    call.schemaDigest = (await sdk.mcp.tools("builtin", "grep_logs", 0, f.sessionId)).tools[0]!.digest;
+    await f.configure(); await f.send("generated mcp call with wide matching lines."); await f.terminal();
+    assert.equal(f.session().status, "completed"); assert.equal(f.requests.length, 2);
+    const messages = f.requests[1]?.messages;
+    assert.ok(Array.isArray(messages));
+    const result = messages.find((message: unknown) => isRecord(message) && message.role === "tool");
+    assert.ok(isRecord(result) && typeof result.content === "string");
+    const view = JSON.parse(result.content);
+    assert.equal(view.truncated, false);
+    const original = JSON.parse(view.content), selection = JSON.parse(original.content[0].text);
+    assert.equal(selection.complete, false); assert.ok(selection.omittedRows > 0);
+    assert.match(selection.matches[0]?.text, /GENERATED_MATCH/);
+    assert.equal(f.session().pendingApproval, null);
+  } finally { sdk.disconnect(); await f.close(); }
 });
 
 test("a real stdio MCP is discovered through the native gateway and credentials never enter settings/events", async () => {

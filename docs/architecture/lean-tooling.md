@@ -174,7 +174,9 @@ protected paths, nested instructions and exact retained source do not change.
 
 Builtin MCP `grep_logs` now uses the same 1-MiB source bound rather than the
 smaller full-read default. Results contain at most 100 matching-line excerpts
-of 1,000 Unicode code points each. Long excerpts start at their first match,
+of 1,000 Unicode code points each, with the entire serialized MCP result bounded
+to 12,000 UTF-8 bytes. Whole trailing rows are omitted when needed, rather than
+cutting JSON at the gateway's model-view boundary. Long excerpts start at their first match,
 so a match near the end is not silently discarded. Each excerpt carries its
 original UTF-8 byte `offset` and `clipped` flag; `omittedRows` and `complete`
 disclose selection coverage. This is a bounded match result, not a retained
@@ -189,7 +191,7 @@ after a genuine source or policy change. No blanket retry suppression, silent
 clamping, synthetic success or automatic model/permission change is added.
 
 The Remote builtin resource uses a new digest binding the actual source,
-line and character limits. Previous two-tool and four-tool grants remain
+line, character and serialized-result limits. Previous two-tool and four-tool grants remain
 retained but cannot authorize the expanded resource without fresh user review.
 Protocol/schema 75 forces the established matching-owner service-upgrade path;
 its metadata-only migration preserves ciphertext, event identities, receipts,

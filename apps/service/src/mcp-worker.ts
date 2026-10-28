@@ -68,10 +68,16 @@ async function run(operation: McpOperation): Promise<unknown> {
           matches.push({ line: index + 1, text: clipped ? Array.from(text.slice(start)).slice(0, BUILTIN_FILE_SEARCH_LIMITS.characters).join("") : text,
             clipped, offset: lineOffset + Buffer.byteLength(text.slice(0, start)) });
         }
-        return textResult({ path: file.path, digest: file.digest, matches, boundedAt: BUILTIN_FILE_SEARCH_LIMITS.lines,
-          charactersBoundedAt: BUILTIN_FILE_SEARCH_LIMITS.characters, omittedRows: observedMatches - matches.length,
+        const selected = () => textResult({ path: file.path, digest: file.digest, matches, boundedAt: BUILTIN_FILE_SEARCH_LIMITS.lines,
+          charactersBoundedAt: BUILTIN_FILE_SEARCH_LIMITS.characters, resultBytesBoundedAt: BUILTIN_FILE_SEARCH_LIMITS.resultBytes, omittedRows: observedMatches - matches.length,
           complete: observedMatches === matches.length && matches.every((match) => !match.clipped),
           diagnostic: "Bounded literal matching-line excerpts, not a retained complete file. Each offset is a UTF-8 byte position in this exact digest; use read_file for source paging." });
+        let result = selected();
+        while (Buffer.byteLength(JSON.stringify(result)) > BUILTIN_FILE_SEARCH_LIMITS.resultBytes) {
+          if (!matches.length) throw new Error("The file search path metadata exceeds the 12000-byte result bound. Use native read_file for exact source paging.");
+          matches.pop(); result = selected();
+        }
+        return result;
       }
       if (request.params.name === "fetch_page") return textResult(await fetchPage(String(args.url), abort.signal, operation.webAccess));
       if (request.params.name === "search_memory" || request.params.name === "memory_graph") {

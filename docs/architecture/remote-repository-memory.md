@@ -181,7 +181,8 @@ existing owned connector returns it. No Local gateway, model call or credential
 is introduced. The expanded four-tool builtin resource has a different digest;
 old two-tool grants stay denied until actual user review.
 Protocol 75 further versions that builtin resource for the 1-MiB `grep_logs`
-source bound and explicit 100-line/1,000-character result limits. Its digest
+source bound, explicit 100-line/1,000-character limits and 12,000-byte complete
+serialized result bound. Its digest
 binds those actual limits. Both the old two-tool and old four-tool grants remain
 stored but require fresh user review before the changed resource can run.
 
