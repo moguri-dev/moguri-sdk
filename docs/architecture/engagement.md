@@ -48,10 +48,18 @@ registration, S256 PKCE, issuer/resource-bound exchange and refresh against
 generated endpoints in approximately 16.5 ms. No real account was authorized.
 
 Project-free sessions use a real null project association, never a synthetic
-folder/project. They may use the selected provider and explicitly configured
-global MCPs, but cannot list/read/write workspace files, run a host shell,
-index a repository or silently use a previous project's root. Bound-session
-scope is immutable. Global chats do not share a fake project writer lease.
+folder/project. Protocol 72 adds the user-selected
+[Home execution binding](project-free-execution.md) for ordinary **Local**
+chats: approved filesystem/command tools, Agent output and configured global
+MCPs do not require a project. Capture canonical Home/device/inode once and
+never substitute a previous checkout, state directory, replacement Home or
+another Env. This is host execution, not filesystem containment or a tool grant.
+Repository memory, plans and project publication still require a real project.
+Browser control retains its actual native host lease and explicit user toggle.
+Git/GitHub commands need explicit repository/checkout targets, not a guessed
+association or silent login. Model-only conversations remain independent;
+actual Home writes use independently retained exact-root ownership rather than
+a fake shared project. Private tool-less owners remain root-less.
 
 ## OAuth boundary
 

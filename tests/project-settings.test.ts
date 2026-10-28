@@ -79,7 +79,6 @@ test("project folder policy binds instructions, native writes, memory and review
     assert.equal((await sdk.memory.search(id, "generatedPrivateKnowledge")).items.some((item) => item.path.startsWith("private/")), false);
     assert.equal((await sdk.memory.graph(id)).nodes.some((item) => item.path.startsWith("private/")), false);
     await fixture.configure(); await fixture.send("generated write");
-    await fixture.approve();
     await fixture.terminal();
     assert.equal(await readFile(join(fixture.project, "fixture.txt"), "utf8"), "generated original\n");
     assert.equal(fixture.service.controller.events(0).some((event) => event.event_type === "tool.started" && event.payload.call.name === "write_file"), false);

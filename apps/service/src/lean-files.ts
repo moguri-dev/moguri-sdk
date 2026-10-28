@@ -75,13 +75,18 @@ export async function editProjectFile(root: string, args: { path: string; expect
     return { text: `File publication may have occurred: ${error instanceof Error ? error.message : "unconfirmed write"}. Inspect the source before retrying.`, isError: true, outcome: "partial" };
   }
 }
-export async function readFileSelection(root: string, args: Record<string, unknown>, policy: FolderPolicy) {
-    const file = await readProjectFile(root, String(args.path), args.mode === "full" ? 128 * 1024 : 1024 * 1024);
-    if (args.expectedDigest !== undefined && args.expectedDigest !== file.digest) throw new MoguriError("file_conflict", "The source version changed. No newer bytes were substituted for the requested digest.", 409);
+export async function readFileSelection(root: string, args: Record<string, unknown>, policy: FolderPolicy, repository?: string) {
+    const paged = args.offset !== undefined || args.limit !== undefined || args.search !== undefined;
+    const file = await readProjectFile(root, String(args.path), args.mode === "full" && !paged ? 128 * 1024 : 1024 * 1024);
+    if (args.requireExactVersion === true && args.expectedDigest === undefined) throw new MoguriError("file_version", "An exact-version read needs an original expectedDigest. Use an ordinary read to obtain the current source reference.");
+    const refreshed = args.expectedDigest !== undefined && args.expectedDigest !== file.digest;
+    if (refreshed && args.requireExactVersion === true) throw new MoguriError("file_conflict", "The explicitly pinned file version changed. Read the current source without requireExactVersion, or inspect the original retained result. No write occurred.", 409);
+    const continuationReset = refreshed && Number(args.offset ?? 0) > 0;
+    const selection = continuationReset ? { ...args, offset: 0 } : args;
     const instructions = (await repositoryInstructionLayers(root, { ...defaultProjectSettings(), deniedFolders: policy.denied, readOnlyFolders: policy.readOnly }, file.path)).filter((layer) => layer.depth > 0);
     const lines = file.text.split("\n");
     let view: Record<string, unknown> = { ...file, view: "full", complete: true };
-    if (args.offset !== undefined || args.limit !== undefined || args.search !== undefined) view = { ...file, ...textFilePage(file.text, args), complete: false, view: "byte-page" };
+    if (paged) view = { ...file, ...textFilePage(file.text, selection), complete: false, view: "byte-page" };
     else if (args.mode === "lines") {
       const start = Number(args.startLine ?? 1), end = Number(args.endLine ?? start + 99);
       if (start > lines.length || end < start) throw new MoguriError("file_lines", "Select an ascending existing 1-based line range.");
@@ -106,7 +111,10 @@ export async function readFileSelection(root: string, args: Record<string, unkno
       view = { ...file, text, view: "structural-preview", complete: shown.length === lines.length && shown.every((index) => lines[index]!.length <= 300),
         omittedLines: lines.length - shown.length, columnsBoundedAt: 300, diagnostic: "Deterministic definition/import/heading preview, not a semantic or complete code summary. Use exact line/byte reads before conclusions." };
     }
-    const text = JSON.stringify({ ...view, ...(instructions.length ? { instructions } : {}), sourceRef: { path: file.path, expectedDigest: file.digest },
+    const text = JSON.stringify({ ...view, ...(instructions.length ? { instructions } : {}),
+      ...(refreshed ? { sourceVersion: { refreshed: true, requestedDigest: args.expectedDigest, currentDigest: file.digest, continuationReset,
+        diagnostic: continuationReset ? "The file changed; byte continuation restarted at zero. Earlier pages are not this version." : "The file changed; this is its current permitted version. Use the fresh sourceRef for edits." } } : {}),
+      sourceRef: { path: file.path, expectedDigest: file.digest, ...(repository ? { repository } : {}) },
       sourceRetention: "retained-source" });
     if (text.length > 128 * 1024) throw new MoguriError("file_view_limit", "The complete selected text/instructions exceed the tool envelope. Select a smaller explicit view; no instructions were omitted.");
     return { text, rawText: file.text, rawComplete: true, isError: false, outcome: "completed" };

@@ -180,6 +180,11 @@ bounded at 1 MiB and rechecks the actual root inode on the worker before its
 existing owned connector returns it. No Local gateway, model call or credential
 is introduced. The expanded four-tool builtin resource has a different digest;
 old two-tool grants stay denied until actual user review.
+Protocol 75 further versions that builtin resource for the 1-MiB `grep_logs`
+source bound, explicit 100-line/1,000-character limits and 12,000-byte complete
+serialized result bound. Its digest binds those actual limits. Both the old
+two-tool and old four-tool grants remain
+stored but require fresh user review before the changed resource can run.
 
 CLI `memory ... --session`, shared `/memory` and actual OpenTUI expose
 index/state/search/graph/stop and user-authored style retention. Desktop's

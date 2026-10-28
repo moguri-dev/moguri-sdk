@@ -4,6 +4,270 @@ This user-requested slice preserves the dark Operate interface and one shared
 SDK/service authority. It replaces redundant composer rows with labeled icon
 controls and progressive disclosure, not new client-only execution behavior.
 
+## Provider and model availability
+
+Provider/model availability belongs to the actual profile, not client-only
+picker state. Providers can be disabled without signing out, deleting secrets
+or changing existing sessions. Local/SSH endpoint configuration remains exact;
+the provider-list action changes its existing enabled flag and the shared
+availability preference atomically. Copilot availability is independent of
+its retained login. Enabling may refresh configured metadata, never authorize
+an account, scan a host, download weights or start inference.
+
+Model rows are grouped only by the exact upstream `apiModelId` (or its original
+concrete ID), not fuzzy display names, prices, vendor/family claims or inferred
+lineage. This is a declared catalog key, not proof of actual model identity,
+training independence or quality. Each group has one enabled preference and
+at most one selected concrete provider offering. Multiple offerings require
+an explicit source choice. A retained choice never silently switches when
+that provider becomes disabled, disappears or becomes unavailable. A sole
+offering without a saved choice is the default; adding a collision requires a
+choice before either source is selectable. Preparation rechecks the exact
+advertised API ID as well as availability after asynchronous credential work.
+The ordinary boundary rechecks that exact metadata again after asynchronous
+repository attribution, immediately before reservation and `model.started`.
+An upstream API literally named `kupo` remains distinct from the synthetic
+`kupo` selection.
+
+The selectable catalog contains only enabled, available, selected offerings.
+The management inventory still exposes disabled/configured entries and clear
+reasons. Desktop, TUI, CLI, `/model`, defaults, Kupo and owned-model admission
+share the service registry; hiding a row alone is insufficient. New selection
+and new model admissions reject disabled or unselected IDs, including prepared
+calls held before admission. Already admitted work retains its actual result,
+charges and cancellation outcome; configuration never refunds an unknown hold
+or replays a call. Existing session/default IDs remain visible as unavailable
+instead of being cleared or rebound to another provider.
+
+Reuse TypeBox/React/Electron and maintained pi-ai under their existing
+MIT/component notices; no dependency or provider-evidence call is added.
+Browser-safe SDK capabilities manage typed revision-bound availability actions.
+Protocol 70 adds profile-owned model preferences through existing
+`settings.updated` persistence plus a strict migration marker. No old encrypted
+history, receipts, grants, model provenance or accounting is rewritten. Restart
+must preserve disabled IDs and exact source choice, and old matching services
+must not be reused for the new selection contract.
+
+Generated tests must prove a 21-model catalog can expose only three selected
+models, disabled IDs fail through both shared slash and raw commands, exact
+duplicate source exclusivity, provider re-enable without credential loss,
+scope isolation, concurrent edits, disable during preparation, no automatic
+fallback, migration failure/reopen and real restart without paid replay.
+Settings use the existing switches, exclusive source dropdowns and explicit
+help rows; ordinary model controls display only the authoritative selected set.
+
+Before feature edits the generated prerequisite passes OAuth/streaming in
+1,077.40 ms (32.18 ms cancellation), SQLite in 66.09 ms (append p95 0.065 ms),
+PTY in 159.20 ms (151.32 ms cancellation, zero survivors), OpenTUI in
+1,026.71 ms, hidden Electron in 565.67 ms (8.12 ms frames) and filesystem/Git
+in 93.69 ms. The generated configured-provider/startup probe also passes.
+Physical SendBox/SSH, live-provider, Rust/Linux, family/quality, notarization
+and full-milestone exclusions remain explicitly unchanged.
+
+### Availability qualification
+
+The application source is `b350dd5`. Eighteen focused availability,
+compiled-CLI/shared-TUI and migration cases pass in 2,963.63 ms. Generated
+checks reduce 21 models to three, reject disabled slash/raw/new-session
+selections, retain exactly one source across provider disable/removal/restart,
+preserve credentials and profile isolation, and reject concurrent revisions.
+Unqualified SSH inventory makes no discovery or secret read. An actual
+upstream ID named `kupo` does not become the synthetic router.
+
+Held preparation, already-prepared results and final repository attribution
+are tested before the atomic reservation/start. A lost or mismatched source
+dispatches zero requests and retains no invented model charge. Disabling
+after admission instead retains the actual 42-token completion. The
+69-to-70 migration recovers from interrupted insertion with identical
+encrypted rows and receipts; missing, corrupt and prematurely retained
+markers fail without repair.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Complete source/service/worker/recovery/CLI/native-TUI run | 1,705 passed, 14 existing skips and three stale fixture expectations; 1,722 cases in 1,458,435.93 ms |
+| Final fixture-only source requalification | All 39 affected Kanban/SSH/search/availability/client/migration cases pass in 27,666.31 ms, including all three previous failures; application source and bundles remain unchanged |
+| Complete hidden desktop suite | 236 passed, three existing skips; 239 flows in 8.0 minutes |
+| Actual packaged-app critical flows | 35 passed in 1.3 minutes |
+| Native help geometry | 34 sections, 200 renderings at widths 1,280/860; maximum offset one CSS pixel against the strict two-pixel bound |
+| Independently installed packed SDK | All entrypoints/declarations and the actual protocol-70 21-to-3, source-exclusivity and disabled-slash probes pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source, independent-consumer and native-workload audits | Zero vulnerabilities |
+| No-cache Linux arm64 worker payload/native PTY | Pass in 52,231.74 ms with exact protocol-70 inputs |
+| Production ZIP/manifest consumer | Pass; 779,846,671 bytes in 121,369.00 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+Earlier failing runs are not passing evidence: asynchronous controlled
+switches now show the pending intent without resetting the click, and errors
+restore the actual saved state. Multi-role fixtures declare distinct
+generated API IDs where they really simulate different models; an intentional
+same-model loopback offering uses the actual explicit source choice. No
+duplicate guard, revision check, timeout or ownership boundary was weakened.
+The missing prepared-API and post-attribution checks were reproduced before
+their fixes.
+
+The complete source run is not described as a fresh zero-failure run. Its
+three obsolete expectations were the separate Kanban solver reusing the
+router's API ID, a Remote test expecting two simultaneous sources, and the
+search list omitting the new provider destination. Only those generated
+fixtures/expectations changed afterwards. The final rerun exercises every
+case in all three affected files plus the full new availability suite.
+The Remote regression still proves its environment rejection before the
+explicit source switch; no assertion or source-exclusivity check was relaxed.
+
+The labelled development installer is
+`release/Moguri-0.30.0-alpha.1-model-availability-70-macos-arm64.dmg`
+(794,057,880 bytes), SHA-512
+`3096360a5d00726e93f9ec065c90235e2977cb9e185f7c49b3cd3337774a47c9fdbea052cf5aca4b8d5612570d5d390af03d764c1c3399d628baf70dad74cf32`.
+Its bundled worker is
+`docker.io/library/moguri-worker@sha256:6b95e0eeef1d89bfb0b0912087703f07c2b56b94d096afd3008d4f3137d32874`.
+This is ad-hoc-signed development output, not a notarized or uploaded release.
+No installed personal app, Finder, login, OS keychain, microphone or paid
+provider was used. Existing experimental OpenTUI FFI, lazy Ghostty chunk,
+optional `.icon` and transitive encoding/DOMException notices remain
+non-blocking; audits report no vulnerability. CI stays main-push-only, and
+empty working-branch checks are not a CI-pass claim.
+
+## Direct tuning slash commands
+
+`/thinking LEVEL` and `/effort LEVEL` share the existing explicit model-option
+command. `default` removes only the effort override. Both preserve the working
+window and other controls, use actual transport-supported levels and retain
+the existing actual-user model/effort preference. `/context-window` accepts an
+exact integer token count or `min`, `half`, `max`, preserving effort without
+changing that model-selection preference.
+
+For models without declared discrete windows, exact working ceilings range
+from the existing 8,192-token minimum to the model maximum. The maximum/half
+menu entries remain presets, not a claim that intermediate local admission
+ceilings are unsupported by the transport. `half` floors half the supported
+maximum; it never clamps a smaller result up to the minimum. Provider-declared
+sets remain authoritative: min/max select their actual endpoints, and exact
+or half quantities outside that set fail explicitly. The desktop displays a
+valid exact selected ceiling without marking it stale or dropping it from the
+menu. Kupo does not acquire fixed-role overrides.
+
+Reuse TypeBox/React/Electron and the maintained pi-ai estimator/clamp under
+their existing MIT/component notices; no dependency or provider call is added.
+The browser-safe protocol helper, SDK, CLI/TUI and desktop share one acceptance
+rule. Existing `session.configured` and `model.selection_remembered` events
+provide persistence; no new durable field or event format is needed.
+Protocol 69 performs a metadata-only upgrade so a healthy older service cannot
+silently retain the old preset-only validation. Ciphertext, grants, receipts,
+budgets, source identities and existing controls remain unchanged.
+
+Malformed input, missing/fixed-model selection, unsupported declared windows,
+concurrent revisions and active-turn changes fail without substituting values
+or starting inference. An overfull next request still stops with all history
+retained; no context truncation, automatic compaction, paid retry or budget
+increase is introduced. Tests must cover exact transmitted/retained windows,
+all shortcuts, sibling-option preservation, discrete-provider restrictions,
+cross-client display, failure and actual restart/upgrade without replay.
+
+The generated prerequisite passes OAuth/streaming in 1,088.14 ms (31.73 ms
+cancellation), SQLite in 69.55 ms (append p95 0.063 ms), PTY in 159.68 ms
+(151.98 ms cancellation, zero survivors), OpenTUI in 1,044.19 ms, hidden
+Electron in 575.47 ms (8.32 ms frames), and filesystem/Git in 89.21 ms.
+The maintained supported/ignored effort transport probe passes in 81.89 ms.
+Physical/live-provider, Rust/Linux, SendBox, quality, notarization and
+full-milestone exclusions remain unchanged.
+
+### Tuning shortcut qualification
+
+The final stable application source is `32d227d`. All three built-in names
+appear before skills in shared discovery/help and use the existing typed,
+revision-bound settings path. Generated checks cover exact 24,577-token
+requests, the floored half of 32,769, the 8,192 minimum, actual declared
+endpoints, unsupported half rejection, retained sibling options and
+effort-only remembered selection. Invalid, stale and active-turn requests
+preserve the original controls; model-free configuration and real service
+restart do not add inference. The metadata-only 68-to-69 upgrade also passes
+failure/reopen with identical encrypted rows and receipts.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Focused shortcut/options/defaults/upgrade checks | 42 passed in 7,508.80 ms |
+| Native composer/default controls | 10 passed in 14.4 seconds |
+| Actual native TUI shortcut input | Pass without inference |
+| Complete source/service/worker/recovery/CLI/native-TUI suite | 1,690 passed, 14 existing skips, zero failures; 1,704 cases in 1,457,307.79 ms |
+| Complete hidden desktop suite | 232 passed, three existing skips, zero failures; 235 flows in 8.0 minutes |
+| Actual packaged-app critical flows | 38 passed in 1.7 minutes |
+| Independently installed packed SDK | All entrypoints/declarations and the protocol-69 exact/min/half/max/effort probe pass without another model call |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source, independent-consumer and native-workload audits | Zero vulnerabilities |
+| No-cache Linux arm64 worker payload/native PTY | Pass in 54,149.06 ms with exact protocol-69 inputs |
+| Production ZIP/manifest consumer | Pass; 779,823,329 bytes in 114,636.36 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+Earlier red runs are not passing evidence. The tiny-model fixture needed its
+actual output bound reduced to 128 tokens before it could legitimately select
+Kupo; its former full-window output declaration correctly failed availability.
+No application gate, deadline, confirmation or history-retention check was
+weakened to make it pass.
+
+The verified worker identity is
+`docker.io/library/moguri-worker@sha256:6c253fd7d1e8af016c43155998a915501dc9145170e97cfadf5579e583c4df61`.
+The current labelled local development installer is:
+
+```text
+release/Moguri-0.30.0-alpha.1-model-shortcuts-69-macos-arm64.dmg
+794080040 bytes
+SHA-512:
+0576433b85957db9ef9cccf5be2ae0ee27a998acc30c3255a9751844272115156b8c9338cf3f94b60249b1d5a32a78e3ce0f55bdfc69a6082c8070e506d87782
+```
+
+The installer is ad-hoc-signed development output, not a notarized or uploaded
+release. No installed personal app, Finder, real microphone, personal login
+or paid inference was used. Experimental OpenTUI FFI, lazy Ghostty chunk,
+optional `.icon` and transitive deprecation notices remain non-blocking.
+Physical SendBox, external Linux, live-provider, quality and full-milestone
+exclusions remain unchanged. CI remains main-push-only, not a passing PR check.
+
+## Cascading menus and complete slash discovery
+
+The owner supplies reference screenshots for a compact Model/Effort/Context
+window menu and side submenus. Reuse React/Electron/native popovers (MIT),
+existing icons/tooltips, pi-ai option/size primitives (MIT), browser-safe SDK
+and Node/component notices. No new dependency or metadata/inference call is
+introduced by model selection. Kupo stays an ordinary synthetic model choice;
+an unavailable entry has a separate focusable explanation tooltip. Only actual
+qualified working windows/efforts are selectable, pending saves and failures
+remain owned by the composer, and private model evidence reads stay explicit.
+
+Slash discovery is scrollable and complete: built-in commands first, followed
+by explicitly enabled installed/configured skills in the current profile/
+session. Source discovery stays off unless configured; fresh gateway pages
+bind one exact catalog digest. Selecting a skill loads its reviewed digest as
+untrusted user-selected guidance, not a permission or an automatic paid turn.
+Source errors remain visible while built-ins remain usable.
+
+Protocol 68 adds atomic `/side PROMPT` admission and fresh gateway-skill loading
+through existing command/event paths. A side send binds the original parent
+and exact source draft revision when consumed, preserves an existing side
+draft, creates/reuses only its original read-only side and atomically enqueues
+the exact prompt/source grants before opening that panel. Failure, cancellation,
+restart and lost receipts never infer a send, model success or a second call.
+Normal parent/side model, Env, permission, context and budget gates remain final.
+The schema upgrade preserves encrypted history, grants, receipts and accounting;
+new side queue items retain exact command-origin digests so missing receipts
+cannot replay an admitted question. No old state is rewritten or deleted.
+
+Before feature edits the generated macOS arm64/Node 26 baseline passes
+OAuth/streaming in 1,083.68 ms (30.76 ms cancellation), SQLite in 63.95 ms
+(append p95 0.057 ms), PTY in 159.27 ms (152.12 ms cancellation, zero survivors),
+OpenTUI in 1,038.00 ms, hidden Electron in 558.50 ms (8.28 ms scroll frames),
+and filesystem/Git in 90.86 ms. Physical/live-provider, Rust/Linux, SendBox,
+quality, signed/notarized release and full-milestone gates remain explicitly
+FAIL/unavailable. Generated source and native tests must cover actual selection,
+keyboard/submenu bounds, unavailable tooltips, save failure, full slash ordering,
+source drift, atomic side routing, draft isolation and restart without replay.
+
+The [protocol-68 qualification](chat-activity.md#protocol-68-composer-and-compact-control-qualification)
+records the final complete source/desktop runs, actual packaged menus and
+slash/side flows, independent SDK install, exact installer identity and
+unchanged physical/live-provider exclusions.
+
 ## Reuse and Phase 0
 
 Reuse React/native popovers, existing SVG icons and the maintained pi-ai

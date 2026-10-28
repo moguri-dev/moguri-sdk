@@ -4,6 +4,7 @@ import { load } from "cheerio";
 import { MoguriError } from "../../../packages/protocol/src/index.ts";
 import { publicAddress } from "./public-network.ts";
 import { boundedBody } from "./network.ts";
+import { assertWebAccess, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 
 function pageText(url: URL, body: string, type: string) {
   if (!/text\/(?:html|plain)/i.test(type)) throw new MoguriError("web_format", "The page is not HTML or plain text; no conversion service was used.");
@@ -14,12 +15,13 @@ function pageText(url: URL, body: string, type: string) {
   return { source: "untrusted-web" as const, url: url.toString(), title: document("title").text().trim(),
     text: text.slice(0, 50_000), complete: text.length <= 50000, omittedCharacters: Math.max(0, text.length - 50000) };
 }
-export async function fetchNativeSource(input: string, signal: AbortSignal, redirects = 0): Promise<{ url: string; body: string; type: string }> {
+export async function fetchNativeSource(input: string, signal: AbortSignal, redirects = 0, access?: WebAccess): Promise<{ url: string; body: string; type: string }> {
   if (process.platform !== "linux" || process.env.NODE_USE_ENV_PROXY !== "1" || !process.env.HTTPS_PROXY || !process.env.ALL_PROXY) {
     throw new MoguriError("native_web_boundary", "Native public-page reads require the actual verified guest's enforced proxy. No controller or Local fetch was attempted.", 409);
   }
   const url = new URL(input);
   if (url.protocol !== "https:" || url.username || url.password || url.port || redirects > 3) throw new MoguriError("web_destination", "Use a public HTTPS page without credentials and at most three approved redirects.");
+  assertWebAccess(access, url.href);
   const records = await lookup(url.hostname, { all: true });
   if (!records.length || records.some((record) => !publicAddress(record.address))) throw new MoguriError("web_destination", "Private, loopback, metadata and reserved destinations are denied.");
   const response = await fetch(url, { redirect: "manual", signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
@@ -27,19 +29,20 @@ export async function fetchNativeSource(input: string, signal: AbortSignal, redi
   if ([301, 302, 303, 307, 308].includes(response.status)) {
     const location = response.headers.get("Location"); await response.body?.cancel();
     if (!location) throw new MoguriError("web_destination", "The approved native page redirect has no exact destination.");
-    return fetchNativeSource(new URL(location, url).href, signal, redirects + 1);
+    return fetchNativeSource(new URL(location, url).href, signal, redirects + 1, access);
   }
   if (!response.ok) { await response.body?.cancel(); throw new MoguriError("web_failed", `Native page returned HTTP ${response.status}. The configured guest network policy was not broadened.`, 502); }
   const content = await boundedBody(response, 1024 * 1024, signal);
   return { url: url.href, body: content.toString("utf8"), type: response.headers.get("Content-Type") ?? "" };
 }
-export async function fetchNativePage(input: string, signal: AbortSignal): Promise<ReturnType<typeof pageText>> {
-  const source = await fetchNativeSource(input, signal);
+export async function fetchNativePage(input: string, signal: AbortSignal, access?: WebAccess): Promise<ReturnType<typeof pageText>> {
+  const source = await fetchNativeSource(input, signal, 0, access);
   return pageText(new URL(source.url), source.body, source.type);
 }
-export async function fetchPublicSource(input: string, signal: AbortSignal, redirects = 0): Promise<{ url: string; body: string; type: string }> {
+export async function fetchPublicSource(input: string, signal: AbortSignal, redirects = 0, access?: WebAccess): Promise<{ url: string; body: string; type: string }> {
   const url = new URL(input);
   if (url.protocol !== "https:" || url.username || url.password || redirects > 3) throw new MoguriError("web_destination", "Only public HTTPS pages with at most three safe redirects are supported.");
+  assertWebAccess(access, url.href);
   const records = await lookup(url.hostname, { all: true });
   if (!records.length || records.some((record) => !publicAddress(record.address))) throw new MoguriError("web_destination", "Private, loopback, link-local and reserved destinations are denied.");
   const address = records[0]!;
@@ -62,11 +65,11 @@ export async function fetchPublicSource(input: string, signal: AbortSignal, redi
     req.on("error", reject);
     req.end();
   });
-  if ([301, 302, 303, 307, 308].includes(response.status) && response.location) return fetchPublicSource(new URL(response.location, url).toString(), signal, redirects + 1);
+  if ([301, 302, 303, 307, 308].includes(response.status) && response.location) return fetchPublicSource(new URL(response.location, url).toString(), signal, redirects + 1, access);
   if (response.status < 200 || response.status >= 300) throw new MoguriError("web_failed", `Page returned HTTP ${response.status}.`);
   return { url: url.href, body: response.body, type: response.type };
 }
-export async function fetchPage(input: string, signal: AbortSignal): Promise<ReturnType<typeof pageText>> {
-  const source = await fetchPublicSource(input, signal);
+export async function fetchPage(input: string, signal: AbortSignal, access?: WebAccess): Promise<ReturnType<typeof pageText>> {
+  const source = await fetchPublicSource(input, signal, 0, access);
   return pageText(new URL(source.url), source.body, source.type);
 }

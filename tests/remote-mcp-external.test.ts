@@ -7,16 +7,43 @@ import { envelope } from "../apps/service/src/controller.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { generatedOAuthServer } from "./fixtures/oauth.ts";
-import { waitFor } from "./fixture.ts";
+import { reviewNativeTools, waitFor } from "./fixture.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 25_000 };
 async function configure(sdk: MoguriSdk, f: Awaited<ReturnType<typeof remoteFixture>>, serverId = "builtin", forwardAccess = false) {
+  await reviewNativeTools(sdk, ["mcp_gateway"]);
   await f.probe(); await sdk.sessions.env(f.sessionId, "Remote");
   const preview = (await sdk.mcp.remotePreview(f.sessionId, serverId)).preview;
   await sdk.mcp.grantRemote(f.sessionId, serverId, preview.digest, preview.settingsRevision, forwardAccess, true);
   await f.probe(); await sdk.refresh();
   return (await sdk.mcp.tools(serverId, serverId === "builtin" ? "grep" : "", 0, f.sessionId)).tools[0]!;
 }
+
+test("remembered Remote MCP approvals survive their own settings update and reuse only the same actual tool schema and peer", native, async () => {
+  const f = await remoteFixture({ exposeModels: false }), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const tool = await configure(sdk, f);
+    const first = await sdk.mcp.call(f.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "remote source" }, tool.digest);
+    const approval = f.session().pendingApproval; assert.ok(approval);
+    await sdk.approvals.respond(f.sessionId, approval.id, true, { scope: "project", match: "exact" });
+    const completed = await sdk.jobs.wait(first.id!);
+    assert.equal(completed.status, "completed", completed.error ?? "Remembering must not invalidate the originally approved Remote call.");
+    const rediscovered = (await sdk.mcp.tools("builtin", "grep", 0, f.sessionId)).tools[0]!;
+    const second = await sdk.mcp.call(f.sessionId, "builtin", rediscovered.name, { path: "fixture.txt", query: "generated" }, rediscovered.digest);
+    const repeated = await sdk.jobs.wait(second.id!);
+    assert.equal(repeated.status, "completed", repeated.error ?? "The same exact MCP tool should use its remembered approval.");
+    assert.equal(f.controller.snapshot().remoteMcpCalls.length, 2); assert.equal(f.requests.length, 0);
+    assert.equal(f.controller.events(0).filter((event) => event.event_type === "tool.decided" && event.payload.actor === "user").length, 1);
+    const original = (await sdk.mcp.remotePreview(f.sessionId, "builtin")).preview;
+    await sdk.approvals.revoke(sdk.approvals.list()[0]!.id);
+    const revoked = (await sdk.mcp.remotePreview(f.sessionId, "builtin")).preview;
+    assert.notEqual(revoked.digest, original.digest);
+    await assert.rejects(() => sdk.mcp.call(f.sessionId, "builtin", rediscovered.name, { path: "fixture.txt", query: "generated" }, rediscovered.digest), { code: "remote_mcp_catalog" });
+    const changed = structuredClone(sdk.settings.get()!.values); changed.instructions = "Generated changed non-approval setting.";
+    await sdk.settings.update(changed, sdk.settings.get()!.revision);
+    assert.notEqual((await sdk.mcp.remotePreview(f.sessionId, "builtin")).preview.digest, revoked.digest);
+  } finally { sdk.disconnect(); await f.close(); }
+});
 
 test("an explicitly approved external Remote MCP call needs no model and settles only after its actual SSH worker stops", native, async (t) => {
   const f = await remoteFixture({ exposeModels: false }), sdk = await new MoguriSdk(f.service.connection).ready();

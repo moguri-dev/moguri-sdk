@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { homedir } from "node:os";
 import { test } from "node:test";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -131,13 +130,13 @@ test("global consoles are profile-owned Local HOME terminals, independent of pro
   try {
     const opened = await sdk.terminal.openGlobal(), terminal = sdk.getState().snapshot!.terminals.find((terminal) => terminal.id === opened.id)!;
     assert.equal(terminal.sessionId, null); assert.equal(terminal.projectId, null);
-    assert.equal(terminal.binding?.root, await realpath(homedir()));
+    assert.equal(terminal.binding?.root, await realpath(fixture.home));
     const settings = sdk.settings.get()!;
     await sdk.settings.update({ ...settings.values, interactions: { confirmSessionAttachments: false, confirmTerminalClose: false } }, settings.revision);
     await sdk.sessions.delete(fixture.sessionId, true);
     assert.equal(sdk.getState().snapshot!.terminals[0]?.id, terminal.id);
     await fixture.service.close({ preserveTerminals: true });
-    restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey, platform: { terminal: { ...program, vault: fixture.terminalVault } } });
+    restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey, platform: { terminal: { ...program, defaultRoot: fixture.home, vault: fixture.terminalVault } } });
     peer = await new MoguriSdk(restarted.connection).ready();
     assert.equal(peer.getState().snapshot!.terminals[0]?.pid, terminal.pid);
     assert.equal(peer.settings.get()!.values.interactions.confirmTerminalClose, false);

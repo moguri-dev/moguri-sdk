@@ -6,10 +6,16 @@ import { GeneratedFileVault } from "./generated-vault.ts";
 import { GENERATED_RETENTION_KEY } from "../fixture.ts";
 import { createRemoteFrameGate } from "./remote-frame-gate.ts";
 import { randomUUID } from "node:crypto";
+import { githubApplicationFixture } from "../github-workflows-fixture.ts";
+import { mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 process.once("message", (raw: unknown) => {
   void (async () => {
     if (!isRecord(raw) || typeof raw.stateDir !== "string" || typeof raw.vaultPath !== "string" || typeof raw.modelId !== "string" || typeof raw.baseUrl !== "string") throw new Error("Invalid generated child bootstrap.");
+    if (raw.homeRoot !== undefined && typeof raw.homeRoot !== "string") throw new Error("Invalid generated Home directory.");
+    const home = raw.homeRoot ?? join(dirname(raw.stateDir), "home");
+    await mkdir(home, { recursive: true, mode: 0o700 });
     const base = githubCopilotProvider().getModels().find((model) => model.id === raw.modelId);
     if (!base) throw new Error("Generated provider model is absent.");
     const model = { ...base, baseUrl: raw.baseUrl };
@@ -21,10 +27,11 @@ process.once("message", (raw: unknown) => {
     };
     const vault = new GeneratedFileVault(raw.vaultPath);
     if (raw.nativeCommand !== undefined && (!Array.isArray(raw.nativeCommand) || !raw.nativeCommand.every((part) => typeof part === "string"))) throw new Error("Invalid generated native command.");
-    const service = await startService({ stateDir: raw.stateDir, provider, retentionKey: GENERATED_RETENTION_KEY, platform: {
+    const projectWork = raw.projectWork === true ? await githubApplicationFixture({ provider, ownedNetwork: true, retentionKey: GENERATED_RETENTION_KEY }) : null;
+    const service = projectWork?.service ?? await startService({ stateDir: raw.stateDir, provider, retentionKey: GENERATED_RETENTION_KEY, platform: {
       remote: { vault, modelsVault: vault }, ...(Array.isArray(raw.nativeCommand) ? { sandbox: { vault, command: raw.nativeCommand } } : {}), terminal: raw.rawTerminal === true ?
-        { vault, executable: process.execPath, args: ["-e", "process.stdin.setRawMode(true); process.stdin.on('data',d=>process.stdout.write(d)); process.stdout.write('GENERATED_CHILD_TERMINAL_READY\\n');"] } :
-        { vault, executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CHILD_TERMINAL_READY\\n'; exec cat"] },
+        { vault, defaultRoot: home, executable: process.execPath, args: ["-e", "process.stdin.setRawMode(true); process.stdin.on('data',d=>process.stdout.write(d)); process.stdout.write('GENERATED_CHILD_TERMINAL_READY\\n');"] } :
+        { vault, defaultRoot: home, executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CHILD_TERMINAL_READY\\n'; exec cat"] },
     } });
     if (raw.holdNativeResult === true) {
       const gate = createRemoteFrameGate("model.complete", (frame) => process.send?.({ kind: "held-native-model", executionId: frame?.executionId }));
@@ -123,6 +130,8 @@ process.once("message", (raw: unknown) => {
         process.send?.({ kind: "planned-budget", planId: planned.plan.id });
       });
     }
-    process.send?.({ kind: "connection", connection: service.connection });
+    process.send?.({ kind: "connection", connection: service.connection, ...(projectWork ? { projectWork: {
+      directory: projectWork.directory, stateDir: projectWork.stateDir, root: projectWork.root, projectId: projectWork.projectId, sessionId: projectWork.sessionId,
+    } } : {}) });
   })().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Generated runtime bootstrap failed."); process.exitCode = 1; process.disconnect?.(); });
 });

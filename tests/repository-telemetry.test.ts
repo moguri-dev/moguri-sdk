@@ -11,6 +11,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { generatedRepositoryMetadata as metadata } from "./fixtures/repository-info.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
+import { runProgram } from "../apps/service/src/program.ts";
 test("verified repository snapshots bind future actual model/tool attribution while origin/license changes never rewrite old charges", { skip: process.platform !== "darwin" }, async () => {
   let license = "MIT", lookups = 0;
   const fixture = await setupFixture({ platform: { integrations: { fetch: async (url, init) => {
@@ -25,7 +26,7 @@ test("verified repository snapshots bind future actual model/tool attribution wh
     assert.equal((await sdk.jobs.wait(refresh.id!)).status, "completed"); assert.equal(lookups, 1);
     const observation = (await sdk.repositories.state(fixture.sessionId)).observation!;
     assert.equal(observation.repository?.publicOsiLicensed, true); assert.equal(observation.repository?.ownerKind, "organization");
-    await fixture.configure(); await fixture.send("generated tool repository attribution"); await fixture.approve(); await fixture.terminal();
+    await fixture.configure(); await fixture.send("generated tool repository attribution"); await fixture.terminal();
     const before = await sdk.budgets.calls({ sessionId: fixture.sessionId });
     assert.equal(before.calls.length, 2); assert.ok(before.calls.every((call) => call.repository?.fullName === "generated/example"));
     assert.ok(before.calls.every((call) => call.repository?.observationId === observation.id)); assert.equal(lookups, 1);
@@ -33,7 +34,7 @@ test("verified repository snapshots bind future actual model/tool attribution wh
     assert.equal(tools.totals.completed, 1); assert.equal(tools.entries[0]?.repository?.fullName, "generated/example");
     const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools.find((tool) => tool.name === "grep_logs")!;
     const external = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "generated" }, tool.digest);
-    await fixture.approve(); assert.equal((await sdk.jobs.wait(external.id!)).status, "completed");
+    assert.equal((await sdk.jobs.wait(external.id!)).status, "completed");
     assert.equal((await sdk.telemetry.operations({ actor: "external", repositoryId: 42 })).totals.completed, 1);
     assert.equal(fixture.requests.length, 2);
     assert.equal(JSON.stringify(before).includes("GENERATED_PRIVATE_METADATA_SENTINEL"), false); assert.equal(JSON.stringify(before).includes("generated-private-credential"), false);
@@ -125,14 +126,21 @@ test("a stop observed after metadata retention is partial, never a successful re
 });
 
 test("private metadata uses only explicitly selected local GitHub CLI access, not Copilot or public-lookup credentials", async () => {
-  const fixture = await setupFixture({ platform: { integrations: { fetch: async () => { throw new Error("Generated public lookup must not run"); } } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
-  const path = process.env.PATH;
+  let generatedGh: string | undefined;
+  const fixture = await setupFixture({ platform: { integrations: {
+    fetch: async () => { throw new Error("Generated public lookup must not run"); },
+    program: async (executable, args, options) => {
+      assert.equal(executable, "gh");
+      if (!generatedGh) throw new Error("The exact generated GitHub CLI has not been prepared. Personal authentication is forbidden.");
+      return runProgram(generatedGh, args, options);
+    },
+  } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await generatedRepository(fixture.project); await git(fixture.project, "remote", "add", "origin", "https://github.com/generated/example.git");
     const bin = join(fixture.directory, "generated-gh-bin"); await mkdir(bin);
     const output = JSON.stringify(metadata()).replace('"private":false', '"private":true').replace('"visibility":"public"', '"visibility":"private"');
     await writeFile(join(bin, "gh"), `#!/bin/sh\nprintf '%s' '${output}'\n`, { mode: 0o700 });
-    process.env.PATH = `${bin}:${path}`;
+    generatedGh = join(bin, "gh");
     const configuration = (await sdk.projects.configuration(fixture.session().projectId)).configuration;
     await sdk.projects.configure(configuration.projectId, { ...configuration.values, repo: { ...configuration.values.repo, githubAccess: "gh-cli" } }, configuration.revision);
     const preview = (await sdk.repositories.preview(fixture.sessionId)).preview;
@@ -141,7 +149,7 @@ test("private metadata uses only explicitly selected local GitHub CLI access, no
     assert.equal((await sdk.jobs.wait(refresh.id!)).status, "completed");
     assert.equal((await sdk.repositories.state(fixture.sessionId)).observation?.repository?.visibility, "private");
     assert.equal(fixture.requests.length, 0);
-  } finally { if (path === undefined) delete process.env.PATH; else process.env.PATH = path; sdk.disconnect(); await fixture.close(); }
+  } finally { sdk.disconnect(); await fixture.close(); }
 });
 
 test("actual SSH attribution observes the remote origin, rejects host CLI fallback and records real remote model provenance", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {

@@ -314,7 +314,7 @@ test("candidate exports accept exactly eight MiB and reject the next byte withou
       { event_type: "candidate.saved", profile_id: "default", project_id: f.record.projectId, payload: { candidate: { ...f.record, revision: 1, status: "partial", diagnostic: "Generated partial." } } },
       { event_type: "job.finished", profile_id: "default", project_id: job.projectId, payload: { jobId: job.id, candidateId: f.record.id, status: "partial", resultDigest, error: "Generated partial." } },
     ]);
-    const snapshot = (): Snapshot => ({ ...projectEvents(store.events()), profileId: "default", protocolVersion: PROTOCOL_VERSION, seq: store.events().at(-1)!.seq,
+    const snapshot = (): Snapshot => ({ ...projectEvents(store.events()), sessionTelemetry: {}, profileId: "default", protocolVersion: PROTOCOL_VERSION, seq: store.events().at(-1)!.seq,
       provider: { status: "disconnected", models: [], login: null, diagnostic: null }, capabilities: [] });
     const unused = (): never => { throw new Error("Generated read-only export unexpectedly requested filesystem or job authority."); };
     const runtime = new ArtifactRuntime(store, { snapshot, events: () => store.events(), closingProject: () => false, wake: unused,

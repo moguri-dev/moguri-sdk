@@ -4,7 +4,7 @@ export interface ClientState { snapshot: Snapshot | null; status: "connecting" |
 function isSnapshot(value: unknown, profileId: string): value is Snapshot {
   return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && typeof value.seq === "number" &&
     value.profileId === profileId &&
-    Array.isArray(value.projects) && Array.isArray(value.sessions) && isRecord(value.provider) && isRecord(value.policy);
+    Array.isArray(value.projects) && Array.isArray(value.sessions) && isRecord(value.provider) && isRecord(value.policy) && isRecord(value.sessionTelemetry);
 }
 function isEvent(value: unknown): value is StoredEvent {
   return isRecord(value) && typeof value.seq === "number" && value.schema_version === 1 && typeof value.event_type === "string" && isRecord(value.payload);

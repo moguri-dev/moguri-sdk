@@ -23,6 +23,7 @@ try {
   execFileSync("npm", ["audit", "--audit-level=moderate"], { cwd: consumer, stdio: "inherit" });
   const installedSdk = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   const { PROTOCOL_VERSION: installedProtocol } = installedSdk;
+  const conversationNavigationAvailable = typeof installedSdk.conversationNavigation === "function";
   const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
   const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
@@ -58,11 +59,13 @@ try {
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
+    ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
     ${installedProtocol >= 54 ? 'import {sessionIndicator,sessionIndicatorColors,sessionPrScope,sessionPullRequest,sessionPullRequestUrl,type SessionPrObservation} from "moguri";' : ""}
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
+    ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
@@ -74,6 +77,54 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 65 ? `
+      {
+      const grouped=await sdk.projects.group("Generated folder",[{projectId:"generated-first",revision:0},{projectId:"generated-second",revision:0}]);
+      const folderChat=await sdk.sessions.createFolder(grouped.id!,"Generated folder chat",{env:"Local"});
+      const sideChat=await sdk.sessions.side(folderChat.id!);
+      const captured:SessionRepository[]|undefined=sdk.getState().snapshot?.sessions.find(session=>session.id===folderChat.id)?.repositories;
+      void approvalProject({projectId:null,repositories:captured},"generated-first");
+      await sdk.workspaces.files(folderChat.id!,".","generated-first");
+      await sdk.workspaces.file(folderChat.id!,"generated.txt","generated-first");
+      await sdk.workspaces.git(folderChat.id!,true,"generated-first");
+      await sdk.approvals.respond(folderChat.id!,"generated-approval",true,{scope:"project",match:"tool"});
+      const capture=await sdk.voice.startCapture(sideChat.id!,undefined,{streaming:true});
+      await sdk.voice.appendCapture(sideChat.id!,capture.id,capture.token,1,new Uint8Array(6400));
+      const live=await sdk.voice.readCapture(sideChat.id!,capture.id,capture.token);void live.revision;
+      await sdk.voice.finishCapture(sideChat.id!,capture.id,capture.token,1);
+      void DraftEditor.prototype.startDictation;
+      }
+      ` : ""}
+      ${installedProtocol >= 62 ? `
+      const kanbanChat=await sdk.kanban.open("generated-project");
+      const cards=await sdk.kanban.items("generated-project","github-issues",1,kanbanChat.id);
+      void cards.github[0]?.headRepository;
+      const task=await sdk.kanban.continue("generated-session","generated-card");
+      const report=await sdk.kanban.work(task.id!);void report.run.source.contentDigest;
+      await sdk.kanban.wait(task.id!);await sdk.kanban.cancel(task.id!);await sdk.kanban.inspect(task.id!,report.run.revision,true);
+      const providerPrices=await sdk.prices.catalog();void providerPrices.catalogs[0]?.sourceDigest;
+      await sdk.prices.refresh(["anthropic"],providerPrices.revision);
+      await sdk.sessions.organize("generated-session",{workItemId:"generated-card",workItemUrl:null});
+      ` : ""}
+      ${installedProtocol >= 64 ? `
+      await sdk.issues.reorder("generated-card","review",null,[{issueId:"generated-card",phaseId:"backlog",order:1}],0);
+      await sdk.kanban.choose({profileId:sdk.profileId,sessionId:"generated-session",expectedRevision:0,text:"continue work"},"prompt");
+      const continued=await sdk.slash("generated-session","/continue-work","cli");
+      if(continued.kind==="continue-work"){void continued.review.expectedRevision;void continued.choices;}
+      ` : ""}
+      ${installedProtocol >= 61 ? `
+      await sdk.approvals.respond("generated-session","generated-approval",true,{scope:"project",match:"family"});
+      void sdk.approvals.list()[0]?.target.kind;
+      await sdk.approvals.revoke("generated-grant",0);
+      await sdk.sessions.autonomy("generated-session","Autopilot");
+      const repositories=await sdk.github.repositories({source:"account"});
+      void repositories.repositories[0]?.sshUrl;void repositories.repositories[0]?.openSource;
+      const githubScope={env:"Local" as const,projectId:"generated-project"};
+      const githubProject=await sdk.github.project(githubScope);
+      const githubSource={kind:"issue" as const,repository:githubProject.repository,account:githubProject.account,accountId:githubProject.accountId,number:7};
+      const githubReviewed=await sdk.github.source(githubScope,githubSource);
+      await sdk.github.startSession(githubScope,githubSource,githubReviewed.digest);
+      ` : ""}
       ${installedProtocol >= 60 ? `
       const confirmsDetach:boolean=sdk.settings.get()?.values.interactions.confirmSessionDetach!==false;void confirmsDetach;
       await sdk.sessions.organize("generated-child",{parentSessionId:null},0,true);
@@ -85,6 +136,19 @@ try {
       void freshSkills.catalogDigest;void freshSkills.skills[0]?.sourceId;
       await sdk.skills.read("generated-id","a".repeat(64),"generated-session");
       await sdk.suggestions.preview(null,true);
+      ` : ""}
+      ${installedProtocol >= 72 ? `
+      await sdk.sessions.home("generated-home-session");
+      const typedHome=await sdk.workspaces.home("generated-home-session");
+      void typedHome.root.device;void typedHome.root.inode;void typedHome.writers[0]?.turnId;void typedHome.writers[0]?.inspection?.actor;
+      void sdk.getState().snapshot?.chatWriters[0]?.backgroundJobs;
+      await sdk.workspaces.acknowledgeHomeWriter("generated-home-session","generated-home-writer",1,true);
+      ` : ""}
+      ${installedProtocol >= 73 ? `
+      await sdk.webAllowlist.add("docs.example.invalid",{kind:"session",sessionId:"generated-session"},0);
+      await sdk.webAllowlist.add("https://example.invalid:8443",{kind:"project",projectId:"generated-project"},0);
+      void sdk.webAllowlist.list("generated-session")[0]?.scope.kind;
+      await sdk.webAllowlist.remove("generated-allowance",0);
       ` : ""}
       ${installedProtocol >= 58 ? `
       const nativeCatalogue=await sdk.tools.catalog("generated-id","file");
@@ -147,6 +211,38 @@ try {
       const detail:ActivityContent|null=(await sdk.activity.read("generated-id","generated-activity","output",{offset:0,limit:4096})).content;void detail?.nextOffset;
       const turn:TurnInfo=(await sdk.activity.turn("generated-id","generated-turn")).info;void turn.context?.window;
       const response:string=sdk.activity.response("generated-id","generated-turn");void response;void useSessionActivity;
+      ` : ""}
+      ${installedProtocol >= 66 ? `
+      const saved:import("moguri").SessionTelemetry|undefined=sdk.getState().snapshot?.sessionTelemetry["generated-id"];
+      const estimate:import("moguri").UsageEstimate|null|undefined=saved?.estimate;
+      void estimate?.outputTokens;void saved?.turns[0]?.usage.knownCacheReadTokens;void saved?.context?.outputEstimate;
+      ` : ""}
+      ${installedProtocol >= 67 ? `
+      const source:import("moguri").SideContext|undefined=sdk.getState().snapshot?.sessions[0]?.sideContext;
+      void source?.parentSessionId;void source?.throughSeq;void source?.contextDigest;void source?.documents[0]?.summary;
+      ` : ""}
+      ${installedProtocol >= 68 ? `
+      const commands:import("moguri").SlashSuggestion[]=await sdk.commands.list("generated-id");
+      void commands[0]?.kind;await sdk.sessions.askSide("generated-id","Generated typed side question.",0);
+      await sdk.skills.use("generated-id","generated-skill","a".repeat(64),0,"Generated task.");
+      ` : ""}
+      ${installedProtocol >= 69 ? `
+      const exactWindow:boolean=supportsModelContextWindow({contextWindow:32769},24577);void exactWindow;
+      await sdk.slash("generated-id","/thinking low","tui");await sdk.slash("generated-id","/effort default","desktop");
+      await sdk.slash("generated-id","/context-window 24577","cli");
+      ` : ""}
+      ${installedProtocol >= 70 ? `
+      const catalogue:import("moguri").ModelCatalogue=sdk.models.catalogue();
+      const preferences:import("moguri").ModelPreferences|undefined=sdk.settings.get()?.values.modelPreferences;
+      void catalogue.providers[0]?.enabled;void catalogue.models[0]?.sourceModelId;void preferences?.disabledModels;
+      await sdk.models.setProviderEnabled("github-copilot",false,0);
+      await sdk.models.setEnabled("generated-api",false,1);
+      await sdk.models.selectSource("generated-api","generated-model",2);
+      await sdk.slash("generated-id","/models catalogue","tui");
+      ` : ""}
+      ${conversationNavigationAvailable ? `
+      const points:import("moguri").ConversationNavigationEntry[]=(await import("moguri")).conversationNavigation(sdk.getState().snapshot!,"generated-id");
+      void points[0]?.messageIndex;const answer=points.find(value=>value.kind==="answer");if(answer?.kind==="answer"){void answer.questionId;void answer.answer;}
       ` : ""}
       ${installedProtocol >= 53 ? `
       const agentRead:AgentTerminalRead={action:"read",commandId:"generated-command",offset:0,limit:4096};void agentRead;
@@ -381,12 +477,12 @@ try {
     import {createHash,randomUUID} from "node:crypto";
     import {createServer} from "node:http";
     import {fileURLToPath} from "node:url";
-    import {homedir} from "node:os";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
+    const generatedHome=join(root,"generated-chat-home");await mkdir(generatedHome,{recursive:true});
     await writeFile(join(project,"generated.ts"),"export function portableSdkMemory() { return 'generated'; }");
     const git=(args,cwd=project)=>execFileSync("git",["--no-pager","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false",...args],{cwd,encoding:"utf8"});
     git(["init","--initial-branch=main"]);git(["add","--","generated.ts"]);
@@ -398,13 +494,13 @@ try {
     const remoteVault={read:async id=>remoteSecrets.get(id)??null,write:async(id,value)=>{remoteSecrets.set(id,value);},remove:async id=>{remoteSecrets.delete(id);}};
     let repositoryLookups=0,sessionPrLookups=0;
     const repositoryMetadata={id:42,name:"example",full_name:"generated/example",html_url:"https://github.com/generated/example",owner:{login:"generated",type:"Organization"},private:false,visibility:"public",license:{spdx_id:"MIT"},description:"GENERATED_UNRETAINED_REPOSITORY_BODY"};
-    const platform={terminal:{executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{
+    const platform={terminal:{defaultRoot:generatedHome,vault:remoteVault,executable:"/bin/sh",args:["-c","printf 'GENERATED_EXTERNAL_PTY_READY\\n'; exec cat"]},remote:{vault:remoteVault,modelsVault:remoteVault},integrations:{fetch:async url=>{
       if(String(url)==="https://api.github.com/repos/generated/example/pulls/7"){sessionPrLookups++;return Response.json({number:7,html_url:"https://github.com/generated/example/pull/7",state:"open",draft:true,merged:false,merged_at:null});}
       assert.equal(String(url),"https://api.github.com/repos/generated/example");repositoryLookups++;return Response.json(repositoryMetadata);
     }}};
     const runtime=await createRuntime({stateDir:join(root,"state"),retentionKey:Buffer.alloc(32,0x67),platform,profiles:{
       provider:id=>{if(!providers.has(id))providers.set(id,makeProvider());return providers.get(id);},
-      platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id);return{...(id==="default"?platform:{}),vault:{read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}}};}
+      platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id),scopedVault={read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}};return{...(id==="default"?platform:{}),terminal:{...platform.terminal,vault:scopedVault},vault:scopedVault};}
     }});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
     ${installedProtocol >= 38 ? `
@@ -478,14 +574,16 @@ try {
       assert.equal((await sdk.coordination.read(s.id,{action:"inbox"})).data.messages[0].origin.actor,"user");
       const source=(await sdk.tools.catalog(s.id,"write_document")).tools.find(tool=>tool.name==="write_document");assert.ok(source);
       const admitted=await sdk.tools.execute(s.id,source.name,{path:"generated-installed.docx",format:"docx",expectedDigest:"absent",paragraphs:[{text:"Generated installed structured document."}]},source.schemaDigest);
-      const approval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;assert.ok(approval);
-      await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:approval.id,allow:true});
+      const approval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;
+      if(PROTOCOL_VERSION>=73)assert.equal(approval,null);
+      else{assert.ok(approval);await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:approval.id,allow:true});}
       assert.equal((await sdk.jobs.wait(admitted.id)).status,"completed");
       assert.ok((await readFile(join(project,"generated-installed.docx"))).length>0);
       const doc=(await sdk.tools.catalog(s.id,"inspect_document")).tools.find(tool=>tool.name==="inspect_document");assert.ok(doc);
       const checked=await sdk.tools.execute(s.id,doc.name,{path:"generated-installed.docx"},doc.schemaDigest);
-      const readApproval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;assert.ok(readApproval);
-      await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:readApproval.id,allow:true});
+      const readApproval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;
+      if(PROTOCOL_VERSION>=73)assert.equal(readApproval,null);
+      else{assert.ok(readApproval);await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:readApproval.id,allow:true});}
       assert.equal((await sdk.jobs.wait(checked.id)).status,"completed");
       assert.match(JSON.stringify(await sdk.mcp.readResult(checked.id)),/Generated installed structured document/);
       assert.equal((await sdk.tools.state(s.id,"SELECT count(*) AS count FROM todos")).data.rows[0].count,0);
@@ -531,6 +629,122 @@ try {
       }` : ""}
       let operationSessionId;
       assert.equal(sdk.getState().snapshot.protocolVersion,PROTOCOL_VERSION);
+      ${installedProtocol >= 62 ? `
+      {
+      const prices=await sdk.prices.catalog();assert.equal(prices.revision,0);
+      assert.equal(prices.catalogs.find(value=>value.provider==="anthropic").prices.find(value=>value.modelId==="claude-opus-5.5").inputUsdPerMillion,4);
+      const boardRoot=join(root,"generated-installed-kanban");await mkdir(boardRoot);
+      const project=await sdk.projects.add(boardRoot,"generated_installed_kanban"),opened=await sdk.kanban.open(project.id);
+      assert.equal((await sdk.kanban.open(project.id)).id,opened.id);
+      const board=(await sdk.issues.board(project.id)).board;
+      const card=await sdk.issues.create(project.id,{title:"Generated installed card",body:"Generated installed board source.",kind:"feature",phaseId:"backlog",pullRequestUrl:null});
+      await sdk.issues.configure(project.id,{...board,kanban:{visible:false,source:"kanban",phaseIds:["backlog"]}},board.revision);
+      await sdk.sessions.organize(opened.id,{workItemId:card.id,workItemUrl:null});
+      assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).purpose,"kanban");
+      assert.equal((await sdk.kanban.items(project.id,"kanban",1,opened.id)).local[0].body,"Generated installed board source.");
+      await sdk.slash(opened.id,"/kanban show","tui");
+      assert.equal((await sdk.issues.board(project.id)).board.kanban.visible,true);
+      assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).workItemId,card.id);
+      assert.equal(sdk.getState().snapshot.projectWorkRuns.length,0);
+      assert.equal(sdk.getState().snapshot.settings.values.budgets.useProviderRatesForLimits,false);
+      if(PROTOCOL_VERSION>=64){
+        const second=await sdk.issues.create(project.id,{title:"Generated installed ordered card",body:"",kind:"misc",phaseId:"backlog",pullRequestUrl:null});
+        const current=(await sdk.issues.board(project.id)).issues;
+        const source=current.find(value=>value.id===second.id);
+        await sdk.issues.reorder(second.id,"backlog",card.id,current.map(value=>({issueId:value.id,phaseId:value.phaseId,order:value.order??value.number})),source.revision);
+        const ordered=(await sdk.issues.board(project.id)).issues.sort((a,b)=>(a.order??a.number)-(b.order??b.number));
+        assert.deepEqual(ordered.map(value=>value.id),[second.id,card.id]);
+        const reviewed=await sdk.slash(opened.id,"/continue-work","cli");
+        assert.equal(reviewed.kind,"continue-work");assert.deepEqual(reviewed.choices,["kanban","prompt"]);
+        assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).draft.text,"/continue-work");
+        assert.equal(sdk.getState().snapshot.projectWorkRuns.length,0);
+        await sdk.command({type:"draft.save",sessionId:opened.id,expectedRevision:reviewed.review.expectedRevision,text:"",attachments:[]});
+        console.log("Installed protocol-64 SDK/runtime preserves structural card order and returns an exact per-request continuation review without a model call.");
+      }
+      console.log("Installed Kanban SDK/runtime exposes one board chat, shared visibility/card bindings and public API-equivalent references without hidden inference or finite-limit consent.");
+      }
+      ` : ""}
+      ${installedProtocol >= 65 ? `{
+      const firstRoot=join(root,"generated-installed-group-first"),secondRoot=join(root,"generated-installed-group-second");
+      await mkdir(firstRoot);await mkdir(secondRoot);await writeFile(join(firstRoot,"generated-group.txt"),"Generated installed first-root source.");
+      const first=await sdk.projects.add(firstRoot),second=await sdk.projects.add(secondRoot);
+      const grouped=await sdk.projects.group("Generated installed group",[{projectId:first.id,revision:0},{projectId:second.id,revision:0}]);
+      const opened=await sdk.sessions.createFolder(grouped.id,"Generated installed folder chat");
+      const original=sdk.getState().snapshot.sessions.find(value=>value.id===opened.id);
+      assert.equal(original.projectId,null);assert.deepEqual(original.repositories.map(value=>value.projectId),[first.id,second.id]);
+      await assert.rejects(()=>sdk.workspaces.files(opened.id,"."),{code:"repository_required"});
+      assert.ok((await sdk.workspaces.files(opened.id,".",first.id)).entries.includes("generated-group.txt"));
+      if(PROTOCOL_VERSION>=73){
+        const current=sdk.settings.get();
+        await sdk.settings.update({...current.values,permissions:{...current.values.permissions,tools:[...current.values.permissions.tools,
+          {id:"generated-installed-folder-review",tool:"write_file",pathPrefix:"",decision:"ask"}]}},current.revision);
+      }
+      const tool=(await sdk.tools.catalog(opened.id,"write_file")).tools.find(value=>value.name==="write_file");
+      const started=await sdk.tools.execute(opened.id,tool.name,{repository:second.id,path:"generated-external.txt",text:"Generated installed selected-root edit.",expectedDigest:"absent"},tool.schemaDigest);
+      const approval=sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).pendingApproval;
+      await sdk.approvals.respond(opened.id,approval.id,true,{scope:"project",match:"tool"});
+      assert.equal((await sdk.jobs.wait(started.id)).status,"completed");
+      assert.equal(await readFile(join(secondRoot,"generated-external.txt"),"utf8"),"Generated installed selected-root edit.");
+      const side=await sdk.sessions.side(opened.id),again=await sdk.sessions.side(opened.id);
+      assert.equal(side.id,again.id);
+      const question=sdk.getState().snapshot.sessions.find(value=>value.id===side.id);
+      assert.equal(question.mode,"read-only");assert.deepEqual(question.repositories,original.repositories);
+      assert.deepEqual(question.controls,original.controls);
+      await assert.rejects(()=>sdk.voice.readCapture(side.id,randomUUID(),randomUUID()),{code:"speech_capture_owner"});
+      await assert.rejects(()=>sdk.voice.appendCapture(side.id,randomUUID(),randomUUID(),1,new Uint8Array(2)),{code:"speech_capture_owner"});
+      const host=fileURLToPath(new URL("./node_modules/moguri/dist/speech-host.mjs",import.meta.url));
+      execFileSync(process.execPath,[host,process.execPath,"-e","setInterval(()=>{},1000)"],{input:"",timeout:10000});
+      const failedHost=spawn(process.execPath,[host,process.execPath,"-e","process.kill(process.pid,'SIGTERM')"],{stdio:["pipe","ignore","pipe"]});
+      let nativeDiagnostic="";failedHost.stderr.on("data",chunk=>{nativeDiagnostic+=chunk.toString();});
+      assert.equal(await new Promise((resolve,reject)=>{failedHost.once("close",resolve);failedHost.once("error",reject);}),1);
+      assert.match(nativeDiagnostic,/recognizer.*SIGTERM/);
+      const grant=sdk.approvals.list().find(value=>value.scope.kind==="project"&&value.scope.projectId===second.id);
+      await sdk.approvals.revoke(grant.id);
+      if(PROTOCOL_VERSION>=73){
+        const current=sdk.settings.get();
+        await sdk.settings.update({...current.values,permissions:{...current.values.permissions,
+          tools:current.values.permissions.tools.filter(rule=>rule.id!=="generated-installed-folder-review")}},current.revision);
+      }
+      await sdk.sessions.delete(opened.id,true);
+      console.log("Installed protocol-65 typed root scopes, actual selected-root SDK edits, whole-tool grants, immediate read-only sides, private speech host and stream ownership gates pass without inference or audio capture.");
+      }` : ""}
+      ${installedProtocol >= 71 ? `
+      {
+        const speechBytes=Buffer.from("Generated installed buffered-readiness recognizer weights.");
+        const speechState=join(root,"generated-installed-speech");
+        const speechProvider=()=>({state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>{},cancel:async()=>{},logout:async()=>{},
+          login:()=>{throw new Error("Generated speech probe forbids personal login");},prepare:async()=>{throw new Error("Generated speech probe forbids inference");}});
+        const speechOptions=(args=[])=>({stateDir:speechState,retentionKey:Buffer.alloc(32,0x68),provider:speechProvider(),platform:{speech:{
+          executable:process.execPath,prefixArgs:[${JSON.stringify(resolve("tests/fixtures/fake-speech.mjs"))},...args],
+          model:{id:"generated-installed-speech",revision:"generated",filename:"generated-installed-speech.gguf",bytes:speechBytes.length,
+            sha256:createHash("sha256").update(speechBytes).digest("hex"),license:"Generated fixture only"},fetch:async()=>new Response(speechBytes)}}});
+        let speechRuntime=await createRuntime(speechOptions(["--buffered-ready","--listener-delay","200"]));
+        let speechSdk=await connectMoguri({stateDir:speechState,autoStart:false});
+        try{
+          const owner=await speechSdk.sessions.create(null,"Generated installed speech owner");
+          await speechSdk.jobs.wait((await speechSdk.voice.download(true)).id);
+          const lease=await speechSdk.voice.startCapture(owner.id,undefined,{streaming:true});
+          const pcm=new Uint8Array(6400).fill(1);
+          await speechSdk.voice.appendCapture(owner.id,lease.id,lease.token,1,pcm);
+          await speechSdk.voice.finishCapture(owner.id,lease.id,lease.token,1);
+          assert.equal((await speechSdk.jobs.wait(lease.id)).status,"completed");
+          assert.equal(await speechSdk.voice.transcript(owner.id,lease.id),"Generated local dictation.");
+          const retained=JSON.stringify(speechSdk.getState().events);
+          assert.ok(!retained.includes(lease.token));assert.ok(!retained.includes(Buffer.from(pcm).toString("base64")));
+          assert.equal(speechSdk.getState().snapshot.budgetEntries.length,0);
+          speechSdk.disconnect();await speechRuntime.close();
+          speechRuntime=await createRuntime(speechOptions(["--fail-with-diagnostic"]));
+          speechSdk=await connectMoguri({stateDir:speechState,autoStart:false});
+          assert.equal(await speechSdk.voice.transcript(owner.id,lease.id),"Generated local dictation.");
+          const failedLease=await speechSdk.voice.startCapture(owner.id,undefined,{streaming:true});
+          const failed=await speechSdk.jobs.wait(failedLease.id);
+          assert.equal(failed.status,"failed");assert.match(failed.error,/Generated recognizer could not initialize/);
+          await assert.rejects(()=>speechSdk.voice.readCapture(owner.id,failedLease.id,failedLease.token),{message:failed.error});
+          await assert.rejects(()=>speechSdk.voice.startCapture(owner.id,lease.id,{streaming:true}),/already exists|identity/i);
+          console.log("Installed protocol-71 service/SDK uses delayed authenticated readiness without a stdout event, retains the exact final transcript across restart, preserves original capture errors and never replays PCM or inference.");
+        }finally{speechSdk.disconnect();await speechRuntime.close();}
+      }
+      ` : ""}
       const profileCreation=await sdk.profiles.create("Generated installed profile","#557799");
       const profile=await sdk.profiles.wait(profileCreation.id);
       beta=await sdk.profiles.open(profile.id);
@@ -662,7 +876,7 @@ try {
         await writeFile(join(directory,"candidate.txt"),original);
         git(["init","--initial-branch=main"],directory);git(["add","--","candidate.txt"],directory);
         git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated installed candidate base"],directory);
-        const options={stateDir:join(root,"candidate-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x68)};
+        const options={stateDir:join(root,"candidate-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x68),platform:{terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
         let candidateRuntime=await createRuntime(options),candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
         try{
           let budgetOwnerId=null;
@@ -725,8 +939,67 @@ try {
       }
       const general=await sdk.sessions.create();
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===general.id).projectId,null);
+      if(PROTOCOL_VERSION>=72)assert.equal((await sdk.workspaces.home(general.id)).root.root,await realpath(generatedHome));
       if(PROTOCOL_VERSION>=57)assert.equal((await sdk.candidates.eligibility(general.id)).eligible,false);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
+      if(PROTOCOL_VERSION>=73){
+        const before=(await sdk.budgets.dashboard()).totals.calls;
+        await sdk.webAllowlist.add("global.example.invalid",{kind:"global"});
+        await sdk.webAllowlist.add("project.example.invalid",{kind:"project",projectId:p.id});
+        await sdk.webAllowlist.add("session.example.invalid",{kind:"session",sessionId:general.id});
+        assert.deepEqual(sdk.webAllowlist.list(general.id).map(entry=>entry.site),["global.example.invalid","session.example.invalid"]);
+        assert.deepEqual(sdk.webAllowlist.list(s.id).map(entry=>entry.site),["global.example.invalid","project.example.invalid"]);
+        const shared=await sdk.slash(general.id,"/firewall list","tui");assert.equal(shared.kind,"text");assert.equal(JSON.parse(shared.text).effective.length,2);
+        for(const entry of [...sdk.webAllowlist.list()])await sdk.webAllowlist.remove(entry.id);
+        const write=(await sdk.tools.catalog(general.id,"write_file")).tools.find(tool=>tool.name==="write_file");
+        const written=await sdk.tools.execute(general.id,write.name,{path:"generated-installed-native-policy.txt",text:"GENERATED_NATIVE_POLICY\\n",expectedDigest:"absent"},write.schemaDigest);
+        assert.equal(sdk.getState().snapshot.sessions.find(session=>session.id===general.id).pendingApproval,null);
+        assert.equal((await sdk.jobs.wait(written.id)).status,"completed");
+        const read=(await sdk.tools.catalog(general.id,"read_file")).tools.find(tool=>tool.name==="read_file");
+        const refreshed=await sdk.tools.execute(general.id,read.name,{path:"generated-installed-native-policy.txt",expectedDigest:"0".repeat(64)},read.schemaDigest);
+        assert.equal((await sdk.jobs.wait(refreshed.id)).status,"completed");
+        const original=JSON.parse((await sdk.mcp.readResult(refreshed.id)).text),view=JSON.parse(original.text);
+        assert.equal(original.isError,false);assert.equal(view.text,"GENERATED_NATIVE_POLICY\\n");
+        assert.equal(view.sourceVersion.refreshed,true);assert.equal(view.sourceVersion.requestedDigest,"0".repeat(64));
+        assert.match(view.sourceRef.expectedDigest,/^[a-f0-9]{64}$/);assert.notEqual(view.sourceRef.expectedDigest,"0".repeat(64));
+        const nativeDecisions=sdk.getState().events.filter(event=>event.session_id===general.id&&event.event_type==="tool.decided");
+        assert.equal(nativeDecisions.length,2);assert.ok(nativeDecisions.every(event=>event.payload.actor==="policy"));
+        assert.equal((await sdk.budgets.dashboard()).totals.calls,before);
+        console.log("Installed protocol-73 SDK/shared TUI preserve exact scoped Local website allowances, policy-owned native Home writes/reads and explicit fresh-source provenance without a model call.");
+      }
+      if(PROTOCOL_VERSION>=72&&process.platform==="darwin"){
+        const homeOptions={stateDir:join(root,"home-execution-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x72),
+          platform:{terminal:{...platform.terminal,defaultRoot:generatedHome,vault:remoteVault}}};
+        let homeRuntime=await createRuntime(homeOptions),homeSdk=await connectMoguri({stateDir:homeOptions.stateDir,autoStart:false});
+        try{
+          const created=await homeSdk.sessions.create(null,"Generated installed Home chat"),homeId=created.id;
+          await homeSdk.sessions.autonomy(homeId,"Autopilot");
+          const bound=(await homeSdk.workspaces.home(homeId)).root;
+          assert.equal(bound.root,await realpath(generatedHome));assert.equal(homeSdk.getState().snapshot.projects.length,0);
+          const fileTool=(await homeSdk.tools.catalog(homeId,"write_file")).tools.find(tool=>tool.name==="write_file");
+          const written=await homeSdk.tools.execute(homeId,fileTool.name,{path:"generated-installed-home.txt",text:"GENERATED_INSTALLED_HOME\\n",expectedDigest:"absent"},fileTool.schemaDigest);
+          assert.equal((await homeSdk.jobs.wait(written.id)).status,"completed");
+          assert.equal((await homeSdk.workspaces.file(homeId,"generated-installed-home.txt")).text,"GENERATED_INSTALLED_HOME\\n");
+          const commandTool=(await homeSdk.tools.catalog(homeId,"run_command")).tools.find(tool=>tool.name==="run_command");
+          const command=await homeSdk.tools.execute(homeId,commandTool.name,{command:"pwd",timeoutMs:2000},commandTool.schemaDigest);
+          assert.equal((await homeSdk.jobs.wait(command.id)).status,"completed");
+          const agent=(await homeSdk.agentTerminals.list(homeId)).activity.entries[0];
+          assert.ok((await homeSdk.agentTerminals.read(homeId,agent.id)).content.text.includes(bound.root));
+          assert.equal(homeSdk.getState().snapshot.chatWriters.filter(writer=>writer.status==="settled").length,2);
+          const tui=await homeSdk.slash(homeId,"/home","tui");assert.equal(tui.kind,"text");assert.deepEqual(JSON.parse(tui.text).root,bound);
+          const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
+          const view=JSON.parse((await promisify(execFile)(process.execPath,[cli,"home","status","--session",homeId],{env:{...process.env,MOGURI_STATE_DIR:homeOptions.stateDir}})).stdout);
+          assert.deepEqual(view.root,bound);assert.deepEqual(view.writers,[]);
+          homeSdk.disconnect();await homeRuntime.close();
+          const alternate=join(root,"generated-alternate-home");await mkdir(alternate);
+          homeRuntime=await createRuntime({...homeOptions,platform:{terminal:{...homeOptions.platform.terminal,defaultRoot:alternate}}});
+          homeSdk=await connectMoguri({stateDir:homeOptions.stateDir,autoStart:false});
+          assert.deepEqual((await homeSdk.workspaces.home(homeId)).root,bound);
+          assert.equal((await homeSdk.workspaces.file(homeId,"generated-installed-home.txt")).text,"GENERATED_INSTALLED_HOME\\n");
+          assert.equal(homeSdk.getState().snapshot.sessions.find(session=>session.id===homeId).projectId,null);
+          console.log("Installed protocol-72 SDK/CLI/shared TUI execute approved Home files and commands without a project, read actual Agent output, retain exact writer settlement and preserve the original Home across changed-default restart without inference.");
+        }finally{homeSdk.disconnect();await homeRuntime.close();}
+      }
       assert.equal((await sdk.remote.status()).remote.ready,false);
       if(PROTOCOL_VERSION>=17&&process.env.MOGURI_GENERATED_REMOTE){
         const target=JSON.parse(process.env.MOGURI_GENERATED_REMOTE),remoteDirectory=join(root,"generated-remote-workspace");
@@ -771,9 +1044,10 @@ try {
           assert.equal(tool.scope.root,remoteRoot);
           const pending=await sdk.mcp.call(viewer.id,"builtin",tool.name,{path:"generated.ts",query:"SSH-only change"},tool.digest);
           const waiting=(await sdk.mcp.remoteCalls(viewer.id)).calls[0];
-          assert.equal(waiting.actor,"external");assert.equal(waiting.executionId,null);assert.equal(waiting.accessForwarded,false);
+          assert.equal(waiting.actor,"external");if(PROTOCOL_VERSION<73){assert.equal(waiting.executionId,null);assert.equal(waiting.accessForwarded,false);}
           const approval=sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).pendingApproval;
-          await sdk.command({type:"approval.respond",sessionId:viewer.id,approvalId:approval.id,allow:true});
+          if(PROTOCOL_VERSION>=73)assert.equal(approval,null);
+          else await sdk.command({type:"approval.respond",sessionId:viewer.id,approvalId:approval.id,allow:true});
           assert.equal((await sdk.jobs.wait(pending.id)).status,"completed");
           const call=(await sdk.mcp.remoteCalls(viewer.id)).calls[0],result=await sdk.mcp.remoteCall(viewer.id,call.id);
           assert.equal(call.status,"completed");assert.equal(call.root,remoteRoot);
@@ -874,9 +1148,12 @@ try {
         const actualTool=(await sdk.mcp.tools("builtin","grep",0,operationSessionId)).tools.find(value=>value.name==="grep_logs");
         assert.ok(actualTool);
         const actualJob=await sdk.mcp.call(operationSessionId,"builtin",actualTool.name,{path:"generated.ts",query:"portableSdkMemory"},actualTool.digest);
-        let actualApproval;
-        for(let n=0;n<400&&!actualApproval;n++){actualApproval=sdk.getState().snapshot.sessions.find(value=>value.id===operationSessionId).pendingApproval;if(!actualApproval)await new Promise(resolve=>setTimeout(resolve,20));}
-        assert.ok(actualApproval);await sdk.command({type:"approval.respond",sessionId:operationSessionId,approvalId:actualApproval.id,allow:true});
+        if(PROTOCOL_VERSION>=73)assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===operationSessionId).pendingApproval,null);
+        else{
+          let actualApproval;
+          for(let n=0;n<400&&!actualApproval;n++){actualApproval=sdk.getState().snapshot.sessions.find(value=>value.id===operationSessionId).pendingApproval;if(!actualApproval)await new Promise(resolve=>setTimeout(resolve,20));}
+          assert.ok(actualApproval);await sdk.command({type:"approval.respond",sessionId:operationSessionId,approvalId:actualApproval.id,allow:true});
+        }
         assert.equal((await sdk.jobs.wait(actualJob.id)).status,"completed");
         assert.equal((await sdk.telemetry.operations({sessionId:operationSessionId,family:"mcp"})).totals.completed,1);
         assert.equal((await sdk.budgets.dashboard()).totals.calls,beforeCalls);
@@ -922,6 +1199,9 @@ try {
       await assert.rejects(()=>sdk.artifacts.read(retained.id),/missing|deleted|outside/);
       const generatedRequests=[];
       budgetServer=createServer(async(request,response)=>{
+        if(PROTOCOL_VERSION>=70&&request.method==="GET"&&request.url.endsWith("/models")){
+          response.writeHead(200,{"Content-Type":"application/json"}).end(JSON.stringify({data:[{id:"generated-external-budget"}]}));return;
+        }
         const chunks=[];for await(const chunk of request)chunks.push(Buffer.from(chunk));
         const body=JSON.parse(Buffer.concat(chunks).toString("utf8"));generatedRequests.push(body);
         response.writeHead(200,{"Content-Type":"text/event-stream"});
@@ -932,7 +1212,7 @@ try {
         }else if(String(body.messages[user]?.content).includes("Generated installed Guided question")&&!body.messages.slice(user+1).some(value=>value.role==="tool")){
           frame({role:"assistant",tool_calls:[{index:0,id:"generated-installed-guided-call",type:"function",function:{name:"ask_user",arguments:JSON.stringify({question:"Choose a generated installed approach?",choices:["Generated installed first","Generated installed second"],allowFreeform:false,recommendation:{choiceIndex:1,reason:"Generated installed solver recommendation."}})}}]});frame({},"tool_calls");
         }else{frame({role:"assistant",content:"Generated external budget response."});frame({},"stop");}
-        response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
+        response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42,...(PROTOCOL_VERSION>=66?{prompt_tokens_details:{cached_tokens:10}}:{})}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
       });
       await new Promise(resolve=>budgetServer.listen(0,"127.0.0.1",resolve));
       const generatedModel={id:"generated-external-budget",name:"Generated external budget model",api:"openai-completions",provider:"github-copilot",baseUrl:"http://127.0.0.1:"+budgetServer.address().port,reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:8192,maxTokens:128};
@@ -979,6 +1259,16 @@ try {
       assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===guided.id).status,"completed");
       assert.equal(beta.getState().snapshot.questions.find(value=>value.id===pending.id).answer.actor,"user");
       assert.equal(beta.getState().snapshot.questions.find(value=>value.id===pending.id).answer.text,pending.choices[0]);assert.equal(generatedRequests.length,4);
+      ${conversationNavigationAvailable ? `
+      const navigation=conversationNavigation(beta.getState().snapshot,guided.id);
+      assert.deepEqual(navigation.map(value=>value.kind),["prompt","answer"]);assert.equal(navigation[1].answer,pending.choices[0]);
+      assert.equal(navigation[1].questionId,pending.id);assert.equal(navigation[1].profileId,beta.profileId);
+      assert.throws(()=>conversationNavigation(sdk.getState().snapshot,guided.id),{code:"session_missing"});
+      const reopenedNavigation=await sdk.profiles.open(beta.profileId);
+      try{assert.deepEqual(conversationNavigation(reopenedNavigation.getState().snapshot,guided.id),navigation);}finally{reopenedNavigation.disconnect();}
+      assert.equal(generatedRequests.length,4);
+      console.log("Installed shared conversation navigation retains exact actual-user question choices, immutable source identities and owning-profile reopen without tool permissions or another model call.");
+      ` : ""}
       const guidedArtifact=beta.getState().snapshot.artifacts.find(value=>value.questionId===pending.id);
       assert.match((await beta.artifacts.read(guidedArtifact.id)).text,/Model recommendation \\(not a user answer\\)/);
       assert.deepEqual(beta.routing.policy(),defaultKupoSettings());
@@ -1037,9 +1327,13 @@ try {
         const refresh=await sdk.repositories.refresh(session.id,preview.bindingDigest,preview.revision,true);assert.equal((await sdk.jobs.wait(refresh.id)).status,"completed");
         assert.equal((await sdk.repositories.state(session.id)).observation.repository.publicOsiLicensed,true);assert.equal(repositoryLookups,1);
         const tool=(await sdk.mcp.tools("builtin","grep",0,session.id)).tools.find(value=>value.name==="grep_logs"),job=await sdk.mcp.call(session.id,"builtin",tool.name,{path:"fixture.txt",query:"Generated"},tool.digest);
-        let approval;
-        for(let n=0;n<400&&!approval;n++){approval=sdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval;if(!approval)await new Promise(resolve=>setTimeout(resolve,20));}
-        assert.ok(approval);await sdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});assert.equal((await sdk.jobs.wait(job.id)).status,"completed");
+        if(PROTOCOL_VERSION>=73)assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval,null);
+        else{
+          let approval;
+          for(let n=0;n<400&&!approval;n++){approval=sdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval;if(!approval)await new Promise(resolve=>setTimeout(resolve,20));}
+          assert.ok(approval);await sdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});
+        }
+        assert.equal((await sdk.jobs.wait(job.id)).status,"completed");
         const observed=await sdk.telemetry.operations({repositoryId:42,visibility:"open-source"});
         assert.equal(observed.totals.completed,1);assert.equal(observed.entries[0].repository.fullName,"generated/example");assert.equal(observed.entries[0].actor,"external");
         assert.equal(JSON.stringify(observed).includes("GENERATED_UNRETAINED_REPOSITORY_BODY"),false);assert.equal((await beta.telemetry.operations({repositoryId:42})).totals.attempts,0);
@@ -1102,7 +1396,107 @@ try {
         assert.equal(beta.routing.history(automatic.id)[0].classifierStepId,null);
         assert.equal(beta.routing.history(automatic.id)[0].plan.basis,"only-model");
         await beta.routing.configure(previousPolicy,beta.settings.get().revision);
+        if(PROTOCOL_VERSION>=66){
+          const saved=beta.getState().snapshot.sessionTelemetry[automatic.id];
+          assert.equal(saved.turns[0].usage.cacheReadTokens,10);assert.equal(saved.turns[0].usage.inputTokens,30);
+          assert.equal(saved.estimate.outputTokens,12);assert.equal(saved.estimate.estimatedCalls,0);assert.ok(saved.context.estimatedTokens>0);
+          assert.equal(sdk.getState().snapshot.sessionTelemetry[automatic.id],undefined);
+          const reopened=await sdk.profiles.open(beta.profileId);
+          try{assert.deepEqual(reopened.getState().snapshot.sessionTelemetry[automatic.id].turns,saved.turns);assert.deepEqual(reopened.getState().snapshot.sessionTelemetry[automatic.id].context,saved.context);}
+          finally{reopened.disconnect();}
+          assert.equal(generatedRequests.length,before+1);
+          console.log("Installed protocol-66 snapshots retain original turn/cache/context and captured-rate estimates across client reopen without detail queries, new model calls or foreign-profile data.");
+        }
         console.log("Installed protocol-61 Kupo catalogue, automatic default and capability inventory use the exact sole model through the real delivered worker without a classifier or extra permission.");
+      }
+      if(PROTOCOL_VERSION>=67){
+        const before=generatedRequests.length;
+        const parent=await beta.sessions.create(null,"Generated installed live side parent",{modelId:generatedModel.id,autonomy:"Manual"});
+        const send=async(id,text)=>{
+          const current=beta.getState().snapshot.sessions.find(value=>value.id===id);
+          await beta.command({type:"draft.save",sessionId:id,expectedRevision:current.draft.revision,text,attachments:[]});
+          await beta.command({type:"message.send",sessionId:id,expectedRevision:current.draft.revision+1,delivery:"queue"});
+          for(let n=0;n<400&&!["completed","partial","failed","stopped"].includes(beta.getState().snapshot.sessions.find(value=>value.id===id).status);n++)await new Promise(resolve=>setTimeout(resolve,20));
+          assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===id).status,"completed");
+        };
+        await send(parent.id,"Generated INSTALLED_MAIN_TIME_ONE.");
+        const side=await beta.sessions.side(parent.id);
+        await send(side.id,"Generated INSTALLED_SIDE_TIME_ONE.");
+        const first=JSON.stringify(generatedRequests.at(-1).messages);
+        await send(parent.id,"Generated INSTALLED_MAIN_TIME_TWO.");
+        await send(side.id,"Generated INSTALLED_SIDE_TIME_TWO.");
+        const last=JSON.stringify(generatedRequests.at(-1).messages);
+        for(const sentinel of ["INSTALLED_MAIN_TIME_ONE","INSTALLED_MAIN_TIME_TWO","INSTALLED_SIDE_TIME_ONE","INSTALLED_SIDE_TIME_TWO"])assert.equal(last.split(sentinel).length-1,1);
+        assert.ok(!first.includes("INSTALLED_MAIN_TIME_TWO"));
+        const retained=beta.getState().snapshot.sessions.find(value=>value.id===side.id);
+        assert.equal(retained.mode,"read-only");assert.equal(retained.sideContext.parentSessionId,parent.id);
+        const reopened=await sdk.profiles.open(beta.profileId);
+        try{assert.deepEqual(reopened.getState().snapshot.sessions.find(value=>value.id===side.id).sideContext,retained.sideContext);assert.ok(!sdk.getState().snapshot.sessions.some(value=>value.id===side.id));}
+        finally{reopened.disconnect();}
+        assert.equal(generatedRequests.length,before+4);
+        if(PROTOCOL_VERSION>=68){
+          const draft=beta.getState().snapshot.sessions.find(value=>value.id===side.id).draft;
+          await beta.command({type:"draft.save",sessionId:side.id,expectedRevision:draft.revision,text:"Generated installed side draft preserved.",attachments:[]});
+          await beta.sessions.askSide(parent.id,"Generated installed atomic slash side prompt.");
+          for(let n=0;n<400&&beta.getState().snapshot.sessions.find(value=>value.id===side.id).status!=="completed";n++)await new Promise(resolve=>setTimeout(resolve,20));
+          assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===side.id).draft.text,"Generated installed side draft preserved.");
+          assert.equal(generatedRequests.length,before+5);
+          const directory=join(root,"generated-installed-command-skills");await mkdir(directory);
+          await writeFile(join(directory,"SKILL.md"),"---\\nname: generated-installed-slash-skill\\ndescription: Generated installed command guidance\\n---\\nUse generated fixtures only.\\n");
+          const settings=beta.settings.get();await beta.settings.update({...settings.values,skillSources:[{id:"generated-installed-slashes",name:"Generated installed slash source",kind:"local",enabled:true,path:directory}]},settings.revision);
+          const catalog=await beta.commands.list(parent.id),skill=catalog.find(value=>value.kind==="skill");
+          assert.equal(catalog[0].kind,"builtin");assert.ok(skill);assert.ok(catalog.slice(catalog.findIndex(value=>value.kind==="skill")).every(value=>value.kind==="skill"));
+          const original=beta.getState().snapshot.sessions.find(value=>value.id===parent.id).draft;
+          await beta.skills.use(parent.id,skill.skill.id,skill.skill.digest,original.revision,"Generated installed skill task.");
+          assert.match(beta.getState().snapshot.sessions.find(value=>value.id===parent.id).draft.text,/Generated installed skill task/);
+          assert.equal(generatedRequests.length,before+5);
+          console.log("Installed protocol-68 SDK retains side-draft isolation and complete builtins-first fresh skill commands with actual selected-source grants and no additional model call.");
+        }
+        console.log("Installed protocol-67 side questions refresh exact retained main history once per new turn, retain original side exchanges and read-only model controls across profile-owned reopen without extra model calls.");
+      }
+      if(PROTOCOL_VERSION>=69){
+        const before=generatedRequests.length,previous=structuredClone(betaProvider.state.models),maximum=generatedModel.contextWindow;
+        try{
+          generatedModel.contextWindow=32769;betaProvider.state.models[0].contextWindow=32769;
+          betaProvider.onChange();await beta.models.refresh();
+          const tuned=await beta.sessions.create(null,"Generated installed tuning shortcuts",{modelId:generatedModel.id});
+          await beta.slash(tuned.id,"/thinking default","tui");await beta.slash(tuned.id,"/effort default","desktop");
+          for(const [argument,tokens] of [["24577",24577],["min",8192],["half",16384],["max",32769]]){
+            await beta.slash(tuned.id,"/context-window "+argument,"cli");
+            assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===tuned.id).controls.modelOptions.contextWindow,tokens);
+          }
+          await assert.rejects(()=>beta.slash(tuned.id,"/context-window 32770"),/context|window|ceiling/i);
+          await assert.rejects(()=>beta.slash(tuned.id,"/thinking low"),/not supported/i);
+          await beta.slash(tuned.id,"/context-window 8192");
+          assert.equal(generatedRequests.length,before);
+          console.log("Installed protocol-69 shortcuts preserve exact/min/half/max context ceilings, real unsupported-effort errors and profile-owned model controls without inference.");
+        }finally{generatedModel.contextWindow=maximum;betaProvider.state.models=previous;betaProvider.onChange();await beta.models.refresh();}
+      }
+      if(PROTOCOL_VERSION>=70){
+        const before=generatedRequests.length,savedSettings=structuredClone(beta.settings.get().values),savedModels=structuredClone(betaProvider.state.models);
+        const extra=Array.from({length:20},(_,index)=>({...savedModels[0],id:"generated-installed-choice-"+index,apiModelId:"generated-installed-choice-"+index,name:"Generated installed choice "+index}));
+        try{
+          betaProvider.state.models=[...savedModels,...extra];betaProvider.onChange();await beta.models.refresh();
+          for(const model of extra.slice(2))await beta.models.setEnabled(model.apiModelId,false);
+          assert.equal(beta.getState().snapshot.provider.models.filter(model=>!model.synthetic).length,3);
+          assert.equal(beta.models.catalogue().models.length,21);
+          await assert.rejects(()=>beta.slash(betaMetered.id,"/model "+extra[2].id),/available|disabled/i);
+          const settings=beta.settings.get();await beta.settings.update({...settings.values,localModels:[...settings.values.localModels,{id:"installed-choice",name:"Generated installed source",enabled:true,baseUrl:generatedModel.baseUrl+"/v1",auth:"none",models:[{id:generatedModel.id,name:"Generated installed duplicate",contextWindow:8192,maxTokens:128,imageInput:false}]}]},settings.revision);
+          await beta.models.refresh();
+          let group=beta.models.catalogue().models.find(model=>model.apiModelId===generatedModel.id);
+          assert.equal(group.offerings.length,2);assert.equal(group.sourceModelId,null);
+          const local=group.offerings.find(offering=>offering.model.source==="local").model;
+          await beta.models.selectSource(generatedModel.id,local.id);
+          assert.ok(beta.getState().snapshot.provider.models.some(model=>model.id===local.id));
+          assert.ok(!beta.getState().snapshot.provider.models.some(model=>model.id===generatedModel.id));
+          await beta.models.setProviderEnabled(local.providerId,false);
+          group=beta.models.catalogue().models.find(model=>model.apiModelId===generatedModel.id);
+          assert.equal(group.sourceModelId,local.id);assert.ok(group.diagnostic);
+          assert.ok(!beta.getState().snapshot.provider.models.some(model=>model.id===generatedModel.id));
+          await beta.models.selectSource(generatedModel.id,generatedModel.id);
+          assert.equal(generatedRequests.length,before);
+          console.log("Installed protocol-70 SDK reduces 21 models to three, blocks disabled slash selection and enforces an exact retained provider source without fallback or inference.");
+        }finally{betaProvider.state.models=savedModels;betaProvider.onChange();await beta.settings.update(savedSettings,beta.settings.get().revision);await beta.models.refresh();}
       }
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
       await sdk.profiles.globalBudget({basis:"estimate",tokens:rootCharges},0,true);
@@ -1137,7 +1531,7 @@ try {
         const model={id:"generated-installed-proposal",name:"Generated installed proposal model",api:"openai-completions",provider:"github-copilot",baseUrl:"http://127.0.0.1:"+server.address().port,reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:16384,maxTokens:256};
         const provider={...makeProvider(),state:{status:"connected",models:[{id:model.id,name:model.name,contextWindow:model.contextWindow,maxTokens:model.maxTokens,imageInput:false}],login:null,diagnostic:null},
           prepare:async id=>{assert.equal(id,model.id);return{model,auth:{apiKey:"generated-installed-only",baseUrl:model.baseUrl}};}};
-        const options={stateDir:join(root,"generation-state"),retentionKey:Buffer.alloc(32,0x79),provider};
+        const options={stateDir:join(root,"generation-state"),retentionKey:Buffer.alloc(32,0x79),provider,platform:{terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
         generationRuntime=await createRuntime(options);generationSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
         const proof=await qualifyCandidateGeneration({sdk:generationSdk,node:process.execPath,cli:${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},
           directory:join(root,"generated-installed-generation"),stateDir:options.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests});
@@ -1190,7 +1584,7 @@ try {
     if(PROTOCOL_VERSION>=26&&process.env.MOGURI_GENERATED_GITHUB){
       const observed=JSON.parse(process.env.MOGURI_GENERATED_GITHUB),state=join(root,"generated-metadata-state"),remoteRoot=await realpath(join(root,"generated-remote-workspace"));
       git(["remote","add","origin","https://github.com/generated/example.git"],remoteRoot);
-      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x73),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault}}};
+      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x73),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault},terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
       let metadataRuntime=await createRuntime(options),metadataSdk=await connectMoguri({stateDir:state,autoStart:false});
       try{
         const metadataProject=await metadataSdk.command({type:"project.add",path:project}),session=await metadataSdk.sessions.create(metadataProject.id);
@@ -1213,7 +1607,7 @@ try {
     }
     if(PROTOCOL_VERSION>=27&&process.env.MOGURI_GENERATED_REMOTE){
       const state=join(root,"generated-memory-state"),remoteRoot=await realpath(join(root,"generated-remote-workspace"));
-      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x75),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault}}};
+      const options={stateDir:state,retentionKey:Buffer.alloc(32,0x75),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault},terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
       let memoryRuntime=await createRuntime(options),memorySdk=await connectMoguri({stateDir:state,autoStart:false});
       try{
         const memoryProject=await memorySdk.command({type:"project.add",path:project}),session=await memorySdk.sessions.create(memoryProject.id);
@@ -1238,7 +1632,8 @@ try {
         const tool=(await memorySdk.mcp.tools("builtin","memory",0,session.id)).tools.find(tool=>tool.name==="search_memory");
         const requested=await memorySdk.mcp.call(session.id,"builtin",tool.name,{query:"SSH-only change"},tool.digest);
         const approval=memorySdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval;
-        await memorySdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});
+        if(PROTOCOL_VERSION>=73)assert.equal(approval,null);
+        else await memorySdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});
         assert.equal((await memorySdk.jobs.wait(requested.id)).status,"completed");assert.match((await memorySdk.mcp.readResult(requested.id)).text,/SSH-only change/);
         assert.equal(memorySdk.getState().snapshot.sessions.find(value=>value.id===session.id).usage.length,0);
       }finally{memorySdk.disconnect();await memoryRuntime.close();}
@@ -1247,7 +1642,7 @@ try {
       const consoleRoot=join(root,"generated-console-project-"+mode),consoleState=join(root,"generated-console-state-"+mode),keys=new Map();
       await mkdir(consoleRoot);
       const vault={read:async id=>keys.get(id)??null,write:async(id,value)=>{keys.set(id,value);},remove:async id=>{keys.delete(id);}};
-      const options={stateDir:consoleState,retentionKey:Buffer.alloc(32,0x71),provider:makeProvider(),platform:{remote:{vault,modelsVault:vault},terminal:{vault,executable:"/bin/sh",args:["-c","printf 'GENERATED_INSTALLED_CONSOLE_READY\\\\n'; exec cat"]}}};
+      const options={stateDir:consoleState,retentionKey:Buffer.alloc(32,0x71),provider:makeProvider(),platform:{remote:{vault,modelsVault:vault},terminal:{vault,defaultRoot:generatedHome,executable:"/bin/sh",args:["-c","printf 'GENERATED_INSTALLED_CONSOLE_READY\\\\n'; exec cat"]}}};
       let consoleRuntime=await createRuntime(options),consoleSdk=await connectMoguri({stateDir:consoleState,autoStart:false});
       try{
         const project=await consoleSdk.command({type:"project.add",path:consoleRoot}),session=await consoleSdk.sessions.create(project.id);
@@ -1282,7 +1677,7 @@ try {
         await consoleSdk.terminal.close(opened.id);
         if(PROTOCOL_VERSION>=53&&mode==="Local"){
           const global=await consoleSdk.terminal.openGlobal(),globalState=(await consoleSdk.terminal.read(global.id)).terminal;
-          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(PROTOCOL_VERSION>=59?homedir():consoleState));
+          assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(PROTOCOL_VERSION>=59?generatedHome:consoleState));
           const globalCli=JSON.parse((await invoke(["terminal","read",global.id])).stdout);assert.equal(globalCli.terminal.id,global.id);
           const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
           await consoleSdk.sessions.delete(session.id,true);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);

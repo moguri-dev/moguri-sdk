@@ -5,7 +5,15 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **59**, including the
+Current source uses protocol **69**, including
+[direct effort and exact context-window shortcuts](architecture/model-controls.md#direct-tuning-slash-commands),
+[cascading model controls and complete slash discovery](architecture/model-controls.md#cascading-menus-and-complete-slash-discovery),
+[per-question refreshed side context](architecture/session-reliability.md#per-question-side-context),
+[saved turn, cache and live usage telemetry](architecture/chat-activity.md#retained-telemetry-follow-up-contract),
+[session reliability, streaming dictation and shared controls](architecture/session-reliability.md),
+[automatic Kupo and its shared capability inventory](architecture/automatic-kupo.md),
+[project Kanban continuation and provider-equivalent prices](architecture/project-kanban.md),
+[remembered approvals and repository-aware GitHub workflows](architecture/session-github-workflows.md),
 [skill gateway and graphic workspace dashboards](architecture/workspace-experience.md),
 [lean tools and coordinated sessions](architecture/lean-tooling.md),
 [session-owned candidate cleanup](architecture/candidate-cleanup.md),
@@ -19,6 +27,26 @@ Older running services require reviewed restart.
 Schema 59 adds an independent transactional metadata marker. Older source
 settings normalize to no configured skill sources; ciphertext, receipts,
 identities and existing accounting are unchanged.
+Schema 60 retains reviewed child-session detachment and schema 61 adds session
+approval/GitHub metadata without rewriting encrypted history. The exact private
+approval-development schema-59 lineage also converges by its own retained
+marker, atomically adding the workspace/navigation markers. Missing or
+ambiguous provenance is rejected rather than guessed.
+Schema 64 adds card ordering, per-request continuation choices and captured
+read-only GitHub board sources. `issues.reorder` binds the complete source and
+destination structure; `kanban.choose` binds the actual profile and exact saved
+draft revision. `/continue-work` returns a typed route review before dispatch.
+`BoardConfig.githubSync` controls optional issue import and explicit column
+mapping, while `IssueBoard.githubSource` is service-owned provenance, never
+client-supplied authority. Older encrypted history and consent remain intact.
+Schema 66 adds the transactional `retained_telemetry_schema` marker and requires
+`Snapshot.sessionTelemetry`. Original events, encrypted grants and receipts are
+preserved. Exact original provider results may append same-call cache-category
+corrections using only the captured rate; unknown work and holds are not refunded.
+Schema 63 explicitly converges the independent automatic-Kupo schema 61 and
+session/GitHub schema 61, plus Kanban/pricing schema 62. Exact original markers,
+approvals, selected responses, encrypted history, receipts and held accounting
+survive failure and reopen; a missing current marker is never silently repaired.
 It retains protocol-54 exact-scoped session PR observations
 and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
 [the separate Agent terminal](architecture/agent-terminal.md),
@@ -42,8 +70,12 @@ current control identity. The user enables/disables access with the pane's
 **Agent control** switch. `mcp.tools` with `serverId: "builtin"` and query
 `"navigate"` discovers `browser_navigate`; query `"browser"` discovers all six
 tools, including `browser_status` and `browser_snapshot`. Invoke through the
-existing `mcp.call`/`mcp_gateway` exact-approval flow, supplying its discovered
-schema digest and fresh control/element identities. Results keep the normal
+existing `mcp.call`/`mcp_gateway` policy/approval flow, supplying its discovered
+schema digest and fresh control/element identities. Reads/interactions also
+copy the exact `expectedUrl` from status/snapshot. Protocol 73 carries the
+service-admitted website scope to the actual host, including redirects,
+subresources and WebSockets; clients cannot invent a substitute grant.
+Results keep the normal
 encrypted session/job retention and bounded `result.read` paging. Native input
 acknowledgement is not verification of a website's business action.
 
@@ -79,6 +111,166 @@ unread state or lifecycle. Metadata is not a user answer, PR-write permission
 or evidence that the session's work succeeded. Legacy missing draft remains
 unknown; project-free scope cannot inherit a root or authenticated account.
 The schema-54 marker upgrades transactionally without rewriting ciphertext.
+
+## Captured folder sessions, side chats and streamed speech
+
+`projects.group(name, [{ projectId, revision }, ...])` atomically creates a named
+navigation folder and moves the exact reviewed projects into it, without moving
+files. `sessions.createFolder(folderId, title?, overrides?)` captures the current
+member IDs/revisions and canonical path/device/inode identities. Its
+`Session.projectId` is null, with immutable paired `projectFolderId` and
+`repositories`. Null without those explicit fields remains project-free;
+ordinary Local chats may separately retain `homeRoot`, never a synthetic project.
+
+The Local filesystem/command tools require an explicit `repository` ID or
+captured name for folder sessions. `workspaces.files(sessionId, path, repository)`,
+`file(sessionId, path, repository)` and `git(sessionId, diff, repository)` resolve the
+same bound root; `terminal.open` requires a captured member's exact root.
+Replaced directories, unknown/ambiguous selectors and unqualified transports
+fail without selecting a first member, common parent or HOME. All captured
+roots participate in writer admission, cancellation and uncertain-work
+quarantine, including across profiles. Per-member folder restrictions and
+project-scoped approval grants bind the actual selected repository.
+
+CLI/TUI/desktop share `/folder-group {"name":"Folder","projectIds":["ID","ID"]}`
+and `/folder-chat [FOLDER_ID]`; `/folder-chat` without an argument lists visible folders. The latter
+explicitly creates a Local folder chat, still subject to hard allowed-env
+policy. Per-project GitHub/plan, MCP, memory, hooks, background/publication and
+managed-worktree surfaces are not implicitly combined.
+
+`sessions.side(parentId)` atomically opens the original side conversation or
+creates one with inherited controls and captured full parent context. It never
+runs inference or grants write/coordination authority. The root set is inherited
+unchanged for folder sides. Navigation nesting alone does not grant context.
+Before each new side turn, the service refreshes from its actual
+`createdParentSessionId`, atomically retaining `turn.started.sideContext` and
+child-owned source grants. `Session.sideContext` exposes the original source
+watermark/digest and owning turn/time; it is retained provenance, not model
+authority. Later main work appears in the next side question, while earlier
+side exchanges and in-progress continuations keep their exact previous inputs.
+Fresh inherited images/documents require actual selected-model support and
+full input/window/budget admission. Private roles, unsent drafts and held main
+queues are excluded; no paid retry, truncation or alternate parent is used.
+The same behavior applies to SDK, TUI and desktop callers. Protocol/schema 67
+adds its atomic metadata marker without rewriting legacy captures or receipts.
+
+`sessions.askSide(parentId, prompt, expectedDraftRevision?)` atomically reuses or
+creates that read-only side and enqueues the original question without replacing
+its saved draft. When a main `/side ...` draft is consumed, the exact revision,
+prompt and attachments are bound in the same transaction. Retained queue command
+origin prevents a lost receipt from replaying admitted work. The slash result
+opens the side panel; ordinary model/budget/Env/permission gates still apply.
+
+`commands.list(sessionId, signal?)` returns complete `SlashSuggestion` values,
+built-ins before fresh enabled gateway skills, paging one exact catalog digest.
+`skills.use(sessionId, id, digest, expectedDraftRevision, replacementText?)`
+loads only the exact fresh source and retains actual-user `skill.used` provenance
+and encrypted grants. It is guidance, never a tool permission or paid call.
+Installed and configured skills share the same bounded selection path.
+
+Desktop dictation uses `voice.startCapture(sessionId, id?, { streaming: true })`,
+ordered `appendCapture(..., sequence, pcmBytes)`, volatile
+`readCapture(...): { text, revision }`, then `finishCapture(..., finalSequence)`.
+Finish acknowledges flush intent; await the original job separately for the
+exact completed transcript. Frames are mono 16-kHz PCM16, bounded per frame and
+capture, authenticated with the transient original nonce, never journaled.
+`DraftEditor.startDictation` guards the provisional insertion span against
+concurrent/foreign edits. Batch WAV upload and reviewed transcript insertion
+remain separate APIs. Reconnect/restart cannot replay PCM, and cancelling a
+retained partial job never acknowledges uncertain cleanup as successful.
+
+## Remembered approvals and GitHub entry points
+
+Native file/data/readback operations are factory-policy approved rather than
+fake human decisions. Stricter explicit review/deny rules still win. Scripts
+and external MCPs require normal approval/delegation. Explicit Autopilot/Max
+remains automatic; this policy does not bypass hard environment or budget gates.
+
+`webAllowlist.list(sessionId?)` returns effective Local entries for that exact
+session or all entries in the connected profile. `add(site, scope,
+expectedSettingsRevision?)` and `remove(id, expectedSettingsRevision?)` use the
+existing atomic settings revision and validate original profile-owned sources:
+
+```ts
+await sdk.webAllowlist.add("docs.example.com", {
+  kind: "session", sessionId: session.id,
+});
+await sdk.webAllowlist.add("https://example.com:8443", { kind: "global" });
+const effective = sdk.webAllowlist.list(session.id);
+await sdk.webAllowlist.remove(effective[0]!.id);
+```
+
+Project scope is `{ kind: "project", projectId }`; global means this profile,
+not shared cross-profile policy. Exact hostnames permit default-port HTTPS;
+exact origins preserve scheme/port. Rules do not confine approved Local shell
+scripts, broaden Sandbox's actual firewall, authorize Remote, or enable browser
+control. Model tools cannot apply these settings. `/firewall` exposes the same
+user-only API in CLI/TUI and desktop.
+
+Protocol/schema 73 adds an optional `permissions.webAllowlist` with a strict
+atomic migration marker. No older record gains grants or changes ciphertext,
+receipts or accounting. Ordinary `read_file` refreshes a stale optional digest
+with explicit `sourceVersion` provenance and a fresh `sourceRef`; stale byte
+continuations restart at zero. `requireExactVersion: true` retains intentional
+pinning. Exact write/edit CAS and immutable original tool results are unchanged.
+
+`approvals.respond(sessionId, approvalId, allow, remember?)` atomically records
+the actual pending answer and optional `{ scope: "session" | "project" | "global",
+match: "exact" | "family" | "tool" }` grant. Global means all projects in this profile,
+not another profile or execution environment. `approvals.list()` and
+`approvals.revoke(id, expectedSettingsRevision?)` share settings revisions.
+Family grants accept only conservative simple commands; MCP grants bind the
+actual server configuration and schema. Callers cannot replace the pending
+command or supply a different grant target. Explicit `tool` matching permits new
+arguments to that same named tool only inside the chosen scope and environment.
+Execution requires an exact command or conservative family rather than a blanket
+execution-tool grant. `/approve project tool` uses the actual selected folder
+member, and `approvalProject(session, call.arguments.repository)` exposes that
+same unambiguous project identity for client choice controls.
+
+`sessions.autonomy(id, "Autopilot")` explicitly sets
+`controls.automaticApprovals: true`; Max does the same while requiring its
+qualified decision provider. The marker is optional only for retained legacy
+history. Old bounded settings stay unchanged until an explicit selection.
+Manual/Guided never gain automatic approval through an inherited marker.
+
+```ts
+await sdk.approvals.respond(session.id, approval.id, true, {
+  scope: "project", match: "family",
+});
+const repositories = await sdk.github.repositories();
+const next = repositories.nextPage && await sdk.github.repositories({
+  account: repositories.account, accountId: repositories.accountId,
+  page: repositories.nextPage,
+});
+const scope = { env: "Local" as const, projectId: session.projectId!, sessionId: session.id };
+const project = await sdk.github.project(scope);
+const source = {
+  kind: "issue" as const, repository: project.repository,
+  account: project.account, accountId: project.accountId, number: 7,
+};
+const reviewed = await sdk.github.source(scope, source);
+// Display reviewed.item in full and obtain the user's explicit start action.
+const created = await sdk.github.startSession(scope, source, reviewed.digest);
+```
+
+`github.repositories({ source: "public", query })` explicitly searches public
+repositories. Public visibility is not an open-source license claim.
+Discovery uses only the current controller GitHub CLI account. No Copilot login,
+secret-backend updater token, rootless filesystem access or SSH fallback is
+introduced. `github.project` derives the exact configured upstream, actual
+default branch, local branch and account; clients do not guess `main` or an
+account name.
+
+`github.source` and `startSession` bind canonical repository/item identity,
+numeric account identity, actual profile/root inode and reviewed complete
+title/body. The returned `binding` is not a filesystem or permission grant. `Session.githubSource`
+retains original provenance; relinking that source clears the current
+attribution without rewriting history. `Session.workItemUrl` is the separately
+typed GitHub issue binding, independent of local `workItemId`. New sessions
+contain an unsent draft, not a claimed prompt or changed checkout.
+Existing `github.preview`, `execute`, `read`, `wait` and cancellation retain the
+original exact-review/no-replay write lifecycle.
 
 ## Lean tools and session coordination
 
@@ -215,6 +407,35 @@ captured output; it cannot become complete process output or a success receipt.
 context evidence and all-role owning-turn budget totals. `activity.response`
 copies public assistant text only from the authenticated snapshot.
 
+`conversationNavigation(snapshot, sessionId)` derives chronological
+`ConversationNavigationEntry` values from already retained public prompts and
+actual-user structured answers, without a query or mutation. Each opaque ID
+binds profile/session/source identity; `messageId` and `messageIndex` locate the
+original source, and answer entries retain `questionId`, question text and exact
+user answer. Original model `turnId` values are preserved. Missing sessions are
+explicit errors; tool approvals, queued prompts and model/decision-provider
+answers are excluded. The same browser-safe selector serves main/side desktop
+navigation and other SDK clients without another service endpoint. The current
+runtime still requires its matching service protocol for per-question side
+refresh and the other shared APIs.
+
+`Snapshot.sessionTelemetry[sessionId]` already contains original `turns`, current
+`budget` or its explicit `budgetDiagnostic`, live `estimate`, and recorded
+`context`. These service-owned views are reconstructed from retained events,
+messages and original budget entries, updated through normal sequenced snapshot
+refresh, and scoped to the SDK profile. Opening a display needs no `activity.turn`,
+`budget.status` or `session.context` query. `activity.turn` reuses the saved view.
+Deleting a session removes this view; independently retained accounting survives.
+
+`UsageEstimate` separates estimated input/visible output and captured-rate USD
+from reported quantities and held capacity. Original turn windows do not change
+when the next working window is edited. Context uses the last visible model's
+retained input estimate plus its visible output; unsent draft text is excluded.
+`knownCacheReadTokens`/`knownCacheWriteTokens` and the corresponding unknown-call
+counts preserve partial totals without treating missing reports as zero.
+Explicit zero needs presence evidence; positive normalized counts do not depend
+on transport presence flags. No private role prompts or reasoning are exposed.
+
 `useSessionActivity` in `moguri/react` provides scoped, non-overlapping refresh,
 earlier-page loading and stale-response isolation. No refresh runs a model,
 tool, provider metadata lookup or terminal. Thought sources are already-public
@@ -293,6 +514,28 @@ their original encryption and identities. Local project names are safe unique
 identifiers; normalization never renames filesystem directories.
 
 ### Retained-state upgrades
+
+Protocol/database 68 requires `composer_workflows_schema` and exact retained
+side-prompt command origin. Marker/version insertion is atomic; failure leaves
+the old state reopenable, current corruption is not repaired, and original
+ciphertext, grants, receipts and accounting are unchanged.
+
+Protocol/database 67 atomically adds `side_context_schema` and rejects missing,
+corrupt or prematurely relabelled markers. Older ciphertext, receipts, creation
+snapshots and accounting remain unchanged. The first new side question captures
+its actual original main source under the child's grants; old turns are not
+replayed, rewritten or granted another paid call.
+
+Protocol/database 66 atomically inserts `retained_telemetry_schema` and advances
+the version. Missing/corrupt current markers and premature older-lineage markers
+are rejected without repair or partial writes. The upgrade preserves original
+ciphertext, grants, receipts, totals and unknown holds. Startup recovery may
+append existing `budget.recorded` events for the same settled call only when
+its retained original model identity and token totals match exactly. It never
+infers absent zero counts, reprices with new rates or repeats a completed repair.
+Unqualified historical result formats are diagnosed without blocking recovery
+or inventing counts. Stopped runtime snapshots preserve final root-owned
+capacity without reading closed stores; they cannot authorize another call.
 
 Protocol/database 56 adds the strict transactional `browser_control_schema`
 marker and reviewed upgrade from an older running service. Native browser
@@ -818,6 +1061,8 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `jobs` | Wait or explicitly cancel. A wait timeout/disconnection does not cancel or retry the service's job. |
 | `sandbox` | Truthful readiness/configuration diagnostics. Configuration is not proof of a qualified SendBox transport. |
 | `issues` | Local feature/bug/misc board, create/update/move/archive, revision-checked phases and read-only linked-PR refresh. |
+| `kanban` | One special project chat, shared source/visibility preferences, paged local/GitHub work, one actual-user delegated Local task to its PR, retained read/wait/cancel and exact settled-task inspection. |
+| `prices` | Originating-provider API-equivalent references, exact model/name matches and explicit official public refresh; no inference, authentication, historical repricing or billed-cost claim. |
 | `cache` | Local plan inspection, explicit metadata-sharing consent, integrity-verified archive preparation and script-free managed install. |
 | `linear` | Optional team-scoped read-only page import, status and user-only OS-keychain credential setup. |
 | `sessions` | Revisioned controls/modelOptions, local context preview, rename/mode/pin/unread/group/attach/delete, explicit side/agent children and work-item/verified-PR context. Side sessions cannot acquire write authority. |
@@ -844,7 +1089,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
-| `models` | Explicit Copilot/local catalog refresh, informational `evidence(modelId)`, always-visible Kupo with authoritative eligible environments, and user-only resource-bound local endpoint keys. Synthetic metadata is not labeled as Copilot. No host scan, weight download, automatic evidence read or model substitution. |
+| `models` | Profile-owned `catalogue()`, `setProviderEnabled`, `setEnabled` and exclusive `selectSource`, plus explicit refresh, informational `evidence(modelId)`, always-visible Kupo and resource-bound endpoint keys. Selection and admission use only enabled, available, chosen sources; disabled inventory remains inspectable. No sign-in, inference, host scan, automatic evidence read or substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
 
@@ -1124,6 +1369,27 @@ IDs. Use `models.setToken`/`clearToken` for bearer credentials; no token belongs
 in settings. `provider.connections` keeps Copilot and local status independent;
 each model/call has actual provider/API-model provenance.
 
+`models.catalogue()` returns the actual profile's provider list plus one model
+group per exact upstream `apiModelId`. It includes disabled and configured-but-
+unready offerings; `snapshot.provider.models` is the authoritative selectable
+set, plus the synthetic Kupo entry with its actual readiness.
+`models.setProviderEnabled(providerId, enabled, expectedRevision?)`,
+`models.setEnabled(apiModelId, enabled, expectedRevision?)`, and
+`models.selectSource(apiModelId, concreteModelId, expectedRevision?)` use the
+current profile settings revision when omitted. Concurrent edits fail rather
+than overwrite another client.
+
+Multiple offerings require one explicit selected source. Disabled models,
+providers and unselected offerings fail raw session selection and every new
+model admission, not only `/model`. Disabling preserves credentials, source
+choices, current session/default IDs, original results and ledger charges.
+Reenabling Copilot explicitly refreshes its configured metadata; a refresh
+failure reports that the preference was saved without claiming connection or
+inference. Local/SSH changes reuse their exact configured endpoint flags.
+`settings.modelPreferences` and protocol-70 migration metadata persist this
+contract without rewriting old history. See
+[provider/model availability](architecture/model-controls.md#provider-and-model-availability).
+
 `settings.remote` holds a non-secret explicit SSH target, pinned public host key,
 selected local identity path, private remote state directory, installed worker
 argv, scoped-Copilot grant and remote-local endpoints. Projects separately set
@@ -1180,13 +1446,36 @@ validated commands used by both clients.
 ### Project-free chats and reviewed configuration
 
 `sessions.create()` or `sessions.create(null)` creates a real project-free chat.
-Raw `session.create` also permits an omitted/null `projectId`. No model workspace
-root, project-file attachments, agent commands or repository memory is available, and failure
-quarantines only the affected general chat. Scope cannot be reassigned by a
-navigation selection. Explicit global MCPs remain subject to normal approvals.
-Separate explicit user consoles do not change that model boundary. Autopilot may
-be selected without a project or preexisting allow rule; this adds no tool
-permissions, and undelegated operations still require human review.
+Raw `session.create` also permits an omitted/null `projectId`. Protocol 72
+captures `Session.homeRoot` (canonical path/device/inode) for ordinary Local
+chats, matching their private console default without creating a project.
+`sessions.home(sessionId, expectedRevision?)` explicitly binds a legacy chat
+once; the SDK prepares legacy Home on explicit file/catalogue/MCP use. Reopening,
+changing defaults or navigating never moves the binding. Files and commands
+use existing scoped executors and approval policy, not another checkout or a
+state-directory fallback. Private role owners and non-Local transports do not
+adopt controller Home.
+
+`workspaces.home(sessionId)` reads the captured binding and current independently
+retained writers; `Snapshot.chatWriters` retains original profile/session/turn,
+root, revision, background jobs and actual active/settled/unconfirmed/acknowledged
+states. `workspaces.acknowledgeHomeWriter(sessionId, writerId, expectedRevision,
+true)` is an actual-user inspection action for that exact original Home.
+Acknowledgement is risk acceptance, not process cleanup, a tool grant or queue
+resumption. Unknown ownership survives source deletion and unloaded-profile
+recovery. Model-only chats stay parallel; actual overlapping writes serialize.
+
+`workspaces.files/file`, `tools.catalog/execute`, `agentTerminals.list/read`
+and shared `/home` work across SDK/CLI/TUI/desktop. Commands start fresh PTYs
+in Home, never private User-console state. Browser control still needs its
+actual attached native host/user toggle and normal exact tool approval.
+Explicitly targeted `gh --repo owner/repo` or `git -C /selected/checkout` commands
+can perform repository work; native project pickers/publication, repository
+memory and project-file capture still require real project ownership.
+No account/login or project association is inferred. Home-dependent MCP grants
+bind the new exact directory identity and require fresh review rather than
+reusing an older null-root resource grant. Explicit automatic approval remains
+separate from hard denials, read-only modes, allowed environments and budgets.
 
 ```ts
 const general = await sdk.sessions.create(null);
@@ -1297,7 +1586,20 @@ is explicit Node client delivery through `loadNotificationSoundFile(path)`;
 the browser-safe SDK never gains arbitrary filesystem authority. No TUI/CLI
 operation automatically plays audio.
 
-Desktop dictation uses `voice.startCapture(sessionId, optionalOriginalId)`,
+Streaming desktop dictation uses
+`voice.startCapture(sessionId, optionalOriginalId, { streaming: true })`,
+ordered `voice.appendCapture(sessionId, id, token, sequence, pcmBytes)`,
+`voice.readCapture(sessionId, id, token)` and
+`voice.finishCapture(sessionId, id, token, finalSequence)`.
+The original intake acknowledges frames without waiting for model startup;
+read returns the current transcript/revision, and the final capability job
+retains the acknowledged complete transcript. Duplicate/out-of-order frames,
+late audio after revocation and incomplete flushes are rejected, never replayed.
+`DraftEditor.startDictation(start, end)` replaces only its original provisional
+span, preserving surrounding typing and refusing foreign/overlapping changes.
+Insertion never sends a prompt.
+
+The retained batch API uses `voice.startCapture(sessionId, optionalOriginalId)`,
 `voice.uploadCapture(sessionId, id, token, wavBytes)` and
 `voice.cancelCapture(sessionId, id, token)`. These use transient authenticated
 `/v1/voice` requests, not durable commands. The original profile/session/job and
@@ -1306,7 +1608,7 @@ normalized clip is 120 seconds / 3,840,044 bytes; malformed rates/channels,
 noncanonical base64, duplicate upload and reused job identity are rejected.
 Audio and upload nonces are never retained in events/receipts. Actual ASR jobs
 and explicit transcript insertion still use existing shared APIs. Root exports
-`encodeSpeechWav`, `validateSpeechWav`, shortcut parsing/matching helpers and
+`encodeSpeechPcm`, `encodeSpeechWav`, `validateSpeechWav`, shortcut parsing/matching helpers and
 typed preferences without importing native/provider runtime.
 
 `await sdk.voice.transcript(sessionId, jobId)` returns the complete recognized
@@ -1315,6 +1617,11 @@ It reads bounded result pages, including JSON escaping, without truncating them
 or opening a microphone. Pending/cancelled/foreign-session results are rejected.
 `voice.insert(sessionId, jobId, expectedDraftRevision)` remains a separate
 explicit write and never submits a prompt.
+
+`sessions.side(parentSessionId)` atomically opens an existing original side chat
+or creates one with the parent's model, thinking/window, autonomy and budget,
+capturing its real effective context. It remains permanently read-only.
+Navigation attachment alone never grants another parent's context.
 
 ### Held prompts, modes and retained plans
 
@@ -1469,12 +1776,25 @@ effective session/profile caps and unavailable-unit diagnostics.
 `budgets.policy(limitOrNull, observedRevision, true)` is a separate explicit
 profile-policy action; settings/default resets never lift it.
 
-USD admission requires a fresh model-specific
+USD admission requires either a fresh model-specific
 `settings.values.budgets.rates` entry with canonical `modelId`,
 `inputUsdPerMillion`, `outputUsdPerMillion`, UTC `effectiveAt` date and
-`source:"user-estimate"`. Default rates are empty, not Copilot zero prices.
-The configured conservative input rate includes cache categories; provider
-totals are never increased by adding those categories twice.
+`source:"user-estimate"`, or explicit
+`settings.values.budgets.useProviderRatesForLimits: true` consent for fresh
+originating-provider references. `providerEstimates` defaults on; finite-limit
+consent defaults off. An existing stale manual override is not replaced.
+`prices.catalog()` exposes reference dates, canonical source/digest, model
+matches and unknown-price diagnostics. `prices.refresh(providers?, revision?)`
+returns an original `pricing.refresh` job. Wait/cancel through `jobs`; failed
+refresh preserves the prior catalog. Calls capture their historical
+`provider-api-equivalent` or `user-estimate` rate. Unknowns remain unpriced;
+`providerReportedUsd` and `billedUsd` remain separate/null.
+
+Reference prices deliberately assume the named originating model's API cost
+through Copilot/resellers, not their invoices. Known cache subsets are priced
+once, long-context thresholds are explicit, and unspecified write TTL uses the
+maximum listed write rate. The manual conservative input override still covers
+every input category. No provider total is inflated by adding cache twice.
 
 Reservation and `model.started` commit before the real worker is authorized.
 The actual reduced output limit reaches maintained pi-ai. Complete reports
@@ -1741,8 +2061,13 @@ No compound kupo, quality calibration, Remote generation or Sandbox is enabled.
 ### Model context and thinking
 
 `sessions.modelOptions(sessionId, options, observedRevision?)` stores optional
-`contextWindow` and `thinkingEffort` alongside the session controls. The working
-window cannot exceed the selected model's fixed maximum. It is enforced against
+`contextWindow` and `thinkingEffort` alongside the session controls. Without
+provider-declared discrete restrictions, the working window accepts exact
+integer token ceilings from 8,192 through the selected model's fixed maximum.
+An actual `supportedContextWindows` list remains an exact allowed set.
+`supportsModelContextWindow(model, tokens)` is the shared browser-safe validator;
+`modelContextWindows(model).values` gives menu presets or the actual declared
+set, not an exhaustive list for unrestricted models. The window is enforced against
 the maintained library's labeled context estimate and output/headroom sizing,
 not represented as exact tokenization or a finite spend cap. Oversized estimates
 stop before inference without silently dropping or compacting history.
@@ -1760,6 +2085,17 @@ Desktop puts these settings in the model-name popover. TUI uses
 `session model-settings options.json --session ID --revision N` and
 `session context --session ID`. Changes require an idle session; running turns
 retain their selected settings and every step records effective provenance.
+
+Shared `sdk.slash`, desktop and TUI also accept `/thinking LEVEL` and
+`/effort LEVEL`; `default` clears only effort. `/context-window TOKENS|min|half|max`
+preserves effort without changing the remembered model choice. `min` is 8,192
+for an unrestricted model or its smallest declared window; `max` is its largest
+supported window; `half` floors half that maximum and rejects an unsupported
+result instead of rounding or clamping. Invalid/stale/running-turn changes
+preserve controls and history, never infer or substitute another model, and
+use the existing revision-bound `session.configure` transaction. Protocol 69
+advances metadata only; no new event format or retained-content rewrite is
+required.
 
 To enable memory, clone `sdk.settings.get().values`, set `memory.enabled`, then
 call `settings.update` with the observed revision. `memory.index(projectId)`
@@ -1892,7 +2228,18 @@ or changes to anonymous/bearer auth. Project operations must include the bound
 session ID, including outward auth-status queries.
 
 The curated internal MCP exposes `grep_logs`, `fetch_page`, `search_memory` and
-`memory_graph`. Page fetching requires approved HTTPS, pins the resolved public
+`memory_graph`. `grep_logs` searches a literal string in one UTF-8 source up to
+1 MiB, returning at most 100 matching lines and 1,000 characters per line,
+within 12,000 bytes of complete serialized MCP output rather than cut JSON.
+Results disclose original byte offsets, clipped excerpts, omitted rows and
+coverage; no match is a successful empty result. Native `read_file` pages exact
+source, while `search_files` supports regex/larger sources. Selective
+`read_file` arguments take precedence over `mode: "full"`: the 128-KiB source
+cap applies only to actual unpaged full reads. Protocol 75 also returns
+actionable, value-free schema diagnostics for invalid native-tool arguments.
+The changed Remote builtin resource requires fresh user review; older resource
+grants are preserved, not silently broadened.
+Page fetching requires approved HTTPS, pins the resolved public
 destination, rejects private networks/unsafe redirects and bounds extraction.
 Tool descriptions, annotations, output and model recommendations remain
 untrusted data, never permission grants.
@@ -1950,6 +2297,28 @@ while Moguri runs, unless the board disables it. Choose the public API or an
 explicit signed-in GitHub CLI account. A verified merge advances to
 `mergedColumnId`; closed/unknown/failed checks and stale responses never do.
 
+Protocol 62 adds optional
+`kanban: {visible, source:"kanban"|"github-issues"|"github-prs", phaseIds}`.
+Old boards default visible with in-progress/backlog eligible.
+`kanban.open(projectId)` opens/returns the one special idle chat, without
+inference. `sessions.organize(id,{workItemId}, revision?)` links only a card from
+that same project; set `workItemUrl:null` when replacing a GitHub item.
+
+`kanban.continue(originSessionId, issueId?, expectedDraftRevision?)` is explicit
+actual-user delegation for one Local task, isolated worktree, branch push and
+draft PR. Optional draft consumption accepts only the exact continuation text
+and revision, never unrelated edits/attachments. `kanban.work(runId)` reads the
+independent source/report; `kanban.wait(runId)` waits only for preparation to
+settle, not for the PR. `kanban.cancel(runId)` requests actual owned stop.
+`kanban.inspect(runId,revision,true)` releases a terminal interrupted source
+claim only after jobs/turns settle; it neither resumes nor deletes work.
+Model/owner/caps, numeric account and source/root bindings are retained. An
+exact `continue work` user submission uses this same path; held/recovered or
+model-authored text cannot acquire it. Failed/restarted work never replays.
+The model-only `project_work` tool reads paged board sources and publishes only
+its already retained exact task. Publication ends the turn without another
+paid call or executing remaining same-response tools.
+
 Linear is off by default. Enable one team in the board, store the user's
 personal API key with `linear.setToken` and explicitly call `linear.import`.
 Each page imports at most 50 tickets, preserves provenance and existing local
@@ -1964,6 +2333,14 @@ moguri issues list PROJECT_ID
 moguri issues create PROJECT_ID issue.json
 moguri issues move ISSUE_ID in-progress --revision 0
 moguri issues configure PROJECT_ID board.json --revision 0
+moguri kanban open PROJECT_ID
+moguri kanban items PROJECT_ID github-issues 1
+moguri kanban continue ORIGIN_SESSION_ID
+moguri kanban work RUN_ID
+moguri kanban stop RUN_ID
+moguri kanban inspect RUN_ID --revision N --confirm-review
+moguri prices
+moguri prices refresh anthropic
 moguri cache inspect PROJECT_ID npm
 moguri cache prepare PROJECT_ID npm PLAN_SHA256 --accept-dependency-metadata
 moguri cache install PROJECT_ID npm PLAN_SHA256 --accept-dependency-metadata
@@ -1972,7 +2349,8 @@ moguri linear import PROJECT_ID
 
 `issue.json` has exactly `title`, `body`, `kind`, `phaseId` and nullable
 `pullRequestUrl`. `board.json` has `columns`, `mergedColumnId`, `autoRefreshPrs`,
-`githubAccess` and `linear: { enabled, teamId }`. Update/move/archive/configure
+`githubAccess`, `linear: { enabled, teamId }` and optional `kanban`.
+Update/move/archive/configure
 require the observed `--revision`. `linear token` reads piped stdin instead of
 shell arguments; TUI `/linear token` uses a dedicated masked editor.
 

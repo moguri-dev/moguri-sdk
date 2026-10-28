@@ -3,7 +3,7 @@ import { mkdir, lstat, realpath } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 import {
-  MoguriError, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
+  MoguriError, defaultProjectSettings, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
   type ManagedWorkspaceCommand, type ManagedWorkspaceQuery, type ManagedWorkspaceResponse, type EventInput, type CommandResult, type CapabilityJob, type GitWorkspaceRegistration,
 } from "../../../packages/protocol/src/index.ts";
 import { runProgram } from "./program.ts";
@@ -15,6 +15,7 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 import { pullRequestLink } from "./project-integrations.ts";
 import { gitReadFilters } from "./project-git.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
+import { assertChatHome, homeWorkspace } from "./chat-workspace.ts";
 
 interface Host {
   snapshot(): Snapshot;
@@ -51,10 +52,12 @@ export class ManagedWorkspaces {
     try { return this.host.job(kind, projectId, execute, start, () => { this.active.delete(id); this.host.wake(); }, id); }
     catch (error) { this.active.delete(id); throw error; }
   }
-  private git(project: Project, args: string[], signal: AbortSignal, extra: string[] = []) {
+  private git(project: Project, args: string[], signal: AbortSignal, extra: string[] = [], network = false) {
     return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false", ...extra, "--literal-pathspecs", ...args], {
       cwd: project.path, signal, timeoutMs: 30_000, maxBytes: 512 * 1024, label: "Managed workspace Git operation",
-      env: { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_LFS_SKIP_SMUDGE: "1", GIT_TERMINAL_PROMPT: "0" },
+      env: { ...(!network ? { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } : {}),
+        ...(network && process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
+        GIT_LFS_SKIP_SMUDGE: "1", GIT_TERMINAL_PROMPT: "0" },
     });
   }
   private async filters(project: Project, signal: AbortSignal): Promise<string[]> {
@@ -87,9 +90,27 @@ export class ManagedWorkspaces {
     const expected = join(realpathSync(this.stateDir), "worktrees", workspace.projectId, workspace.id);
     if (workspace.path !== expected) throw new MoguriError("workspace_ownership", "This path is not the exact owned workspace location. No deletion or fallback was attempted.", 409);
   }
-  project(session: Pick<Session, "projectId" | "workspaceId">): Project {
+  project(session: Pick<Session, "projectId" | "workspaceId" | "repositories">, repository?: string): Project {
+    if (session.repositories) {
+      if (session.projectId || session.workspaceId) throw new MoguriError("repository_scope", "A folder session cannot acquire an implicit single checkout or managed worktree.");
+      if (!repository) throw new MoguriError("repository_required", "Select an explicit repository from this session's captured folder roots. No first member, common parent or base checkout was substituted.", 409);
+      const selected = session.repositories.filter((binding) => binding.projectId === repository || binding.name === repository);
+      if (selected.length !== 1) throw new MoguriError("repository_scope", "Select exactly one original captured repository by ID or name. No foreign or renamed alias was adopted.", 409);
+      const binding = selected[0]!, project = this.host.project(binding.projectId);
+      if (project.path !== binding.root.root) throw new MoguriError("repository_changed", "The captured repository was relocated. Create a new folder session to review current roots; the original checkout was not substituted.", 409);
+      let metadata;
+      try { metadata = lstatSync(binding.root.root, { bigint: true }); }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR"].includes(String(error.code)))) throw error;
+        throw new MoguriError("repository_changed", "An original captured repository is unavailable. No replacement root was used.", 409);
+      }
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || realpathSync(binding.root.root) !== binding.root.root ||
+        String(metadata.dev) !== binding.root.device || String(metadata.ino) !== binding.root.inode) throw new MoguriError("repository_changed", "The captured repository directory identity changed. No newer, aliased or replacement root was used.", 409);
+      return project;
+    }
     if (!session.projectId) throw new MoguriError("project_required", "Select a project for this workspace capability. No previous root was reused.", 409);
     const project = this.host.project(session.projectId);
+    if (repository && repository !== project.id && repository !== project.name) throw new MoguriError("repository_scope", "This repository selector does not belong to the session's original project.", 409);
     if (!session.workspaceId) return project;
     const workspace = this.workspace(session.workspaceId);
     this.expectedPath(workspace);
@@ -104,8 +125,28 @@ export class ManagedWorkspaces {
     const project = this.project(session);
     return { id: profileIndexId(this.host.snapshot().profileId, session.workspaceId ?? project.id), path: project.path };
   }
-  leaseKey(session: Session): string | null { return session.projectId ? `${session.projectId}:${session.workspaceId ?? "base"}` : null; }
-  async assert(session: Pick<Session, "projectId" | "workspaceId">, signal?: AbortSignal): Promise<void> {
+  filesystem(session: Session, repository?: string) {
+    if (homeWorkspace(session)) {
+      if (repository) throw new MoguriError("repository_scope", "Home is not an implicit Git repository. Select a project or use an explicitly targeted approved command.", 409);
+      return { root: assertChatHome(session.homeRoot!), settings: defaultProjectSettings(), project: undefined };
+    }
+    const project = this.project(session, repository);
+    return { root: project.path, settings: this.settings().values(project.id), project };
+  }
+  roots(session: Pick<Session, "projectId" | "workspaceId" | "repositories" | "homeRoot"> & Partial<Pick<Session, "controls">>): string[] {
+    return session.repositories ? session.repositories.map((repository) => repository.root.root) : session.projectId ? [this.project(session).path] :
+      session.homeRoot && session.controls?.env === "Local" ? [session.homeRoot.root] : [];
+  }
+  leaseKey(session: Session): string | null {
+    return session.repositories ? `repositories:${JSON.stringify(session.repositories.map((binding) => binding.projectId).sort())}` :
+      session.projectId ? `${session.projectId}:${session.workspaceId ?? "base"}` : null;
+  }
+  async assert(session: Pick<Session, "projectId" | "workspaceId" | "repositories" | "homeRoot"> & Partial<Pick<Session, "controls">>, signal?: AbortSignal): Promise<void> {
+    if (session.repositories) {
+      for (const repository of session.repositories) { signal?.throwIfAborted(); this.project(session, repository.projectId); }
+      return;
+    }
+    if (!session.projectId && session.homeRoot && session.controls?.env === "Local") { assertChatHome(session.homeRoot); return; }
     this.project(session);
     if (!session.workspaceId) return;
     const inspection = await this.inspect(session.workspaceId, signal);
@@ -140,6 +181,7 @@ export class ManagedWorkspaces {
     }
     if (query.type === "workspace.inspect") return { type: query.type, inspection: await this.inspect(query.workspaceId) };
     const session = this.session(query.sessionId);
+    if ((session.repositories || query.repository) && session.controls.env !== "Local") throw new MoguriError("repository_env", "Explicit multi-repository selection is currently Local-only. No execution transport or root was substituted.", 409);
     if (session.controls.env === "Sandbox") {
       if (!this.host.nativeRead) throw new MoguriError("sandbox_workspace", "This service has no qualified native file broker. No Local source root was read.", 409);
       const request: WorkspaceReadQuery = query.type === "session.git" ? { type: query.type, diff: query.diff } : { type: query.type, path: query.path };
@@ -154,18 +196,21 @@ export class ManagedWorkspaces {
       return result;
     }
     if (session.controls.env !== "Local") throw new MoguriError("workspace_env", "This file/Git surface has no qualified transport for the selected environment. No Local fallback.", 409);
-    const project = this.project(session), settings = this.settings().values(project.id);
     if (query.type === "session.git") {
+      const project = this.project(session, query.repository);
       const signal = AbortSignal.timeout(30_000), disabledFilters = await this.filters(project, signal);
       return { ...await this.settings().gitView(project, query.diff, signal, disabledFilters), type: query.type };
     }
-    await assertFolderAccess(project.path, query.path, false, folderPolicy(settings));
-    if (query.type === "session.files") return { type: query.type, path: query.path, entries: (await listProjectFiles(project.path, query.path)).filter((entry) => !matchesFolder(entry, settings.deniedFolders)) };
-    return { type: query.type, ...await readProjectFile(project.path, query.path) };
+    const { root, settings } = this.filesystem(session, query.repository);
+    await assertFolderAccess(root, query.path, false, folderPolicy(settings));
+    if (query.type === "session.files") return { type: query.type, path: query.path, entries: (await listProjectFiles(root, query.path)).filter((entry) => !matchesFolder(entry, settings.deniedFolders)) };
+    return { type: query.type, ...await readProjectFile(root, query.path) };
   }
-  async execute(command: ManagedWorkspaceCommand, finish: WorkspaceFinish): Promise<CommandResult> {
+  async execute(command: ManagedWorkspaceCommand, finish: WorkspaceFinish,
+    taskBase?: { remote: string; ref: string; commit: string; sourceWorkspaceId: string | null; expectedUrl: string }): Promise<CommandResult> {
     if (command.type === "session.workspace") {
       const session = this.session(command.sessionId);
+      if (session.repositories) throw new MoguriError("repository_scope", "A folder session retains its exact root set. Start a single-project session to bind a managed worktree.", 409);
       if (session.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "Session changed. Reload before binding a workspace.", 409);
       if (session.turnId || session.messages.length || session.queue.length || session.status === "archived") throw new MoguriError("workspace_session", "Bind only a fresh idle session. Existing conversation/queued intent is not silently moved to another branch.", 409);
       if (command.workspaceId && session.controls.env !== "Local") throw new MoguriError("workspace_env", "Managed worktree location is currently qualified for Local only. No remote mapping is inferred.", 409);
@@ -174,17 +219,25 @@ export class ManagedWorkspaces {
     }
     if (!this.host.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("workspace_env", "Local Git workspace maintenance is excluded by allowed-env policy. No protected-environment fallback.", 403);
     if (command.type === "workspace.create") {
-      const project = this.host.project(command.projectId), settings = this.settings().configuration(project.id);
+      const currentProject = () => taskBase ? this.project({ projectId: command.projectId, workspaceId: taskBase.sourceWorkspaceId }) : this.host.project(command.projectId);
+      const project = currentProject(), settings = this.settings().configuration(project.id);
       if (command.branch === settings.values.repo.mainBranch || ["main", "master"].includes(command.branch)) throw new MoguriError("workspace_branch", "Use a new non-protected work branch. Managed creation does not replace main/master.");
       const signal = AbortSignal.timeout(15_000);
       await this.git(project, ["check-ref-format", "--branch", command.branch], signal);
-      const baseCommit = (await this.git(project, ["rev-parse", "--verify", "--end-of-options", `${command.baseRef ?? settings.values.repo.mainBranch}^{commit}`], signal)).trim();
+      if (taskBase && (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(taskBase.remote) ||
+        !/^refs\/(?:heads\/[A-Za-z0-9][A-Za-z0-9._/-]{0,239}|pull\/[1-9][0-9]*\/head)$/.test(taskBase.ref) ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(taskBase.commit) || taskBase.commit !== command.baseRef)) {
+        throw new MoguriError("workspace_task_base", "The owned task needs one exact captured remote ref/commit, not an arbitrary fetch or root.", 403);
+      }
+      const baseCommit = taskBase?.commit ?? (await this.git(project, ["rev-parse", "--verify", "--end-of-options", `${command.baseRef ?? settings.values.repo.mainBranch}^{commit}`], signal)).trim();
+      const remoteUrl = taskBase ? (await this.git(project, ["remote", "get-url", "--", taskBase.remote], signal, [], true)).trim() : null;
+      if (taskBase && remoteUrl !== taskBase.expectedUrl) throw new MoguriError("workspace_task_base", "The captured source fetch destination changed before intent. No different repository was fetched.", 409);
       const common = await realpath((await this.git(project, ["rev-parse", "--path-format=absolute", "--git-common-dir"], signal)).trim());
       const disabledFilters = await this.filters(project, signal);
-      if (this.settings().configuration(project.id).revision !== settings.revision || this.host.project(project.id).path !== project.path) throw new MoguriError("workspace_changed", "Project configuration/root changed during worktree planning. Nothing was created.", 409);
+      if (this.settings().configuration(project.id).revision !== settings.revision || currentProject().path !== project.path) throw new MoguriError("workspace_changed", "Project configuration/root changed during worktree planning. Nothing was created.", 409);
       if (command.issueId && !this.host.snapshot().issues.some((issue) => issue.id === command.issueId && issue.projectId === project.id)) throw new MoguriError("workspace_issue", "Choose an existing ticket from this project.");
       const id = randomUUID(), changeSetId = randomUUID(), parent = await this.parent(project.id);
-      if (!this.host.snapshot().policy.allowedEnvs.includes("Local") || this.settings().configuration(project.id).revision !== settings.revision || this.host.project(project.id).path !== project.path) throw new MoguriError("workspace_changed", "Project/policy changed during preparation. No Git mutation was admitted.", 409);
+      if (!this.host.snapshot().policy.allowedEnvs.includes("Local") || this.settings().configuration(project.id).revision !== settings.revision || currentProject().path !== project.path) throw new MoguriError("workspace_changed", "Project/policy changed during preparation. No Git mutation was admitted.", 409);
       const prUrl = command.prUrl ? pullRequestLink(command.prUrl).url : null;
       let workspace: ManagedWorkspace = { id, projectId: project.id, path: join(parent, id), branch: command.branch, baseCommit, gitCommonDir: common, status: "creating", revision: 0, createdAt: new Date().toISOString(), jobId: null, diagnostic: null, identity: null, changeSetId };
       this.job(id, "workspace.create", project.id, async (signal, progress) => {
@@ -192,6 +245,20 @@ export class ManagedWorkspaces {
         try {
           progress("Creating an owned isolated checkout; hooks, filters and submodule fetching stay disabled.");
           started = true;
+          if (taskBase) {
+            const currentRemote = (await this.git(project, ["remote", "get-url", "--", taskBase.remote], signal, [], true)).trim();
+            if (currentRemote !== remoteUrl || currentProject().path !== project.path || this.settings().configuration(project.id).revision !== settings.revision ||
+              !this.host.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("workspace_task_base", "The captured task remote/root or policy changed before fetch.", 409);
+            const expected = `${taskBase.commit}\t${taskBase.ref}`;
+            if ((await this.git(project, ["ls-remote", "--refs", "--", taskBase.remote, taskBase.ref], signal, disabledFilters, true)).trim() !== expected) {
+              throw new MoguriError("workspace_task_base", "The exact remote source ref changed before capture. No replacement commit or account was inferred.", 409);
+            }
+            await this.git(project, ["fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--", taskBase.remote, taskBase.ref], signal, disabledFilters, true);
+            await this.git(project, ["cat-file", "-e", `${taskBase.commit}^{commit}`], signal, disabledFilters);
+            if ((await this.git(project, ["ls-remote", "--refs", "--", taskBase.remote, taskBase.ref], signal, disabledFilters, true)).trim() !== expected) {
+              throw new MoguriError("workspace_task_base", "The remote source moved during capture. Objects and intent were retained; no task or fetch was replayed.", 409);
+            }
+          }
           await this.git(project, ["worktree", "add", "--no-checkout", "--lock", "--reason", `Moguri ${id}`, "-b", workspace.branch, workspace.path, baseCommit], signal, disabledFilters);
           const target = { ...project, path: workspace.path };
           await this.git(target, ["read-tree", baseCommit], signal, disabledFilters);

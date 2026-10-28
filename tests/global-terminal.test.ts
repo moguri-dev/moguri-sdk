@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdir, realpath, rename } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
@@ -14,7 +14,7 @@ const program = { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_GLOBAL_
 test("the default Local console root is configured HOME, never the Moguri state directory", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
-    assert.equal((await sdk.terminal.defaultRoot()).root, await realpath(homedir()));
+    assert.equal((await sdk.terminal.defaultRoot()).root, await realpath(fixture.home));
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });

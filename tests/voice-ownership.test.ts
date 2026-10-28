@@ -49,7 +49,8 @@ test("restart removes only recognized private staged clips and never reattaches 
     restarted = await startService({ stateDir: directory, provider: fixture.provider, retentionKey: fixture.retentionKey, platform: fixture.platform });
     current = await new MoguriSdk(restarted.connection).ready();
     assert.deepEqual(await readdir(spool), []);
-    await assert.rejects(() => current!.voice.uploadCapture(fixture.sessionId, capture.id, capture.token, encodeSpeechWav(new Float32Array(160))), /original.*capture/i);
+    const original = restarted.controller.snapshot().jobs.find((job) => job.id === capture.id)!;
+    await assert.rejects(() => current!.voice.uploadCapture(fixture.sessionId, capture.id, capture.token, encodeSpeechWav(new Float32Array(160))), { message: original.error! });
     await assert.rejects(() => current!.voice.startCapture(fixture.sessionId, capture.id), /already exists|identity/i);
     assert.equal(fixture.requests.length, 0);
   } finally { current?.disconnect(); fixture.sdk.disconnect(); await restarted?.close(); await fixture.close(); }
@@ -68,4 +69,20 @@ test("unknown crash-staging entries survive restart and block capture without di
     assert.deepEqual(await readdir(spool), ["generated-unknown.keep"]);
     assert.equal(current.settings.get()?.values.voice.backend, "auto");
   } finally { current?.disconnect(); fixture.sdk.disconnect(); await restarted?.close(); await fixture.close(); }
+});
+
+test("cancelling an already partial capture cannot turn unknown native cleanup into a successful acknowledgement", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready(), id = randomUUID();
+  try {
+    const scope = { profile_id: sdk.profileId, project_id: fixture.session().projectId, session_id: fixture.sessionId };
+    fixture.service.store.commit([
+      { ...scope, event_type: "job.started", payload: { job: { id, kind: "voice.capture", sessionId: fixture.sessionId, projectId: fixture.session().projectId,
+        parentTurnId: null, status: "running", progress: "Generated original native capture.", resultDigest: null, error: null } } },
+      { ...scope, event_type: "job.finished", payload: { jobId: id, status: "partial", resultDigest: null, error: "Generated exact native cleanup remains unconfirmed." } },
+    ]);
+    fixture.service.controller.refreshProfile();
+    await assert.rejects(() => sdk.voice.cancelCapture(fixture.sessionId, id, randomUUID()), { code: "speech_partial" });
+    assert.equal(fixture.service.controller.snapshot().jobs.find((job) => job.id === id)?.status, "partial");
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
 });

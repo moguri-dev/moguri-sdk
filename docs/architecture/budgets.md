@@ -65,8 +65,9 @@ year, inclusive custom dates and all time. Day, Monday-based week, month and
 whole-range buckets use the same scoped complete ledger before role pagination.
 Only periods with calls are listed; edge buckets can be partial. More than
 3,660 calendar buckets is an explicit error, not truncation or fallback.
-Captured-rate history uses the admission-time user estimate, never today's
-replacement rate, an inferred Copilot price or a bill.
+Captured-rate history uses the admission-time user estimate or explicitly
+labeled originating-provider API-equivalent reference, never today's
+replacement rate or a claimed Copilot subscription charge/bill.
 
 `budgets.calls` returns bounded current-accounting pages with deterministic
 time/ID ordering and per-call provenance. New calls/late reports can reorder
@@ -128,11 +129,23 @@ The current adapters expose context estimates, not a qualified exact tokenizer.
 Finite controls therefore require an explicit **estimate-based** policy and
 the warning: **Budgets can interrupt a session mid-task. Usage reporting can
 lag, and a clean final commit is not guaranteed.** Do not label estimated
-admission as an exact provider-billing guarantee. No silently inferred prices:
-USD admission requires explicit dated, fresh model-specific input/output
-rates. Cache categories use the declared conservative input rate, not an
-invented discount. Estimated, provider-reported and billed amounts remain
-separate fields.
+admission as an exact provider-billing guarantee. USD admission requires an
+explicit dated fresh model-specific override, or separate actual-user consent
+to fresh originating-provider API-equivalent references. Protocol 62 enables
+reference estimates by default but does not infer finite-limit consent.
+An expired manual override never becomes a different automatic rate.
+
+The [project Kanban/pricing contract](project-kanban.md) records official
+sources, source dates/digests and explicit credential-free refresh. Named
+Copilot/reseller models deliberately use their originating API equivalent,
+not a reported subscription bill. Every call captures its actual price
+snapshot; refresh never reprices history or grants model-family evidence.
+Cache subsets are deducted from total input before their reference rates are
+applied, long-context thresholds use total input, and unknown write TTL uses
+the maximum published write rate. Reservations include conservative cache-write
+headroom. Unknown prices or invalid categories do not become zero.
+Manual overrides keep their flat conservative input rate. Estimated,
+provider-reported and billed amounts remain separate fields.
 
 Reserve input estimate plus an actual forwarded output limit. Check session
 and profile/global availability together; another concurrent leg cannot reuse a

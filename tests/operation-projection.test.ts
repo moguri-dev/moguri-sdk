@@ -12,7 +12,7 @@ import { PROTOCOL_VERSION, parse, projectEvents, TelemetryQuerySchema, type Even
 
 const meta = { profile_id: "default", session_id: "generated-session", project_id: "generated-project", turn_id: "generated-turn", step_id: "generated-step" };
 const call = { id: "generated-call", name: "read_file", arguments: { path: "GENERATED_PRIVATE_SENTINEL.txt" } };
-const scope = (events: StoredEvent[]): Snapshot => ({ protocolVersion: PROTOCOL_VERSION, seq: events.at(-1)?.seq ?? 0, profileId: "default", ...projectEvents(events),
+const scope = (events: StoredEvent[]): Snapshot => ({ protocolVersion: PROTOCOL_VERSION, seq: events.at(-1)?.seq ?? 0, profileId: "default", sessionTelemetry: {}, ...projectEvents(events),
   provider: { status: "disconnected", models: [], login: null, diagnostic: null }, capabilities: [] });
 const inputs: EventInput[] = [
   { ...meta, event_type: "model.started", payload: { modelId: "generated-model", providerId: "generated-provider", role: "solver" } },

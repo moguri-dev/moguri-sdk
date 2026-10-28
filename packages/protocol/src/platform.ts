@@ -8,9 +8,17 @@ import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAutho
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
 import type { ModelSelection } from "./model.ts";
-import { LocalEndpointSchema } from "./providers.ts";
+import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
+import { RememberedApprovalSchema } from "./permissions.ts";
+import { WebAllowanceSchema } from "./web-policy.ts";
+export * from "./web-policy.ts";
+import { KanbanCommandSchema, KanbanQuerySchema, type KanbanResponse, type KanbanSnapshot } from "./kanban.ts";
+export * from "./kanban.ts";
+import { PricingCommandSchema, PricingQuerySchema, type PricingResponse, type PricingSnapshot } from "./pricing.ts";
+export * from "./pricing.ts";
+export * from "./permissions.ts";
 import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
 export * from "./skill-gateway.ts";
@@ -127,6 +135,8 @@ export const SettingsSchema = object({
     defaultDecision: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("deny")])),
     tools: Type.Array(object({ id, tool: Type.String({ minLength: 1, maxLength: 80 }), decision, pathPrefix: Type.String({ maxLength: 4096 }) }), { maxItems: 100 }),
     commands: Type.Array(object({ id, command: Type.String({ minLength: 1, maxLength: 16384 }), decision }), { maxItems: 100 }),
+    remembered: Type.Optional(Type.Array(RememberedApprovalSchema, { maxItems: 500 })),
+    webAllowlist: Type.Optional(Type.Array(WebAllowanceSchema, { maxItems: 500 })),
   }),
   memory: object({ enabled: Type.Boolean(), useInContext: Type.Boolean(), useTieredContext: Type.Optional(Type.Boolean()), maxFiles: Type.Integer({ minimum: 1, maximum: 5000 }) }),
   subagents: object({ enabled: Type.Boolean(), maxParallel: Type.Integer({ minimum: 1, maximum: 2 }) }),
@@ -163,6 +173,7 @@ export const SettingsSchema = object({
     needsInputSound: Type.Optional(notificationSound), completedSound: Type.Optional(notificationSound), soundWhileFocused: Type.Optional(Type.Boolean()),
   }),
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
+  modelPreferences: Type.Optional(ModelPreferencesSchema),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
 });
@@ -180,7 +191,7 @@ export const defaultSettings = (): UserSettings => ({
   sandboxManagement: defaultSandboxManagement(),
   retention: { deleteArchived: false, afterDays: 7, archiveCompleted: false, archiveAfterDays: 7, confirmArchive: true, confirmDelete: true },
   artifacts: { retainAnswers: true },
-  budgets: { rates: [], maxPriceAgeDays: 30 },
+  budgets: { rates: [], maxPriceAgeDays: 30, providerEstimates: true, useProviderRatesForLimits: false },
   kupo: defaultKupoSettings(),
   winddown: defaultWinddownSettings(),
   decisions: defaultDecisionSettings(),
@@ -207,7 +218,7 @@ const section = Type.Union([
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("skillSources"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
-  Type.Literal("localModels"), Type.Literal("startup"),
+  Type.Literal("localModels"), Type.Literal("modelPreferences"), Type.Literal("startup"),
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
   Type.Literal("kupo"),
   Type.Literal("winddown"),
@@ -215,6 +226,9 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  ModelPreferenceCommandSchema,
+  PricingCommandSchema,
+  KanbanCommandSchema,
   WorkflowCommandSchema,
   CoordinationCommandSchema,
   ToolingCommandSchema,
@@ -274,6 +288,8 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  PricingQuerySchema,
+  KanbanQuerySchema,
   SkillGatewayQuerySchema,
   DashboardQuerySchema,
   CoordinationQuerySchema,
@@ -363,7 +379,7 @@ export interface CapabilityJob {
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
-export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot {
+export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot {
   coordinationLinks: CoordinationLink[];
   coordinationMessages: CoordinationMessage[];
   lastModelSelection: ModelSelection | null;
@@ -409,6 +425,8 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse
+  | PricingResponse
+  | KanbanResponse
   | SkillGatewayResponse
   | DashboardResponse
   | CoordinationResponse

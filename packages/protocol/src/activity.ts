@@ -1,6 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import type { BudgetTotals, ModelRole } from "./budgets.ts";
+import type { BudgetStatus, BudgetTotals, ModelRole, UsageEstimate } from "./budgets.ts";
 import type { Controls, PublicMessage } from "./index.ts";
 
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -49,6 +49,14 @@ export interface TurnInfo {
   models: Array<{ modelId: string; providerId: string | null; role: ModelRole }>; usage: BudgetTotals;
   context: { estimatedTokens: number | null; window: number | null } | null;
   responseBytes: number;
+  estimate?: UsageEstimate;
+}
+export interface SessionTelemetry {
+  sessionId: string; sequence: number;
+  budget: BudgetStatus | null; budgetDiagnostic: string | null;
+  estimate: UsageEstimate | null;
+  turns: TurnInfo[];
+  context: { stepId: string; modelId: string; estimatedTokens: number; window: number | null; outputEstimate: number | null; updatedAt: string } | null;
 }
 export const responseText = (messages: readonly PublicMessage[], turnId: string): string =>
   messages.filter((message) => message.turnId === turnId && message.role === "assistant" && message.text.length > 0).map((message) => message.text).join("\n\n");

@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
-import { waitFor } from "./fixture.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 25_000 };
 async function configure(sdk: MoguriSdk, f: Awaited<ReturnType<typeof remoteFixture>>) {
@@ -20,8 +19,8 @@ test("an actual approved Remote model MCP call stays on the SSH worker and retai
     const selected = await configure(sdk, f); call.schemaDigest = selected.digest;
     const local = t.mock.method(f.controller.platform.gateway, "operate", async () => { throw new Error("Remote MCP must not execute on the Local gateway."); });
     await f.select(); await f.send("generated mcp call");
-    await waitFor(() => f.session().pendingApproval); await f.approve();
     await f.terminal();
+    assert.equal(f.session().pendingApproval, null);
     assert.equal(f.session().status, "completed", f.session().lastError ?? "Remote MCP turn failed.");
     assert.equal(local.mock.calls.length, 0); assert.equal(f.requests.length, 2);
     await sdk.refresh();
@@ -41,7 +40,7 @@ test("an old or Local MCP digest cannot authorize a Remote model connector under
   const f = await remoteFixture({ mcpCall: call }), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await configure(sdk, f); await f.select(); await f.send("generated mcp call");
-    await waitFor(() => f.session().pendingApproval); await f.approve(); await f.terminal();
+    await f.terminal();
     assert.notEqual(f.session().messages.findLast((message) => message.role === "tool")?.outcome, "completed");
     assert.match(f.session().messages.findLast((message) => message.role === "tool")?.text ?? "", /Rediscover|Remote MCP catalog/);
     assert.equal(f.controller.snapshot().remoteMcpCalls.length, 0);
@@ -60,7 +59,7 @@ test("failed Remote MCP result retention cannot acknowledge success, continue an
       if (!failed && args[0].some((event) => event.event_type === "mcp.remote_recorded" && event.payload.call.phase === "result-retained")) { failed = true; throw new Error("Generated Remote MCP retention failure"); }
       return commit(...args);
     });
-    await f.select(); await f.send("generated mcp call"); await waitFor(() => f.session().pendingApproval); await f.approve(); await f.terminal();
+    await f.select(); await f.send("generated mcp call"); await f.terminal();
     mock.mock.restore();
     assert.equal(f.session().status, "partial"); assert.equal(f.requests.length, 1);
     const record = f.controller.snapshot().remoteMcpCalls[0]!;

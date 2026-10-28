@@ -51,7 +51,7 @@ test("operation icons describe actual file, search, skill, issue, script and MCP
 test("tool activity uses exact original starts, outcomes, arguments and retained UTF-8 result quantities", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
-    await fixture.configure(); await fixture.send("generated tool activity"); await fixture.approve(); await fixture.terminal();
+    await fixture.configure(); await fixture.send("generated tool activity"); await fixture.terminal();
     const entry = (await sdk.activity.list(fixture.sessionId)).activity.entries.find((entry) => entry.kind === "read-file")!;
     const start = fixture.service.controller.events(0).find((event) => event.event_type === "tool.started")!;
     const finished = fixture.service.controller.events(0).find((event) => event.event_type === "tool.completed")!;
@@ -127,8 +127,7 @@ test("real file creation/editing and command arguments/results keep actual effec
     const fixture = await setupFixture(options), sdk = await new MoguriSdk(fixture.service.connection).ready();
     try {
       await fixture.configure(); await fixture.send(kind === "edit" ? "generated write" : "Generated actual activity.");
-      await fixture.approve();
-      if (kind === "edit") await fixture.approve();
+      if (kind === "command") await fixture.approve();
       await fixture.terminal();
       const expected = kind === "create" ? "create-file" : kind === "edit" ? "edit-file" : "command";
       const entry = (await sdk.activity.list(fixture.sessionId)).activity.entries.find((entry) => entry.kind === expected)!;
@@ -155,9 +154,9 @@ test("model and external MCP activity retains exact nested arguments/results and
   try {
     const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools.find((tool) => tool.name === "grep_logs")!;
     options.mcpCall = { serverId: "builtin", tool: tool.name, arguments: { path: "fixture.txt", query: "original" }, schemaDigest: tool.digest };
-    await fixture.configure(); await fixture.send("generated mcp call"); await fixture.approve(); await fixture.terminal();
+    await fixture.configure(); await fixture.send("generated mcp call"); await fixture.terminal();
     const external = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "original" }, tool.digest);
-    await fixture.approve(); assert.equal((await sdk.jobs.wait(external.id!)).status, "completed");
+    assert.equal((await sdk.jobs.wait(external.id!)).status, "completed");
     const entries = (await sdk.activity.list(fixture.sessionId)).activity.entries.filter((entry) => entry.source === "tool");
     assert.equal(entries.length, 2); assert.deepEqual(entries.map((entry) => entry.actor).sort(), ["external", "model"]);
     for (const entry of entries) {

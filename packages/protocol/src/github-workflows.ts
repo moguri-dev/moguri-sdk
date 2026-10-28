@@ -27,7 +27,7 @@ const github = { repository, account };
 const release = { tag: ref, target: ref, name: title, body, draft: Type.Boolean(), prerelease: Type.Boolean() };
 export const GithubIssueCreateActionSchema = object({ kind: Type.Literal("github.issue.create"), ...github, title, body });
 export const GithubActionSchema = Type.Union([
-  object({ kind: Type.Literal("git.push"), remote, branch: ref, forceWithLease: Type.Boolean() }),
+  object({ kind: Type.Literal("git.push"), remote, branch: ref, destination: Type.Optional(ref), forceWithLease: Type.Boolean() }),
   object({ kind: Type.Literal("git.rebase"), mode: Type.Literal("start"), onto: ref }),
   object({ kind: Type.Literal("git.rebase"), mode: Type.Union([Type.Literal("continue"), Type.Literal("abort")]) }),
   object({ kind: Type.Literal("git.tag.create"), tag: ref, target: ref, annotated: Type.Boolean(), message: Type.String({ maxLength: 4096 }) }),
@@ -102,6 +102,7 @@ export const GithubOperationSchema = object({
   version: Type.Literal(1), id, profileId: id, projectId: id, workspaceId: Type.Union([id, Type.Null()]),
   originSessionId: Type.Union([id, Type.Null()]), root: GithubReviewDocumentSchema.properties.root,
   kind: operationKind, actor: Type.Union([Type.Literal("user"), Type.Literal("model")]), modelSource: Type.Optional(ModelAdviceSourceSchema),
+  projectWorkId: Type.Optional(id),
   commandId: id, commandDigest: hash, reviewDigest: hash, inputDigest: hash, resultDigest: maybeHash, jobId: id,
   revision: count, status: Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("cancelled"), Type.Literal("partial")]),
   dispatched: Type.Boolean(), cancelRequested: Type.Boolean(), createdAt: timestamp, updatedAt: timestamp,
@@ -120,8 +121,9 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
   const corrupt = (): never => { throw new MoguriError("github_corrupt", "Git/GitHub intent, scope or lifecycle is corrupt. State was preserved; no operation was replayed.", 409); };
   if (!Value.Check(GithubOperationSchema, value)) return corrupt();
   const next = value;
-  if (next.actor === "model" && (!next.modelSource || next.kind !== "github.issue.create" || !next.originSessionId) ||
-    next.actor === "user" && next.modelSource) return corrupt();
+  if (next.actor === "model" && (!next.modelSource || !next.originSessionId ||
+    (next.projectWorkId ? !["git.push", "github.pr.create", "github.pr.update"].includes(next.kind) : next.kind !== "github.issue.create")) ||
+    next.actor === "user" && (next.modelSource || next.projectWorkId)) return corrupt();
   if (![next.createdAt, next.updatedAt].every((value) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value) ||
     !next.root.root.startsWith("/") || next.root.root.includes("\0") || !next.root.root.isWellFormed() ||
     next.status === "completed" && (!next.dispatched || !next.resultDigest || next.cancelRequested || next.diagnostic !== null) ||
@@ -145,7 +147,7 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
     const immutable = ["version", "id", "profileId", "projectId", "workspaceId", "originSessionId", "kind", "actor", "commandId",
       "commandDigest", "reviewDigest", "inputDigest", "jobId", "createdAt"] as const;
     if (next.inspection || next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
-      JSON.stringify(next.root) !== JSON.stringify(previous.root) || JSON.stringify(next.modelSource) !== JSON.stringify(previous.modelSource) || previous.dispatched && !next.dispatched ||
+      next.projectWorkId !== previous.projectWorkId || JSON.stringify(next.root) !== JSON.stringify(previous.root) || JSON.stringify(next.modelSource) !== JSON.stringify(previous.modelSource) || previous.dispatched && !next.dispatched ||
       previous.cancelRequested && !next.cancelRequested) return corrupt();
   }
   return structuredClone(next);
@@ -158,8 +160,42 @@ export const GithubCommandSchema = Type.Union([
 ]);
 export type GithubCommand = Static<typeof GithubCommandSchema>;
 const page = { page: Type.Integer({ minimum: 1, maximum: 100 }), perPage: Type.Integer({ minimum: 1, maximum: 100 }) };
+export const GithubRepositorySchema = object({
+  id: number, fullName: repository, description: Type.String({ maxLength: 4096 }),
+  url: Type.String({ maxLength: 2048 }), sshUrl: Type.String({ maxLength: 2048 }), cloneUrl: Type.String({ maxLength: 2048 }),
+  visibility: Type.Union([Type.Literal("public"), Type.Literal("private"), Type.Literal("internal")]),
+  defaultBranch: ref, relationship: Type.Union([Type.Literal("owner"), Type.Literal("organization"), Type.Literal("accessible"), Type.Literal("public")]),
+  licenseId: Type.Union([Type.String({ maxLength: 100 }), Type.Null()]), openSource: Type.Union([Type.Boolean(), Type.Null()]),
+});
+export type GithubRepository = Static<typeof GithubRepositorySchema>;
+export const GithubWorkSourceSchema = object({
+  kind: Type.Union([Type.Literal("issue"), Type.Literal("pull")]), repository, account, number,
+  accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })),
+});
+export type GithubWorkSource = Static<typeof GithubWorkSourceSchema>;
+export const GithubSessionSourceSchema = object({ ...GithubWorkSourceSchema.properties, expectedDigest: hash });
+export type GithubSessionSource = Static<typeof GithubSessionSourceSchema>;
+export const GithubSourceBindingSchema = object({
+  env: Type.Literal("Local"), profileId: id, projectId: id, workspaceId: Type.Union([id, Type.Null()]),
+  root: GithubReviewDocumentSchema.properties.root, configurationRevision: count, policyRevision: count, permissionRevision: count,
+});
+export type GithubSourceBinding = Static<typeof GithubSourceBindingSchema>;
+export const GithubSessionOriginSchema = object({
+  version: Type.Literal(1), source: GithubWorkSourceSchema,
+  accountId: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" }), binding: GithubSourceBindingSchema, digest: hash,
+});
+export type GithubSessionOrigin = Static<typeof GithubSessionOriginSchema>;
+export function githubItemIdentity(input: string): { url: string; kind: "issue" | "pull"; repository: string; number: number } {
+  let url: URL;
+  try { url = new URL(input); } catch { throw new MoguriError("github_source", "Use a canonical GitHub issue or pull request URL."); }
+  const match = url.pathname.match(/^\/([A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100})\/(issues|pull)\/([1-9]\d*)\/?$/);
+  if (url.protocol !== "https:" || url.host !== "github.com" || url.username || url.password || url.search || url.hash || !match ||
+    !Number.isSafeInteger(Number(match[3])) || [".", ".."].includes(match[1]!.split("/")[1]!)) throw new MoguriError("github_source", "Use an exact credential-free github.com issue or pull request URL.");
+  return { url: `https://github.com/${match[1]}/${match[2]}/${match[3]}`, kind: match[2] === "pull" ? "pull" : "issue", repository: match[1]!, number: Number(match[3]) };
+}
 export const GithubBrowseSchema = Type.Union([
-  object({ resource: Type.Union([Type.Literal("issues"), Type.Literal("pulls"), Type.Literal("releases")]), ...github, ...page }),
+  object({ resource: Type.Union([Type.Literal("issues"), Type.Literal("pulls"), Type.Literal("releases")]), ...github, ...page,
+    state: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("closed"), Type.Literal("all")])) }),
   object({ resource: Type.Union([Type.Literal("issue"), Type.Literal("pull"), Type.Literal("reviews"), Type.Literal("comments"), Type.Literal("review-comments"), Type.Literal("threads")]), ...github, number, ...page }),
   object({ resource: Type.Literal("checks"), ...github, headSha: gitHash, ...page }),
   object({ resource: Type.Literal("runs"), ...github, headSha: Type.Optional(gitHash), ...page }),
@@ -168,6 +204,12 @@ export const GithubBrowseSchema = Type.Union([
 ]);
 export type GithubBrowse = Static<typeof GithubBrowseSchema>;
 export const GithubQuerySchema = Type.Union([
+  object({ type: Type.Literal("github.repositories"), source: Type.Union([Type.Literal("account"), Type.Literal("public")]),
+    query: Type.String({ maxLength: 200 }), account: Type.Optional(account),
+    accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })), ...page }),
+  object({ type: Type.Literal("github.project"), scope: GithubScopeSchema }),
+  object({ type: Type.Literal("github.branch"), scope: GithubScopeSchema, repository, account, branch: ref, accountId: Type.String({ minLength: 3, maxLength: 128 }) }),
+  object({ type: Type.Literal("github.source"), scope: GithubScopeSchema, source: GithubWorkSourceSchema }),
   object({ type: Type.Literal("github.preview"), scope: GithubScopeSchema, action: GithubActionSchema }),
   object({ type: Type.Literal("github.browse"), scope: GithubScopeSchema, input: GithubBrowseSchema }),
   object({ type: Type.Literal("github.read"), operationId: id }),
@@ -185,6 +227,7 @@ export const GithubItemSchema = object({
   state: Type.String({ maxLength: 100 }), url: nullableText(4096), updatedAt: nullableText(100), author: nullableText(128),
   headSha: maybeGit, conclusion: nullableText(100), tag: Type.Optional(Type.String({ maxLength: 1024 })), target: Type.Optional(Type.String({ maxLength: 1024 })),
   draft: Type.Optional(Type.Boolean()), prerelease: Type.Optional(Type.Boolean()), base: Type.Optional(Type.String({ maxLength: 1024 })), head: Type.Optional(Type.String({ maxLength: 1024 })),
+  headRepository: Type.Optional(Type.String({ minLength: 3, maxLength: 140 })),
   nodeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
 });
 export type GithubItem = Static<typeof GithubItemSchema>;
@@ -200,6 +243,13 @@ export const GithubOperationResultSchema = object({
 });
 export type GithubOperationResult = Static<typeof GithubOperationResultSchema>;
 export type GithubResponse =
+  | { type: "github.repositories"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string;
+      source: "account" | "public"; repositories: GithubRepository[]; page: number; nextPage: number | null; warning: string }
+  | { type: "github.project"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string;
+      repository: string; defaultBranch: string; branch: string; url: string; binding: GithubSourceBinding; warning: string;
+      remote: { name: string; fetchUrl: string; pushUrls: string[] } }
+  | { type: "github.branch"; branch: string; sha: string; accountId: string; binding: GithubSourceBinding }
+  | { type: "github.source"; source: GithubWorkSource; accountId: string; binding: GithubSourceBinding; item: GithubItem; digest: string; warning: string }
   | { type: "github.preview"; preview: GithubPreview }
   | { type: "github.browse"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string; repository: string; resource: GithubBrowse["resource"];
       page: number; perPage: number; nextPage: number | null; items: GithubItem[]; warning: string }

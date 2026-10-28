@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resolve } from "node:path";
 import { envelope } from "../apps/service/src/controller.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
 test("a steer is applied only at the next boundary of its owning turn", mac, async () => {
   const fixture = await setupFixture();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.configure();
     await fixture.send("generated tool task");
     await waitFor(() => fixture.session().pendingApproval);

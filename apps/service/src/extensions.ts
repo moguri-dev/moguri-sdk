@@ -1,6 +1,6 @@
 import { valid } from "semver";
 import {
-  ExtensionManifestSchema, HookDefinitionSchema, MarketplaceCatalogSchema, MAX_TEXT, MoguriError, PROTOCOL_VERSION, parse,
+  ExtensionManifestSchema, HookDefinitionSchema, MarketplaceCatalogSchema, MoguriError, PROTOCOL_VERSION, parse,
   type CapabilityEntry, type EventInput, type ExtensionCommand, type ExtensionManifest, type ExtensionQuery, type ExtensionResponse,
   type HookBinding, type MarketplaceInput, type MarketplaceOrigin, type MarketplacePreview, type MarketplaceSource,
   type Project, type Session, type Snapshot, type StoredEvent,
@@ -11,6 +11,7 @@ import { sourceRootSync } from "./repository-source.ts";
 import { assertFolderName, folderPolicy, validateProjectPath } from "./project-policy.ts";
 import type { ProjectService } from "./project-service.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import { selectedSkillEvents } from "./skill-selection.ts";
 
 interface ExtensionHost {
   snapshot(): Snapshot;
@@ -151,19 +152,11 @@ export class Extensions {
     const entry = this.current(command.capabilityId);
     if (command.type === "skill.use") {
       const session = this.host.snapshot().sessions.find((session) => session.id === command.sessionId);
-      if (!session || entry.projectId !== session.projectId || entry.kind !== "skill" || !entry.enabled || entry.retired || entry.contentDigest !== command.expectedDigest ||
+      if (!session || entry.projectId !== null && entry.projectId !== session.projectId || entry.kind !== "skill" || !entry.enabled || entry.retired || entry.contentDigest !== command.expectedDigest ||
         entry.ownerPluginId && !this.current(entry.ownerPluginId).enabled) throw new MoguriError("skill_scope", "Choose an enabled current skill in this exact session/project. No task, grant or model call was inferred.", 403);
-      if (session.draft.revision !== command.expectedDraftRevision) throw new MoguriError("revision_conflict", "The draft changed. Your current draft and selected skill were preserved.", 409);
       const startedAt = new Date().toISOString(), start = performance.now(), content = this.store.blob(entry.contentDigest);
-      const text = `${session.draft.text}${session.draft.text ? "\n\n" : ""}<user-selected-skill name=${JSON.stringify(entry.name)}>\n${content}\n</user-selected-skill>`;
-      if (Buffer.byteLength(text) > MAX_TEXT) throw new MoguriError("draft_limit", "The complete selected skill does not fit this draft. No content was truncated or sent.", 409);
-      return finish([
-        { event_type: "draft.saved", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { text, attachments: session.draft.attachments } },
-        { event_type: "skill.used", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: {
-          capabilityId: entry.id, name: entry.name, contentDigest: this.store.putBlob(content), bytes: Buffer.byteLength(content),
-          startedAt, loadMs: Math.max(0, Math.round(performance.now() - start)), actor: "user",
-        } },
-      ], { revision: session.draft.revision + 1 });
+      return finish(selectedSkillEvents(this.store, session, { id: entry.id, name: entry.name, body: content }, command.expectedDraftRevision, startedAt, start, command.replacementText),
+        { revision: session.draft.revision + 1 });
     }
     if (entry.revision !== command.expectedRevision) throw new MoguriError("capability_conflict", "Another client changed this capability. Review its current version before rollback.", 409);
     this.assertIdle(entry.projectId);

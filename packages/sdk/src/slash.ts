@@ -4,6 +4,11 @@ import { DashboardQuerySchema, ArtifactKindSchema, CandidatePatchSchema, Candida
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
+import { RememberApprovalSchema } from "../../protocol/src/permissions.ts";
+import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol/src/application-updates.ts";
+import { continueWorkInput, KanbanSourceSchema, kanbanPreferences, type ContinueWorkReview } from "../../protocol/src/kanban.ts";
+import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
+import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } from "../../protocol/src/model.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -13,17 +18,28 @@ export type SlashResult =
   | { kind: "session"; sessionId: string; side: boolean }
   | { kind: "panel"; panel: SessionPanel | "Settings" | "Models" | "Queue"; url?: string; path?: string; text?: string; allProjects?: boolean; planEditor?: PlanEditorRequest }
   | { kind: "text"; text: string }
+  | { kind: "continue-work"; review: ContinueWorkReview; choices: ["kanban", "prompt"] }
   | { kind: "copy"; text: string }
   | { kind: "artifact-editor"; artifact: ArtifactEditorRequest }
   | { kind: "profiles" }
   | { kind: "profile"; profileId: string }
   | { kind: "export"; document: ArtifactExport; path?: string };
 export const slashCommands = [
+  { name: "approve", description: "Approve the current action once or remember a named tool/command in its exact scope", argument: "[once|session|project|global] [exact|family|tool]" },
+  { name: "folder-chat", description: "List project folders or create a Local chat with every explicitly captured member root", argument: "[FOLDER_ID]" },
+  { name: "folder-group", description: "Atomically name a navigation folder containing exact existing projects; no files are moved", argument: '{"name":"Folder","projectIds":["ID","ID"]}' },
+  { name: "approvals", description: "Inspect or revoke this profile's remembered approvals", argument: "[revoke ID]" },
+  { name: "work-item", description: "Pick a project Kanban card or GitHub issue", argument: "[kanban|CARD_ID|clear]" },
+  { name: "kanban", description: "Open this project's special board chat or change shared visibility/source", argument: "[show|hide|source kanban|github-issues|github-prs|items [SOURCE] [PAGE]|work RUN|stop RUN|inspect RUN REV confirm-inspected]" },
+  { name: "continue-work", description: "Choose for this request: work from Kanban or send the exact prompt to the model", argument: "[CARD_ID]" },
+  { name: "prices", description: "Inspect provider API-equivalent references, or explicitly refresh public pricing without inference", argument: "[refresh [anthropic|openai|google|xai]]" },
   { name: "review", description: "Investigate and fix current changes, or the project when clean, within existing policy", argument: "[PROMPT]" },
   { name: "security", description: "Investigate and fix reachable security weaknesses within existing authority", argument: "[PROMPT]" },
   { name: "performance", description: "Measure and improve current-code performance without changing outcomes", argument: "[PROMPT]" },
   { name: "debug", description: "Debug current code and the session-owned app/logs, using approved DAP when available", argument: "[PROMPT]" },
   { name: "tools", description: "Discover the actual scoped typed tool catalogue without inference", argument: "[OFFSET] [QUERY]" },
+  { name: "home", description: "Inspect this Local chat's captured Home and original writer ownership", argument: "[status|acknowledge WRITER_ID REVISION confirm-inspected]" },
+  { name: "firewall", description: "Manage actual-user Local website allowances at session, project or profile scope", argument: "[list|add session|project|global HOST_ORIGIN|remove ID]" },
   { name: "tool", description: "Admit an exact approved Local user tool job; model-only capabilities stay blocked", argument: "NAME SCHEMA_SHA ARGUMENTS_JSON" },
   { name: "tool-result", description: "Page one exact retained original result without replay", argument: "STEP_ID CALL_ID [UTF8_OFFSET]" },
   { name: "state", description: "Query service-backed todo/memory views, not raw storage", argument: "SELECT_SQL" },
@@ -50,7 +66,7 @@ export const slashCommands = [
   { name: "agent", description: "Return to agent mode at the next safe steer boundary" },
   { name: "rename", description: "Rename this session", argument: "NAME" },
   { name: "reorder-sessions", description: "Set the exact shared order of one complete sibling section", argument: "SESSION_ID..." },
-  { name: "side", description: "Open parallel, question-only context" },
+  { name: "side", description: "Open the read-only side chat and optionally send it a question using current main context", argument: "[PROMPT]" },
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
   { name: "terminal", aliases: ["termnial"], description: "Open this session's Ghostty terminal at its project worktree or configured HOME", desktopOnly: true },
   { name: "clone", description: "Explicitly clone a repository into a new Local project folder without inference", argument: '{\"repository\":\"URL\",\"path\":\"ABSOLUTE_NEW_PATH\"} confirm-clone' },
@@ -79,7 +95,7 @@ export const slashCommands = [
   { name: "capability", description: "Inspect historical bytes, explicitly enable/disable, roll back disabled or insert a reviewed skill", argument: "[history ID|version ID SHA|enable/disable ID REV confirm-state|rollback ID REV SHA confirm-rollback|use ID SHA]" },
   { name: "containment", description: "Inspect process-group limits or require qualified SendBox for whole-session containment", argument: "[status|require-sandbox confirm-policy]" },
   { name: "cache", description: "Inspect verified Local dependency plans and explicit private registry scopes", argument: "[inspect MANAGER|prepare MANAGER SHA accept-metadata|install MANAGER SHA accept-metadata replace-node-modules|registries|registry-save REV ID|- JSON|registry-remove ID REV confirm-remove|token ID|clear-token ID]" },
-  { name: "github", description: "Two-way Git/GitHub with exact-root review, protected-write confirmations, pinned CI and no replay", argument: "[browse JSON|preview ACTION_JSON|execute confirm-write {action,expectedDigest,confirmations}|history|read/wait ID|stop ID confirm-stop]" },
+  { name: "github", description: "Repository discovery, project PRs/issues and reviewed GitHub writes", argument: "[repos [public QUERY]|project|issues|pulls|source issue|pull NUMBER|start issue|pull NUMBER SHA|browse JSON|preview ACTION_JSON|execute confirm-write JSON|history]" },
   { name: "linear", description: "Reviewed Linear issue/project/comment workflows and explicit two-way local ticket sync", argument: "[status|import [CURSOR]|catalog JSON|issue UUID|preview JSON|execute SHA confirm-write JSON|history|read/wait ID|stop ID confirm-stop|token]" },
   { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
   { name: "profiles", description: "Choose or manage isolated profiles" },
@@ -94,8 +110,11 @@ export const slashCommands = [
   { name: "settings", description: "Open shared settings" },
   { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
-  { name: "updates", description: "Inspect private-release updates or explicitly check/cancel; never authenticate or install", argument: "[status|history|read ID|check|cancel ID]" },
-  { name: "models", description: "Choose an available model" },
+  { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
+  { name: "models", description: "Choose a model or manage profile availability and its exact provider source", argument: "[catalogue|enable API_ID|disable API_ID|provider PROVIDER_ID enable|disable|source API_ID MODEL_ID]" },
+  { name: "thinking", description: "Set this model's supported thinking effort, preserving its context window", argument: "LEVEL|default" },
+  { name: "effort", description: "Set thinking effort; same as /thinking", argument: "LEVEL|default" },
+  { name: "context-window", description: "Set an exact working token ceiling or its supported min/half/max, preserving effort", argument: "TOKENS|min|half|max" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or Kupo", argument: "[EXACT_MODEL_ID]" },
   { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
@@ -129,7 +148,83 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
-    case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
+    case "folder-group": {
+      const input: unknown = JSON.parse(command.argument);
+      if (!isRecord(input) || typeof input.name !== "string" || !Array.isArray(input.projectIds) ||
+        !input.projectIds.every((id) => typeof id === "string") || Object.keys(input).some((key) => key !== "name" && key !== "projectIds")) {
+        throw new ClientError("folder_group_input", 'Use /folder-group {"name":"Folder","projectIds":["ID","ID"]} with exact current-profile project IDs.');
+      }
+      const snapshot = sdk.getState().snapshot!, projects = input.projectIds.map((projectId) => {
+        if (!snapshot.projects.some((project) => project.id === projectId)) throw new ClientError("project_missing", "Every grouped project must belong to this profile. No foreign project or path was adopted.");
+        return { projectId, revision: snapshot.projectConfigurations.find((configuration) => configuration.projectId === projectId)?.revision ?? 0 };
+      });
+      return { kind: "text", text: JSON.stringify(await sdk.projects.group(input.name, projects), null, 2) };
+    }
+    case "folder-chat": {
+      const snapshot = sdk.getState().snapshot!, id = command.argument.trim();
+      if (!id) return { kind: "text", text: JSON.stringify(snapshot.projectFolders.map((folder) => ({ ...folder,
+        projects: snapshot.projectConfigurations.filter((configuration) => configuration.folderId === folder.id)
+          .sort((a, b) => a.order - b.order).map((configuration) => ({ id: configuration.projectId,
+            name: snapshot.projects.find((project) => project.id === configuration.projectId)?.name })) })), null, 2) };
+      const folder = snapshot.projectFolders.find((folder) => folder.id === id);
+      if (!folder) throw new ClientError("project_folder", "Choose an exact folder ID from /folder-chat. No previous project or first repository was substituted.");
+      const result = await sdk.sessions.createFolder(folder.id, `${folder.name} chat`, { env: "Local" });
+      return { kind: "session", sessionId: result.id!, side: false };
+    }
+    case "prices": {
+      if (!command.argument) return { kind: "text", text: JSON.stringify(await sdk.prices.catalog(), null, 2) };
+      const [action, provider, extra] = command.argument.trim().split(/\s+/);
+      if (action !== "refresh" || extra) throw new ClientError("pricing_input", "Use /prices or /prices refresh [anthropic|openai|google|xai].");
+      const started = await sdk.prices.refresh(provider ? [parse(PriceProviderSchema, provider)] : undefined);
+      return { kind: "text", text: JSON.stringify({ jobId: started.id, diagnostic: "Original public-price refresh started, not claimed complete. Inspect the shared capability job; old catalogs and historical costs stay intact on failure." }, null, 2) };
+    }
+    case "approve": {
+      const [scope = "once", match = "exact", extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!session.pendingApproval || extra || !["once", "session", "project", "global"].includes(scope) || !["exact", "family", "tool"].includes(match) || scope === "once" && match !== "exact") throw new ClientError("approval_input", "Use /approve once, session|project|global [exact|family|tool] for the actual pending action.");
+      await sdk.approvals.respond(session.id, session.pendingApproval.id, true, scope === "once" ? undefined : parse(RememberApprovalSchema, { scope, match }));
+      return { kind: "ok", message: scope === "once" ? "Approved this action." : `Approved and remembered in ${scope} scope. Hard policy still applies.` };
+    }
+    case "approvals": {
+      const [action, id, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!action) return { kind: "text", text: JSON.stringify(sdk.approvals.list(), null, 2) };
+      if (action !== "revoke" || !id || extra) throw new ClientError("approval_input", "Use /approvals or /approvals revoke ID.");
+      await sdk.approvals.revoke(id); return { kind: "ok", message: "Remembered approval revoked. Pending approvals were invalidated." };
+    }
+    case "work-item": {
+      if (!command.argument || command.argument === "kanban") return { kind: "panel", panel: "Work item" };
+      await sdk.sessions.organize(session.id, { workItemId: command.argument === "clear" ? null : command.argument,
+        ...(command.argument === "clear" ? {} : { workItemUrl: null }) });
+      return { kind: "ok", message: command.argument === "clear" ? "Kanban work item cleared." : "Linked this project's Kanban card without running it." };
+    }
+    case "continue-work": {
+      if (!session.projectId || !continueWorkInput(text)) throw new ClientError("project_work_input", "Use /continue-work or one exact Kanban card ID in an actual project chat.");
+      if (session.draft.text && session.draft.text !== text) throw new ClientError("continue_work_draft", "Another draft is saved. Keep or send it before reviewing this separate continuation request.");
+      let expectedRevision = session.draft.revision;
+      if (!session.draft.text) {
+        const saved = await sdk.command({ type: "draft.save", sessionId: session.id, expectedRevision, text, attachments: session.draft.attachments });
+        if (saved.revision === undefined) throw new ClientError("continue_work_draft", "The continuation draft was not acknowledged. No request was dispatched.");
+        expectedRevision = saved.revision;
+      }
+      return { kind: "continue-work", review: { profileId: sdk.profileId, sessionId: session.id, expectedRevision, text }, choices: ["kanban", "prompt"] };
+    }
+    case "kanban": {
+      if (!session.projectId) throw new ClientError("project_required", "Choose this board's actual project. No previous project was reused.");
+      const [action, value, page, confirmation, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!action) { const opened = await sdk.kanban.open(session.projectId); return { kind: "session", sessionId: opened.id!, side: false }; }
+      if (action === "work" && value && !page) return { kind: "text", text: JSON.stringify(await sdk.kanban.work(value), null, 2) };
+      if (action === "stop" && value && !page) { await sdk.kanban.cancel(value); return { kind: "ok", message: "Stop requested for the original task. Inspect its actual retained outcome." }; }
+      if (action === "inspect" && value && page && /^\d+$/.test(page) && confirmation === "confirm-inspected" && !extra) {
+        await sdk.kanban.inspect(value, Number(page), true); return { kind: "ok", message: "Inspection recorded. Original work was not replayed or deleted." };
+      }
+      if (action === "items" && !confirmation && !extra) return { kind: "text", text: JSON.stringify(await sdk.kanban.items(session.projectId,
+        parse(KanbanSourceSchema, value ?? "kanban"), page && /^\d+$/.test(page) ? Number(page) : page ? Number.NaN : 1), null, 2) };
+      const board = (await sdk.issues.board(session.projectId)).board, current = kanbanPreferences(board);
+      if ((action === "show" || action === "hide") && !value) await sdk.issues.configure(session.projectId, { ...board, kanban: { ...current, visible: action === "show" } }, board.revision);
+      else if (action === "source" && value && !page) await sdk.issues.configure(session.projectId, { ...board, kanban: { ...current, source: parse(KanbanSourceSchema, value) } }, board.revision);
+      else throw new ClientError("kanban_input", "Use /kanban [show|hide|source SOURCE|items [SOURCE] [PAGE]|work RUN|stop RUN|inspect RUN REV confirm-inspected].");
+      return { kind: "ok", message: "Shared project Kanban preference saved. No model, sync or scheduled work was started." };
+    }
+    case "firewall": case "home": case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
       return toolingSlash(sdk, session.id, command.name, command.argument);
     case "review": case "security": case "performance": case "debug": {
       const consume = !session.draft.text || session.draft.text.trim() === text.trim();
@@ -175,6 +270,27 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "capability":
     case "containment":
     case "cache": return workspaceFeatureSlash(sdk, session, command.name, command.argument);
+    case "thinking":
+    case "effort": {
+      const effort = command.argument.trim().toLowerCase();
+      if (!effort || /\s/.test(effort)) throw new ClientError("model_effort_input", "Use /thinking LEVEL or /effort LEVEL with one supported effort, or default to clear only the effort override.");
+      const { thinkingEffort: _, ...other } = session.controls.modelOptions ?? {};
+      const options = effort === "default" ? other : parse(ModelOptionsSchema, { ...other, thinkingEffort: effort });
+      await sdk.sessions.modelOptions(session.id, options, session.revision, true);
+      return { kind: "ok", message: `Thinking effort set to ${effort === "default" ? "the model default" : effort}. The context window and other controls were preserved.` };
+    }
+    case "context-window": {
+      const model = sdk.getState().snapshot?.provider.models.find((entry) => entry.id === session.controls.modelId);
+      if (!model || model.synthetic) throw new ClientError("model_context_model", "Choose an available fixed model before setting its context window. Kupo owns each actual role's tuning; no model was substituted.");
+      const windows = modelContextWindows(model), maximum = windows.values[0], argument = command.argument.trim().toLowerCase();
+      if (maximum === undefined) throw new ClientError("model_context", "The selected model offers no working window at or above 8192 tokens. No setting or history was changed.");
+      const tokens = argument === "min" ? windows.source === "provider" ? windows.values.at(-1)! : MIN_WORKING_CONTEXT :
+        argument === "half" ? Math.floor(maximum / 2) : argument === "max" ? maximum : /^\d+$/.test(argument) ? Number(argument) : Number.NaN;
+      if (!supportsModelContextWindow(model, tokens)) throw new ClientError("model_context_input",
+        `Use /context-window TOKENS|min|half|max. Allowed ${windows.source === "provider" ? `provider-declared token counts: ${windows.values.join(", ")}` : `whole-token ceilings: ${MIN_WORKING_CONTEXT} through ${maximum}`}. An unsupported half is not clamped; no settings or history were changed.`);
+      await sdk.sessions.modelOptions(session.id, { ...session.controls.modelOptions, contextWindow: tokens }, session.revision, false);
+      return { kind: "ok", message: `Context window set to ${tokens.toLocaleString("en-US")} tokens. Thinking effort and other controls were preserved; history was not truncated.` };
+    }
     case "model-settings": {
       if (!command.argument) return { kind: "text", text: JSON.stringify({ options: session.controls.modelOptions ?? {}, context: (await sdk.sessions.context(session.id)).context }, null, 2) };
       if (command.argument === "reset") {
@@ -262,6 +378,15 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "models":
     case "model": {
+      if (command.name === "models" && command.argument) {
+        const [action, id, value, ...extra] = command.argument.split(/\s+/);
+        if (action === "catalogue" && !id) return { kind: "text", text: JSON.stringify(sdk.models.catalogue(), null, 2) };
+        if ((action === "enable" || action === "disable") && id && !value) await sdk.models.setEnabled(id, action === "enable");
+        else if (action === "provider" && id && (value === "enable" || value === "disable") && !extra.length) await sdk.models.setProviderEnabled(id, value === "enable");
+        else if (action === "source" && id && value && !extra.length) await sdk.models.selectSource(id, value);
+        else throw new ClientError("model_preference_command", "Use /models catalogue, enable API_ID, disable API_ID, provider PROVIDER_ID enable|disable, or source API_ID MODEL_ID. These profile preferences never sign in or start inference.");
+        return { kind: "ok", message: "Profile model availability saved. Existing session IDs, credentials and model charges were preserved; no inference started." };
+      }
       if (command.name === "models" || !command.argument) return client === "cli" ? { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.provider.models, null, 2) } : { kind: "panel", panel: "Models" };
       const model = sdk.getState().snapshot!.provider.models.find((model) => model.id === command.argument && (!model.environments || model.environments.includes(session.controls.env)));
       if (!model) throw new ClientError("model_unavailable", "Choose an exact available model ID for this env. Inspect /models and /kupo status; no provider or policy fallback was used.");
@@ -385,6 +510,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       throw new ClientError("notification_sounds_command", "Use /notification-sounds list, read ID or remove ID SHA confirm-remove. Explicit file imports use CLI notification-sounds import FILE.wav --confirm-write or desktop Settings. No terminal audio playback.");
     }
     case "updates": {
+      if (command.argument === "token-help") return { kind: "text", text: JSON.stringify({ url: UPDATE_TOKEN_CREATION_URL, steps: UPDATE_TOKEN_GUIDANCE }, null, 2) };
       const [action = "status", id, ...extra] = command.argument.split(/\s+/).filter(Boolean);
       if (extra.length) throw new ClientError("update_command", "Use /updates status/history/read ID/check/cancel ID. Credentials and installation never enter chat.");
       const result = !id && action === "status" ? await sdk.application.updates.status() : !id && action === "history" ? await sdk.application.updates.history() :
@@ -798,11 +924,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!command.argument.trim()) throw new ClientError("slash_arguments", "Use /reorder-sessions followed by every sibling session ID in the desired order.");
       await sdk.sessions.reorder(command.argument.trim().split(/\s+/));
       return { kind: "ok", message: "Shared sibling order saved. No session was reparented or resumed." };
-    case "side":
+    case "side": {
+      const result = command.argument ? await sdk.sessions.askSide(sessionId, command.argument,
+        session.draft.text.trim() === text.trim() ? session.draft.revision : undefined) : await sdk.sessions.side(sessionId);
+      return { kind: "session", sessionId: result.id!, side: true };
+    }
     case "subsession": {
-      const side = command.name === "side";
-      const result = await sdk.sessions.spawn(sessionId, side ? "side" : "agent", command.argument || undefined);
-      return { kind: "session", sessionId: result.id!, side };
+      const result = await sdk.sessions.spawn(sessionId, "agent", command.argument || undefined);
+      return { kind: "session", sessionId: result.id!, side: false };
     }
     case "terminal":
       if (command.argument === "global") throw new ClientError("terminal_removed", "Global Terminal was removed. Use the selected session terminal; existing consoles remain inspectable through /terminals list/read/close.");
@@ -902,7 +1031,17 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       await sdk.prompts.release(sessionId, command.argument, session.queueRevision); return { kind: "ok", message: "Released for admission." };
     }
     case "settings": return { kind: "panel", panel: "Settings" };
-    case "help": return { kind: "text", text: slashCommands.map((entry) => `/${entry.name}${"argument" in entry ? ` ${entry.argument}` : ""}  ${entry.description}`).join("\n") };
-    default: throw new ClientError("unknown_slash", "Unknown shared slash command. Use /help.");
+    case "help": {
+      const skills = (await sdk.commands.list(sessionId)).filter((entry) => entry.kind === "skill");
+      return { kind: "text", text: [...slashCommands.map((entry) => `/${entry.name}${"argument" in entry ? ` ${entry.argument}` : ""}  ${entry.description}`),
+        ...skills.map((entry) => `/${entry.name}  Skill / ${entry.skill.sourceName}: ${entry.description}`)].join("\n") };
+    }
+    default: {
+      const matches = (await sdk.commands.list(sessionId)).filter((entry) => entry.kind === "skill" && entry.name === command.name);
+      if (matches.length !== 1 || matches[0]?.kind !== "skill") throw new ClientError("unknown_slash", matches.length > 1 ? "Multiple skills share this name. Select its exact source from the slash list." : "Unknown shared slash command. Use /help.");
+      const selected = matches[0].skill;
+      await sdk.skills.use(sessionId, selected.id, selected.digest, session.draft.revision, command.argument);
+      return { kind: "ok", message: `Skill ${selected.name} added to this draft as untrusted guidance. No model or permission was started.` };
+    }
   }
 }

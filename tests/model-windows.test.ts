@@ -17,7 +17,11 @@ test("working windows use the exact maximum and floored half, or only actual pro
   assert.deepEqual(modelContextWindows(declared), { source: "provider", values: [65536, 32768] });
   assert.throws(() => modelContextWindows({ contextWindow: 32768, supportedContextWindows: [65536] }), /declared|window/i);
   assert.throws(() => modelContextWindows({ contextWindow: Number.NaN }), /window/i);
-  assert.throws(() => validateModelOptions({ contextWindow: 32768 }, { contextWindow: 24576 }), /supported|offered/i);
+  assert.doesNotThrow(() => validateModelOptions({ contextWindow: 32768 }, { contextWindow: 24576 }));
+  assert.doesNotThrow(() => validateModelOptions({ contextWindow: 32768 }, { contextWindow: 8192 }));
+  for (const contextWindow of [8191, 32769, Number.NaN, Number.POSITIVE_INFINITY, 24576.5]) {
+    assert.throws(() => validateModelOptions({ contextWindow: 32768 }, { contextWindow }), /supported|offered|window|context/i);
+  }
   assert.throws(() => validateModelOptions(declared, { contextWindow: 131072 }), /supported|offered/i);
   validateModelOptions(declared, { contextWindow: 32768 });
 });

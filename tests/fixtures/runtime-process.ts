@@ -2,7 +2,7 @@ import { fork } from "node:child_process";
 import { resolve } from "node:path";
 import { isRecord, type Connection } from "../../packages/protocol/src/index.ts";
 
-export async function launchRuntimeChild(input: { stateDir: string; vaultPath: string; modelId: string; baseUrl: string; nativeCommand?: string[]; holdNativeResult?: boolean; holdNativePublication?: "before" | "after-first"; holdUserPlan?: "approval" | "result"; holdUserMcp?: "authorization" | "result"; holdTerminalInput?: boolean; rawTerminal?: boolean; holdMemory?: boolean; holdMemoryStream?: boolean; planBudgetOnStart?: boolean; holdGeneration?: "before-admission" | "before-result"; holdCandidate?: "stage-before" | "stage-after-first" | "apply-before" | "apply-after-first" }) {
+export async function launchRuntimeChild(input: { stateDir: string; vaultPath: string; modelId: string; baseUrl: string; homeRoot?: string; projectWork?: boolean; nativeCommand?: string[]; holdNativeResult?: boolean; holdNativePublication?: "before" | "after-first"; holdUserPlan?: "approval" | "result"; holdUserMcp?: "authorization" | "result"; holdTerminalInput?: boolean; rawTerminal?: boolean; holdMemory?: boolean; holdMemoryStream?: boolean; planBudgetOnStart?: boolean; holdGeneration?: "before-admission" | "before-result"; holdCandidate?: "stage-before" | "stage-after-first" | "apply-before" | "apply-after-first" }) {
   const child = fork(resolve("tests/fixtures/runtime-child.ts"), [], { execPath: process.execPath, execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   let heldExecution: string | null = null;
@@ -12,6 +12,7 @@ export async function launchRuntimeChild(input: { stateDir: string; vaultPath: s
   let plannedBudgetId: string | null = null;
   let heldGenerationId: string | null = null;
   let heldNativePublicationId: string | null = null;
+  let projectWorkFixture: { directory: string; stateDir: string; root: string; projectId: string; sessionId: string } | null = null;
   child.on("message", (raw: unknown) => { if (isRecord(raw) && ["held-user-plan", "held-user-mcp", "held-native-model"].includes(String(raw.kind)) && typeof raw.executionId === "string") heldExecution = raw.executionId; });
   child.on("message", (raw: unknown) => { if (isRecord(raw) && raw.kind === "held-terminal-input" && typeof raw.terminalId === "string") heldTerminalInput = raw.terminalId; });
   child.on("message", (raw: unknown) => { if (isRecord(raw) && raw.kind === "held-memory-source" && typeof raw.root === "string") heldMemoryRoot = raw.root; });
@@ -29,10 +30,15 @@ export async function launchRuntimeChild(input: { stateDir: string; vaultPath: s
         if (!isRecord(raw) || !isRecord(raw.connection)) { reject(new Error("Invalid generated runtime connection.")); return; }
         const value = raw.connection;
         if (typeof value.protocolVersion !== "number" || typeof value.baseUrl !== "string" || typeof value.wsUrl !== "string" || typeof value.token !== "string" || typeof value.pid !== "number") { reject(new Error("Incomplete generated connection.")); return; }
+        if (isRecord(raw.projectWork) && typeof raw.projectWork.directory === "string" && typeof raw.projectWork.stateDir === "string" &&
+          typeof raw.projectWork.root === "string" && typeof raw.projectWork.projectId === "string" && typeof raw.projectWork.sessionId === "string") {
+          projectWorkFixture = { directory: raw.projectWork.directory, stateDir: raw.projectWork.stateDir, root: raw.projectWork.root,
+            projectId: raw.projectWork.projectId, sessionId: raw.projectWork.sessionId };
+        }
         resolve({ protocolVersion: value.protocolVersion, baseUrl: value.baseUrl, wsUrl: value.wsUrl, token: value.token, pid: value.pid });
       });
     });
     child.send(input);
-    return { child, exited, connection: await ready, get heldExecution() { return heldExecution; }, get heldTerminalInput() { return heldTerminalInput; }, get heldMemoryRoot() { return heldMemoryRoot; }, get heldCandidateId() { return heldCandidateId; }, get plannedBudgetId() { return plannedBudgetId; }, get heldGenerationId() { return heldGenerationId; }, get heldNativePublicationId() { return heldNativePublicationId; }, stop };
+    return { child, exited, connection: await ready, get projectWorkFixture() { return projectWorkFixture; }, get heldExecution() { return heldExecution; }, get heldTerminalInput() { return heldTerminalInput; }, get heldMemoryRoot() { return heldMemoryRoot; }, get heldCandidateId() { return heldCandidateId; }, get plannedBudgetId() { return plannedBudgetId; }, get heldGenerationId() { return heldGenerationId; }, get heldNativePublicationId() { return heldNativePublicationId; }, stop };
   } catch (error) { await stop(); throw error; }
 }

@@ -10,10 +10,11 @@ import { Value } from "typebox/value";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
-import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
+import { BUILTIN_FILE_SEARCH_LIMITS, INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
 import { readProjectFile } from "./files.ts";
 import { fetchPage } from "./web-page.ts";
 import { isBrowserTool, McpServerSchema, parse, type McpServerConfig } from "../../../packages/protocol/src/index.ts";
+import { WebAccessSchema, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 
 export interface McpOperation {
   action: "tools" | "call";
@@ -24,6 +25,7 @@ export interface McpOperation {
   arguments?: Record<string, unknown>;
   schemaDigest?: string;
   prepared?: unknown;
+  webAccess?: WebAccess;
   scripts?: { id: string; name: string; description: string; path: string; digest: string }[];
 }
 const operationSchema = Type.Object({
@@ -34,6 +36,7 @@ const operationSchema = Type.Object({
   prepared: Type.Optional(Type.Unknown()), scripts: Type.Optional(Type.Array(Type.Object({
     id: Type.String(), name: Type.String(), description: Type.String(), path: Type.String(), digest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   }), { maxItems: 64 })),
+  webAccess: Type.Optional(WebAccessSchema),
 }, { additionalProperties: false });
 const abort = new AbortController();
 let client: Client | undefined;
@@ -50,11 +53,33 @@ async function run(operation: McpOperation): Promise<unknown> {
       const args = request.params.arguments ?? {};
       if (isBrowserTool(request.params.name)) throw new Error("Native browser tools require the owning Local desktop session broker. This worker cannot launch or substitute a browser.");
       if (request.params.name === "grep_logs") {
-        const file = await readProjectFile(operation.root, String(args.path));
-        const lines = file.text.split("\n").map((text, index) => ({ line: index + 1, text })).filter((line) => line.text.includes(String(args.query))).slice(0, 100);
-        return textResult({ path: file.path, digest: file.digest, matches: lines, boundedAt: 100 });
+        const query = String(args.query);
+        if (!query.isWellFormed()) throw new Error("File search needs a lossless Unicode literal query. No source was read.");
+        const file = await readProjectFile(operation.root, String(args.path), BUILTIN_FILE_SEARCH_LIMITS.bytes);
+        const matches: { line: number; text: string; clipped: boolean; offset: number }[] = [];
+        let offset = 0, observedMatches = 0;
+        for (const [index, text] of file.text.split("\n").entries()) {
+          const lineOffset = offset, at = text.indexOf(query);
+          offset += Buffer.byteLength(text) + 1;
+          if (at < 0) continue;
+          observedMatches++;
+          if (matches.length >= BUILTIN_FILE_SEARCH_LIMITS.lines) continue;
+          const clipped = Array.from(text).length > BUILTIN_FILE_SEARCH_LIMITS.characters, start = clipped ? at : 0;
+          matches.push({ line: index + 1, text: clipped ? Array.from(text.slice(start)).slice(0, BUILTIN_FILE_SEARCH_LIMITS.characters).join("") : text,
+            clipped, offset: lineOffset + Buffer.byteLength(text.slice(0, start)) });
+        }
+        const selected = () => textResult({ path: file.path, digest: file.digest, matches, boundedAt: BUILTIN_FILE_SEARCH_LIMITS.lines,
+          charactersBoundedAt: BUILTIN_FILE_SEARCH_LIMITS.characters, resultBytesBoundedAt: BUILTIN_FILE_SEARCH_LIMITS.resultBytes, omittedRows: observedMatches - matches.length,
+          complete: observedMatches === matches.length && matches.every((match) => !match.clipped),
+          diagnostic: "Bounded literal matching-line excerpts, not a retained complete file. Each offset is a UTF-8 byte position in this exact digest; use read_file for source paging." });
+        let result = selected();
+        while (Buffer.byteLength(JSON.stringify(result)) > BUILTIN_FILE_SEARCH_LIMITS.resultBytes) {
+          if (!matches.length) throw new Error("The file search path metadata exceeds the 12000-byte result bound. Use native read_file for exact source paging.");
+          matches.pop(); result = selected();
+        }
+        return result;
       }
-      if (request.params.name === "fetch_page") return textResult(await fetchPage(String(args.url), abort.signal));
+      if (request.params.name === "fetch_page") return textResult(await fetchPage(String(args.url), abort.signal, operation.webAccess));
       if (request.params.name === "search_memory" || request.params.name === "memory_graph") {
         if (operation.prepared === undefined) throw new Error("This memory tool has no authorized root-bound prepared data. No index or Local fallback was selected.");
         return textResult(operation.prepared);

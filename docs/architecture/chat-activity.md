@@ -93,3 +93,307 @@ views, copy/info actions, live timers and compact budget policy/price behavior.
 The [protocol-45 source qualification](../setup.md#protocol-45-source-qualification)
 records the complete generated unit/native-TUI, hidden Electron and actual
 packed-SDK/installed-worker results, with physical/release exclusions unchanged.
+
+## Retained telemetry follow-up contract
+
+The owner requires cached-input reporting and immediately available saved
+turn/cost/context/token information, including while a turn is running and after
+reopening a chat. Reuse the original append-only model/delta/budget events and
+captured rates as authority; the desktop must not start `activity.turn`,
+`budget.status` or `session.context` reads merely to open these displays.
+Root/React/Node SDK clients, TUI and desktop receive one profile-scoped retained
+telemetry view with their normal snapshot/event refresh.
+
+Protocol/schema 66 requires `Snapshot.sessionTelemetry`; turn and compact usage
+controls select it synchronously. No second telemetry journal or client-only
+provider state is introduced. Session/turn indexes reuse all original ledger
+groups, rather than a dashboard's first page, and unchanged snapshots reuse the
+same derived view. Missing original accounting ownership is an explicit
+diagnostic, not a reason to block every other chat's snapshot.
+
+Cache repair requires the exact retained profile/session/step, normalized
+provider model result, safe integer categories and matching original totals.
+It appends existing `budget.recorded` metadata for the same settled call and
+uses only that entry's original captured rate. Missing, mismatched, non-JSON or
+older non-provider result formats are diagnosed and leave cache unknown, rather
+than blocking otherwise valid chat recovery. Known categories are not replaced.
+
+Stopped control planes retain their final accounting view. After owned shutdown
+settles, the profile authority captures global capacity before closing stores;
+subsequent read-only snapshots use that exact last value instead of reading a
+closed database or substituting unlimited capacity. Failed cleanup does not
+freeze or discard still-live authority, and stopped controllers cannot admit
+new work. Restart reconstructs authority from retained events, not this cache.
+
+Reuse React, TypeBox, Node and the maintained pi-ai estimation utilities under
+their existing MIT/component notices and SQLite's public-domain terms. No new
+dependency, provider metadata request, model call, credentials, tool permission
+or budget admission path is added. Normalized positive provider cache counts
+remain reported even when transport presence metadata is absent; zero requires
+actual evidence, and missing usage is never fabricated as zero.
+
+Original turn accounting must include actual owning roles and late results,
+not unrelated sessions or private role content. Streaming output quantities and
+USD based on captured rates are explicitly estimates until provider completion;
+they never settle/refund a reservation or become a bill. Retained model input
+and output estimates must not weaken fresh inference sizing. Context combines
+the last visible model's captured input estimate and retained visible output,
+not unsent draft text; original turn windows remain unchanged when the next
+working window is selected. Protocol/schema
+changes preserve ciphertext, receipts, known/unknown charges and original
+identities through atomic migration and restart, with no paid or tool replay.
+
+Before feature edits the generated platform spike passes OAuth/streaming in
+1,090.15 ms (32.66 ms cancellation), SQLite in 70.61 ms, PTY in 159.96 ms
+(152.52 ms cancellation, zero survivors), OpenTUI in 1,077.82 ms, hidden Electron
+in 537.23 ms and filesystem/Git in 93.06 ms. Physical/live-provider, Rust/Linux,
+SendBox, quality and release exclusions remain explicitly unavailable. Tests
+must prove absent/zero/positive cache categories, live saved updates, immediate
+popover data without those detail queries, cross-chat/profile isolation,
+deletion, unknown cancellation, migration rollback and restart without replay.
+
+## Protocol-66 qualification
+
+This records the retained-telemetry checkpoint; the later SDK/desktop-only
+turn-navigation qualification is recorded below.
+
+The generated regression first reproduced a normalized 10-token cache report
+being discarded when transport presence flags were false. Hidden desktop tests
+reject `activity.turn`, `budget.status` and `session.context` detail queries:
+original turn information, cached input, captured-rate cost and context still
+open immediately, update while streaming and survive navigation/reload without
+another model request. Actual service restarts preserve the same observations,
+including unknown stopped-call holds and one-time exact-source cache repair.
+
+Final qualification uses the same rebuilt source/runtime and generated fixtures:
+
+| Surface | Result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Combined recovery, terminal, profile, legacy-evidence and deadline regressions | 98 passed |
+| Complete source/service/worker/CLI/native-TUI suite | 1,651 passed, 14 existing skips, zero failures; 1,665 cases in 1,437,731.03 ms |
+| Complete hidden desktop suite | 222 passed, three existing skips, zero failures; 225 flows in 7.4 minutes |
+| Actual packaged-app turn/cache/streaming/navigation/settings flows | 13 passed in 24.2 seconds |
+| Independently installed packed SDK | Browser-safe root/React, explicit Node/MCP, declarations, immutable profiles, saved telemetry and actual runtime/worker checks pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Fresh source, independent consumer and native workload audits | Zero vulnerabilities |
+
+Generated coverage also checks absent versus explicit-zero cache, partial known
+cache totals, all 61 model groups beyond dashboard pagination, deletion/profile
+isolation, atomic 65-to-66 rollback, unchanged ciphertext/receipts, final global
+capacity after shutdown and unknown legacy result formats. An indexed
+2,000-turn reconstruction took 12.78 ms in the focused recovery run; unchanged
+snapshots reuse the same view.
+
+Earlier failed runs are not counted as passing qualification. They exposed
+stopped-store reads, an unqualified legacy prototype result, a sub-millisecond
+timer-rounding assertion and a native settings teardown racing its renderer's
+save acknowledgement. The repaired deadline test checks the actual 10,000 ms
+configuration and real abort, without increasing the deadline or test timeout.
+The settings test waits for the real **Saved** status before closing; its
+three-repeat check and the complete final native suite pass.
+
+The final no-cache Linux arm64 workload retains locked dependencies, compiled
+native PTY and the exact protocol-66 payload. Its OCI digest is
+`sha256:09e6f9062daed94bcbe7c5e858709018bfa50359046b5060f8d9784326c083f0`.
+This is producer/image evidence, not physical SendBox or Linux-release proof.
+The actual 779,784,410-byte ZIP passes the bounded production update consumer.
+The canonical DMG passes native Finder geometry, icons/background and exact
+signed-bundle verification; the distinctly labelled copy has identical bytes
+and its own successful disk-image checksum verification:
+
+```text
+release/Moguri-0.30.0-alpha.1-telemetry-66-macos-arm64.dmg
+793982118 bytes
+SHA-512:
+5c020a58b2fdae340653c4d27f006897e0e33d3059c3c4c82ec28119742fd492b2bb26c53d3f2a755728642453d9697c5bd46b480c4e60053edb57de7e1b9eaa
+```
+
+The installer is local, ad-hoc-signed development output, not a notarized or
+uploaded release. No personal app, Finder, microphone, login or paid provider
+was used. Known non-blocking notices remain experimental OpenTUI FFI, the lazy
+Ghostty chunk, optional `.icon` format and transitive
+`whatwg-encoding`/`node-domexception` deprecations. Other physical/live-provider,
+Rust, public compound/family-quality and release exclusions remain unchanged.
+
+## Conversation turn navigation contract
+
+The compact desktop index navigates sent user prompts and model questions that
+have an actual `answer.actor: "user"`. Tool permissions, queued drafts,
+delegated notices, unanswered/cancelled questions and model/decision-provider
+answers are not user turns. Labels retain the original question and the
+user's exact chosen/custom answer; they grant no permission or further work.
+
+Reuse React/Electron and the existing SDK under their MIT notices, with the
+existing Node/component notices and SQLite public-domain authority. There is
+no new dependency, event, service endpoint, durable schema or migration.
+The browser-safe SDK selector derives ordered, profile/session-scoped anchors
+only from canonical public messages and structured question records. Original
+owning turn IDs remain unchanged; an answered question is a navigation point,
+not a new model turn. Desktop main/side transcripts use the same selector;
+other SDK clients can reuse it without introducing a second question model.
+
+Navigation is local presentation only. It must reveal older retained messages,
+scroll the exact originating prompt/answer in its own transcript and keep the
+selected index item focused,
+preserve drafts and a user's historical scroll position during new output,
+and reset on session/profile changes. A narrow pane uses a compact rail with
+expandable previews, keyboard focus stays visible, and jumps do not animate
+or override reduced-motion preferences. Missing targets are explicit errors,
+not permission/model actions or substitution of another session.
+
+Before feature edits the generated macOS arm64/Node 26 baseline passes
+OAuth/streaming in 1,096.05 ms (32.65 ms cancellation), SQLite in 60.37 ms
+(append p95 0.053 ms), PTY in 158.43 ms (150.90 ms cancellation, zero survivors),
+OpenTUI in 1,068.34 ms, hidden Electron in 564.96 ms (8.06 ms scroll frames),
+and filesystem/Git in 87.62 ms. Live Copilot/ds4, Rust/Linux, signed/notarized
+release, physical SendBox, Kupo quality, System One, configured physical SSH
+and full-milestone attachment/default/budget gates remain explicitly
+FAIL/unavailable in this primitive spike; it does not broaden qualification.
+
+### Turn navigation qualification
+
+The shared selector and desktop use the existing protocol-66 snapshot, with no
+service implementation, durable schema, endpoint or dependency change.
+Fresh focused source coverage passes 46 navigation/question/activity/telemetry
+cases and 26 SDK-discovery/profile/interaction cases. It includes actual fixed
+and automatically routed model questions, the original user choice, service
+restart without another model call, 5,000 retained navigation points, repeated
+call IDs, regressed clocks and explicit automated-answer/permission exclusions.
+
+The complete final hidden desktop suite passes **225 flows, three existing
+skips, zero failures** across 228 flows in **7.1 minutes**. New native coverage
+checks keyboard focus/current location, saved drafts, reload, old history,
+streamed output without scroll capture, independent main/side transcripts,
+compact preview Escape handling and actual viewport/Send visibility at
+840 by 620. Wide and compact generated screenshots were inspected.
+
+The independently packed/audited SDK qualifies the exported selector and
+declarations, exact user-choice provenance, owner-profile reopen and unchanged
+model counts. Browser-safe root/React and explicit Node/MCP entrypoints pass,
+as do all 12 actual installed-worker accounting/continuation probes.
+Source and independent-consumer audits report zero vulnerabilities.
+
+The actual packaged app passes **18 functional flows in 38.2 seconds**, plus
+the separate **nine navigation/readability/composer flows in 24.8 seconds**.
+The readability check retains its 85% threshold against the actual transcript
+column, excluding the intentionally added navigation sidebar. Earlier failed
+checks and the compact clipping regression are not passing evidence. No
+deadlines were increased or new unsaved-draft guard bypasses introduced.
+
+The 779,788,594-byte ZIP passes the actual bounded production update consumer.
+The canonical styled DMG preserves its exact signed bundle, and the labelled
+copy has identical bytes plus successful disk-image verification:
+
+```text
+release/Moguri-0.30.0-alpha.1-turn-navigation-66-macos-arm64.dmg
+794037986 bytes
+SHA-512:
+a7401fdfc68ad29d6b1d68a8fabc5781b89ad5c5575dd8f02d1c3dd8a46dd767192c8bb4fb0530cdce721df5825e5ce7bd476a08402a6e1350ce288df1042d0e
+```
+
+The previously verified native worker payload remains byte-identical.
+Ad-hoc development signing, known notices and all physical/live-provider,
+Linux-release and notarization exclusions remain unchanged. No installed
+personal application, Finder, real microphone, personal login or paid inference
+was used.
+
+## Compact turn and action controls
+
+The user requests a number-free collapsed rail: plain turn blocks show prompt/
+question previews on hover or keyboard focus. A little left chevron expands
+the list and a right chevron collapses it. Clicking a block expands complete
+original prompt/question/choice details, keeps the clicked item focused and
+reveals its exact transcript position; clicking that same selected item again
+collapses. Both long histories and long individual details scroll in the list,
+not the page. Keyboard Enter/Space and Escape stay equivalent, and no new
+model action, cross-session source, smooth scroll or reduced-motion exception
+is introduced.
+
+Reuse React/Electron (MIT), the browser-safe SDK, existing Tooltip/SettingsAction
+helpers and shared theme/switch tokens. Node/component and SQLite public-domain
+terms remain unchanged; no dependencies, domain events, endpoints, durable
+schema or migration are added. CLI/TUI/service context, approval, source
+retention, accounting and cancellation behavior are unchanged.
+
+MCP/Linear credential and unavailable session-USD-limit removal use icon-only
+Close controls with explicit accessible names/tooltips. Proposal-file and
+text/image/document-preview removal use icon-only Trash controls, preserving
+their exact disabled/error and user-only mutation behavior. PR draft creation,
+GitHub issue import, Agent output following and all-project suggestion scope
+use the shared switch appearance and native checkbox keyboard behavior.
+All "Do not ask again" flags, multi-select lists and exact review/consent
+acknowledgements remain checkboxes; no confirmation is weakened or inferred.
+
+Before feature edits the generated macOS arm64/Node 26 baseline passes
+OAuth/streaming in 1,077.86 ms (30.75 ms cancellation), SQLite in 63.71 ms
+(append p95 0.058 ms), PTY in 159.92 ms (152.10 ms cancellation, zero survivors),
+OpenTUI in 1,027.92 ms, hidden Electron in 584.28 ms (8.23 ms scroll frames),
+and filesystem/Git in 89.18 ms. Live Copilot/ds4, Rust/Linux, signed/notarized
+release, physical SendBox, Kupo quality, System One, configured physical SSH
+and full-milestone gates remain explicitly FAIL/unavailable in this primitive.
+Generated tests must prove exact block/arrow/preview/reclick/focus behavior,
+bounded list scrolling, complete details, narrow main/side isolation, real
+removal/toggle effects and unchanged acknowledgement semantics.
+
+### Protocol-68 composer and compact-control qualification
+
+The compact controls and cascading model/slash workflows share one stable
+production build. Application source is retained in `d97e6e2` and `f8e6dc5`;
+later acknowledgement corrections change only generated tests. The final
+menus, unavailable-Kupo explanation, complete built-ins-first/skills-last list,
+exact selected skill and atomic `/side PROMPT` run against both the rebuilt
+renderer and the actual packaged app. Generated screenshots were inspected.
+
+| Surface | Observed result |
+| --- | --- |
+| Strict types and production build | Pass |
+| Fresh maintained model-option/context transport probe | Pass in 93.16 ms; actual Responses/Anthropic low effort and provider-controlled Completions |
+| Complete source/service/worker/recovery/CLI/native-TUI suite | 1,682 passed, 14 existing skips, zero failures; 1,696 cases in 1,362,876.05 ms |
+| Complete hidden desktop suite | 231 passed, three existing skips, zero failures; 234 flows in 7.3 minutes |
+| Actual packaged-app critical flows | 37 passed in 1.6 minutes |
+| Actual packaged narrow-menu keyboard/save/resize repetition | 10 passed in 13.2 seconds |
+| Focused saved profile/turn accounting | 33 passed in 15.54 seconds |
+| Focused complete native TUI | 35 passed, one existing skip, zero failures in 45.47 seconds |
+| Independently installed packed SDK | All browser-safe root/React, explicit Node/MCP, declarations, fresh skill and atomic side workflows pass |
+| Actual installed-worker continuation/accounting probes | 12 passed |
+| Source, independent-consumer and native-workload audits | Zero vulnerabilities |
+| No-cache Linux arm64 worker payload/native PTY | Pass in 40,152.87 ms with exact protocol-68 inputs |
+| Actual production ZIP/manifest consumer | Pass; 779,802,669 bytes in 113,653.04 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+Source coverage includes complete paginated skill discovery, fresh digest
+refusal without replacing drafts, actual-user selection without inference or
+permission, exact main-draft consumption while retaining an existing side
+draft, atomic side creation/queue rollback and missing-receipt restart without
+another model call. The 67-to-68 marker upgrade preserves original ciphertext,
+receipts, grants and accounting; corrupt, missing and premature markers fail
+without repair or deleting state. Existing parent-context refresh, permissions,
+finite-budget, cancellation and profile-isolation checks remain enabled.
+
+Earlier failed runs are not passing evidence. Native checks now wait for the
+connected service, saved/enabled controls and the actual 840-pixel renderer
+width before keyboard input. The profile test waits for the reconciled saved
+capacity, not an earlier reservation notification. TUI review waits for the
+actual proposed record, not identical summary text already visible in retained
+history. No timeout was increased, confirmation weakened, unload guard removed
+or application behavior changed to accommodate those fixture races.
+
+The verified worker identity is
+`docker.io/library/moguri-worker@sha256:c5e16ad5d3e289510cb65a87bff3c0064b37975e886d056e0efc11d5749e6ef4`.
+The labelled development installer retains the exact canonical image:
+
+```text
+release/Moguri-0.30.0-alpha.1-composer-menus-68-macos-arm64.dmg
+794062813 bytes
+SHA-512:
+3e3fd34342ca9a2dc56162f718ab9019a9f9a2ea9b32ec49644a96912164c6769673897c91e0b86d3a0cabd5aceca61a8529042b3573e247a5f844b5bd400ae7
+```
+
+This is local ad-hoc-signed development output, not a notarized or uploaded
+release. No installed personal app, Finder, real microphone, personal login
+or paid inference was used. Known experimental OpenTUI FFI, lazy Ghostty
+chunk, optional `.icon` and transitive `whatwg-encoding`/`node-domexception`
+notices remain non-blocking. Physical SendBox, live-provider, external Linux,
+quality and full-milestone exclusions are unchanged. CI remains main-push-only;
+an empty PR check list is not a CI-pass claim.

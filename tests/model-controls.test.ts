@@ -43,6 +43,18 @@ test("historical usage cannot undercut the fresh source estimate or output headr
   assert.throws(() => modelRequest(base, { contextWindow: 8192 }, { ...context, systemPrompt: "Generated expanded policy. ".repeat(2000) }), /working context/);
 });
 
+test("retained text above one MiB is admitted when it fits the actual model window without dropping history", () => {
+  const model = { ...githubCopilotProvider().getModels().find((model) => hasApi(model, "openai-completions"))!, contextWindow: 2_097_152 };
+  const text = "Generated retained conversation. ".repeat(40_000);
+  const messages: Context["messages"] = [{ role: "user", timestamp: 1, content: text }];
+  assert.ok(Buffer.byteLength(JSON.stringify(messages)) > 1024 * 1024);
+  const request = modelRequest(model, undefined, { messages });
+  assert.ok(request.estimatedTokens > 0);
+  assert.equal(messages[0]?.content, text);
+  assert.ok(request.estimatedTokens + request.maxTokens + 4096 <= model.contextWindow);
+  assert.throws(() => modelRequest({ ...model, contextWindow: 8192 }, undefined, { messages }), /working context/);
+});
+
 test("reasoning cannot expand the output ceiling beyond the configured context room", async () => {
   const catalog = githubCopilotProvider().getModels();
   const base = { ...catalog.find((model) => hasApi(model, "anthropic-messages") && model.reasoning && !model.compat?.forceAdaptiveThinking)!, contextWindow: 16384 };
@@ -99,7 +111,8 @@ test("an approved README edit can finish with reported reasoning output above 81
     await fixture.send("Add to readme file a mention to users of this repo, the first user is an app called Moguri which is an AI harness for local development.");
     const request = await waitFor(() => fixture.requests[0]);
     assert.equal(request.max_tokens ?? request.max_completion_tokens, 32768);
-    await fixture.approve(); assert.equal((await fixture.terminal()).status, "completed");
+    assert.equal((await fixture.terminal()).status, "completed");
+    assert.equal(fixture.session().pendingApproval, null);
     assert.equal(await readFile(join(fixture.project, "README.md"), "utf8"), text);
     assert.equal(fixture.requests.length, 2);
     const entries = fixture.service.controller.snapshot().budgetEntries;

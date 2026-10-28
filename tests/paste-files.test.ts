@@ -109,7 +109,7 @@ test("Remote scoped-file reads use authenticated owned frames and a policy chang
   try {
     await fixture.probe(); await fixture.select();
     const text = Array.from({ length: 51 }, (_, index) => index === 40 ? "Generated selected section ONLY_IN_SCOPED_FILE" : `Generated retained-only Remote ${index}`).join("\r\n");
-    await fixture.send(text); await fixture.approve(); await waitFor(() => gate.held);
+    await fixture.send(text); await waitFor(() => gate.held);
     const settings = structuredClone(sdk.settings.get()!.values);
     settings.permissions.tools.push({ id: "generated-unrelated-revocation", tool: "write_file", pathPrefix: "generated-unrelated", decision: "deny" });
     await sdk.settings.update(settings, sdk.settings.get()!.revision);
@@ -127,7 +127,7 @@ test("an actual pinned SSH worker reads only the explicitly approved paste page 
   try {
     await fixture.probe(); await fixture.select();
     const text = Array.from({ length: 51 }, (_, index) => index === 40 ? "Generated selected section REMOTE_PAGE_PROOF" : `Generated retained-only Remote ${index}`).join("\r\n");
-    await fixture.send(text); await fixture.approve();
+    await fixture.send(text);
     assert.equal((await fixture.terminal()).status, "completed");
     const result = fixture.session().messages.find((message) => message.role === "tool")!;
     assert.equal(result.outcome, "completed");
@@ -187,11 +187,9 @@ test("a project-free owned worker receives only paste metadata, then uses its ap
     const text = Array.from({ length: 51 }, (_, index) => index === 40 ? "Generated selected section \u{1f34a}\r\n" : `Generated retained-only ${index} ${"x".repeat(100)}\r\n`).join("");
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text, attachments: [] });
     await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
-    const approval = await waitFor(() => session().pendingApproval);
-    assert.equal(approval.call.name, "read_file");
-    assert.equal(JSON.stringify(fixture.requests[0]).includes("Generated retained-only"), false);
-    await sdk.command({ type: "approval.respond", sessionId: created.id!, approvalId: approval.id, allow: true });
     await waitFor(() => !session().turnId && session().status === "completed");
+    assert.equal(session().pendingApproval, null);
+    assert.equal(JSON.stringify(fixture.requests[0]).includes("Generated retained-only"), false);
     const result = session().messages.find((message) => message.role === "tool")!;
     assert.equal(result.outcome, "completed");
     assert.match(result.text, /Generated selected section/);

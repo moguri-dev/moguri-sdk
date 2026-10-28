@@ -26,6 +26,7 @@ export class ProfileRuntime {
   private readonly active = new Map<string, { abort: AbortController; done: Promise<void> }>();
   private readonly pending = new Map<string, { digest: string; result: Promise<CommandResult> }>();
   private closed = false;
+  private closedBudget?: GlobalBudgetCapacity;
   private closeTask?: Promise<void>;
   readonly hooks: ProfileHooks;
   constructor(private readonly initial: EventStore, private readonly stateDir: string, private readonly options: Options) {
@@ -172,6 +173,7 @@ export class ProfileRuntime {
     }
   }
   private globalBudget(): GlobalBudgetCapacity {
+    if (this.closedBudget) return structuredClone(this.closedBudget);
     const limit = this.catalog().globalBudget.limit;
     if (!limit) return { limit: null, chargedTokens: 0, chargedUsdMicros: 0 };
     const entries: BudgetEntry[] = [], plans: BudgetPlan[] = [];
@@ -194,11 +196,15 @@ export class ProfileRuntime {
       const control = this.controllers.get(profile.id);
       if (control?.ownedWriteRoots().some((owned) => includeNested ? localRootsOverlap(root, owned) : owned === root)) return true;
       const state = control?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      if (!root.startsWith("remote/") && state.chatWriters.some((writer) => ["active", "unconfirmed"].includes(writer.status) &&
+        localRootsOverlap(root, writer.root.root))) return true;
       if (state.jobs.some((job) => job.commandJob && (job.status === "running" || job.status === "waiting_input" || job.status === "partial" && !job.commandJob.inspected) &&
         (includeNested ? localRootsOverlap(root, job.commandJob.root) : root === job.commandJob.root))) return true;
       if (state.jobs.some((job) => job.projectClone && ["running", "waiting_input"].includes(job.status) && localRootsOverlap(root, job.projectClone.path))) return true;
-      if (remoteRootQuarantined(state, root) || githubRootQuarantined(state, root) || state.projects.some((project) => project.path === root && state.blockedProjects.includes(project.id)) ||
-        state.managedWorkspaces.some((workspace) => workspace.path === root && state.blockedWorkspaces.includes(workspace.id))) return true;
+      if (remoteRootQuarantined(state, root) || githubRootQuarantined(state, root) || state.projects.some((project) =>
+        state.blockedProjects.includes(project.id) && (includeNested ? localRootsOverlap(project.path, root) : project.path === root)) ||
+        state.managedWorkspaces.some((workspace) => state.blockedWorkspaces.includes(workspace.id) &&
+          (includeNested ? localRootsOverlap(workspace.path, root) : workspace.path === root))) return true;
     }
     return false;
   }
@@ -296,6 +302,7 @@ export class ProfileRuntime {
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Profile cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "profile_cleanup");
     if (failed?.status === "rejected") throw failed.reason;
+    this.closedBudget = this.globalBudget();
     for (const [id, store] of this.stores) if (id !== PROFILE_ID) store.close();
     this.global.close();
   }

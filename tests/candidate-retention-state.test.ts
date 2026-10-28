@@ -74,7 +74,7 @@ function seedGeneration(store: EventStore) {
   return { id, resultDigest, inputDigest, entry };
 }
 function downgrade(store: EventStore): void {
-  store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('automatic_kupo_schema','session_navigation_schema','workspace_experience_schema','candidate_retention_schema','lean_tooling_schema','lean_tooling_convergence_schema'); PRAGMA user_version=56; COMMIT;");
+  store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema','session_navigation_schema','workspace_experience_schema','candidate_retention_schema','lean_tooling_schema','lean_tooling_convergence_schema'); PRAGMA user_version=56; COMMIT;");
 }
 
 test("schema-56 rollback preserves ciphertext, keys and accounting; successful replay binds original provenance, never the latest link or an unknown owner", async () => {
@@ -158,7 +158,7 @@ test("upgrade cleans previously deleted canonical origins without probing roots,
     seedSession(store);
     const owned = seedCandidate(store, "generated-old-orphan"), unknown = seedCandidate(store, "generated-old-unassigned", null);
     store.commit([{ event_type: "session.deleted", profile_id: "default", project_id: projectId, payload: { deletedSessionId: sessionId, usage: [] } }], undefined, { sessions: [sessionId] });
-    downgrade(store); store.close(); store = new EventStore(path, key);
+    downgrade(store); store.close(); store = undefined; store = new EventStore(path, key);
     control = new ControlPlane(store, provider.provider, undefined, { stateDir: directory });
     const root = t.mock.method(control.platform.managed, "project", () => { throw new Error("Legacy cleanup cannot inspect or adopt a missing root."); });
     const model = t.mock.method(provider.provider, "prepare", async () => { throw new Error("Legacy cleanup cannot redispatch a model."); });

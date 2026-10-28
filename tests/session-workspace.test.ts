@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DraftEditor, MoguriSdk, isRecord } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
 test("held queue admission is explicit even when idle or no model is configured", mac, async () => {
@@ -58,6 +58,7 @@ test("a pending mode restriction invalidates approval and settles at a safe boun
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.configure(); await fixture.send("generated tool task");
     const approval = await waitFor(() => fixture.session().pendingApproval);
     await sdk.sessions.mode(fixture.sessionId, "read-only");
@@ -81,8 +82,8 @@ test("side context runs in parallel without edit authority and explicit nested s
     try { draft.edit("generated parallel question"); await draft.send("queue"); } finally { draft.dispose(); }
     await waitFor(() => fixture.service.controller.snapshot().sessions.find((session) => session.id === side.id)?.status === "completed");
     assert.equal(fixture.session().status, "running");
-    assert.doesNotMatch(JSON.stringify(fixture.requests[1]?.messages), /generated slow parent context/);
-    assert.match(JSON.stringify(fixture.requests[1]?.messages), /parent-session-reference/);
+    assert.match(JSON.stringify(fixture.requests[1]?.messages), /generated slow parent context/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[1]?.messages), /parent-session-reference/);
     const captured = await sdk.coordination.read(side.id!, { action: "snapshot" });
     assert.match(JSON.stringify(captured), /generated slow parent context/);
     assert.equal(fixture.service.controller.snapshot().sessions.find((session) => session.id === side.id)?.usage[0]?.role, "side");

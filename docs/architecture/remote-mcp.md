@@ -34,6 +34,18 @@ explicit review. It cannot turn a no-auth resource into a meaningful credential
 grant. Concurrent or stale edits fail instead of overwriting another client.
 Grant updates invalidate outstanding approvals like other permission changes.
 
+Protocol 61's remembered **tool approval** is separate from this resource/access
+grant. Adding it atomically with an actual pending answer must not invalidate
+that original operation. New intents carry a digest of all settings except
+the remembered-approval list; the transport binding omits only the additive
+settings-CAS increment, retaining the actual permission epoch and every
+peer/resource/root/helper/project/mode boundary. Revocation or any ordinary
+permission/configuration edit still invalidates the old catalogue. Legacy
+intents without the optional settings digest keep their original complete
+revision-bound hash. The remembered target uses the underlying actual tool
+schema, with fresh scope-bound discovery required after restart; it never
+creates access-forwarding authority. See the [session workflow contract](session-github-workflows.md).
+
 `mcp.remote.revoke` is available even when SSH is unready or Remote is excluded
 by policy. Removing authority must not require a successful network probe or
 access token. Existing started effects cannot be rolled back by revocation.

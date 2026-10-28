@@ -27,7 +27,7 @@ test("original tool sources and independently granted child snapshots survive re
   const f = await setupFixture({ toolCall: { name: "read_file", args: { path: "fixture.txt" } } });
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
-    await f.configure(); await f.send("Generated retained original file."); await f.approve(); await f.terminal();
+    await f.configure(); await f.send("Generated retained original file."); await f.terminal();
     const event = f.service.controller.events(0).find((event) => event.event_type === "tool.completed" && event.payload.call.name === "read_file");
     if (event?.event_type !== "tool.completed") assert.fail("Missing original retained source.");
     const child = await f.service.controller.dispatch(envelope({ type: "session.spawn", sessionId: f.sessionId, kind: "side" }));

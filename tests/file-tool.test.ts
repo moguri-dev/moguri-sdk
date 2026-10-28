@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { executeTool } from "../apps/service/src/tools.ts";
 import { digest } from "../apps/service/src/store.ts";
 import type { ToolCall } from "../packages/protocol/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { setupFixture } from "./fixture.ts";
 
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-owned-file-tool-"))), abort = new AbortController();
@@ -84,8 +84,6 @@ test("the actual owned worker retains a partial file result and cannot spend on 
   const f = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/file-tool-worker.ts", import.meta.url)) });
   try {
     await f.configure(); await f.send("generated write");
-    await waitFor(() => f.session().pendingApproval?.call.name === "read_file"); await f.approve();
-    await waitFor(() => f.session().pendingApproval?.call.name === "write_file"); await f.approve();
     const terminal = await f.terminal();
     assert.equal(terminal.status, "partial"); assert.equal(f.requests.length, 2);
     assert.equal(await readFile(join(f.project, "fixture.txt"), "utf8"), "generated replacement\n");

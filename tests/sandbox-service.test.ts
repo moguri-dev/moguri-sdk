@@ -36,20 +36,15 @@ test("SDK native source review, real guest model/tools, Manual approvals and sol
     await assert.rejects(() => sdk.command({ type: "subagent.run", sessionId: created.id!, prompt: "Generated unqualified native child." }), /not qualified/);
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text: "generated native write", attachments: [] });
     await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
-    const approved: string[] = [];
     const deadline = Date.now() + 25_000;
     while (Date.now() < deadline) {
       const current = session();
-      if (current.pendingApproval && !approved.includes(current.pendingApproval.id)) {
-        approved.push(current.pendingApproval.id);
-        assert.ok(["read_file", "write_file"].includes(current.pendingApproval.call.name));
-        await sdk.command({ type: "approval.respond", sessionId: current.id, approvalId: current.pendingApproval.id, allow: true });
-      }
+      assert.equal(current.pendingApproval, null, "Native file operations must use policy rather than an invented user decision.");
       if (!current.turnId && ["completed", "failed", "partial"].includes(current.status)) break;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert.equal(session().status, "completed", session().lastError ?? "Native turn did not settle.");
-    assert.equal(approved.length, 2); assert.equal(provider.requests.length, 0, "No controller-side inference fallback.");
+    assert.equal(provider.requests.length, 0, "No controller-side inference fallback.");
     assert.equal(session().usage.length, 3);
     assert.ok(session().usage.every((usage) => usage.quality === "provider-reported" && usage.totalTokens === 42));
     const execution = await waitFor(() => sdk.getState().snapshot!.sandboxExecutions?.find((value) => value.sessionId === created.id));
@@ -118,10 +113,8 @@ test("project-free native SDK turns read scoped long-paste pages through the aut
     const file = session().draft.attachments[0]!;
     assert.equal(file.kind, "paste_file");
     await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
-    const pending = await waitFor(() => session().pendingApproval, 20_000);
-    assert.equal(pending.call.name, "read_file"); assert.equal(pending.call.arguments.path, file.path);
-    await sdk.command({ type: "approval.respond", sessionId: created.id!, approvalId: pending.id, allow: true });
     await waitFor(() => !session().turnId && ["completed", "failed", "partial"].includes(session().status), 20_000);
+    assert.equal(session().pendingApproval, null);
     assert.equal(session().status, "completed", session().lastError ?? "Native scoped-file read did not finish.");
     const execution = sdk.getState().snapshot!.sandboxExecutions!.find((value) => value.sessionId === created.id)!;
     assert.equal(execution.root, null); assert.equal(execution.sourceRoot, null);
@@ -130,6 +123,8 @@ test("project-free native SDK turns read scoped long-paste pages through the aut
     assert.equal(proof.calls.length, 2);
     assert.ok(proof.calls.every((call: { tail: boolean; tools: string[] }) => !call.tail && !call.tools.includes("run_command") && !call.tools.includes("write_file")));
     const tool = session().messages.find((message) => message.role === "tool")!;
+    const read = sdk.getState().events.find((event) => event.session_id === created.id && event.event_type === "tool.completed");
+    assert.ok(read?.event_type === "tool.completed"); assert.equal(read.payload.call.arguments.path, file.path);
     assert.match(tool.text, /scoped-controller-snapshot/);
     assert.match(tool.text, /Generated native paste 0/);
     assert.ok(tool.text.length < 1024);

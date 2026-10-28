@@ -30,11 +30,8 @@ test("the same SDK binds worker/files/diff/plan/attachments to an isolated workt
     const session = () => fixture.sdk.getState().snapshot!.sessions.find((value) => value.id === created.id)!;
     await fixture.sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text: "generated write", attachments: [] });
     await fixture.sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
-    let approval = await waitFor(() => session().pendingApproval);
-    await fixture.sdk.command({ type: "approval.respond", sessionId: session().id, approvalId: approval.id, allow: true });
-    approval = await waitFor(() => session().pendingApproval?.call.name === "write_file" && session().pendingApproval);
-    await fixture.sdk.command({ type: "approval.respond", sessionId: session().id, approvalId: approval.id, allow: true });
     await waitFor(() => session().status === "completed");
+    assert.equal(session().pendingApproval, null);
     assert.equal(await readFile(join(workspace.path, "fixture.txt"), "utf8"), "generated replacement\n");
     assert.equal(await readFile(join(fixture.project, "fixture.txt"), "utf8"), "generated original\n");
     assert.equal(fixture.git(["write-tree"]), originalIndex); assert.equal(fixture.git(["branch", "--show-current"]), "main");

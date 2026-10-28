@@ -188,17 +188,20 @@ test("the registry cannot publish a valid declaration after its actual model bin
   } finally { gate.resolve(); await registry.close(); globalThis.fetch = fetch; }
 });
 
-test("the inspector's own ten-second total bound aborts an otherwise unbounded catalogue request", { timeout: 15_000 }, async () => {
+test("the inspector's own ten-second total bound aborts an otherwise unbounded catalogue request", { timeout: 15_000 }, async (t) => {
   const fetch = globalThis.fetch, f = await configuredAdapter(); let requests = 0;
+  const timeout = AbortSignal.timeout.bind(AbortSignal), deadlines = t.mock.method(AbortSignal, "timeout", (delay: number) => timeout(delay));
+  const caller = new AbortController();
   globalThis.fetch = async (_input, init) => {
     requests++;
     return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }));
   };
   try {
     const start = performance.now();
-    await assert.rejects(() => f.adapter.evidence(f.model.id, new AbortController().signal), { code: "model_evidence_timeout" });
+    await assert.rejects(() => f.adapter.evidence(f.model.id, caller.signal), { code: "model_evidence_timeout" });
     const elapsed = performance.now() - start;
-    assert.ok(elapsed >= 10_000 && elapsed < 14_000); assert.equal(requests, 1);
+    assert.deepEqual(deadlines.mock.calls.map((call) => call.arguments), [[10_000]]);
+    assert.ok(elapsed < 14_000); assert.equal(requests, 1); assert.equal(caller.signal.aborted, false);
     assert.equal(f.adapter.state.status, "connected"); assert.equal(f.adapter.state.models.length, 1);
   } finally { await f.adapter.cancel(); globalThis.fetch = fetch; }
 });

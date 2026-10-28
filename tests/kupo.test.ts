@@ -4,7 +4,7 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultKupoSettings, KUPO_MODEL_ID, MoguriSdk, type ModelInfo } from "../packages/sdk/src/index.ts";
 import { automaticPool, kupoAvailability } from "../apps/service/src/routing.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 
 test("Kupo stays in the shared catalogue without configured models or usable budget", () => {
@@ -102,6 +102,7 @@ test("Cascade escalates once without executing or publishing the rejected draft'
 test("selected tool requests still need exact Manual approval and later cycles see only selected history", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     fixture.options.respond = (_request, index) => ({ text: JSON.stringify(index === 1 ?
       { pattern: "cascade", modelId: fixture.solverId, escalationId: fixture.modelId, complexity: "moderate", confidence: 0.95, reason: "GENERATED_ROUTER_REASON_NOT_CONTEXT" } :
       { verdict: "pass", reason: "GENERATED_GATE_REASON_NOT_CONTEXT" }) });
@@ -338,9 +339,8 @@ test("Remote automatic Cascade keeps selected tools and model calls on the pinne
       { pattern: "cascade", modelId: fixture.solverId, escalationId: fixture.modelId, complexity: "moderate", confidence: 0.95, reason: "Generated SSH automatic route." } :
       { verdict: "pass", reason: "Generated SSH gate cannot grant file access." }) });
     await fixture.select(); await fixture.send("generated write through automatic SSH Kupo");
-    await waitFor(() => fixture.session().pendingApproval?.call.name === "read_file"); await fixture.approve();
-    await waitFor(() => fixture.session().pendingApproval?.call.name === "write_file"); await fixture.approve();
     await fixture.terminal(); await fixture.sdk.refresh();
+    assert.equal(fixture.session().pendingApproval, null);
     assert.equal(fixture.session().status, "completed");
     assert.ok(fixture.workspace);
     assert.equal(await readFile(join(fixture.workspace, "fixture.txt"), "utf8"), "generated replacement\n");

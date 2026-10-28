@@ -27,11 +27,14 @@ export async function assertFolderAccess(root: string, input: string, write: boo
   const name = relative(root, path) || ".";
   assertFolderName(name, write, policy);
 }
-export const readTools = new Set(["query_state", "read_command_job", "session_context", "session_message", "wait_session", "discover_tools", "read_tool_result", "find_files", "search_files", "diff_files", "query_data", "clock", "sqlite_query", "inspect_document", "web_search", "web_fetch", "use_skill", "fetch_page", "list_files", "read_file", "list_documents", "read_document", "search_document", "read_agent_terminal", "memory_search", "ask_user", "task_progress"]);
+export const readTools = new Set(["project_work", "query_state", "read_command_job", "session_context", "session_message", "wait_session", "discover_tools", "read_tool_result", "find_files", "search_files", "diff_files", "query_data", "clock", "sqlite_query", "inspect_document", "web_search", "web_fetch", "use_skill", "fetch_page", "list_files", "read_file", "list_documents", "read_document", "search_document", "read_agent_terminal", "memory_search", "ask_user", "task_progress"]);
 export const fileWriteTools = new Set(["write_file", "edit_file", "sqlite_transaction", "write_document", "edit_document"]);
 export const fileTools = new Set(["list_files", "read_file", "write_file", "edit_file", "find_files", "search_files", "diff_files", "query_data", "sqlite_query", "sqlite_transaction", "inspect_document", "write_document", "edit_document"]);
-export const workspaceTools = new Set([...fileTools, "create_issue", "debug", "command_job", "run_command", "read_agent_terminal", "memory_search", "propose_skill", "propose_script", "propose_memory", "propose_hook"]);
+export const workspaceTools = new Set([...fileTools, "create_issue", "project_work", "debug", "command_job", "run_command", "read_agent_terminal", "memory_search", "propose_skill", "propose_script", "propose_memory", "propose_hook"]);
 export async function assertSessionTool(session: Session, root: string | null, settings: ProjectSettings, call: ToolCall, inspectFilesystem = true): Promise<void> {
+  if ((session.mode === "read-only" || session.pendingMode === "read-only" || session.kind === "side") && call.name === "project_work" && call.arguments.action !== "read") {
+    throw new MoguriError("read_only", "Read-only/side chats can read their board, never publish project work.", 403);
+  }
   if ((session.mode === "read-only" || session.pendingMode === "read-only" || session.kind === "side") && !readTools.has(call.name)) throw new MoguriError("read_only", "This session is question/read-only. Edit, shell, MCP execution, Git and evolution tools are disabled.", 403);
   if (typeof call.arguments.path === "string" && isPasteFilePath(call.arguments.path)) {
     if (call.name !== "read_file") throw new MoguriError("attachment_read_only", "Scoped pasted files are immutable and are not project paths.", 403);

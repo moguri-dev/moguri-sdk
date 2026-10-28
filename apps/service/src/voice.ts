@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { MoguriError, type VoiceStatus, type UserSettings } from "../../../packages/protocol/src/index.ts";
+import { openSpeechStream, startSpeechServer, type SpeechServer } from "./speech-stream.ts";
 
 export const NEMOTRON_MODEL = {
   id: "nvidia/nemotron-3.5-asr-streaming-0.6b",
@@ -34,6 +35,7 @@ export class LocalDictation {
   private readonly model;
   private readonly modelPath: string;
   private verified = "";
+  private streaming?: { backend: string; server: Promise<SpeechServer>; readonly owner?: SpeechServer };
   private active = new Map<string, { child: ChildProcess | null; stopping: boolean; ready: boolean; terminate?: (signal: NodeJS.Signals) => void }>();
   constructor(stateDir: string, private readonly options: SpeechOptions = {}) {
     this.executable = options.executable ?? fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../../../.native/speech/bin/nemo-speech" : "./native/speech/bin/nemo-speech", import.meta.url));
@@ -107,6 +109,35 @@ export class LocalDictation {
     for await (const chunk of createReadStream(this.modelPath, { signal })) hash.update(chunk);
     if (hash.digest("hex") !== this.model.sha256) throw new MoguriError("speech_integrity", "Installed model integrity failed. Reinstall it explicitly; no download or cloud fallback was attempted.");
     this.verified = fingerprint;
+  }
+  async stream(jobId: string, settings: UserSettings["voice"], signal: AbortSignal, changed: (text: string) => void) {
+    if (!jobId) throw new MoguriError("speech_scope", "Streaming recognition needs its exact capture owner.");
+    await this.verify(signal);
+    if (settings.language !== "auto" && !VOICE_LOCALES.some((locale) => locale.code === settings.language && locale.tier !== "adaptation")) {
+      throw new MoguriError("speech_language", "Choose auto or a qualified ready/broad-coverage locale.");
+    }
+    if (this.streaming?.backend !== settings.backend || (await this.streaming.server).closed) {
+      await this.close();
+      let owner: SpeechServer | undefined;
+      this.streaming = { backend: settings.backend,
+        server: startSpeechServer(this.executable, this.options.prefixArgs ?? [], this.modelPath, settings.backend, signal, (value) => { owner = value; }),
+        get owner() { return owner; } };
+    }
+    const owned = this.streaming!;
+    let server: SpeechServer;
+    try { server = await owned.server; } catch (error) {
+      if (this.streaming === owned && !(error instanceof MoguriError && error.code === "speech_partial")) this.streaming = undefined;
+      throw error;
+    }
+    const stream = await openSpeechStream(server, settings.language, signal, changed);
+    return { append: stream.append,
+      finish: async () => ({ ...await stream.finish(), modelId: this.model.id, language: settings.language, source: "local" as const }),
+      cancel: async () => { await stream.cancel(); if (signal.aborted && this.streaming === owned) this.streaming = undefined; },
+    };
+  }
+  async close(): Promise<void> {
+    const owned = this.streaming;
+    if (owned) { await (owned.owner ?? await owned.server).close(); if (this.streaming === owned) this.streaming = undefined; }
   }
   async transcribe(jobId: string, source: string | "microphone", settings: UserSettings["voice"], signal: AbortSignal, progress: (message: string) => void = () => {}): Promise<{ text: string; modelId: string; language: string; source: "local" }> {
     if (source === "microphone" && settings.inputDeviceId && settings.inputDeviceId !== "default") throw new MoguriError("speech_input_device", "This native capture supports only the default microphone. Use the selected device through desktop capture, or explicitly choose Default in Voice settings. No device was substituted.", 409);

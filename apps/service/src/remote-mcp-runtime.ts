@@ -10,6 +10,7 @@ import { runMcpConnector } from "./mcp-process.ts";
 import { frameDigest } from "./worker-wire.ts";
 import { redactSecrets } from "./secret-redactor.ts";
 import { MemoryPreparedSchema, checkedMemoryPrepared } from "./memory-mcp.ts";
+import { assertWebAccess, WebAccessSchema } from "../../../packages/protocol/src/web-policy.ts";
 
 const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 export const RemoteMcpToolsRequestSchema = Type.Object({
@@ -38,6 +39,7 @@ export const RemoteMcpAuthorizationSchema = Type.Object({
   arguments: Type.Record(Type.String(), Type.Unknown()), schemaDigest: hash, reviewedDigest: hash,
   accessToken: Type.Optional(Type.String({ minLength: 1, maxLength: 32768 })),
   preparedMemory: Type.Optional(MemoryPreparedSchema),
+  webAccess: Type.Optional(WebAccessSchema),
 }, { additionalProperties: false });
 export type RemoteMcpAuthorization = Static<typeof RemoteMcpAuthorizationSchema>;
 export const RemoteMcpExecutionResultSchema = Type.Object({
@@ -62,11 +64,14 @@ export async function executeRemoteMcp(raw: RemoteMcpAuthorization, expected: { 
     if (needsAccess !== Boolean(authorization.accessToken)) throw new MoguriError("remote_mcp_credential", "The Remote MCP access token does not match its exact selected resource/auth method. No credential fallback.", 403);
     const needsMemory = !authorization.server && ["search_memory", "memory_graph"].includes(authorization.tool);
     if (needsMemory !== Boolean(authorization.preparedMemory)) throw new MoguriError("memory_authorization", "This exact Remote memory tool requires validated root/query-bound data, and other tools cannot receive it.", 403);
+    const needsWeb = !authorization.server && authorization.tool === "fetch_page";
+    if (needsWeb !== Boolean(authorization.webAccess)) throw new MoguriError("web_authority", "Only the exact approved Remote page tool may receive its original website scope.", 403);
+    if (needsWeb) assertWebAccess(authorization.webAccess, String(authorization.arguments.url));
     const prepared = authorization.preparedMemory ? await checkedMemoryPrepared(authorization.preparedMemory, authorization, signal) : undefined;
     const helperPath = await checkedHelper(authorization.helperDigest, signal);
     const result = await runMcpConnector({ action: "call", server: authorization.server, root: authorization.root, tool: authorization.tool,
       arguments: authorization.arguments, schemaDigest: authorization.schemaDigest, ...(authorization.accessToken ? { token: authorization.accessToken } : {}),
-      ...(prepared ? { prepared } : {}) }, helperPath, signal,
+      ...(prepared ? { prepared } : {}), ...(needsWeb ? { webAccess: authorization.webAccess } : {}) }, helperPath, signal,
     (pid) => { started(pid); dispatched = true; });
     const safe = redactSecrets(result, secrets);
     if (Buffer.byteLength(JSON.stringify(safe)) > 2 * 1024 * 1024) throw new MoguriError("remote_mcp_result_limit", "Remote MCP result exceeds 2 MiB. It was not silently truncated; inspect external effects.", 409);

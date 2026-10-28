@@ -56,7 +56,8 @@ export class ContextInputs {
       if (event.event_type === "session.created") return [...(event.payload.pasteFiles ?? []), ...(event.payload.documents ?? [])];
       if (event.event_type === "draft.saved") return event.payload.attachments;
       if (event.event_type === "queue.edited") return event.payload.attachments ?? [];
-      return event.event_type === "queue.enqueued" || event.event_type === "turn.started" || event.event_type === "steer.applied" ? event.payload.item.attachments : [];
+      if (event.event_type === "turn.started") return [...event.payload.item.attachments, ...(event.payload.sideContext?.pasteFiles ?? []), ...(event.payload.sideContext?.documents ?? [])];
+      return event.event_type === "queue.enqueued" || event.event_type === "steer.applied" ? event.payload.item.attachments : [];
     });
   }
   admittedFiles(sessionId: string): Extract<Attachment, { kind: "paste_file" }>[] {
@@ -65,13 +66,13 @@ export class ContextInputs {
     const inherited = this.host.events().flatMap((event) => event.profile_id === profileId && event.session_id === sessionId && event.event_type === "session.created" ? event.payload.pasteFiles ?? [] : []);
     const admitted = session.messages.flatMap((message) => message.role === "user" ? message.attachments ?? [] : [])
       .filter((attachment): attachment is Extract<Attachment, { kind: "paste_file" }> => attachment.kind === "paste_file");
-    return [...new Map([...inherited, ...admitted].map((attachment) => [attachment.id, attachment])).values()];
+    return [...new Map([...inherited, ...session.sideContext?.pasteFiles ?? [], ...admitted].map((attachment) => [attachment.id, attachment])).values()];
   }
   admittedDocuments(sessionId: string): DocumentAttachment[] {
     const session = this.session(sessionId, false), profileId = this.host.snapshot().profileId;
     const inherited = this.host.events().flatMap((event) => event.profile_id === profileId && event.session_id === sessionId && event.event_type === "session.created" ? event.payload.documents ?? [] : []);
     const admitted = session.messages.flatMap((message) => message.role === "user" ? message.attachments ?? [] : []).filter((attachment): attachment is DocumentAttachment => attachment.kind === "document");
-    return [...new Map([...inherited, ...admitted].map((attachment) => [attachment.id, attachment])).values()];
+    return [...new Map([...inherited, ...session.sideContext?.documents ?? [], ...admitted].map((attachment) => [attachment.id, attachment])).values()];
   }
   scopedDocument(sessionId: string, id: string, admitted = true): DocumentAttachment {
     const attachment = (admitted ? this.admittedDocuments(sessionId) : this.retainedAttachments(sessionId)).find((attachment) => attachment.id === id && attachment.kind === "document");

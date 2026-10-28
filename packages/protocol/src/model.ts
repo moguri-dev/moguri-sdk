@@ -14,6 +14,11 @@ export function modelContextWindows(model: ModelWindowCapability): ModelContextW
   const values = declared ?? [model.contextWindow, Math.floor(model.contextWindow / 2)];
   return { source: declared ? "provider" : "maximum-and-half", values: [...new Set(values)].filter((value) => value >= MIN_WORKING_CONTEXT).sort((a, b) => b - a) };
 }
+export function supportsModelContextWindow(model: ModelWindowCapability, value: number): boolean {
+  const windows = modelContextWindows(model);
+  return Number.isSafeInteger(value) && value >= MIN_WORKING_CONTEXT && value <= model.contextWindow &&
+    (windows.source !== "provider" || windows.values.includes(value));
+}
 
 export const ThinkingEffortSchema = Type.Union([
   Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"),

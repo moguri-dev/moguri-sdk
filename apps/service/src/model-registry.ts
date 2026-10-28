@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { defaultModelPreferences, modelCatalogue, selectableModels, isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ModelOffering, type ModelPreferences, type ModelProvider, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import type { PreparedModel, ProviderAdapter } from "./provider.ts";
 
@@ -8,6 +8,7 @@ export interface ModelRegistryOptions {
   vault?: SecretVault; fetch?: typeof fetch; idPrefix?: () => string; environments?: Controls["env"][];
   additional?: ModelRegistry; includeCopilot?: boolean; copilotEnvironments?: () => Controls["env"][];
   localEnvironments?: (endpoint: LocalEndpoint) => Controls["env"][];
+  preferences?: () => ModelPreferences; scope?: "local" | "remote"; nested?: boolean; ready?: () => boolean;
 }
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export const localModelId = (endpointId: string, modelId: string, prefix = "local") => `${prefix}.${endpointId}.${createHash("sha256").update(modelId).digest("hex").slice(0, 24)}`;
@@ -45,23 +46,46 @@ export class ModelRegistry implements ProviderAdapter {
     this.publish(false);
   }
   private get prefix() { return this.options.idPrefix?.() ?? "local"; }
-  private configurationSignature() { return JSON.stringify({ endpoints: this.endpoints(), prefix: this.prefix }); }
+  private get preferences() { return this.options.preferences?.() ?? defaultModelPreferences(); }
+  private enabled(id: string) { return !this.preferences.disabledProviders.includes(id); }
+  private configurationSignature() { return JSON.stringify({ endpoints: this.endpoints().map((endpoint) => ({ ...endpoint, enabled: endpoint.enabled && this.enabled(`${this.prefix}.${endpoint.id}`) })), prefix: this.prefix, ready: this.options.ready?.() ?? true }); }
   private modelId(endpointId: string, modelId: string) { return localModelId(endpointId, modelId, this.prefix); }
   private publish(notify = true) {
     if (this.closed) return;
-    const local = [...this.local.values()];
-    const localModels = local.flatMap((entry) => entry.models.map((model) => {
-      const endpoint = this.endpoints().find((endpoint) => model.providerId === `${this.prefix}.${endpoint.id}`);
-      return endpoint && this.options.localEnvironments ? { ...model, environments: this.options.localEnvironments(endpoint) } : model;
-    }));
-    const models = [...this.copilot.state.models.map((model) => ({ ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id, endpointBoundary: model.endpointBoundary ?? "network" as const, environments: this.options.copilotEnvironments?.() ?? ["Local"] })), ...localModels, ...this.options.additional?.state.models ?? []];
-    const connections: ProviderConnection[] = [...(this.options.includeCopilot === false ? [] : [{ id: "github-copilot", name: "GitHub Copilot", source: "copilot" as const, status: this.copilot.state.status, diagnostic: this.copilot.state.diagnostic }]), ...local.map((entry) => entry.connection), ...this.options.additional?.state.connections ?? []];
-    this.state = { ...this.copilot.state, status: models.length ? "connected" : this.copilot.state.status, models, connections };
+    const local = [...this.local.values()], providers: ModelProvider[] = [];
+    const offerings: ModelOffering[] = [];
+    if (this.options.includeCopilot !== false) {
+      providers.push({ id: "github-copilot", name: "GitHub Copilot", source: "copilot", scope: "copilot", endpointId: null,
+        enabled: this.enabled("github-copilot"), status: this.copilot.state.status, diagnostic: this.copilot.state.diagnostic });
+      offerings.push(...this.copilot.state.models.map((model) => ({ available: this.copilot.state.status === "connected", model: {
+        ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id,
+        endpointBoundary: model.endpointBoundary ?? "network" as const, environments: this.options.copilotEnvironments?.() ?? ["Local"] } })));
+    }
+    for (const endpoint of this.endpoints()) {
+      const id = `${this.prefix}.${endpoint.id}`, entry = this.local.get(endpoint.id), enabled = endpoint.enabled && this.enabled(id);
+      providers.push({ id, name: endpoint.name, source: "local", scope: this.options.scope ?? "local", endpointId: endpoint.id, enabled,
+        status: enabled ? entry?.connection.status ?? "disconnected" : "disconnected",
+        diagnostic: enabled ? this.options.ready && !this.options.ready() ? "Probe the exact configured SSH peer before model discovery." : entry?.connection.diagnostic ?? "Refresh this configured endpoint before selecting a model." : "Provider disabled. Its configuration and credentials were retained." });
+      for (const model of endpoint.models) {
+        const modelId = this.modelId(endpoint.id, model.id), advertised = entry?.models.find((value) => value.id === modelId);
+        const info: ModelInfo = { ...model, id: modelId, providerId: id, source: "local", apiModelId: model.id, endpointBoundary: modelEndpointBoundary(endpoint.baseUrl),
+          thinkingLevels: [], environments: this.options.localEnvironments?.(endpoint) ?? this.options.environments ?? ["Local"] };
+        offerings.push({ model: advertised ? { ...advertised, environments: info.environments } : info, available: enabled && entry?.connection.status === "connected" && Boolean(advertised) });
+      }
+    }
+    if (this.options.additional?.state.catalogue) {
+      providers.push(...this.options.additional.state.catalogue.providers);
+      offerings.push(...this.options.additional.state.catalogue.models.flatMap((entry) => entry.offerings));
+    }
+    const catalogue = modelCatalogue(providers, offerings, this.preferences);
+    const models = this.options.preferences && !this.options.nested ? selectableModels(catalogue) :
+      offerings.filter((entry) => entry.available && providers.some((provider) => provider.id === entry.model.providerId && provider.enabled)).map((entry) => entry.model);
+    this.state = { ...this.copilot.state, status: models.length ? "connected" : this.copilot.state.status, models, connections: providers, catalogue };
     if (!models.length && local.some((entry) => entry.connection.status === "error")) this.state = { ...this.state, status: this.copilot.state.status === "connecting" ? "connecting" : "error", diagnostic: "No usable model is available. Inspect the configured endpoint and Copilot connection diagnostics." };
     if (notify) this.onChange();
   }
   private endpoint(id: string): LocalEndpoint {
-    const endpoint = this.endpoints().find((endpoint) => endpoint.id === id && endpoint.enabled);
+    const endpoint = this.endpoints().find((endpoint) => endpoint.id === id && endpoint.enabled && this.enabled(`${this.prefix}.${endpoint.id}`));
     if (!endpoint) throw new MoguriError("local_model_missing", "This local endpoint is no longer enabled. No other provider was selected.", 409);
     return endpoint;
   }
@@ -113,7 +137,7 @@ export class ModelRegistry implements ProviderAdapter {
     this.discovery.abort(); this.discovery = new AbortController();
     const epoch = ++this.epoch, signal = this.discovery.signal;
     this.local.clear();
-    const endpoints = this.endpoints().filter((endpoint) => endpoint.enabled);
+    const endpoints = this.endpoints().filter((endpoint) => endpoint.enabled && this.enabled(`${this.prefix}.${endpoint.id}`) && (this.options.ready?.() ?? true));
     for (const endpoint of endpoints) this.local.set(endpoint.id, { models: [], connection: { id: `${this.prefix}.${endpoint.id}`, name: endpoint.name, source: "local", status: "connecting", diagnostic: null } });
     this.publish();
     const task = Promise.all(endpoints.map(async (endpoint) => {
@@ -132,8 +156,11 @@ export class ModelRegistry implements ProviderAdapter {
     })).then(() => {});
     this.task = task; return task;
   }
-  async refresh(): Promise<void> { await Promise.all([this.copilot.refresh(), this.refreshLocal(), this.options.additional?.refresh()]); }
-  login(): void { this.copilot.login(); }
+  async refresh(): Promise<void> { await Promise.all([this.options.includeCopilot === false || !this.enabled("github-copilot") ? undefined : this.copilot.refresh(), this.refreshLocal(), this.options.additional?.refresh()]); }
+  login(): void {
+    if (!this.enabled("github-copilot")) throw new MoguriError("provider_disabled", "Enable GitHub Copilot in this profile's provider list before signing in. No account or model was substituted.", 409);
+    this.copilot.login();
+  }
   async cancel(): Promise<void> { await this.copilot.cancel(); }
   async logout(): Promise<void> { await this.copilot.logout(); }
   async evidence(id: string, signal: AbortSignal): Promise<import("../../../packages/protocol/src/index.ts").ModelEvidenceReport> {
@@ -158,8 +185,18 @@ export class ModelRegistry implements ProviderAdapter {
     await this.refreshLocal();
   }
   async prepare(id: string, signal: AbortSignal): Promise<PreparedModel> {
-    if (this.options.additional?.state.models.some((model) => model.id === id)) return this.options.additional.prepare(id, signal);
-    if (!id.startsWith(`${this.prefix}.`)) return this.copilot.prepare(id, signal);
+    signal.throwIfAborted();
+    const selected = this.state.models.find((model) => model.id === id), preference = JSON.stringify(this.preferences);
+    if (this.closed || !selected) throw new MoguriError("model_unavailable", "This model or provider is disabled, unselected or unavailable in this profile. Choose an enabled source explicitly; no fallback occurred.", 409);
+    const binding = JSON.stringify(selected);
+    const check = (prepared: PreparedModel): PreparedModel => {
+      signal.throwIfAborted();
+      if (prepared.model.id !== (selected.apiModelId ?? selected.id)) throw new MoguriError("model_identity", "The prepared API identity differs from the exact selected source. No inference or provider substitution was authorized.", 409);
+      if (this.closed || JSON.stringify(this.preferences) !== preference || JSON.stringify(this.state.models.find((model) => model.id === id)) !== binding) throw new MoguriError("model_changed", "Model availability or its exact source changed during preparation. No inference was started or provider substituted.", 409);
+      return prepared;
+    };
+    if (this.options.additional?.state.models.some((model) => model.id === id)) return check(await this.options.additional.prepare(id, signal));
+    if (!id.startsWith(`${this.prefix}.`)) return check(await this.copilot.prepare(id, signal));
     const info = this.state.models.find((model) => model.id === id && model.source === "local");
     if (!info?.providerId) throw new MoguriError("model_unavailable", "The selected local model is unavailable. Recheck its endpoint; no provider was substituted.", 409);
     const endpoint = this.endpoint(info.providerId.slice(this.prefix.length + 1)), signature = JSON.stringify(endpoint), epoch = this.epoch;
@@ -174,7 +211,7 @@ export class ModelRegistry implements ProviderAdapter {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" },
     };
-    return { model, auth: inspected.key ? { apiKey: inspected.key } : { apiKey: "moguri-keyless", headers: { Authorization: null } } };
+    return check({ model, auth: inspected.key ? { apiKey: inspected.key } : { apiKey: "moguri-keyless", headers: { Authorization: null } } });
   }
   async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.options.additional?.close(); await this.copilot.cancel(); }
 }

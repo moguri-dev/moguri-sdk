@@ -1,10 +1,11 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
-import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery } from "../../protocol/src/index.ts";
+import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
+import { listSlashCommands } from "./slash-catalog.ts";
 import { responseText, type ActivityCursor } from "../../protocol/src/activity.ts";
 import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../protocol/src/knowledge.ts";
 import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../protocol/src/extensions.ts";
@@ -12,12 +13,19 @@ import { createCacheApi } from "./cache.ts";
 import { createGithubApi } from "./github.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
 import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
+import type { RememberApproval } from "../../protocol/src/permissions.ts";
+import { canonicalWebSite, effectiveWebAllowances, type WebScope } from "../../protocol/src/web-policy.ts";
+import type { KanbanSource } from "../../protocol/src/kanban.ts";
+import { PRICE_PROVIDERS, type PriceProvider } from "../../protocol/src/pricing.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
+export * from "./conversation.ts";
 export * from "./slash.ts";
+export * from "./slash-catalog.ts";
 export { ClientError };
 export { DraftEditor } from "../../client/src/draft.ts";
+export type { DraftDictation } from "../../client/src/draft.ts";
 export type { ClientState } from "../../client/src/index.ts";
 export const sessionTitle = (session: Session, limit = 64, fallback = "New session"): string =>
   session.title !== "New session" ? session.title : session.messages.find((message) => message.role === "user")?.text.split("\n")[0]?.slice(0, limit) || fallback;
@@ -25,6 +33,7 @@ export const attachmentStatus = (attachment: Attachment): string => attachment.k
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
+  readonly commands = { list: (sessionId: string, signal?: AbortSignal) => listSlashCommands(this, sessionId, signal) };
   readonly browser = {
     state: (sessionId: string) => this.query({ type: "browser.state", sessionId }),
     host: {
@@ -36,8 +45,75 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly github = createGithubApi(this);
+  readonly prices = {
+    catalog: () => this.query({ type: "pricing.catalog" }),
+    refresh: (providers: PriceProvider[] = [...PRICE_PROVIDERS], expectedRevision = this.getState().snapshot?.providerPriceRevision) => {
+      if (expectedRevision === undefined) throw new ClientError("pricing_missing", "Connect before refreshing this profile's provider references.");
+      return this.command({ type: "pricing.refresh", providers, expectedRevision });
+    },
+  };
+  readonly kanban = {
+    open: (projectId: string) => this.command({ type: "kanban.open", projectId }),
+    choose: (review: import("../../protocol/src/kanban.ts").ContinueWorkReview, choice: import("../../protocol/src/kanban.ts").ContinueWorkChoice) => {
+      if (review.profileId !== this.profileId) throw new ClientError("continue_work_stale", "The continuation review belongs to another profile. No prompt or task was dispatched.");
+      return this.command({ type: "message.send", sessionId: review.sessionId, expectedRevision: review.expectedRevision, delivery: "queue", continueWorkChoice: choice });
+    },
+    items: (projectId: string, source: KanbanSource = "kanban", page = 1, sessionId?: string) => this.query({ type: "kanban.items", projectId, source, page, ...(sessionId ? { sessionId } : {}) }),
+    continue: (sessionId: string, issueId?: string, expectedDraftRevision?: number) => this.command({ type: "project.work.start", sessionId,
+      ...(issueId ? { issueId } : {}), ...(expectedDraftRevision !== undefined ? { consumeDraft: { expectedRevision: expectedDraftRevision } } : {}) }),
+    work: (runId: string) => this.query({ type: "project.work.read", runId }),
+    wait: async (runId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
+      const deadline = Date.now() + (options.timeoutMs ?? 120000);
+      for (;;) {
+        options.signal?.throwIfAborted();
+        const { run } = await this.kanban.work(runId);
+        if (run.status !== "preparing") return run;
+        if (Date.now() >= deadline) throw new ClientError("project_work_wait", `The original task ${runId} is still preparing. Inspect it; do not start a replacement.`);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    },
+    cancel: (runId: string) => this.command({ type: "project.work.cancel", runId }),
+    inspect: (runId: string, expectedRevision: number, confirmInspection: true) => this.command({ type: "project.work.inspect", runId, expectedRevision, confirmInspection }),
+  };
+  readonly approvals = {
+    respond: (sessionId: string, approvalId: string, allow: boolean, remember?: RememberApproval) =>
+      this.command({ type: "approval.respond", sessionId, approvalId, allow, ...(remember ? { remember } : {}) }),
+    list: () => this.getState().snapshot?.settings.values.permissions.remembered ?? [],
+    revoke: (id: string, expectedRevision = this.settings.get()?.revision) => {
+      const current = this.settings.get();
+      if (!current || expectedRevision === undefined) throw new ClientError("settings_missing", "Connect before changing remembered approvals.");
+      if (!current.values.permissions.remembered?.some((grant) => grant.id === id)) throw new ClientError("approval_missing", "This remembered approval is no longer present.");
+      return this.settings.update({ ...current.values, permissions: { ...current.values.permissions,
+        remembered: current.values.permissions.remembered.filter((grant) => grant.id !== id) } }, expectedRevision);
+    },
+  };
+  readonly webAllowlist = {
+    list: (sessionId?: string) => {
+      const snapshot = this.getState().snapshot, entries = snapshot?.settings.values.permissions.webAllowlist ?? [];
+      if (!sessionId) return entries;
+      const session = snapshot?.sessions.find((entry) => entry.id === sessionId);
+      if (!session) throw new ClientError("session_missing", "Choose an existing session in this profile.");
+      return effectiveWebAllowances(entries, { sessionId, projectId: session.projectId, env: session.controls.env });
+    },
+    add: (site: string, scope: WebScope, expectedRevision = this.settings.get()?.revision) => {
+      const current = this.settings.get(), snapshot = this.getState().snapshot;
+      if (!current || !snapshot || expectedRevision === undefined) throw new ClientError("settings_missing", "Connect this profile before changing its Local website allowlist.");
+      if (scope.kind === "session" && !snapshot.sessions.some((session) => session.id === scope.sessionId) ||
+        scope.kind === "project" && !snapshot.projects.some((project) => project.id === scope.projectId)) throw new ClientError("web_allowlist_scope", "Choose an original session or project in this profile.");
+      const entry = { id: crypto.randomUUID(), site: canonicalWebSite(site), scope };
+      return this.settings.update({ ...current.values, permissions: { ...current.values.permissions,
+        webAllowlist: [...(current.values.permissions.webAllowlist ?? []), entry] } }, expectedRevision);
+    },
+    remove: (id: string, expectedRevision = this.settings.get()?.revision) => {
+      const current = this.settings.get();
+      if (!current || expectedRevision === undefined) throw new ClientError("settings_missing", "Connect before removing a website allowance.");
+      if (!current.values.permissions.webAllowlist?.some((entry) => entry.id === id)) throw new ClientError("web_allowlist_missing", "This website allowance is no longer present.");
+      return this.settings.update({ ...current.values, permissions: { ...current.values.permissions,
+        webAllowlist: current.values.permissions.webAllowlist.filter((entry) => entry.id !== id) } }, expectedRevision);
+    },
+  };
   readonly tools = {
-    catalog: (sessionId: string, query = "", offset = 0) => this.query({ type: "tooling.catalog", sessionId, query, offset }),
+    catalog: async (sessionId: string, query = "", offset = 0) => { await this.prepareHome(sessionId); return this.query({ type: "tooling.catalog", sessionId, query, offset }); },
     execute: (sessionId: string, name: string, args: Record<string, unknown>, schemaDigest: string) => this.command({ type: "tooling.execute", sessionId, name, arguments: args, schemaDigest }),
     result: (sessionId: string, stepId: string, callId: string, offset = 0) => this.query({ type: "tooling.result", sessionId, input: { stepId, callId, offset } }),
     command: (sessionId: string, jobId: string, offset = 0, targetSessionId?: string) => this.query({ type: "tooling.command", sessionId, input: { jobId, offset, ...(targetSessionId ? { targetSessionId } : {}) } }),
@@ -55,10 +131,20 @@ export class MoguriSdk extends TransportClient {
     start: (sessionId: string, kind: import("../../protocol/src/workflows.ts").WorkflowKind, prompt = "", expectedDraftRevision?: number) =>
       this.command({ type: "workflow.start", sessionId, kind, prompt, ...(expectedDraftRevision !== undefined ? { consumeDraft: { expectedRevision: expectedDraftRevision } } : {}) }),
   };
+  private async prepareHome(id: string): Promise<void> {
+    const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
+    if (session && session.projectId === null && !session.repositories && !session.readOnly && ["agent", "side"].includes(session.kind) &&
+      session.controls.env === "Local" && !session.homeRoot) await this.sessions.home(id, session.revision);
+  }
   private sessionRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");
     return session.revision;
+  }
+  private settingsRevision(): number {
+    const snapshot = this.getState().snapshot;
+    if (!snapshot) throw new ClientError("profile_missing", "Connect this profile before changing model availability.");
+    return snapshot.settings.revision;
   }
   private draftRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
@@ -93,12 +179,29 @@ export class MoguriSdk extends TransportClient {
   readonly sessions = {
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
+    home: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.home", sessionId, expectedRevision }),
+    side: (sessionId: string) => this.command({ type: "session.side", sessionId }),
+    askSide: (sessionId: string, prompt: string, expectedDraftRevision?: number) => this.command({ type: "session.side.prompt", sessionId, prompt,
+      ...(expectedDraftRevision === undefined ? {} : { expectedDraftRevision }) }),
+    createFolder: (projectFolderId: string, title?: string, overrides?: ControlDefaults) => {
+      const snapshot = this.getState().snapshot;
+      if (!snapshot?.projectFolders.some((folder) => folder.id === projectFolderId)) throw new ClientError("project_folder", "Choose an existing folder in this profile.");
+      const folderProjects = snapshot.projectConfigurations.filter((configuration) => configuration.folderId === projectFolderId)
+        .sort((a, b) => a.order - b.order).map((configuration) => ({ projectId: configuration.projectId, revision: configuration.revision }));
+      return this.command({ type: "session.create", projectFolderId, folderProjects, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}) });
+    },
     configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
       const current = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.controls;
       const changed = controls.modelId !== null && Boolean(current && (controls.modelId !== current.modelId ||
         controls.modelOptions?.thinkingEffort !== current.modelOptions?.thinkingEffort));
       return this.command({ type: "session.configure", sessionId, controls, expectedRevision,
         ...((rememberModelSelection ?? changed) ? { rememberModelSelection: true } : {}) });
+    },
+    autonomy: (sessionId: string, autonomy: Controls["autonomy"], expectedRevision = this.sessionRevision(sessionId)) => {
+      const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
+      if (!session) throw new ClientError("session_missing", "Choose an existing session before changing autonomy.");
+      return this.sessions.configure(sessionId, { ...session.controls, autonomy,
+        automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max" }, expectedRevision);
     },
     selectModel: (sessionId: string, modelId: string | null, expectedRevision = this.sessionRevision(sessionId)) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
@@ -126,7 +229,8 @@ export class MoguriSdk extends TransportClient {
     reorder: (...args: [sessionIds: string[]] | [projectId: string | null, parentSessionId: string | null, groupId: string | null, archived: boolean, sessions: { sessionId: string; revision: number }[]]) => {
       if (args.length === 1) return this.command({ type: "session.reorder", sessions: args[0].map((sessionId) => ({ sessionId, revision: this.sessionRevision(sessionId) })) });
       const [projectId, parentSessionId, groupId, archived, sessions] = args;
-      return this.command({ type: "session.reorder", projectId, parentSessionId, groupId, archived, sessions });
+      const projectFolderId = projectId === null && parentSessionId === null ? this.getState().snapshot?.sessions.find((session) => session.id === sessions[0]?.sessionId)?.projectFolderId : undefined;
+      return this.command({ type: "session.reorder", projectId, parentSessionId, groupId, archived, sessions, ...(projectFolderId ? { projectFolderId } : {}) });
     },
     rename: (sessionId: string, title: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes: { title }, expectedRevision }),
     mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
@@ -146,6 +250,25 @@ export class MoguriSdk extends TransportClient {
     generate: (sessionId: string | null, expectedDigest: string, allProjects: boolean, confirmScope: true) => this.command({ type: "suggestions.generate", sessionId, expectedDigest, allProjects, confirmScope }),
   };
   readonly models = {
+    catalogue: (): ModelCatalogue => {
+      const catalogue = this.getState().snapshot?.provider.catalogue;
+      if (!catalogue) throw new ClientError("model_catalogue", "The current service has not supplied this profile's model inventory. No default catalogue was substituted.");
+      return catalogue;
+    },
+    setEnabled: (apiModelId: string, enabled: boolean, expectedRevision = this.settingsRevision()) =>
+      this.command({ type: "models.model.set", apiModelId, enabled, expectedRevision }),
+    selectSource: (apiModelId: string, modelId: string, expectedRevision = this.settingsRevision()) =>
+      this.command({ type: "models.source.select", apiModelId, modelId, expectedRevision }),
+    setProviderEnabled: async (providerId: string, enabled: boolean, expectedRevision = this.settingsRevision()) => {
+      const provider = this.models.catalogue().providers.find((entry) => entry.id === providerId);
+      if (!provider) throw new ClientError("model_provider", "Choose a provider from this actual profile's inventory.");
+      const result = await this.command({ type: "models.provider.set", providerId, enabled, expectedRevision });
+      if (enabled && provider.scope === "copilot") {
+        try { await this.models.refresh(); }
+        catch (error) { throw new ClientError("model_refresh", `The provider preference was saved, but metadata refresh failed. Inspect its actual connection; no login or inference was started. ${error instanceof Error ? error.message : ""}`); }
+      }
+      return result;
+    },
     refresh: () => this.command({ type: "provider.refresh" }),
     evidence: (modelId: string) => this.query({ type: "model.evidence", modelId }),
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
@@ -225,6 +348,9 @@ export class MoguriSdk extends TransportClient {
     overview: (filters: Omit<DashboardQuery, "type"> = {}) => this.query({ type: "dashboard.overview", ...filters }),
   };
   readonly skills = {
+    use: (sessionId: string, skillId: string, expectedDigest: string, expectedDraftRevision: number, replacementText?: string) =>
+      this.command({ type: "skill.use", sessionId, capabilityId: skillId, expectedDigest, expectedDraftRevision,
+        ...(replacementText === undefined ? {} : { replacementText }) }),
     find: (query = "", options: { sessionId?: string; sourceId?: string; offset?: number; expectedCatalogDigest?: string; signal?: AbortSignal } = {}) => {
       const { signal, ...filters } = options;
       return this.query({ type: "skills.find", query, offset: 0, ...filters }, signal);
@@ -376,15 +502,26 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly workspaces = {
+    home: async (sessionId: string) => {
+      await this.prepareHome(sessionId);
+      const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
+      if (!snapshot || !session?.homeRoot || session.projectId !== null || session.controls.env !== "Local" || session.readOnly ||
+        !["agent", "side"].includes(session.kind)) throw new ClientError("chat_home_scope", "Choose an ordinary project-free Local chat to inspect its captured Home. No other environment or root was substituted.");
+      const root = session.homeRoot;
+      return { root, writers: snapshot.chatWriters.filter((writer) => ["active", "unconfirmed"].includes(writer.status) &&
+        writer.root.root === root.root && writer.root.device === root.device && writer.root.inode === root.inode) };
+    },
+    acknowledgeHomeWriter: (sessionId: string, writerId: string, expectedRevision: number, confirmInspection: true) =>
+      this.command({ type: "chat.writer.acknowledge", sessionId, writerId, expectedRevision, confirmInspection }),
     discover: (projectId: string) => this.query({ type: "workspace.discover", projectId }),
     create: (projectId: string, branch: string, options: { baseRef?: string; issueId?: string; prUrl?: string } = {}) => this.command({ type: "workspace.create", projectId, branch, ...options }),
     inspect: (workspaceId: string) => this.query({ type: "workspace.inspect", workspaceId }),
     bind: (sessionId: string, workspaceId: string | null, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.workspace", sessionId, workspaceId, expectedRevision }),
     remove: (workspaceId: string, expectedRevision: number, confirm: true) => this.command({ type: "workspace.remove", workspaceId, expectedRevision, confirm }),
     reconcile: (workspaceId: string, expectedRevision: number) => this.command({ type: "workspace.reconcile", workspaceId, expectedRevision }),
-    git: (sessionId: string, diff = true) => this.query({ type: "session.git", sessionId, diff }),
-    files: (sessionId: string, path = ".") => this.query({ type: "session.files", sessionId, path }),
-    file: (sessionId: string, path: string) => this.query({ type: "session.file", sessionId, path }),
+    git: (sessionId: string, diff = true, repository?: string) => this.query({ type: "session.git", sessionId, diff, ...(repository ? { repository } : {}) }),
+    files: async (sessionId: string, path = ".", repository?: string) => { await this.prepareHome(sessionId); return this.query({ type: "session.files", sessionId, path, ...(repository ? { repository } : {}) }); },
+    file: async (sessionId: string, path: string, repository?: string) => { await this.prepareHome(sessionId); return this.query({ type: "session.file", sessionId, path, ...(repository ? { repository } : {}) }); },
     wait: async (workspaceId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
       const workspace = this.getState().snapshot?.managedWorkspaces.find((value) => value.id === workspaceId);
       if (!workspace) throw new ClientError("workspace_missing", "Connect and choose an existing managed workspace.");
@@ -417,6 +554,7 @@ export class MoguriSdk extends TransportClient {
     acknowledge: (attentionIds: string[]) => this.command({ type: "attention.acknowledge", attentionIds }),
   };
   readonly projects = {
+    group: (name: string, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.group", name, projects }),
     add: (path: string, name?: string) => this.command({ type: "project.add", path, ...(name !== undefined ? { name } : {}) }),
     clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),
     configuration: (projectId: string) => this.query({ type: "project.configuration", projectId }),
@@ -621,7 +759,10 @@ export class MoguriSdk extends TransportClient {
     oauthClear: (serverId: string, sessionId?: string) => this.command({ type: "mcp.oauth.clear", serverId, ...(sessionId ? { sessionId } : {}) }),
     oauthClient: (serverId: string, clientId: string, issuer: string, clientSecret?: string, sessionId?: string, redirectUri?: string) => this.command({ type: "mcp.oauth.client", serverId, clientId, issuer, ...(clientSecret ? { clientSecret } : {}), ...(sessionId ? { sessionId } : {}), ...(redirectUri ? { redirectUri } : {}) }),
     oauthStatus: (authorizationId: string) => this.query({ type: "mcp.oauth.status", authorizationId }),
-    tools: (serverId = "builtin", query = "", offset = 0, sessionId?: string) => this.query({ type: "mcp.tools", serverId, query, offset, ...(sessionId ? { sessionId } : {}) }),
+    tools: async (serverId = "builtin", query = "", offset = 0, sessionId?: string) => {
+      if (sessionId && serverId !== "builtin") await this.prepareHome(sessionId);
+      return this.query({ type: "mcp.tools", serverId, query, offset, ...(sessionId ? { sessionId } : {}) });
+    },
     auth: (serverId: string, sessionId?: string) => this.query({ type: "mcp.auth", serverId, ...(sessionId ? { sessionId } : {}) }),
     setToken: (serverId: string, token: string, sessionId?: string) => this.command({ type: "mcp.token.set", serverId, token, ...(sessionId ? { sessionId } : {}) }),
     clearToken: (serverId: string, sessionId?: string) => this.command({ type: "mcp.token.clear", serverId, ...(sessionId ? { sessionId } : {}) }),
@@ -629,12 +770,28 @@ export class MoguriSdk extends TransportClient {
     readResult: (resultId: string, offset = 0, limit = 12000) => this.query({ type: "result.read", resultId, offset, limit }),
   };
   readonly voice = {
-    startCapture: async (sessionId: string, id: string = crypto.randomUUID()): Promise<{ id: string; token: string }> => {
+    startCapture: async (sessionId: string, id: string = crypto.randomUUID(), options: { streaming?: true } = {}): Promise<{ id: string; token: string }> => {
       if (this.getState().status !== "connected") throw new ClientError("disconnected", "Reconnect the original profile before capturing audio.");
-      const request = parse(SpeechCaptureRequestSchema, { action: "start", sessionId, id });
+      const request = parse(SpeechCaptureRequestSchema, { action: "start", sessionId, id, ...(options.streaming ? { streaming: true } : {}) });
       const result = await this.request("/v1/voice", request);
       if (!isRecord(result) || result.id !== id || typeof result.token !== "string" || !/^[a-f0-9-]{36}$/.test(result.token)) throw new ClientError("speech_capture_response", "The service did not acknowledge the exact original capture. No microphone was started.");
+      if (options.streaming && result.streaming !== true) throw new ClientError("speech_capture_response", "The service did not acknowledge streaming for this exact capture. No batch or cloud fallback was used.");
       await this.refresh(); return { id, token: result.token };
+    },
+    appendCapture: async (sessionId: string, id: string, token: string, sequence: number, bytes: Uint8Array): Promise<void> => {
+      if (!bytes.length || bytes.length % 2 || bytes.length > 64 * 1024) throw new ClientError("speech_audio", "Use one bounded little-endian PCM16 frame.");
+      const result = await this.request("/v1/voice", parse(SpeechCaptureRequestSchema, { action: "append", sessionId, id, token, sequence, audio: audioBase64(bytes) }));
+      if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "The owning capture did not acknowledge this audio frame. It was not replayed.");
+    },
+    finishCapture: async (sessionId: string, id: string, token: string, sequence: number): Promise<void> => {
+      const result = await this.request("/v1/voice", parse(SpeechCaptureRequestSchema, { action: "finish", sessionId, id, token, sequence }));
+      if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "The original capture did not accept its final buffer. It was not replayed.");
+    },
+    readCapture: async (sessionId: string, id: string, token: string): Promise<{ text: string; revision: number }> => {
+      const result = await this.request("/v1/voice", parse(SpeechCaptureRequestSchema, { action: "read", sessionId, id, token }));
+      if (!isRecord(result) || result.id !== id || result.accepted !== true || typeof result.text !== "string" ||
+        typeof result.revision !== "number" || !Number.isSafeInteger(result.revision) || result.revision < 0) throw new ClientError("speech_capture_response", "The original streamed transcript was not acknowledged. No text was inserted.");
+      return { text: result.text, revision: result.revision };
     },
     uploadCapture: async (sessionId: string, id: string, token: string, bytes: Uint8Array): Promise<void> => {
       validateSpeechWav(bytes);
@@ -713,10 +870,13 @@ export class MoguriSdk extends TransportClient {
   readonly issues = {
     board: (projectId: string) => this.query({ type: "board.get", projectId }),
     configure: (projectId: string, config: BoardConfig, expectedRevision: number) => this.command({ type: "board.save", projectId,
-      config: { columns: config.columns, mergedColumnId: config.mergedColumnId, autoRefreshPrs: config.autoRefreshPrs, githubAccess: config.githubAccess, linear: config.linear }, expectedRevision }),
+      config: { columns: config.columns, mergedColumnId: config.mergedColumnId, autoRefreshPrs: config.autoRefreshPrs, githubAccess: config.githubAccess, linear: config.linear,
+        ...(config.kanban ? { kanban: config.kanban } : {}), ...(config.githubSync ? { githubSync: config.githubSync } : {}) }, expectedRevision }),
     create: (projectId: string, fields: IssueInput) => this.command({ type: "issue.create", projectId, ...fields }),
     update: (issueId: string, fields: IssueInput, expectedRevision: number) => this.command({ type: "issue.update", issueId, ...fields, expectedRevision }),
     move: (issueId: string, phaseId: string, expectedRevision: number) => this.command({ type: "issue.move", issueId, phaseId, expectedRevision }),
+    reorder: (issueId: string, phaseId: string, beforeIssueId: string | null, expectedOrder: import("../../protocol/src/workspace.ts").IssuePosition[], expectedRevision: number) =>
+      this.command({ type: "issue.reorder", issueId, phaseId, beforeIssueId, expectedOrder, expectedRevision }),
     archive: (issueId: string, archived: boolean, expectedRevision: number) => this.command({ type: "issue.archive", issueId, archived, expectedRevision }),
     refresh: (projectId: string) => this.command({ type: "issues.refresh", projectId }),
   };

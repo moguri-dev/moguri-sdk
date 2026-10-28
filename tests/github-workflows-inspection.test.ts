@@ -48,7 +48,7 @@ function fixture() {
     { event_type: "job.finished", profile_id: "default", project_id: initial.projectId, session_id: initial.originSessionId,
       payload: { jobId: initial.jobId, operationId: initial.id, status: "partial", resultDigest: null, error: partial.diagnostic } },
   ]);
-  const snapshot = (): Snapshot => ({ ...projectEvents(store.events()), profileId: "default", protocolVersion: PROTOCOL_VERSION, seq: store.events().at(-1)?.seq ?? 0,
+  const snapshot = (): Snapshot => ({ ...projectEvents(store.events()), sessionTelemetry: {}, profileId: "default", protocolVersion: PROTOCOL_VERSION, seq: store.events().at(-1)?.seq ?? 0,
     provider: { status: "disconnected", models: [], login: null, diagnostic: null }, capabilities: [], policy: { revision: 7, allowedEnvs: ["Remote"] } });
   const forbidden = (): never => { throw new Error("Inspection attempted source-root, writer, process or credential authority."); };
   const host: WorkflowHost = {

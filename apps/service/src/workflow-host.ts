@@ -7,7 +7,7 @@ export interface WorkflowHost {
   project(projectId: string, workspaceId?: string): Project;
   configuration(projectId: string): ProjectConfiguration;
   assertRoot(projectId: string, workspaceId: string | undefined, signal: AbortSignal): Promise<void>;
-  rootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean): boolean;
+  rootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean, ownerSessionId?: string): boolean;
   closing(projectId: string): boolean;
   commit(events: EventInput[]): void;
   job(

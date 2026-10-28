@@ -139,7 +139,7 @@ within the owning turn. They remain untrusted instructions beneath hard policy.
 
 | Capability | Actual behavior and bounds |
 | --- | --- |
-| `read_file` | Whole-source SHA-256; files up to 1 MiB with structural/line/byte/literal views. Automatic previews above 16 KiB or 200 lines; explicit full reads remain at most 128 KiB. Previews are not AST or semantic summaries. |
+| `read_file` | Whole-source SHA-256; files up to 1 MiB with structural/line/byte/literal views. A stale optional digest refreshes explicitly and restarts byte continuation; `requireExactVersion` deliberately pins instead. Writes still require the returned fresh digest. Automatic previews above 16 KiB or 200 lines; explicit unpaged full reads remain at most 128 KiB. Byte paging/literal search takes precedence over full mode and returns at most 16 KiB. Previews are not AST or semantic summaries. |
 | `edit_file` | Ordered unique old/new replacements, exact source digest and one atomic publication; up to 1 MiB edited text. No ambiguous matching, fuzzy replacement or silently rewritten EOLs. |
 | `find_files` | Bounded `rg` inventories, applicable ancestor/nested `.gitignore`/`.ignore`/`.rgignore`, glob pages and explicit incomplete coverage. Intersect ordinary inventory with glob inventory because explicit ripgrep globs override ignore rules. Global ignore/config injection stays disabled. |
 | `search_files` | Actual Rust-regex/literal ripgrep, path/glob/case/context selectors. Compact rows are bounded by UTF-8 bytes; only permitted match/context records enter retained source, including for literal metacharacters in denied folder names. |
@@ -161,6 +161,96 @@ identity with UTF-8 paging. `rawComplete` describes retained source coverage,
 not semantic completeness or successful execution. Source deletion removes
 access; missing data never authorizes replay. Raw digests enter the normal
 encrypted retention-reference transaction.
+
+### Bounded file-search recovery, protocol 75
+
+Selective `read_file` requests previously applied the 128-KiB whole-read cap
+when `mode: "full"` accompanied `search`, `offset` or `limit`, despite returning
+a bounded selection. Source admission now follows that selection precedence:
+up to 1 MiB of source, at most 16 KiB of selected text. Actual unpaged full
+reads retain their 128-KiB limit. No match is a successful empty literal-search
+result; regex and larger sources use `search_files`. Write CAS, pinned reads,
+protected paths, nested instructions and exact retained source do not change.
+
+Builtin MCP `grep_logs` now uses the same 1-MiB source bound rather than the
+smaller full-read default. Results contain at most 100 matching-line excerpts
+of 1,000 Unicode code points each, with the entire serialized MCP result bounded
+to 12,000 UTF-8 bytes. Whole trailing rows are omitted when needed, rather than
+cutting JSON at the gateway's model-view boundary. Long excerpts start at their
+first match, so a match near the end is not silently discarded. Each excerpt carries its
+original UTF-8 byte `offset` and `clipped` flag; `omittedRows` and `complete`
+disclose selection coverage. This is a bounded match result, not a retained
+complete file. Page the exact source with `read_file` when needed. Invalid
+Unicode queries and oversized/binary/protected sources remain explicit errors.
+
+Known native-tool argument failures retain `invalid_tool` and report bounded
+schema field/type/range diagnostics without echoing submitted values or
+arbitrary input-property names. Unknown tool names are not echoed either.
+Invalid requests execute nothing; corrected requests remain possible, including
+after a genuine source or policy change. No blanket retry suppression, silent
+clamping, synthetic success or automatic model/permission change is added.
+
+The Remote builtin resource uses a new digest binding the actual source,
+line, character and serialized-result limits. Previous two-tool and four-tool
+grants remain retained but cannot authorize the expanded resource without fresh
+user review.
+Protocol/schema 75 forces the established matching-owner service-upgrade path;
+its metadata-only migration preserves ciphertext, event identities, receipts,
+website grants and accounting. No durable payload/event schema changes or
+additional dependencies are introduced. TUI, desktop and SDK share the service
+behavior and original failure/cancellation outcomes.
+
+Generated README, long-line and actual-worker regressions reproduce the
+incorrect limits and prove bounded recovery. They do not reconstruct the exact
+cause of failures in a deleted conversation.
+
+#### Focused protocol-75 qualification
+
+Implementation `be3cd91` / `c93caf0` is qualified against frozen runtime bytes
+and pinned Node 26.12.0. These are focused search/authority/recovery checks,
+not the earlier complete protocol-73 suites relabelled as a new full run.
+
+| Surface | Result |
+| --- | --- |
+| Strict types and complete production build | PASS |
+| Native/SDK/worker/search, file CAS, MCP, real SSH authority/cancellation/restart and preserved-state migrations | **111 passed, no skips**, in **54,060.19 ms** |
+| Hidden source desktop tooling and healthy-old-service cancellation | **3 passed**, **4.5 s** |
+| Actual packaged executable desktop | **3 passed**, **7.0 s** |
+| Independently installed packed SDK | Imports/types, browser-safe entries, installed runtime/CLI/TUI/recovery and audit pass; **12 actual installed-worker acknowledgement/accounting probes passed** |
+| Exact actual bundled backend regression | Node **26.12.0**, SDK/service/worker: a **180,050-byte README** recovers from an invalid byte limit; long/control/Unicode searches retain matching excerpts and pass intact bounded JSON to the next model request. **Six generated model requests and four model-free MCP calls**, no personal credentials or paid inference |
+| Source, independent-consumer and no-cache Linux-workload audits | **Zero vulnerabilities** |
+| Exact no-cache protocol-75 Linux workload | PASS in **45,303.94 ms**; immutable image/payload below |
+| Production ZIP/manifest consumer | PASS; **779,891,947 bytes**, **115,433.64 ms** |
+| Actual DMG | Private layout, signed application tree and exact byte checks pass; no Finder/user application opened |
+
+One initial packaged loss-receipt probe encountered `database is locked` during
+its direct generated SQLite receipt deletion. The same compiled bundle passed
+the unchanged complete packaged probe in isolation; the failed-run evidence is
+retained separately. No production recovery behavior was changed to hide it.
+Existing non-blocking notices remain experimental OpenTUI FFI, the large lazy
+Ghostty chunk, transitive dependency deprecations and the skipped optional
+`.icon` format; the actual `.icns` mascot and native layout verify.
+
+Retained installer:
+`release/Moguri-0.30.0-alpha.1-search-75-macos-arm64.dmg`,
+**794,107,843 bytes**, SHA-512:
+
+```text
+1cd68f3b17c5a18dd0f7b910424d3dab0ae2815af8845c625987c784065d0209026afc2dcd66813d3b1828212aa1a66d8c2efef3cc51466c8b76319e1e8af2f9
+```
+
+Workload:
+`docker.io/library/moguri-worker@sha256:a128496eaeeb698d97385c26675265c8a78df7e02318ca1eae3e8b179a935c5b`.
+Worker SHA-256:
+`cb872beca80577ff87de0d4b2d291e2ab360e8bfb3fa905983658b8751978d35`;
+bridge:
+`05c19b96bfc817609ed7f25e63f7761a516bc5856060a135b07bc1a769921e5b`;
+MCP worker:
+`1336c7c0f53afc951504b3c664e83277bb62216f7301c30bb074cfc21dede3a7`.
+This is ad-hoc-signed development output, not notarized or uploaded. Install
+matching protocol-75 clients/service through the existing reviewed upgrade;
+never delete state to upgrade. No live model-quality, physical SendBox VM,
+external Linux-host or wider first-milestone readiness is implied.
 
 ### Structured documents and SQL
 

@@ -9,6 +9,25 @@ import { ensureConnection, ServiceProtocolMismatch, stopMoguriService } from "..
 import { defaultNotificationWav, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 
+test("Finder-style service startup preserves the original PATH and exposes standard macOS tools without forwarding ambient values", { skip: process.platform !== "darwin" }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-launch-path-"));
+  const previousPath = process.env.PATH, previousValue = process.env.MOGURI_GENERATED_UNFORWARDED;
+  let connection: Awaited<ReturnType<typeof ensureConnection>> | undefined;
+  try {
+    process.env.PATH = "/generated/preferred-bin:/usr/bin:/bin:/usr/sbin:/sbin";
+    process.env.MOGURI_GENERATED_UNFORWARDED = "generated-not-a-credential";
+    connection = await ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts") });
+    assert.deepEqual(JSON.parse(await readFile(join(directory, "generated-startup-environment.json"), "utf8")), {
+      preferredPathFirst: true, homebrewAvailable: true, usrLocalAvailable: true, ambientValueForwarded: false,
+    });
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+    if (previousValue === undefined) delete process.env.MOGURI_GENERATED_UNFORWARDED; else process.env.MOGURI_GENERATED_UNFORWARDED = previousValue;
+    if (connection) await stopMoguriService(directory);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("a healthy older service is reviewed as an upgrade, not corrupt state, and declining never stops it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-upgrade-")), token = "generated-private-upgrade-token";
   let healthReads = 0, lifecycleCalls = 0, confirmations = 0;

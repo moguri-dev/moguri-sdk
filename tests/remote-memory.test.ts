@@ -63,7 +63,7 @@ test("the actual Remote solver can request approved memory_search through the sa
   try {
     await writeFile(join(f.workspace, "knowledge.ts"), "export const generatedDirectMemoryKnowledge = 'generated remote knowledge';\n");
     const index = await f.sdk.memory.indexSession(f.sessionId); assert.equal((await f.sdk.jobs.wait(index.id!)).status, "completed");
-    await f.select(); await f.send("generated memory search for the actual remote knowledge."); await f.approve(); await f.terminal();
+    await f.select(); await f.send("generated memory search for the actual remote knowledge."); await f.terminal();
     assert.equal(f.requests.length, 2);
     const tool = f.session().messages.find((message) => message.role === "tool")!;
     assert.match(tool.text, /generatedDirectMemoryKnowledge/); assert.match(tool.text, /"env":"Remote"/);
