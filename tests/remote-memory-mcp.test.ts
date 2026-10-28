@@ -18,10 +18,10 @@ test("reviewed no-model Remote memory MCP uses the same scoped index and retains
     const search = tools.find((tool) => tool.name === "search_memory")!, graph = tools.find((tool) => tool.name === "memory_graph")!;
     assert.ok(search && graph);
     const job = await f.sdk.mcp.call(f.sessionId, "builtin", search.name, { query: "generatedRemoteMcpKnowledge" }, search.digest);
-    await f.approve(); assert.equal((await f.sdk.jobs.wait(job.id!)).status, "completed");
+    assert.equal((await f.sdk.jobs.wait(job.id!)).status, "completed");
     const result = await f.sdk.mcp.readResult(job.id!); assert.match(result.text, /generatedRemoteMcpKnowledge/); assert.match(result.text, /sourceDigest/);
     const graphJob = await f.sdk.mcp.call(f.sessionId, "builtin", graph.name, { path: "memory.ts" }, graph.digest);
-    await f.approve(); assert.equal((await f.sdk.jobs.wait(graphJob.id!)).status, "completed");
+    assert.equal((await f.sdk.jobs.wait(graphJob.id!)).status, "completed");
     assert.match((await f.sdk.mcp.readResult(graphJob.id!)).text, /generatedRemoteMcpKnowledge/);
     assert.equal(f.controller.snapshot().remoteMcpCalls.length, 2); assert.equal(f.requests.length, 0);
   } finally { await f.close(); }

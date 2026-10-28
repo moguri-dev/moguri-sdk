@@ -60,7 +60,6 @@ test("a completed standalone MCP control job is not a completed agent task or an
   try {
     const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools[0]!;
     const admitted = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "original" }, tool.digest);
-    await fixture.approve();
     assert.equal((await sdk.jobs.wait(admitted.id!)).status, "completed");
     const { dashboard } = await sdk.dashboard.overview();
     assert.equal(dashboard.velocity.completedTurns, 0); assert.equal(dashboard.velocity.interventions, 0);

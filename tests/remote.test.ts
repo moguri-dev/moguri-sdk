@@ -9,7 +9,7 @@ import { envelope } from "../apps/service/src/controller.ts";
 import { WorkerRequestSchema } from "../apps/service/src/worker-protocol.ts";
 import type { WorkerConnectionEvents } from "../apps/service/src/worker-connection.ts";
 import { parse } from "../packages/protocol/src/index.ts";
-import { waitFor } from "./fixture.ts";
+import { reviewNativeTools, waitFor } from "./fixture.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 30_000 };
@@ -20,9 +20,8 @@ test("Remote keeps authority local while real SSH models, instructions, approval
     await fixture.probe(); await fixture.select();
     assert.equal(fixture.controller.snapshot().capabilities.find((value) => value.env === "Remote")?.ready, true);
     await fixture.send("generated write");
-    await waitFor(() => fixture.session().pendingApproval); await fixture.approve();
-    await waitFor(() => fixture.session().pendingApproval?.call.name === "write_file"); await fixture.approve();
     await waitFor(() => fixture.session().status === "completed");
+    assert.equal(fixture.session().pendingApproval, null);
     await waitFor(() => fixture.controller.snapshot().executions[0]?.cleanup === "owned-worker-stopped");
     assert.equal(await readFile(join(fixture.workspace, "fixture.txt"), "utf8"), "generated replacement\n");
     assert.equal(await readFile(join(fixture.project, "fixture.txt"), "utf8"), "generated original\n");
@@ -155,6 +154,7 @@ test("project-free SSH chats retain null workspace authority instead of reusing 
 test("remote workspace changes invalidate an exact pending approval instead of sending it to the old worker root", native, async () => {
   const fixture = await remoteFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(sdk);
     await fixture.probe(); await fixture.select(); await fixture.send("generated write");
     const approval = await waitFor(() => fixture.session().pendingApproval);
     const configuration = (await sdk.projects.configuration(fixture.session().projectId)).configuration;

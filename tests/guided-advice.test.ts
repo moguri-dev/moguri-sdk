@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { MoguriSdk, parse, UserQuestionSchema, type UserQuestion } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { appendLegacyProjectFreeSession, assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
@@ -70,6 +70,7 @@ test("an open-ended question cannot manufacture a recommended user-only fact", n
 test("Guided tool advice is exact-step model text, not approval, and still requires the actual user's decision", native, async () => {
   const fixture = await setupFixture({ toolAdvice: "Generated current solver advice: reading the requested fixture is useful." }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, modelId: fixture.modelId, autonomy: "Guided" });
     await fixture.send("generated tool guided approval");
     const approval = await waitFor(() => fixture.session().pendingApproval);
@@ -87,6 +88,7 @@ test("Guided tool advice is exact-step model text, not approval, and still requi
 test("an older assistant message cannot masquerade as current-step Guided approval advice", native, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, modelId: fixture.modelId, autonomy: "Guided" });
     await fixture.send("Generated prior completed explanation."); await fixture.terminal();
     assert.ok(fixture.session().messages.some((message) => message.role === "assistant" && message.text));

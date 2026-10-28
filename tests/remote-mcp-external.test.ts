@@ -7,10 +7,11 @@ import { envelope } from "../apps/service/src/controller.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { generatedOAuthServer } from "./fixtures/oauth.ts";
-import { waitFor } from "./fixture.ts";
+import { reviewNativeTools, waitFor } from "./fixture.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 25_000 };
 async function configure(sdk: MoguriSdk, f: Awaited<ReturnType<typeof remoteFixture>>, serverId = "builtin", forwardAccess = false) {
+  await reviewNativeTools(sdk, ["mcp_gateway"]);
   await f.probe(); await sdk.sessions.env(f.sessionId, "Remote");
   const preview = (await sdk.mcp.remotePreview(f.sessionId, serverId)).preview;
   await sdk.mcp.grantRemote(f.sessionId, serverId, preview.digest, preview.settingsRevision, forwardAccess, true);

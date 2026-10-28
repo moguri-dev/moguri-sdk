@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { approvalProject, DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
 async function groupForFixture(fixture: Awaited<ReturnType<typeof setupFixture>>, sdk: MoguriSdk) {
   const first = fixture.session().projectId!, path = join(fixture.directory, "second-repository"); await mkdir(path);
@@ -155,6 +155,7 @@ test("a folder approval remembers the actual selected member tool, not every rep
     return { text: "Generated scoped approval result." };
   } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     const group = await groupForFixture(fixture, sdk); first = group.first; second = group.second;
     await writeFile(join(fixture.project, "generated-other.txt"), "Generated first-repository source.");
     await writeFile(join(group.path, "generated-other.txt"), "Generated second-repository source.");

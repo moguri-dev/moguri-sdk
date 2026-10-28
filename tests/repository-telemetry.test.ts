@@ -26,7 +26,7 @@ test("verified repository snapshots bind future actual model/tool attribution wh
     assert.equal((await sdk.jobs.wait(refresh.id!)).status, "completed"); assert.equal(lookups, 1);
     const observation = (await sdk.repositories.state(fixture.sessionId)).observation!;
     assert.equal(observation.repository?.publicOsiLicensed, true); assert.equal(observation.repository?.ownerKind, "organization");
-    await fixture.configure(); await fixture.send("generated tool repository attribution"); await fixture.approve(); await fixture.terminal();
+    await fixture.configure(); await fixture.send("generated tool repository attribution"); await fixture.terminal();
     const before = await sdk.budgets.calls({ sessionId: fixture.sessionId });
     assert.equal(before.calls.length, 2); assert.ok(before.calls.every((call) => call.repository?.fullName === "generated/example"));
     assert.ok(before.calls.every((call) => call.repository?.observationId === observation.id)); assert.equal(lookups, 1);
@@ -34,7 +34,7 @@ test("verified repository snapshots bind future actual model/tool attribution wh
     assert.equal(tools.totals.completed, 1); assert.equal(tools.entries[0]?.repository?.fullName, "generated/example");
     const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools.find((tool) => tool.name === "grep_logs")!;
     const external = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "generated" }, tool.digest);
-    await fixture.approve(); assert.equal((await sdk.jobs.wait(external.id!)).status, "completed");
+    assert.equal((await sdk.jobs.wait(external.id!)).status, "completed");
     assert.equal((await sdk.telemetry.operations({ actor: "external", repositoryId: 42 })).totals.completed, 1);
     assert.equal(fixture.requests.length, 2);
     assert.equal(JSON.stringify(before).includes("GENERATED_PRIVATE_METADATA_SENTINEL"), false); assert.equal(JSON.stringify(before).includes("generated-private-credential"), false);

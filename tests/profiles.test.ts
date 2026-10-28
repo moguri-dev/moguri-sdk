@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { DraftEditor, GLOBAL_PROFILE_ID, isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { waitFor } from "./fixture.ts";
+import { reviewNativeTools, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
 import { dependencyArchive, dependencyProject } from "./fixtures/dependencies.ts";
@@ -80,9 +80,8 @@ test("foreign tool attempts and retained ciphertext do not leak into another liv
     const session = await beta.sessions.create(project.id!, "Generated private outcome", { modelId: fixture.providers[1]!.modelId });
     const own = (await fixture.sdk.telemetry.storage()).storage;
     await fixture.send(beta, session.id!, "generated tool GENERATED_BETA_PRIVATE_OUTCOME");
-    const approval = await waitFor(() => fixture.session(beta, session.id!).pendingApproval);
-    await beta.command({ type: "approval.respond", sessionId: session.id!, approvalId: approval.id, allow: true });
     await waitFor(() => fixture.session(beta, session.id!).status === "completed");
+    assert.equal(fixture.session(beta, session.id!).pendingApproval, null);
     assert.equal((await beta.telemetry.operations()).totals.completed, 1); assert.equal((await fixture.sdk.telemetry.operations()).totals.attempts, 0);
     assert.equal(JSON.stringify(fixture.sdk.getState()).includes("GENERATED_BETA_PRIVATE_OUTCOME"), false);
     assert.ok((await beta.telemetry.storage()).storage.bytes.total > 0);
@@ -143,6 +142,7 @@ test("a global policy edit invalidates an actual foreign-profile approval withou
   try {
     const root = join(fixture.directory, "generated-approval-root"); await mkdir(root); await writeFile(join(root, "fixture.txt"), "Generated private approval fixture.\n");
     const { client: beta } = await fixture.create("Generated approval Beta"), project = await beta.command({ type: "project.add", path: root });
+    await reviewNativeTools(beta, ["read_file"]);
     const session = await beta.sessions.create(project.id!, "Generated pending approval", { modelId: fixture.providers[1]!.modelId });
     await fixture.send(beta, session.id!, "generated tool approval across profiles");
     const approval = await waitFor(() => fixture.session(beta, session.id!).pendingApproval);

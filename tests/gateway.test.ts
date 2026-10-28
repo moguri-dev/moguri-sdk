@@ -11,7 +11,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CallToolResultSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { MoguriSdk, DraftEditor, isRecord } from "../packages/sdk/src/index.ts";
 import { createGatewayMcpServer } from "../packages/sdk/src/mcp-server.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import type { SecretVault } from "../apps/service/src/gateway.ts";
 
 class GeneratedVault implements SecretVault {
@@ -55,6 +55,7 @@ test("the single outward MCP exposes discovery/call/result but no user-only sett
   const caller = new Client({ name: "generated-external-agent", version: "1" });
   const [local, remote] = InMemoryTransport.createLinkedPair();
   try {
+    await reviewNativeTools(fixture, ["mcp_gateway"]);
     await server.connect(remote); await caller.connect(local);
     const tools = await caller.listTools();
     assert.equal(tools.tools.length, 7);
@@ -82,6 +83,7 @@ test("permission revocation invalidates a waiting MCP request and cancellation d
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["mcp_gateway"]);
     const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools[0]!;
     const pending = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "original" }, tool.digest);
     const approval = fixture.session().pendingApproval!;
@@ -154,6 +156,7 @@ test("an external MCP approval holds the project lease against other agents and 
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["mcp_gateway"]);
     await fixture.configure();
     const projectId = fixture.session().projectId;
     const second = await sdk.command({ type: "session.create", projectId });

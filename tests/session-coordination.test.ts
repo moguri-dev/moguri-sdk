@@ -121,7 +121,7 @@ test("an actual model coordinator yields its writer, observes the child and resu
     const child = await f.service.controller.dispatch(envelope({ type: "session.spawn", sessionId: f.sessionId, kind: "agent" }));
     options.coordinationChildId = child.id!;
     await f.send("generated coordinate parent");
-    await f.approve(); await f.approve();
+    await f.approve();
     const parent = await f.terminal(), state = f.service.controller.snapshot();
     assert.equal(parent.status, "completed");
     assert.equal(state.sessions.find((session) => session.id === child.id)?.status, "completed");

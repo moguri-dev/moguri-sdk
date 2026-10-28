@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import { MoguriSdk, KUPO_MODEL_ID, defaultKupoSettings, defaultSingleKupoSettings, executeSlash } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { kupoPool } from "../apps/service/src/routing.ts";
@@ -251,6 +251,8 @@ test("a classifier cannot ask questions or execute tools even with a valid-looki
 test("the selected solver uses the existing exact-argument human approval path rather than router permission", native, async () => {
   const fixture = await routedFixture();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
+    const policy = structuredClone(fixture.service.controller.snapshot().settings.values.permissions.tools);
     await fixture.select(); await fixture.send("generated tool through the routed solver");
     const approval = await waitFor(() => fixture.session().pendingApproval);
     assert.equal(approval.call.name, "read_file"); assert.equal(fixture.requests.length, 1); assert.equal(fixture.solver.requests.length, 1);
@@ -258,13 +260,14 @@ test("the selected solver uses the existing exact-argument human approval path r
     await fixture.sdk.command({ type: "approval.respond", sessionId: fixture.sessionId, approvalId: approval.id, allow: true }); await fixture.terminal(); await fixture.sdk.refresh();
     assert.equal(fixture.session().status, "completed"); assert.equal(fixture.requests.length, 1); assert.equal(fixture.solver.requests.length, 2);
     assert.deepEqual(fixture.session().usage.map((usage) => usage.role), ["router", "solver", "solver"]);
-    assert.deepEqual(fixture.sdk.settings.get()!.values.permissions.tools, []);
+    assert.deepEqual(fixture.sdk.settings.get()!.values.permissions.tools, policy);
   } finally { await fixture.close(); }
 });
 
 test("remembering an actual routed solver approval does not revoke its unchanged model policy or interrupt later solver steps", native, async () => {
   const fixture = await routedFixture();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.select(); await fixture.send("generated tool through the routed solver with a remembered grant");
     const approval = await waitFor(() => fixture.session().pendingApproval);
     await fixture.sdk.approvals.respond(fixture.sessionId, approval.id, true, { scope: "project", match: "exact" });
@@ -315,6 +318,7 @@ test("opt-in routed model children retain their actual subagent role and charge 
 test("revoking routing authority invalidates an actual pending solver approval rather than authorizing old arguments", native, async () => {
   const fixture = await routedFixture();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.select(); await fixture.send("generated tool before routing revocation");
     const approval = await waitFor(() => fixture.session().pendingApproval);
     const settings = structuredClone(fixture.sdk.settings.get()!.values); settings.kupo.enabled = false;
@@ -390,13 +394,12 @@ test("Remote Single runs both owned roles through pinned SSH and accounts the ac
   } finally { await fixture.close(); }
 });
 
-test("routed Remote file tools keep exact approvals and never write the Local mapping", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("routed Remote file tools use native policy and never write the Local mapping", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
   const fixture = await routedFixture({ env: "Remote" });
   try {
     await fixture.select(); await fixture.send("generated write from the selected SSH solver");
-    await waitFor(() => fixture.session().pendingApproval?.call.name === "read_file"); await fixture.approve();
-    await waitFor(() => fixture.session().pendingApproval?.call.name === "write_file"); await fixture.approve();
     await fixture.terminal(); await fixture.sdk.refresh();
+    assert.equal(fixture.session().pendingApproval, null);
     assert.equal(fixture.session().status, "completed"); assert.equal(fixture.requests.length, 1); assert.equal(fixture.solver.requests.length, 3);
     if (!fixture.workspace) throw new Error("Generated SSH workspace missing.");
     assert.equal(await readFile(join(fixture.workspace, "fixture.txt"), "utf8"), "generated replacement\n");

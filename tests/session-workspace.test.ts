@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DraftEditor, MoguriSdk, isRecord } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
 test("held queue admission is explicit even when idle or no model is configured", mac, async () => {
@@ -58,6 +58,7 @@ test("a pending mode restriction invalidates approval and settles at a safe boun
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.configure(); await fixture.send("generated tool task");
     const approval = await waitFor(() => fixture.session().pendingApproval);
     await sdk.sessions.mode(fixture.sessionId, "read-only");

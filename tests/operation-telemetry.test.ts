@@ -2,13 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("actual SDK tool outcomes separate completed, denied and failed results without retaining private source contents", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture);
     await fixture.configure();
     await fixture.send("generated tool GENERATED_PRIVATE_SENTINEL");
     await fixture.approve(); await fixture.terminal();
@@ -39,7 +40,7 @@ test("independent sanitized outcomes survive deletion, schema-20 upgrade and ser
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
-    await fixture.configure(); await fixture.send("generated tool GENERATED_PRIVATE_SENTINEL"); await fixture.approve(); await fixture.terminal();
+    await fixture.configure(); await fixture.send("generated tool GENERATED_PRIVATE_SENTINEL"); await fixture.terminal();
     const prior = await sdk.telemetry.operations(), firstId = prior.entries[0]!.id;
     await sdk.sessions.delete(fixture.sessionId, true, fixture.session().revision);
     assert.equal((await sdk.telemetry.operations()).totals.completed, 1);
@@ -77,6 +78,7 @@ test("stopping owned work with no retained tool result preserves unconfirmed out
 test("actual model and external MCP attempts are not inflated by gateway discovery or retained-result jobs", { skip: process.platform !== "darwin" }, async () => {
   const options: GeneratedProviderOptions = {}, fixture = await setupFixture(options), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["mcp_gateway"]);
     const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools.find((tool) => tool.name === "grep_logs")!;
     assert.equal((await sdk.telemetry.operations()).totals.attempts, 0);
     options.mcpCall = { serverId: "builtin", tool: tool.name, arguments: { path: "fixture.txt", query: "original" }, schemaDigest: tool.digest };
