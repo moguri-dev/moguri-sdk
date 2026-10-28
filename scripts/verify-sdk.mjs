@@ -54,7 +54,7 @@ try {
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   if (installedProtocol >= 41 && (!help.includes("moguri github") || !help.includes("moguri marketplace") || !help.includes("moguri containment"))) throw new Error("The installed CLI is missing the protocol-41 platform workflow surface.");
   await writeFile(join(consumer, "consumer.ts"), `
-    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}${installedProtocol >= 34 ? ", type ModelEvidenceReport" : ""}} from "moguri";
+    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}${installedProtocol >= 34 ? ", type ModelEvidenceReport" : ""}${installedProtocol >= 76 ? ", type SessionChildrenReview" : ""}} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService${upgradeDiscovery ? ", ensureConnection, ServiceProtocolMismatch, ServiceUpgradeCancelled, type ServiceUpgradeReview" : ""}} from "moguri/node";
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
@@ -77,6 +77,10 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 76 ? `
+      const reviewedChildren:SessionChildrenReview={action:"detach",expected:[{sessionId:"generated-child",parentSessionId:"generated-parent"}]};void reviewedChildren;
+      const deleteWithReview=(view:MoguriSdk,id:string,review:SessionChildrenReview)=>view.sessions.delete(id,true,0,review);void deleteWithReview;
+      ` : ""}
       ${installedProtocol >= 65 ? `
       {
       const grouped=await sdk.projects.group("Generated folder",[{projectId:"generated-first",revision:0},{projectId:"generated-second",revision:0}]);
@@ -479,7 +483,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     const generatedHome=join(root,"generated-chat-home");await mkdir(generatedHome,{recursive:true});
@@ -503,6 +507,14 @@ try {
       platform:id=>{if(!vaults.has(id))vaults.set(id,new Map());const values=vaults.get(id),scopedVault={read:async key=>values.get(key)??null,write:async(key,value)=>{values.set(key,value);},remove:async key=>{values.delete(key);}};return{...(id==="default"?platform:{}),terminal:{...platform.terminal,vault:scopedVault},vault:scopedVault};}
     }});
     const sdk=await connectMoguri({stateDir:join(root,"state"),autoStart:false});
+    const deleteWithReviewedChildren=async(view,id,revision)=>{
+      const sessions=view.getState().snapshot?.sessions??[],rootSession=sessions.find(session=>session.id===id);
+      if(!rootSession)return view.sessions.delete(id,true,revision);
+      const tree=[rootSession],visited=new Set([id]);
+      for(let index=0;index<tree.length;index++)for(const child of sessions)if(child.parentSessionId===tree[index].id&&!visited.has(child.id)){visited.add(child.id);tree.push(child);}
+      const expected=tree.slice(1).map(child=>({sessionId:child.id,parentSessionId:child.parentSessionId})).sort((a,b)=>a.sessionId.localeCompare(b.sessionId));
+      return view.sessions.delete(id,true,revision??rootSession.revision,expected.length?{action:"detach",expected}:undefined);
+    };
     ${installedProtocol >= 38 ? `
     assert.deepEqual(sdk.compound.list(),[]);
     await assert.rejects(()=>sdk.compound.read("generated-missing-public-workflow"),error=>error.code==="compound_missing");
@@ -528,6 +540,15 @@ try {
     try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
+      ${installedProtocol >= 76 ? `
+      const lifecycleParent=await sdk.sessions.create(p.id,"Generated installed lifecycle parent");
+      const lifecycleChild=await sdk.sessions.spawn(lifecycleParent.id,"agent","Generated installed lifecycle child");
+      const lifecycleExpected=sessionChildBindings(sdk.getState().snapshot.sessions,lifecycleParent.id);
+      await assert.rejects(()=>sdk.sessions.delete(lifecycleParent.id,true,lifecycleParent.revision),error=>error.code==="session_children_review");
+      await sdk.sessions.delete(lifecycleParent.id,true,lifecycleParent.revision,{action:"delete",expected:lifecycleExpected});
+      assert.equal(sdk.getState().snapshot.sessions.some(session=>session.id===lifecycleParent.id||session.id===lifecycleChild.id),false);
+      console.log("Installed protocol-76 child-session review binds the exact tree before cascading deletion.");
+      ` : ""}
       const s=await sdk.command({type:"session.create",projectId:p.id});
       ${installedProtocol >= 59 ? `{
       const skillDirectory=join(root,"generated-skills");await mkdir(skillDirectory);
@@ -561,7 +582,7 @@ try {
       await sdk.settings.reset("interactions",sdk.settings.get().revision);
       assert.equal(sdk.settings.get().values.interactions.confirmSessionDetach,true);
       for(const client of ["desktop","tui"])await assert.rejects(()=>sdk.slash(s.id,"/terminal global",client),error=>error.code==="terminal_removed");
-      await sdk.sessions.delete(child.id,true);
+      await deleteWithReviewedChildren(sdk,child.id);
       console.log("Installed protocol-60 detach acknowledgement, profile preference/reset, unchanged ownership and retired global entrypoints pass.");
       }` : ""}
       ${installedProtocol >= 58 ? `{
@@ -589,7 +610,7 @@ try {
       assert.equal((await sdk.tools.state(s.id,"SELECT count(*) AS count FROM todos")).data.rows[0].count,0);
       await sdk.coordination.grant(s.id,child.id,(await sdk.coordination.preview(s.id,child.id)).digest,false,true);
       await assert.rejects(()=>sdk.coordination.read(s.id,{action:"transcript",targetSessionId:child.id}),{code:"coordination_changed"});
-      await sdk.sessions.delete(child.id,true);
+      await deleteWithReviewedChildren(sdk,child.id);
       console.log("Installed protocol-58 typed catalogue, actual restricted data worker, canonical SQL reads and root-bound coordination preserve actor, approval and no-model authority.");
       }` : ""}
       ${installedProtocol >= 41 ? `{
@@ -600,7 +621,7 @@ try {
       const terra=await sdk.knowledge.promote(sky.id,0,skyRead.record.contentDigest,{tier:"Terra",title:"Generated installed Terra",text:"Generated reviewed installed knowledge."},true);
       const terraRead=await sdk.knowledge.read(terra.id);
       const glacier=await sdk.knowledge.promote(terra.id,0,terraRead.record.contentDigest,{tier:"Glacier",title:"Generated installed Glacier",text:"Generated installed knowledge."},true);
-      await sdk.sessions.delete(temporarySession.id,true);
+      await deleteWithReviewedChildren(sdk,temporarySession.id);
       await assert.rejects(()=>sdk.knowledge.read(sky.id),{code:"knowledge_missing"});
       assert.equal((await sdk.knowledge.read(glacier.id)).text,"Generated installed knowledge.");
       await sdk.knowledge.forget(terra.id,0,true);
@@ -623,7 +644,7 @@ try {
       const gitFinished=await sdk.github.wait(gitStarted.id,{timeoutMs:10000});
       assert.equal(gitFinished.operation.status,"completed");assert.equal(git(["rev-parse","refs/tags/generated-installed-reviewed-tag"]).trim(),gitHead);
       assert.equal(git(["rev-parse","HEAD"]).trim(),gitHead);assert.deepEqual(await readFile(join(project,".git/index")),gitIndex);
-      await sdk.sessions.delete(gitSession.id,true);assert.equal((await sdk.github.read(gitStarted.id)).operation.originSessionId,gitSession.id);
+      await deleteWithReviewedChildren(sdk,gitSession.id);assert.equal((await sdk.github.read(gitStarted.id)).operation.originSessionId,gitSession.id);
       assert.deepEqual((await sdk.cache.registries.list()).registries,[]);assert.equal((await sdk.containment.status()).containment.required,false);
       console.log("Installed protocol-41 SDK/CLI/runtime preserves tier lifetimes and independent promotion, disabled catalog/hooks, exact real Git publication and source-independent results without inference.");
       }` : ""}
@@ -705,7 +726,7 @@ try {
         await sdk.settings.update({...current.values,permissions:{...current.values.permissions,
           tools:current.values.permissions.tools.filter(rule=>rule.id!=="generated-installed-folder-review")}},current.revision);
       }
-      await sdk.sessions.delete(opened.id,true);
+      await deleteWithReviewedChildren(sdk,opened.id);
       console.log("Installed protocol-65 typed root scopes, actual selected-root SDK edits, whole-tool grants, immediate read-only sides, private speech host and stream ownership gates pass without inference or audio capture.");
       }` : ""}
       ${installedProtocol >= 71 ? `
@@ -764,7 +785,7 @@ try {
         await pasteEditor.send("queue",true);
         const held=sdk.getState().snapshot.sessions.find(session=>session.id===pasteSession.id).queue[0];
         assert.equal(held.held,true);assert.equal(held.text,"");assert.equal(held.attachments[0].digest,file.digest);
-        await sdk.sessions.delete(pasteSession.id,true);
+        await deleteWithReviewedChildren(sdk,pasteSession.id);
         await assert.rejects(()=>sdk.attachments.read(pasteSession.id,file.id),{code:"attachment_session"});
       }finally{pasteEditor.dispose();}
       ` : ""}
@@ -788,7 +809,7 @@ try {
       await assert.rejects(()=>beta.attachments.read(first.id,captured.id),{code:"attachment_session"});
       await sdk.slash(first.id,"/reorder-sessions "+first.id+" "+second.id,"tui");
       assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===first.id).order,0);
-      await sdk.sessions.delete(first.id,true);await sdk.sessions.delete(second.id,true);await sdk.projects.remove(interactionProject.id,true,0);
+      await deleteWithReviewedChildren(sdk,first.id);await deleteWithReviewedChildren(sdk,second.id);await sdk.projects.remove(interactionProject.id,true,0);
       console.log("Installed protocol-53 browser-safe SDK and TUI commands preserve safe identifiers, exact Local context resolution, profile-private snapshots and atomic shared sibling order without inference.");
       }
       ` : ""}
@@ -823,7 +844,7 @@ try {
       assert.equal(agentShared.kind,"text");assert.deepEqual(JSON.parse(agentShared.text).activity.entries,[]);
       console.log("Installed protocol-53 Agent SDK/React/CLI/TUI views preserve exact session/profile/source filters; a retained skill cannot masquerade as a command and inspection starts no shell or inference.");
       ` : ""}
-      await sdk.sessions.delete(activitySession.id,true);
+      await deleteWithReviewedChildren(sdk,activitySession.id);
       await assert.rejects(()=>sdk.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
       await sdk.projects.remove(activityProject.id,true,(await sdk.projects.configuration(activityProject.id)).configuration.revision);
       console.log("Installed protocol-53 SDK/React/CLI/TUI activity preserves exact session-granted source bytes, profile/deletion isolation and actual user provenance without inference or private-ledger content.");
@@ -843,7 +864,7 @@ try {
       const publicOwner=sdk.getState().snapshot.sessions.find(value=>value.id===publicPr.id);
       assert.equal(publicOwner.prObservation.scope.root,null);assert.equal(publicOwner.prObservation.scope.access,"public");
       assert.equal(publicOwner.status,"idle");assert.equal(sessionPrLookups,2);
-      await sdk.sessions.delete(publicPr.id,true);await sdk.sessions.delete(pr.id,true);
+      await deleteWithReviewedChildren(sdk,publicPr.id);await deleteWithReviewedChildren(sdk,pr.id);
       console.log("Installed protocol-54 browser-safe session/PR selectors, retained draft metadata and shared TUI PR commands preserve exact project/profile and public root-null scope without a model, Git write or duplicate verification.");
       }
       ` : ""}
@@ -867,7 +888,7 @@ try {
       const bound=await sdk.sessions.create(p.id,"Generated external worktree",{env:"Local"},owned.id);
       assert.match((await sdk.workspaces.file(bound.id,"generated.ts")).text,/portableSdkMemory/);
       assert.equal((await sdk.workspaces.git(bound.id)).branch,"moguri/generated-external");
-      await sdk.sessions.delete(bound.id,true);
+      await deleteWithReviewedChildren(sdk,bound.id);
       await sdk.workspaces.remove(owned.id,owned.revision,true);
       assert.equal((await sdk.workspaces.wait(owned.id)).status,"removed");
       if(PROTOCOL_VERSION>=29){
@@ -901,7 +922,7 @@ try {
               assert.equal((await candidateSdk.budgets.calls({sessionId:owner.id})).calls.length,0);
               console.log("Installed complete planned-capacity batches honor cumulative finite limits, retain no failed prefix and create no model calls.");
             }
-            await candidateSdk.sessions.delete(owner.id,true,control.snapshot().sessions.find(session=>session.id===owner.id).revision);
+            await deleteWithReviewedChildren(candidateSdk,owner.id,control.snapshot().sessions.find(session=>session.id===owner.id).revision);
             const released=(await candidateSdk.budgets.plans({sessionId:owner.id})).plans;
             assert.equal(released.length,typeof control.platform.budgets.planBatch==="function"?3:1);assert.ok(released.every(plan=>plan.status==="released"));
             assert.equal((await candidateSdk.budgets.dashboard({sessionId:owner.id})).totals.plannedHolds,0);
@@ -930,7 +951,7 @@ try {
           assert.equal((await candidateSdk.command(command,commandId)).id,staged.candidate.id);
           assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
           if(PROTOCOL_VERSION>=57){
-            await candidateSdk.sessions.delete(source.id,true);
+            await deleteWithReviewedChildren(candidateSdk,source.id);
             await assert.rejects(()=>candidateSdk.candidates.read(staged.candidate.id),{code:"candidate_missing"});
             assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
           }
@@ -1157,7 +1178,7 @@ try {
         assert.equal((await sdk.jobs.wait(actualJob.id)).status,"completed");
         assert.equal((await sdk.telemetry.operations({sessionId:operationSessionId,family:"mcp"})).totals.completed,1);
         assert.equal((await sdk.budgets.dashboard()).totals.calls,beforeCalls);
-        await sdk.refresh();await sdk.sessions.delete(operationSessionId,true);
+        await sdk.refresh();await deleteWithReviewedChildren(sdk,operationSessionId);
       }
       const ticket=await sdk.issues.create(p.id,{title:"Generated external SDK ticket",body:"Generated",kind:"feature",phaseId:"backlog",pullRequestUrl:null});
       await sdk.issues.move(ticket.id,"in-progress",0);
@@ -1171,7 +1192,7 @@ try {
       assert.equal((await sdk.jobs.wait(installed.id)).status,"completed");
       assert.equal((await sdk.voice.status()).voice.runtimeReady,true);
       assert.equal((await sdk.voice.status()).voice.modelReady,false);
-      await sdk.sessions.delete(s.id,true);
+      await deleteWithReviewedChildren(sdk,s.id);
       assert.equal((await sdk.plans.artifact(artifact.id)).text,"Generated external retained plan.");
       assert.equal(sdk.getState().snapshot.sessions.find(v=>v.id===side.id).parentSessionId,undefined);
       const artifactFolder=await sdk.projects.folder("Generated external artifact folder");
@@ -1340,7 +1361,7 @@ try {
         const cli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"repository","state","--session",session.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
         assert.equal(JSON.parse(cli.stdout).observation.repository.id,42);
         const slash=await sdk.slash(session.id,"/repository state","tui");assert.equal(slash.kind,"text");assert.equal(JSON.parse(slash.text).observation.repository.licenseId,"MIT");
-        await sdk.refresh();await sdk.sessions.delete(session.id,true);
+        await sdk.refresh();await deleteWithReviewedChildren(sdk,session.id);
         const removal=(await sdk.artifacts.projectPreview(project.id)).preview,configuration=(await sdk.projects.configuration(project.id)).configuration;
         await sdk.projects.remove(project.id,true,configuration.revision,{action:"retain",expectedDigest:removal.digest});
         assert.equal((await sdk.telemetry.operations({repositoryId:42})).totals.completed,1);assert.equal(repositoryLookups,1);assert.equal(generatedRequests.length,6);
@@ -1680,7 +1701,7 @@ try {
           assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(PROTOCOL_VERSION>=59?generatedHome:consoleState));
           const globalCli=JSON.parse((await invoke(["terminal","read",global.id])).stdout);assert.equal(globalCli.terminal.id,global.id);
           const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
-          await consoleSdk.sessions.delete(session.id,true);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);
+          await deleteWithReviewedChildren(consoleSdk,session.id);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);
           await consoleSdk.terminal.close(global.id);
           console.log("Installed protocol-"+PROTOCOL_VERSION+" compatibility Local console retains exact "+(PROTOCOL_VERSION>=59?"configured HOME":"data directory")+" independently of sessions/projects, with SDK ownership and CLI/TUI inspection, no model context or launch replay.");
         }
