@@ -62,6 +62,22 @@ Starting from a GitHub item retains its explicit source and draft without
 starting inference or changing the checkout. Desktop and TUI consume the same
 SDK capabilities.
 
+Read-only GitHub authority does not include transient conversation status.
+A session starting or completing an ordinary turn while a slower PR page
+loads is activity, not a root or policy change. Reads still bind the exact
+profile/session/project/workspace, canonical directory device/inode,
+environment, session kind/mode, pending restrictions, permission revision,
+project configuration and account. Archival, actual root replacement and
+real policy changes still discard the response without retry or fallback.
+Mutation-review policy keeps its original stricter status binding.
+
+Protocol/schema **74** ensures a newly installed app cannot reuse a healthy
+protocol-73 service with the stale read guard. Its upgrade advances only
+version metadata: no new dependency, API shape, event or encrypted-data rewrite.
+Generated service and hidden desktop regressions compare successful issue
+listing with a held PR list across a real completed model turn, then verify
+real root, mode, permission and archival invalidation remains enforced.
+
 Protocol/schema 61 preserves existing events and settings. Older grants
 are not inferred, and old autonomy selections are not silently upgraded into
 broader permission. New automatic approvals require the retained

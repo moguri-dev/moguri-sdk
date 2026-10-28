@@ -172,7 +172,8 @@ export class GitHubWorkflows {
     if (action && permissions.commands.some((rule) => rule.decision === "deny" && rule.command === action.kind)) throw new MoguriError("github_denied", "A hard exact-command denial excludes this operation.", 403);
     return digest(stable({ profileId: snapshot.profileId, policy: snapshot.policy, permissionRevision: snapshot.settings.permissionRevision,
       permissions, configuration, ...(action && githubAction(action) ? { credentialEpoch: this.credentialEpoch } : {}), session: session ? { id: session.id, projectId: session.projectId, workspaceId: session.workspaceId,
-        env: session.controls.env, kind: session.kind, mode: session.mode, pendingMode: session.pendingMode, status: session.status } : null }));
+        env: session.controls.env, kind: session.kind, mode: session.mode, pendingMode: session.pendingMode,
+        ...(action ? { status: session.status } : {}) } : null }));
   }
   private async context(scope: GithubScope, action: GithubAction | undefined, signal: AbortSignal, jobId?: string, projectWorkId?: string) {
     const ownerSessionId = projectWorkId && action ? this.workAuthority(scope, action, projectWorkId) : undefined;
