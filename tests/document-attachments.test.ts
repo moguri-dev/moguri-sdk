@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ChildProcess } from "node:child_process";
 import sharp from "sharp";
-import { MoguriSdk, DraftEditor, PROTOCOL_VERSION, type DocumentAttachment } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, DraftEditor, PROTOCOL_VERSION, sessionChildBindings, type DocumentAttachment } from "../packages/sdk/src/index.ts";
 import { DocumentParsers } from "../apps/service/src/documents.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
@@ -208,7 +208,9 @@ test("the actual owning worker receives only descriptors, then a policy-approved
     assert.doesNotMatch(result.text, /Generated table cell B/);
     assert.equal(fixture.requests.length, 2);
     const side = await sdk.sessions.spawn(free.id!, "side");
-    await sdk.sessions.delete(free.id!, true);
+    await sdk.sessions.delete(free.id!, true, sdk.getState().snapshot!.sessions.find((session) => session.id === free.id)!.revision, {
+      action: "detach", expected: sessionChildBindings(sdk.getState().snapshot!.sessions, free.id!),
+    });
     assert.equal((await sdk.attachments.original(side.id!, capture.id!)).attachment.format, "docx");
     assert.match((await sdk.attachments.readDocument(side.id!, capture.id!, { section: 2 })).page.text, /GENERATED_DOCUMENT_SECRET/);
   } finally { sdk.disconnect(); await fixture.close(); }

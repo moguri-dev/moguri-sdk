@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MoguriSdk, kanbanPreferences, ProjectWorkReadSchema } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, kanbanPreferences, ProjectWorkReadSchema, sessionChildBindings } from "../packages/sdk/src/index.ts";
 import { githubApplicationFixture } from "./github-workflows-fixture.ts";
 import { fixtureProvider, setupFixture, waitFor } from "./fixture.ts";
 import { Value } from "typebox/value";
@@ -103,7 +103,9 @@ for (const mergedColumnId of ["done", "review"] as const) test(`one captured car
     assert.ok(snapshot.githubOperations.filter((operation) => run.operationIds.includes(operation.id)).every((operation) => operation.actor === "model" && operation.projectWorkId === run.id));
     assert.ok(snapshot.budgetEntries.every((entry) => entry.ownerSessionId === fixture.sessionId));
     const retained = (await fixture.sdk.kanban.work(run.id)).text, workspace = snapshot.managedWorkspaces.find((workspace) => workspace.id === run.workspaceId)!;
-    await fixture.sdk.sessions.delete(fixture.sessionId, true);
+    await fixture.sdk.sessions.delete(fixture.sessionId, true, fixture.session().revision, {
+      action: "detach", expected: sessionChildBindings(fixture.sdk.getState().snapshot!.sessions, fixture.sessionId),
+    });
     assert.equal((await fixture.sdk.kanban.work(run.id)).text, retained);
     assert.equal((await stat(workspace.path)).isDirectory(), true);
     assert.equal(fixture.service.controller.snapshot().budgetEntries.length, 2);
