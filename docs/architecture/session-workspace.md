@@ -172,6 +172,17 @@ hover. Dragging into the composer copies reviewed transcript context instead
 of changing navigation ownership. Both clients sort with the shared comparator;
 keyboard/menu alternatives use the same SDK command. Confirmation preferences
 are independently saved profile settings, defaulting to asking.
+Protocol 76 binds archive/delete child disposition to the exact reviewed
+subsession tree. The user can cascade archive/delete or detach direct children;
+nested descendants retain their direct parent. A changed tree rejects the
+operation before lifecycle events are committed. Profile retention preferences
+may remember the explicit disposition or continue asking. Detaching preserves
+child sessions and their saved content, but settles their owned work first;
+cascading settles every affected session. Model-owned subagents cannot be
+detached. Owned-work inspection, cleanup, and explicit Resume gates
+remain authoritative for every deleted session. Automatic retention follows
+the same saved disposition and skips a child tree while the profile remains in
+Ask mode.
 Explicit user subsessions are distinct from off-by-default model subagents.
 Writable siblings serialize through the project lease; read-only questions
 may run in parallel. PR/work-item bindings never implicitly check out a branch.

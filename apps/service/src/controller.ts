@@ -25,6 +25,7 @@ import {
   type RepositoryRemoteBoundary,
   type MemoryTarget, type BudgetEntry,
   type RoleSequenceRecord, projectRoleSequence, successfulRoleEntry, decisionEvidence,
+  type SessionChildrenAction, type SessionChildrenReview, sessionChildBindings, sessionSubtree,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, textFilePage } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
@@ -300,7 +301,7 @@ export class ControlPlane extends EventEmitter {
       wake: () => queueMicrotask(() => this.pumpAll()),
       mode: (session, mode, finish) => this.changeMode(session, mode, finish),
       spawnUser: (session, kind, title, finish) => this.spawnUser(session, kind, title, finish),
-      deleteSession: (session, finish) => this.deleteSession(session, finish),
+      deleteSession: (session, finish, children, requireChildReview) => this.deleteSession(session, finish, children, requireChildReview),
       removeProject: (id, finish, artifacts) => this.removeProject(id, finish, artifacts),
       validateAdmission: (session, attachments = []) => {
         if (session.status === "archived") throw new MoguriError("archived", "Restore the session before running queued work.");
@@ -1349,11 +1350,32 @@ export class ControlPlane extends EventEmitter {
     this.paused.delete(result.id!); this.pumpAll(); return result;
   }
   private descendants(id: string): Session[] {
-    const values = [this.session(id)];
-    for (let index = 0; index < values.length; index++) {
-      for (const child of this.projection.sessions.filter((session) => session.parentSessionId === values[index]!.id)) if (!values.some((entry) => entry.id === child.id)) values.push(child);
+    this.session(id);
+    return sessionSubtree(this.projection.sessions, id);
+  }
+  private childrenDecision(session: Session, action: "archive" | "delete", review?: SessionChildrenReview, required = true):
+  { tree: Session[]; action: SessionChildrenAction | null } {
+    const tree = this.descendants(session.id), children = tree.slice(1);
+    if (review && review.action !== action && review.action !== "detach") {
+      throw new MoguriError("session_children_action", `Choose to ${action} these subsessions or detach them. No session was changed.`, 409);
     }
-    return values;
+    if (!children.length) {
+      if (review?.expected.length) throw new MoguriError("session_children_stale", "The attached session tree changed after review. No session was changed; review it again.", 409);
+      return { tree, action: review?.action ?? null };
+    }
+    if (!review) {
+      if (required) throw new MoguriError("session_children_review", "This session has attached subsessions. Review whether to cascade this action or detach them before continuing.", 409);
+      return { tree, action: "detach" };
+    }
+    const expected = [...review.expected].sort((a, b) => a.sessionId.localeCompare(b.sessionId));
+    const actual = sessionChildBindings(this.projection.sessions, session.id);
+    if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+      throw new MoguriError("session_children_stale", "The attached session tree changed after review. No session was changed; review it again.", 409);
+    }
+    if (review.action === "detach" && children.some((child) => child.parentSessionId === session.id && child.kind === "subagent")) {
+      throw new MoguriError("session_children_detach", "Model-owned subagents cannot be detached. Choose to cascade this action or review the session tree again.", 409);
+    }
+    return { tree, action: review.action };
   }
   private removingSession(id: string): boolean {
     return this.deletingSessions.has(id) || Boolean(this.candidateCleanup?.sessionDeleting(id));
@@ -1388,7 +1410,7 @@ export class ControlPlane extends EventEmitter {
   }
   private async settleOwned(id: string): Promise<void> {
     const sessions = this.descendants(id);
-    this.stop(id);
+    for (const session of sessions) this.stop(session.id, true, false);
     for (const session of sessions) {
       await this.platform.settleSession(session.id);
       await this.platform.sessions.terminals.closeSession(session.id);
@@ -1415,27 +1437,47 @@ export class ControlPlane extends EventEmitter {
       if (Math.max(uncertainTool, uncertainProcess) > inspected) throw new MoguriError("cleanup_unconfirmed", "Owned tool/process effects remain unconfirmed. Inspect them and explicitly Resume after inspection before forgetting this session.", 409);
     }
   }
-  private async deleteSession(session: Session, finish: WorkspaceFinish): Promise<CommandResult> {
-    if (this.descendants(session.id).some((value) => value.repositories && value.kind === "agent" && this.projection.blockedSessions.includes(value.id))) {
+  private async deleteSession(session: Session, finish: WorkspaceFinish, children?: SessionChildrenReview, requireChildReview = false): Promise<CommandResult> {
+    const decision = this.childrenDecision(session, "delete", children, requireChildReview);
+    const ownershipScope = decision.tree;
+    if (ownershipScope.some((value) => value.repositories && value.kind === "agent" && this.projection.blockedSessions.includes(value.id))) {
       throw new MoguriError("cleanup_unconfirmed", "This folder session retains unconfirmed ownership across its original roots. Inspect every root and explicitly Resume before forgetting its owner.", 409);
     }
-    if (this.deletingSessions.has(session.id)) throw new MoguriError("session_busy", "This session is already being removed.", 409);
-    const cleanup = this.candidateCleanup.beginSession(session.id);
-    const owned = this.descendants(session.id).map((session) => session.id);
-    for (const id of owned) this.deletingSessions.add(id);
+    const locked = ownershipScope.map((value) => value.id);
+    if (locked.some((id) => this.deletingSessions.has(id))) throw new MoguriError("session_busy", "This session tree is already being removed.", 409);
+    for (const id of locked) this.deletingSessions.add(id);
+    const targets = decision.action === "delete" ? [...decision.tree].reverse() : [session];
+    const cleanups: NonNullable<ReturnType<CandidateCleanupRuntime["beginSession"]>>[] = [];
     try {
-      if (cleanup) await settleCandidateCleanup(this.settleOwned(session.id)); else await this.settleOwned(session.id);
-      await this.settleCandidateWork(cleanup?.targets ?? []);
-      const current = this.session(session.id);
-      for (const execution of this.projection.executions.filter((value) => value.sessionId === session.id)) await this.remote.forget(execution);
-      const detach = this.projection.sessions.filter((child) => child.parentSessionId === session.id).map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } }));
-      const completed = cleanup ? this.candidateCleanup.complete(cleanup.id) : { events: [], forget: {} };
-      const result = finish([...detach, ...completed.events,
-        { event_type: "session.deleted", profile_id: this.profileId, project_id: session.projectId, payload: { deletedSessionId: session.id, usage: current.usage } }],
-      { id: session.id }, { ...completed.forget, sessions: [session.id] });
-      this.paused.delete(session.id); return result;
-    } catch (error) { if (cleanup) throw this.candidateCleanup.failed(cleanup.id, error); throw error; }
-    finally { for (const id of owned) this.deletingSessions.delete(id); }
+      for (const target of targets) {
+        const cleanup = this.candidateCleanup.beginSession(target.id);
+        if (cleanup) cleanups.push(cleanup);
+      }
+      if (cleanups.length) await settleCandidateCleanup(this.settleOwned(session.id));
+      else await this.settleOwned(session.id);
+      if (children !== undefined) this.childrenDecision(this.session(session.id), "delete", children, requireChildReview);
+      await this.settleCandidateWork([...new Set(cleanups.flatMap((cleanup) => cleanup.targets))]);
+      const targetIds = new Set(targets.map((target) => target.id));
+      for (const execution of this.projection.executions.filter((value) => targetIds.has(value.sessionId))) await this.remote.forget(execution);
+      const detach = decision.action === "detach" ? this.projection.sessions.filter((child) => child.parentSessionId === session.id)
+        .map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } })) : [];
+      const completed = cleanups.map((cleanup) => this.candidateCleanup.complete(cleanup.id));
+      const deletionEvents = targets.map((target) => {
+        const current = this.session(target.id);
+        return { event_type: "session.deleted" as const, profile_id: this.profileId, project_id: current.projectId,
+          payload: { deletedSessionId: current.id, usage: current.usage } };
+      });
+      const artifacts = [...new Set(completed.flatMap((cleanup) => cleanup.forget.artifacts ?? []))];
+      const result = finish([...detach, ...completed.flatMap((cleanup) => cleanup.events), ...deletionEvents],
+        { id: session.id }, { ...(artifacts.length ? { artifacts } : {}), sessions: targets.map((target) => target.id) });
+      for (const target of targets) this.paused.delete(target.id);
+      return result;
+    } catch (error) {
+      let cleanupFailure: MoguriError | undefined;
+      for (const cleanup of cleanups) cleanupFailure ??= this.candidateCleanup.failed(cleanup.id, error);
+      if (cleanupFailure) throw cleanupFailure;
+      throw error;
+    } finally { for (const id of locked) this.deletingSessions.delete(id); }
   }
   private async removeProject(id: string, finish: WorkspaceFinish, choice?: ProjectArtifactChoice): Promise<CommandResult> {
     if (this.projection.sessions.some((session) => session.repositories?.some((repository) => repository.projectId === id))) throw new MoguriError("repository_sessions", "A retained folder session still captures this exact repository. Settle and remove those sessions before removing the member project; no root or context was silently retargeted.", 409);
@@ -2321,9 +2363,18 @@ export class ControlPlane extends EventEmitter {
         { revision: session.revision + 1 });
       }
       case "session.archive": {
+        if (command.expectedRevision !== undefined) this.revision(session.revision, command.expectedRevision);
+        this.childrenDecision(session, "archive", command.children);
         await this.settleOwned(session.id);
         const current = this.session(session.id);
-        return finish([...(current.queue.length ? [this.event(current, "queue.held", { messageIds: current.queue.map((item) => item.id) })] : []), this.event(current, "session.archived", {})]);
+        const reviewed = this.childrenDecision(current, "archive", command.children);
+        const targets = reviewed.action === "archive" ? reviewed.tree : [current];
+        const detach = reviewed.action === "detach" ? reviewed.tree.filter((child) => child.parentSessionId === current.id)
+          .map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } })) : [];
+        return finish([...detach, ...targets.flatMap((value) => [
+          ...(value.queue.length ? [this.event(value, "queue.held", { messageIds: value.queue.map((item) => item.id) })] : []),
+          this.event(value, "session.archived", {}),
+        ])]);
       }
       case "session.restore":
         if (session.status !== "archived") throw new MoguriError("not_archived", "This session is not archived.", 409);
@@ -3987,10 +4038,10 @@ export class ControlPlane extends EventEmitter {
       if ((!child || !child.turnId && !child.queue.some((item) => !item.held)) && !this.otherWriter(this.session(parent.id))) delete run.yieldedTo;
     }
   }
-  private stop(sessionId: string, holdQueue = true): void {
+  private stop(sessionId: string, holdQueue = true, includeCreatedChildren = true): void {
     this.projectWork.stopOrigin(sessionId);
     try { this.decisions.cancelSession(sessionId); } catch (error) { console.error("Decision cancellation persistence failed; actual owned abort was still requested:", error instanceof MoguriError ? error.code : "decision_stop"); }
-    for (const session of this.projection.sessions) if (session.createdParentSessionId === sessionId) this.stop(session.id);
+    if (includeCreatedChildren) for (const session of this.projection.sessions) if (session.createdParentSessionId === sessionId) this.stop(session.id);
     this.sandboxWorkspaces.cancel(sessionId);
     this.platform.stopSession(sessionId);
     const current = this.session(sessionId);

@@ -235,11 +235,11 @@ export class MoguriSdk extends TransportClient {
     rename: (sessionId: string, title: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes: { title }, expectedRevision }),
     mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
     spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
-    delete: (sessionId: string, confirm: true, expectedRevision?: number) => {
+    delete: (sessionId: string, confirm: true, expectedRevision?: number, children?: import("../../protocol/src/index.ts").SessionChildrenReview) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
       const deleted = snapshot?.candidateCleanups.some((cleanup) => cleanup.status === "completed" && cleanup.reason.kind === "session-delete" && cleanup.reason.sessionId === sessionId);
       if (!session && !deleted && expectedRevision === undefined) throw new ClientError("session_missing", "Choose an existing session or its exact retained deletion.");
-      return this.command({ type: "session.delete", sessionId, expectedRevision: expectedRevision ?? session?.revision ?? 0, confirm });
+      return this.command({ type: "session.delete", sessionId, expectedRevision: expectedRevision ?? session?.revision ?? 0, confirm, ...(children ? { children } : {}) });
     },
     fromWork: (projectId: string, source: { issueId: string } | { prUrl: string }, workspaceId?: string) => this.command({ type: "session.from-work", projectId, ...source, ...(workspaceId ? { workspaceId } : {}) }),
     group: (projectId: string, name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "session.group", projectId, name, order, expectedRevision, ...(id ? { id } : {}) }),

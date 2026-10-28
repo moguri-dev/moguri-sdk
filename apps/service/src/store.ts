@@ -436,6 +436,7 @@ export class EventStore {
       }
       if (version < 74) this.db.exec("PRAGMA user_version=74;");
       if (version < 75) this.db.exec("PRAGMA user_version=75;");
+      if (version < 76) this.db.exec("PRAGMA user_version=76;");
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {

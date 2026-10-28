@@ -6,9 +6,14 @@ import { publicAddress } from "./public-network.ts";
 import { boundedBody } from "./network.ts";
 import { assertWebAccess, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 
+const isGithubApi = (url: URL) => url.hostname === "api.github.com";
+const pageHeaders = (url: URL, userAgent: string): Record<string, string> => isGithubApi(url) ?
+  { "User-Agent": userAgent, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } :
+  { "User-Agent": userAgent, Accept: "text/html,text/plain" };
 function pageText(url: URL, body: string, type: string) {
-  if (!/text\/(?:html|plain)/i.test(type)) throw new MoguriError("web_format", "The page is not HTML or plain text; no conversion service was used.");
-  if (type.includes("text/plain")) return { source: "untrusted-web" as const, url: url.toString(), title: url.hostname, text: body.slice(0, 50_000), complete: body.length <= 50000, omittedCharacters: Math.max(0, body.length - 50000) };
+  const githubJson = isGithubApi(url) && /application\/(?:vnd\.github\+json|json)/i.test(type);
+  if (!/text\/(?:html|plain)/i.test(type) && !githubJson) throw new MoguriError("web_format", "The page is not HTML or plain text; only public GitHub REST API JSON is also supported.");
+  if (type.includes("text/plain") || githubJson) return { source: "untrusted-web" as const, url: url.toString(), title: url.hostname, text: body.slice(0, 50_000), complete: body.length <= 50000, omittedCharacters: Math.max(0, body.length - 50000) };
   const document = load(body);
   document("script,style,noscript,iframe,form").remove();
   const text = (document("main").text() || document("article").text() || document("body").text()).replace(/\s+/g, " ").trim();
@@ -25,7 +30,7 @@ export async function fetchNativeSource(input: string, signal: AbortSignal, redi
   const records = await lookup(url.hostname, { all: true });
   if (!records.length || records.some((record) => !publicAddress(record.address))) throw new MoguriError("web_destination", "Private, loopback, metadata and reserved destinations are denied.");
   const response = await fetch(url, { redirect: "manual", signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-    headers: { "User-Agent": "Moguri native public-page tool", Accept: "text/html,text/plain" } });
+    headers: pageHeaders(url, "Moguri native public-page tool") });
   if ([301, 302, 303, 307, 308].includes(response.status)) {
     const location = response.headers.get("Location"); await response.body?.cancel();
     if (!location) throw new MoguriError("web_destination", "The approved native page redirect has no exact destination.");
@@ -50,7 +55,7 @@ export async function fetchPublicSource(input: string, signal: AbortSignal, redi
     const req = request({
       hostname: address.address, servername: url.hostname, port: url.port || 443,
       path: url.pathname + url.search, method: "GET", signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
-      headers: { Host: url.host, "User-Agent": "Moguri/0.2 local-tool", Accept: "text/html,text/plain" },
+      headers: { Host: url.host, ...pageHeaders(url, "Moguri/0.2 local-tool") },
     }, (response) => {
       const chunks: Buffer[] = [];
       let bytes = 0;
