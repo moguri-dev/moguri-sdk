@@ -75,6 +75,57 @@ The footer contains profile name, Ask Moguri and Settings in one row. Copilot
 connection status is shown only in Settings / Models / Providers, not the left
 sidebar. Both new right-rail panels follow the actual selected session.
 
+## Tooltip dismissal qualification
+
+The owner-reported click/mouse-out bug reproduces before the repair: the
+Settings hint remains after the pointer moves to the heading because its
+clicked button still matches `:focus-within`. Source
+`f54910fb6ec9bb5b90648e3a42c9206080bf702d` instead uses keyboard-visible focus
+for focus-triggered display and persistence. The right rail also refuses to
+open a hint merely because pointer-driven navigation restored focus.
+
+The regressions exercise Settings, clicked information and Copy icons with
+focus still on their original controls, moving onto and off the portal, actual
+Tab/Shift+Tab focus, Escape, ARIA description removal, pointer-origin focus
+restoration and sidebar activation. Existing Remote and source-update tests
+now use the shared real-keyboard focus helper rather than treating a
+programmatic focus call after a mouse click as keyboard input. Their original
+warning, permission and update assertions remain intact.
+
+Before the repair, the six generated foundation spikes pass: providers
+1,114.33 ms (31.11 ms cancellation), SQLite 63.95 ms (append p95 0.0519 ms),
+known-group PTY 159.65 ms (151.87 ms cancellation, zero observed children),
+OpenTUI 1,040.88 ms, hidden Electron 747.06 ms (242.11 ms startup,
+442.53 MiB), and bounded filesystem/Git 92.43 ms. Historical generic
+unavailable-checkpoint diagnostics are not current feature discovery.
+
+| Surface | Result |
+| --- | --- |
+| Focused source tooltip/settings/menu/turn/sidebar/Remote flows | 23/23 passed, 45.3 s |
+| Actual rebuilt packaged tooltip, dictation and native setup/publication | 37/37 passed, 1.7 min |
+| Packed external SDK install/types/entrypoints and 12 installed worker probes | Pass; independent consumer npm audit has zero vulnerabilities |
+| Strict types, production build and source npm audit | Pass; zero npm vulnerabilities |
+| Exact packaged Node/service native distribution check | Pass, 1,085.56 ms |
+| Actual final ZIP/manifest through production update staging | Pass; 779,906,515 bytes in 116,203.74 ms |
+| Read-only DMG identity/layout and exact application bytes | Pass; user app/Finder not opened |
+
+Protocol 76, the qualified worker/bridge and immutable native image remain
+byte-identical. No API/schema/dependency migration or new physical-native
+qualification is inferred from this renderer-only change.
+
+The labelled **794,198,369-byte** development installer is
+`release/Moguri-0.30.0-alpha.1-desktop-fixes-macos-arm64.dmg`, SHA-256
+`a9628a5cc51816e784d407caf40d8bfff86be2f0ad2496a035ef3df83b562ed3`.
+Final ZIP SHA-512:
+`d420f380993aff5fc06d428730908838ee844cf51921243ca06292f3c7d636214e7d657170c7bef17f2bdbe82f57bfa8eceac443de61323871dbaafdb7f3fec9`.
+The previous dictation archive cut remains under
+`release/qualification-history/pre-tooltip-dismissal-c884fb15ab9b`, with the
+separately labelled dictation installer untouched. This app is ad-hoc signed,
+not notarized or uploaded. Generated fixtures use no personal data, microphone,
+model weights or paid inference. Existing FFI/chunk/optional `.icon` and
+consumer deprecation notices remain non-blocking, not hidden vulnerabilities.
+CI remains main-push-only.
+
 ## Visual direction
 
 Keep the factory theme: midnight `#11161e`, canvas `#141922`, surface `#191f29`,
