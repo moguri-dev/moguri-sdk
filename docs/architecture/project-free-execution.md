@@ -126,3 +126,60 @@ This includes the original concurrent-answer regression, real bounded-Max
 Home writes, cancellable shared-root waits and a human denial racing the
 decision provider, plus genuine root-less pre-Home fixtures for old schema
 migrations. No actual Home binding is stripped or relabelled as older history.
+
+## Complete protocol-72 qualification
+
+Application source: `2f5260c`. These are fresh results for the final payload,
+not relabelled earlier runs:
+
+| Surface | Observed result |
+|---|---|
+| Strict types and complete production build | Pass |
+| Complete source/service/worker/recovery/CLI/native-TUI suite | 1,749 passed, 14 existing skips, zero failures; 1,763 cases in 1,484,757.16 ms |
+| Complete hidden desktop suite | 243 passed, three existing skips; 246 flows in 8.0 minutes |
+| Complete actual packaged-app desktop suite | 243 passed, three existing skips; 246 flows in 7.9 minutes |
+| Independently installed packed SDK | All root/React/Node/MCP entrypoints, declarations, approved install, actual Home file/command/Agent/CLI/TUI/restart checks and existing runtime probes pass |
+| Actual installed-worker role/accounting probes | 12 passed in 5,368.89 ms |
+| Actual bundled service/SDK/private Node | Home execution, original Agent output, exact writer settlement, OAuth/SSH/retained-role/candidate/recovery checks pass |
+| Actual packaged one/four User-console footprint | Electron 541.92 / 553.66 MiB, below the 600-MiB shell budget; control plane/broker included totals are separately reported as 1,073.30 / 1,085.27 MiB |
+| Bundled retained-role inspection and reopen | 1,203.61 ms, original 15-second deadline retained; generated public-feed metadata and no automatic setup/model work |
+| Source, independent-consumer and no-cache Linux-workload audits | Zero vulnerabilities |
+| Exact Linux arm64 workload/native PTY | Pass in 54,556.84 ms; image primitive, not a Linux release or genuine-VM claim |
+| Production ZIP/manifest consumer | Pass; 779,870,754 bytes in 112,068.17 ms |
+| Canonical and labelled DMG | Exact signed bundle, Finder layout/resources, byte equality and disk-image checks pass |
+
+The initial complete run exposed five stale real-Home/pre-Home fixture
+assumptions and the concurrent actual-user answer race. The fixture repairs
+generate genuinely old root-less sessions and assert exact generated Home,
+without deleting new bindings or relaxing ownership checks. A separate
+bounded-Max regression reproduces its missing Home lease; every actual grant
+path now shares the root/authorization/executor checks. The fresh complete
+results above include those repairs.
+
+The package probe keeps the real desktop connected for explicit service
+replacement, captures its last actual attachment identities and distinguishes
+ordinary app quit from preserved restart. Its original 15-second retained-role
+bound remains; the optional public-feed transport is generated rather than an
+uncontrolled live startup dependency.
+
+Retained development installer:
+`release/Moguri-0.30.0-alpha.1-home-chats-72-macos-arm64.dmg`
+(794,109,964 bytes). SHA-512:
+
+```text
+1649a664aa7e11321ef261cfd001a4adb3a7c37b06dede8bb0ad84ad0c3245d58c96d0e985611d2d06f980ceb10123250cfee8dd6393f3f9c36700d1505c7bed
+```
+
+Native workload:
+`docker.io/library/moguri-worker@sha256:f3af7f5f104374435c694927cc221dbf82a9fe88b35d99de9deac260791d08b8`.
+Worker SHA-256:
+`9e6f71ce25fab530a7a852a92c49625c2a30ef9424b4a65ab73037fb9ba14629`.
+SSH bridge SHA-256:
+`4e882d9dc59bdcdeaf43d2b427da5df7424703dbbaf2d579e739a05787156d84`.
+
+The installer is ad-hoc-signed development output, not notarized or uploaded.
+No installed personal app, Finder, login, OS keychain, personal audio, real
+weights or paid provider was used. Existing notices remain OpenTUI's
+experimental FFI, the lazy Ghostty chunk, the skipped optional `.icon` format
+and transitive `whatwg-encoding`/`node-domexception` deprecations. CI remains
+main-push-only; an empty PR check list is not a CI-pass claim.
