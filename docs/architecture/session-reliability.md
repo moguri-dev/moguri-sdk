@@ -33,6 +33,8 @@ to that exact composer/profile/session and must not overwrite concurrent edits,
 duplicate a final buffer or submit a turn. Cancellation settles owned capture
 and keeps already inserted text visible; audio remains private and temporary.
 No cloud recognizer, implicit model download or personal recording is allowed.
+The microphone button instead always toggles record/confirm on separate clicks;
+it is not push-to-talk, regardless of an older saved button preference.
 
 Autopilot tools still obey hard denials, read-only scopes and environment
 policy. Actual user selection/defaults must propagate automatic approval
@@ -112,10 +114,49 @@ the terminal job event arrives before the HTTP reply. There is no Insert step
 or automatic prompt submission for live desktop dictation. Legacy SDK batch
 uploads and explicitly reviewed file/native transcripts remain separate.
 
+### Two-click microphone and gesture-owned push-to-talk
+
+The owner requires separate desktop controls: click the microphone to record,
+click again to confirm; hold the configured voice shortcut (Control+Space by
+default) and release to finish. Space/Enter activation of the focused native
+button also toggles, not hold/release. Repeated Enter cannot repeatedly toggle
+the microphone, and pointer release outside the control cannot commit a clip.
+
+The old optional button PTT mode could finalize a click before an utterance was
+captured, producing early-capture or genuine empty-recognition errors. A
+generated hidden-browser regression reproduces that first-click failure with
+the saved legacy flag enabled. The renderer no longer reads that flag or offers
+its checkbox. Existing `voice.pushToTalk` values remain in the typed settings
+and survive save/reopen, avoiding a destructive compatibility change.
+
+Each held shortcut owns one transient gesture identity. Only its original
+capture may be finished or cancelled by that release/effect cleanup. It cannot
+take over an already running click recording, or stop a newer clip after the
+user explicitly stopped/discarded the earlier one. Click-toggle reads the
+controller's current state rather than a stale render. Early release still
+prevents late microphone startup; profile/blur/sleep cancellation and the
+original nonce/session authority remain intact.
+
+The pinned native server's PCM16 and final-before-commit contract was checked
+against the existing 0.2.0 source. The transport, native runtime/model, SDK API,
+durable events/settings shape and protocol 76 are unchanged. No cloud/backend
+fallback, weights download or fabricated replacement for an empty transcript
+is introduced. Genuine empty results still report their error while preserving
+the draft. This repair changes renderer activation/ownership, not ASR accuracy.
+
+Generated qualification includes a real 48-kHz oscillator entering the browser
+capture graph, normalized nonzero PCM16 with at least 16,000 samples delivered
+before the second click, one final commit, preserved draft text and zero model
+turns. It also covers stale release/cancellation, focused-button keys, exact
+device selection, custom shortcut save, delayed admission, cold listener
+readiness, partial text and final acknowledgement. No personal microphone or
+real speech weights are used.
+
 ### Native listener readiness and capture finalization
 
-The microphone remains a microphone while recording, including Ctrl+Space and
-configured pointer/keyboard push-to-talk. Its pressed/recording state reflects
+The microphone remains a microphone while recording, including Ctrl+Space.
+The protocol-71 optional button-hold behavior is historical and is superseded
+by the two-click repair above. Its pressed/recording state reflects
 the owning capture; the icon does not disappear into a stop-square glyph.
 Release still flushes the same bounded input, never another capture or a chat
 submission.

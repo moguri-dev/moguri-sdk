@@ -50,8 +50,11 @@ storage-pressure and recovery hardening belongs to the next slice.
 `20:38:39.083Z`, source
 `1d8da6c7400b90be5b14439ab340b9185b36bd82`, with clean source/compiled inputs.
 Moguri is `0.30.0-alpha.1`, protocol **76**. This is neither all of issue #35 nor
-Milestone 1 completion. Subsequent evidence-only edits do not change these
-compiled worker or application bytes.
+Milestone 1 completion. These are this run's original artifact identities.
+The later [two-click dictation repair](session-reliability.md#two-click-microphone-and-gesture-owned-push-to-talk)
+changes the renderer and desktop archives, not this exact protocol-76 worker,
+bridge or native distribution payload. Its newer desktop checks are recorded
+separately; the measurements and archive digests below remain unchanged.
 
 The host is macOS **26.6 / 25G72**, arm64, Apple silicon `Mac17,6`, with hardware
 virtualization exposed. Apple Containerization CLI/daemon are **0.10.0**,

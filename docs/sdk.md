@@ -171,6 +171,10 @@ Installed and configured skills share the same bounded selection path.
 Desktop dictation uses `voice.startCapture(sessionId, id?, { streaming: true })`,
 ordered `appendCapture(..., sequence, pcmBytes)`, volatile
 `readCapture(...): { text, revision }`, then `finishCapture(..., finalSequence)`.
+The microphone button toggles record/confirm on separate clicks; only the held
+voice shortcut uses release-to-finish. Renderer gesture ownership prevents an
+old shortcut release from finishing a newer click-owned capture. Legacy
+`voice.pushToTalk` settings remain readable without controlling the button.
 Finish acknowledges flush intent; await the original job separately for the
 exact completed transcript. Frames are mono 16-kHz PCM16, bounded per frame and
 capture, authenticated with the transient original nonce, never journaled.
