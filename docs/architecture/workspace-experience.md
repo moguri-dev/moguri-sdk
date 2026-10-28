@@ -61,6 +61,16 @@ their original root and input is never replayed. Missing roots fail explicitly.
 Settings use hover/focus copy controls for non-secret text fields and information
 tooltips for explanations. Errors, live status and consequential safety warnings
 stay visible. Icon-only navigation keeps accessible names and keyboard focus.
+Tooltip focus follows keyboard-visible focus, not every focused element: a
+mouse click must not pin a hint after the pointer leaves, and pointer-origin
+focus restoration must not reopen it elsewhere. Shared and right-rail icons
+use that same distinction. Keyboard hints remain visible while focused,
+Escape dismisses them without blurring the control, and portalled help remains
+hoverable across the existing short exit delay. Dismissal removes only the
+tooltip's temporary `aria-describedby`, preserving the control and its action.
+This renderer-only repair adds no dependency, service API, durable field or
+protocol change.
+
 The footer contains profile name, Ask Moguri and Settings in one row. Copilot
 connection status is shown only in Settings / Models / Providers, not the left
 sidebar. Both new right-rail panels follow the actual selected session.
