@@ -126,6 +126,48 @@ model weights or paid inference. Existing FFI/chunk/optional `.icon` and
 consumer deprecation notices remain non-blocking, not hidden vulnerabilities.
 CI remains main-push-only.
 
+## Settings scroll containment
+
+The desktop shell and settings content establish their own positioning
+boundaries. Absolutely positioned, visually hidden model labels must not use
+the initial document as their containing block: otherwise labels below a long
+list escape the scroll container and enlarge the document, even though the
+visible app shell already hides overflow. The settings category list and
+content remain independently scrollable, shrink within the available height
+and contain wheel/trackpad overscroll. The app frame and settings toolbar stay
+inside the viewport. This uses browser layout in the existing React/Electron
+clients, both MIT-licensed, without another library, event handler, dependency,
+service API, durable field or protocol change. TUI/SDK behavior and existing
+save, cancellation and navigation guards are unchanged.
+
+A generated **81-model** provider list reproduced the reported blank area:
+the document grew to **5,305 CSS pixels** in a **1,100-pixel** viewport. Scrolling
+the category list moved the root document by **58 pixels**, placing the toolbar
+at **-12 pixels** and exposing space below the app. The offscreen model labels
+were positioned against the document rather than their own scrolling content.
+The regression now verifies root/document containment, the final model's native
+keyboard switch and authoritative autosave, both scroll boundaries, independent
+category scrolling, access to Restore all defaults, and switching between a
+long provider list and short Appearance settings.
+
+| Generated viewport | Document height | Content height | Outer scroll offsets |
+| --- | --- | --- | --- |
+| 2,000 x 1,100 | 1,100 | 984 | All zero |
+| 1,280 x 800 | 800 | 684 | All zero |
+| 860 x 620 | 620 | 504 | All zero |
+
+The source settings/navigation/layout/tooltip suite passes **25/25 cases**
+in **50.3 seconds**, including 202 information-control renderings across all
+34 settings sections at wide/narrow widths. Strict type checks and the
+production build pass. The six freshly repeated executable foundation spikes
+also pass: generated providers **1,099.92 ms** (cancellation **30.80 ms**),
+SQLite **65.50 ms** (append p95 **0.0539 ms**), owned PTY **159.23 ms**
+(cancellation **151.00 ms**, zero survivors), OpenTUI **1,070.78 ms**, hidden
+Electron **745.38 ms** (startup **257.03 ms**, **443.75 MiB**), and bounded
+filesystem/Git **94.64 ms**. Historical generic unavailable-checkpoint rows
+remain separate from current feature/native qualification. Fixtures contain
+only generated data; no personal window, browser or microphone is controlled.
+
 ## Visual direction
 
 Keep the factory theme: midnight `#11161e`, canvas `#141922`, surface `#191f29`,
