@@ -194,14 +194,35 @@ export async function readNativeBoundary(input: NativeBoundaryInput) {
   return { sessionId: value.sid, planDigest: value.planDigest, signerFingerprint: value.signerFingerprint,
     workspace: input.workspace, image: input.image };
 }
-export async function readNativeCompletion(input: NativeCompletionInput) {
-  const { sid, root, identity, planDigest, signerFingerprint } = await boundary(input);
+async function auditedBoundary(input: NativeCompletionInput) {
+  const bound = await boundary(input), { sid, root, identity, planDigest, signerFingerprint } = bound;
   if (input.planDigest !== undefined && input.planDigest !== planDigest || input.signerFingerprint !== undefined && input.signerFingerprint !== signerFingerprint) fail("Native completion changed its originally bound plan or signer.");
   const auditRaw = await bytes(join(root, "audit-log.json"), 16 * 1024 * 1024), audit = record(json(auditRaw));
   signature(json(await bytes(join(root, "audit-log.signature.json"), 64 * 1024)), identity, auditRaw, "artifact", "audit-log.json", { session_id: sid, boundary_plan_digest: planDigest });
   if (audit.format !== "sendbox-host-audit-publication" || audit.version !== 1 || audit.session_id !== sid || audit.boundary_plan_digest !== planDigest || !Array.isArray(audit.records) || audit.event_count !== audit.records.length) fail("Native signed audit does not match the captured boundary.");
   const events = audit.records.map((value) => record(record(value).event));
   if (events.some((event) => event.version !== 1 || sessionHex(event.session_id) !== sid)) fail("Native audit contains a foreign or unsupported event.");
+  return { ...bound, auditRaw, events };
+}
+export async function readNativeNetwork(input: NativeCompletionInput) {
+  const { sid, root, planDigest, signerFingerprint, auditRaw, events } = await auditedBoundary(input);
+  const publications = events.filter((event) => event.action === "network_egress_report_persisted");
+  if (publications.length !== 1 || publications[0]!.result !== "success" ||
+    record(publications[0]!.metadata).file !== "network-egress-report.json") fail("Native effective network evidence has no unique signed publication.");
+  const raw = await bytes(join(root, "network-egress-report.json"), 4 * 1024 * 1024), reportDigest = hash(raw);
+  if (publications[0]!.subject !== `sha256:${reportDigest}`) fail("Native effective network bytes differ from their signed audit publication.");
+  const report = record(json(raw)), gateways = record(report.gateways), roles = Object.keys(gateways);
+  exact(report, ["schema_version", "gateways"]);
+  if (report.schema_version !== 1 || roles.length < 1 || roles.length > 2 || roles.some((role) => !["workload", "registry"].includes(role))) fail("Native effective network report has an unsupported version or gateway.");
+  for (const value of Object.values(gateways)) {
+    const gateway = record(value);
+    exact(gateway, ["configured_policy", "github_meta"]);
+    record(gateway.configured_policy); record(gateway.github_meta);
+  }
+  return { sessionId: sid, planDigest, signerFingerprint, auditDigest: hash(auditRaw), reportDigest, report };
+}
+export async function readNativeCompletion(input: NativeCompletionInput) {
+  const { sid, root, planDigest, signerFingerprint, auditRaw, events } = await auditedBoundary(input);
   const before = events.filter((event) => event.action === "before_snapshot_captured" && event.result === "success");
   if (before.length !== 1 || !hex(before[0]!.subject)) fail("Native audit has no unique captured baseline.");
   const beforeId = before[0]!.subject;

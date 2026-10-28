@@ -95,6 +95,11 @@ or dynamic effective-scope qualification.
 
 #### Default-update qualification
 
+The later [exact 0.2.4 qualification](sendbox-0.2.4-qualification.md) records
+the current protocol-76 artifact, physical guest/network and generated
+service-led model/tool/accounting gates. It does not relabel the historical
+measurements below or close the wider cancellation/recovery and milestone work.
+
 Source `10f7708` passes the release-specific SDK, state, review, archive-safety
 and generated network gates, including explicit old-version preservation and
 the version-bound Meta warning. The source and compiled inputs remain unchanged
