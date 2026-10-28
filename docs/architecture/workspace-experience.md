@@ -168,6 +168,41 @@ filesystem/Git **94.64 ms**. Historical generic unavailable-checkpoint rows
 remain separate from current feature/native qualification. Fixtures contain
 only generated data; no personal window, browser or microphone is controlled.
 
+Source `55c97d5ebf5931871f8b90c7cabf080465cd5893` also passes **35/35 actual
+packaged desktop cases** in **1.3 minutes**, covering settings, responsive
+sidebars, tooltip dismissal and both dictation gestures. The separately run
+packaged Sandbox group passes **4/4 cases** in **21.9 seconds**, including
+actual reviewed guest tools and source publication with the pinned SendBox
+0.2.4 receipts. An initial generated management-autosave assertion timed out;
+the original failure log is retained, and the same assertion passed 14 isolated
+repeats and the final full native group. Its cause was not established.
+Failure-only diagnostics now retain the generated backend revision/management,
+actual checkbox, alerts and toolbar status instead of obscuring future evidence.
+This is not a claim that the wider recovery matrix is complete.
+
+The fresh packed external SDK install, browser-safe entrypoints, CLI and
+12 installed worker probes pass; root and independent-consumer npm audits
+report zero vulnerabilities. The six native payload/dependency hashes still
+match the original protocol-76 immutable image. The exact final packaged
+native distribution/BOM and Node/service check passes in **4,660.89 ms**.
+The **779,906,542-byte ZIP** passes the actual production update consumer in
+**113,694.67 ms**. Read-only DMG checks confirm layout, identity and the exact
+signed application bytes without opening Finder or the user's app.
+
+The new, separately labelled **794,198,362-byte** combined installer is
+`release/Moguri-0.30.0-alpha.1-settings-scroll-macos-arm64.dmg`, SHA-256
+`3976996b2f36986687b8859eb26a9d8077fb5d3a150ea389df6b4c9eda0f5093`.
+ZIP SHA-512:
+`842d8ef5ddedd63c475dc2bfb92deeed7f37ddb8324dd8cdd76e2c02c270f21d32dd5c2db99e519dafd30a78e98141685bc049faee4906fbeb1e8390eff2048f`.
+Application-tree SHA-512:
+`0450dcb83c966ad43cd8b9b8a72a04c356f31186634bf63f040f234fd6784006c30e62b5491eb28224a177a3c5c504094ca872039bd144735bba7d29242206a2`.
+The previous tooltip archive cut remains under
+`release/qualification-history/pre-settings-scroll-d420f380993a`; earlier
+labelled installers and evidence remain untouched. This is still an ad-hoc
+signed, non-notarized development build, not a new native qualification.
+Existing FFI/chunk/optional `.icon`, scoped consumer postinstall and deprecated
+transitive-package notices remain explicit and non-blocking. CI is unchanged.
+
 ## Visual direction
 
 Keep the factory theme: midnight `#11161e`, canvas `#141922`, surface `#191f29`,
