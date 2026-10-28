@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { BlockList, isIP } from "node:net";
 import { homedir, release } from "node:os";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
 import { build } from "esbuild";
 import {
   distributionConfiguration, inspectSandboxRelease, readSandboxDistribution, sandboxFileHash, SENDBOX_024,
@@ -222,6 +222,11 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
     await sdk.settings.update(settings.values, settings.revision);
     await reviewNativeTools(sdk);
     await sdk.sandbox.probe();
+    const cli = JSON.parse((await promisify(execFile)(process.execPath, ["dist/cli.mjs", "sandbox", "status"], {
+      cwd: process.cwd(), env: { ...env, MOGURI_STATE_DIR: fixture.state }, encoding: "utf8", timeout: 15_000, maxBuffer: 256 * 1024,
+    })).stdout);
+    assert.equal(cli.sandbox.ready, true); assert.equal(cli.sandbox.release, configuration.qualification.release);
+    assert.equal(cli.sandbox.image, configuration.image); assert.equal(cli.sandbox.workerDigest, configuration.qualification.workerDigest);
     const bound = await sdk.command({ type: "project.add", path: fixture.project }), created = await sdk.sessions.create(bound.id);
     const session = () => service.controller.snapshot().sessions.find((value) => value.id === created.id);
     await sdk.sessions.configure(created.id, { ...session().controls, env: "Sandbox", modelId: provider.modelId, autonomy: "Manual" });
@@ -279,6 +284,7 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
       signerFingerprint: execution.signerFingerprint, frameCursor: execution.lastSequence, guestGeneratedRequests: proof.calls.length,
       approvedTools: approved.size, starts: starts.length, totals, metaSha256: meta.published_scope.sha256,
       eventsSha256: hash(JSON.stringify(events)), resultSha256: hash(JSON.stringify(result)), scope: execution.networkScope,
+      compiledCliReadiness: { ready: cli.sandbox.ready, release: cli.sandbox.release, image: cli.sandbox.image, workerDigest: cli.sandbox.workerDigest },
       sourceUnchanged: true, privateOutputVerified: true, ownedGuestAbsent: ownedGuests(owner).length === 0 };
   } finally {
     await fixture.close(false);

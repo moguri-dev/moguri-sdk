@@ -32,6 +32,7 @@ try {
   const script = `
     import assert from 'node:assert/strict';
     import { startService } from ${JSON.stringify(pathToFileURL(join(runtime, "dist", "runtime.mjs")).href)};
+    import { KUPO_MODEL_ID } from ${JSON.stringify(pathToFileURL(join(runtime, "dist", "sdk", "index.mjs")).href)};
     globalThis.fetch = async () => { throw new Error("Generated packaged discovery cannot access a real account or network."); };
     const provider = {state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},refresh:async()=>{},login:()=>{throw Error("No generated login.");},
       cancel:async()=>{},logout:async()=>{},prepare:async()=>{throw Error("No generated model.");}};
@@ -41,7 +42,8 @@ try {
       const setup=service.controller.sandboxSetup.status();
       assert.equal(setup.supported,true);assert.equal(setup.bundledVersion,${JSON.stringify(definition.distribution.vendor.version)});
       assert.equal(service.connection.protocolVersion,${PROTOCOL_VERSION});
-      assert.equal(service.controller.snapshot().provider.models.length,0);
+      assert.deepEqual(service.controller.snapshot().provider.models.map(model=>model.id),[KUPO_MODEL_ID]);
+      assert.equal(service.controller.snapshot().provider.status,"disconnected");
       assert.equal(service.store.events().some(event=>event.event_type==="model.started"),false);
       console.log(JSON.stringify({status:"PASS",primitive:"Actual packaged Node/service discovers bundled Sandbox without path injection, model, network or keychain access",
         node:process.versions.node,protocol:service.connection.protocolVersion,bundledVersion:setup.bundledVersion}));
