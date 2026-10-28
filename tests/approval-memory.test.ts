@@ -3,7 +3,7 @@ import test from "node:test";
 import { commandFamily, defaultSettings, resolveControls, type ToolCall } from "../packages/protocol/src/index.ts";
 import { authorizeTool, rememberToolApproval } from "../apps/service/src/permissions.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
 test("Autopilot and Max automatically approve commands and exact MCP calls without weakening hard policy", () => {
   const settings = defaultSettings();
@@ -69,13 +69,13 @@ test("remembered MCP tools bind exact server configuration and schema but intent
 
 test("an explicitly remembered named tool permits new arguments only inside its original scope and hard policy", () => {
   const context = { sessionId: "generated-session", projectId: "generated-project", env: "Local" as const, autonomy: "Manual" as const };
-  const call: ToolCall = { id: "generated-read", name: "read_file", arguments: { path: "first.txt" } };
+  const call: ToolCall = { id: "generated-read", name: "web_fetch", arguments: { url: "https://first.example.invalid/" } };
   const settings = rememberToolApproval(defaultSettings(), call, context, { scope: "project", match: "tool" }, "generated-whole-tool");
-  const other = { ...call, arguments: { path: "second.txt" } };
+  const other = { ...call, arguments: { url: "https://second.example.invalid/" } };
   assert.equal(authorizeTool(settings, other, "/generated", context).decision, "allow");
   assert.equal(authorizeTool(settings, other, "/generated", { ...context, projectId: "generated-other" }).decision, "ask");
   assert.equal(authorizeTool(settings, other, "/generated", { ...context, env: "Remote" }).decision, "ask");
-  settings.permissions.tools.push({ id: "generated-deny", tool: "read_file", pathPrefix: "", decision: "deny" });
+  settings.permissions.tools.push({ id: "generated-deny", tool: "web_fetch", pathPrefix: "", decision: "deny" });
   assert.equal(authorizeTool(settings, other, "/generated", context).decision, "deny");
   assert.throws(() => rememberToolApproval(defaultSettings(), { ...call, name: "run_command", arguments: { command: "printf generated" } }, context,
     { scope: "global", match: "tool" }, "generated-invalid"), /exact command|family/i);
@@ -116,6 +116,7 @@ test("an explicit generic Autopilot selection enables real tool approvals withou
 test("a stopped pending action cannot create a remembered grant or execute late", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.configure(); await fixture.send("generated tool cancelled approval");
     const pending = await waitFor(() => fixture.session().pendingApproval);
     await sdk.command({ type: "session.stop", sessionId: fixture.sessionId }); await fixture.terminal();
@@ -128,6 +129,7 @@ test("a stopped pending action cannot create a remembered grant or execute late"
 test("a remembered Local MCP tool runs with new arguments without another approval or model call", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["mcp_gateway"]);
     const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools.find((tool) => tool.name === "grep_logs")!;
     const first = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "original" }, tool.digest);
     const approval = fixture.session().pendingApproval; assert.ok(approval);
@@ -148,6 +150,7 @@ test("remembering a pending approval is atomic, shared across clients and used b
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   const other = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    await reviewNativeTools(fixture, ["read_file"]);
     await fixture.configure();
     await fixture.send("generated tool task");
     const approval = await waitFor(() => fixture.session().pendingApproval);

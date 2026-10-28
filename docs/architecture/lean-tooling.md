@@ -139,7 +139,7 @@ within the owning turn. They remain untrusted instructions beneath hard policy.
 
 | Capability | Actual behavior and bounds |
 | --- | --- |
-| `read_file` | Whole-source SHA-256; files up to 1 MiB with structural/line/byte/literal views. Automatic previews above 16 KiB or 200 lines; explicit full reads remain at most 128 KiB. Previews are not AST or semantic summaries. |
+| `read_file` | Whole-source SHA-256; files up to 1 MiB with structural/line/byte/literal views. A stale optional digest refreshes explicitly and restarts byte continuation; `requireExactVersion` deliberately pins instead. Writes still require the returned fresh digest. Automatic previews above 16 KiB or 200 lines; explicit full reads remain at most 128 KiB. Previews are not AST or semantic summaries. |
 | `edit_file` | Ordered unique old/new replacements, exact source digest and one atomic publication; up to 1 MiB edited text. No ambiguous matching, fuzzy replacement or silently rewritten EOLs. |
 | `find_files` | Bounded `rg` inventories, applicable ancestor/nested `.gitignore`/`.ignore`/`.rgignore`, glob pages and explicit incomplete coverage. Intersect ordinary inventory with glob inventory because explicit ripgrep globs override ignore rules. Global ignore/config injection stays disabled. |
 | `search_files` | Actual Rust-regex/literal ripgrep, path/glob/case/context selectors. Compact rows are bounded by UTF-8 bytes; only permitted match/context records enter retained source, including for literal metacharacters in denied folder names. |

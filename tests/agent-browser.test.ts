@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BrowserBroker } from "../apps/service/src/browser.ts";
-import { BROWSER_MCP_TOOLS, MoguriSdk, browserUrl, type Snapshot } from "../packages/sdk/src/index.ts";
+import { BROWSER_MCP_TOOLS, MoguriSdk, browserUrl, type Snapshot, type WebAccess } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { join } from "node:path";
 import { profileFixture } from "./fixtures/profiles.ts";
+const generatedWebAccess: WebAccess = { version: 1, unrestricted: false, sites: ["example.invalid"], origins: [] };
+const generatedPage = "https://example.invalid/generated";
 
 async function setupBrowser(timeout = 1000) {
   const fixture = await setupFixture();
@@ -19,6 +21,7 @@ async function setupBrowser(timeout = 1000) {
     return result;
   };
   const enable = (sequence = 1) => {
+    poll();
     broker.command({ type: "browser.host.control", ...owner, sequence, enabled: true });
     return broker.state(owner.sessionId).controlId!;
   };
@@ -63,7 +66,7 @@ test("cancellation distinguishes undispatched work from possibly dispatched effe
     const controlId = owned.enable();
     for (const dispatched of [false, true]) {
       const abort = new AbortController();
-      const pending = owned.broker.call(owned.owner.sessionId, "browser_navigate", { controlId, url: "https://example.invalid/" }, abort.signal);
+      const pending = owned.broker.call(owned.owner.sessionId, "browser_navigate", { controlId, url: "https://example.invalid/" }, abort.signal, generatedWebAccess);
       const delivered = dispatched ? owned.poll() : null;
       abort.abort();
       assert.equal((await pending).outcome, dispatched ? "partial" : "cancelled");
@@ -80,7 +83,7 @@ test("turning off cancels a pending read and prevents late success or cross-owne
   const owned = await setupBrowser();
   try {
     const controlId = owned.enable();
-    const pending = owned.broker.call(owned.owner.sessionId, "browser_snapshot", { controlId }, new AbortController().signal);
+    const pending = owned.broker.call(owned.owner.sessionId, "browser_snapshot", { controlId, expectedUrl: generatedPage }, new AbortController().signal, generatedWebAccess);
     const polled = owned.poll(); assert.ok("request" in polled && polled.request);
     const request = polled.request;
     assert.throws(() => owned.broker.command({ type: "browser.host.reply", ...owned.owner, lease: "cd".repeat(32),
@@ -124,7 +127,7 @@ test("expired heartbeats, closure and a fresh service do not restore a control g
     broker.close();
     context.mock.timers.reset();
     const controlId = owned.enable();
-    const pending = owned.broker.call(owned.owner.sessionId, "browser_navigate", { controlId, url: "https://example.invalid/" }, new AbortController().signal);
+    const pending = owned.broker.call(owned.owner.sessionId, "browser_navigate", { controlId, url: "https://example.invalid/" }, new AbortController().signal, generatedWebAccess);
     owned.poll(); owned.broker.close();
     assert.equal((await pending).outcome, "partial");
     const restarted = new BrowserBroker(() => snapshot);
@@ -142,7 +145,7 @@ test("browser schemas refuse executable URLs, extra arguments and oversized outp
     for (const url of ["file:///generated", "javascript:alert(1)", "http://example.invalid/", "https://generated:secret@example.invalid/"]) assert.throws(() => browserUrl(url));
     assert.throws(() => browserUrl(`https://example.invalid/${"\u20ac".repeat(1000)}`), /canonical browser URL exceeds/);
     await assert.rejects(() => owned.broker.call(owned.owner.sessionId, "browser_navigate", { controlId, url: "https://example.invalid/", javascript: "generated()" }, new AbortController().signal), { code: "browser_arguments" });
-    const pending = owned.broker.call(owned.owner.sessionId, "browser_snapshot", { controlId }, new AbortController().signal);
+    const pending = owned.broker.call(owned.owner.sessionId, "browser_snapshot", { controlId, expectedUrl: generatedPage }, new AbortController().signal, generatedWebAccess);
     const polled = owned.poll(); assert.ok("request" in polled && polled.request);
     const request = polled.request;
     assert.throws(() => owned.broker.command({ type: "browser.host.reply", ...owned.owner, requestId: request.id, result: { text: "\u20ac".repeat(6000), outcome: "completed" } }), { code: "browser_output" });

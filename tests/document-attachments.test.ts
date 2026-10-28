@@ -191,7 +191,7 @@ test("held queue/edit/restart preserves exact encrypted originals and extracted 
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }
 });
 
-test("the actual owning worker receives only descriptors, then an explicitly approved document section", mac, async () => {
+test("the actual owning worker receives only descriptors, then a policy-approved admitted document section", mac, async () => {
   const fixture = await setupFixture({ documentTool: { name: "read_document", arguments: { section: 2, limit: 512 } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const free = await sdk.sessions.create(null, "Generated project-free document", { modelId: fixture.modelId });
@@ -199,12 +199,10 @@ test("the actual owning worker receives only descriptors, then an explicitly app
     const capture = await sdk.attachments.document(free.id!, path);
     const session = () => fixture.service.controller.snapshot().sessions.find((session) => session.id === free.id)!;
     await sdk.command({ type: "message.send", sessionId: free.id!, expectedRevision: session().draft.revision, delivery: "queue" });
-    const approval = await waitFor(() => session().pendingApproval);
-    assert.equal(approval.call.name, "read_document");
+    await waitFor(() => session().status === "completed");
+    assert.equal(session().pendingApproval, null);
     assert.doesNotMatch(JSON.stringify(fixture.requests[0]), /GENERATED_DOCUMENT_SECRET|word\/document.xml/);
     assert.equal(JSON.stringify(fixture.requests[0]).includes(path), false);
-    await sdk.command({ type: "approval.respond", sessionId: free.id!, approvalId: approval.id, allow: true });
-    await waitFor(() => session().status === "completed");
     const result = session().messages.find((message) => message.role === "tool")!;
     assert.equal(result.outcome, "completed"); assert.match(result.text, /GENERATED_DOCUMENT_SECRET/);
     assert.doesNotMatch(result.text, /Generated table cell B/);
@@ -295,7 +293,7 @@ test("pinned SSH workers inspect only approved document snapshots, never source 
   try {
     await fixture.probe(); await fixture.select();
     const path = join(fixture.directory, "generated.docx"); await writeFile(path, generatedDocx()); await sdk.attachments.document(fixture.sessionId, path);
-    await fixture.send("Generated Remote document inspection."); await fixture.approve();
+    await fixture.send("Generated Remote document inspection.");
     assert.equal((await fixture.terminal()).status, "completed");
     const result = fixture.session().messages.find((message) => message.role === "tool")!;
     assert.equal(result.outcome, "completed"); assert.match(result.text, /table cell B/); assert.match(result.text, /"column":2/);
@@ -310,7 +308,7 @@ test("policy revocation after an SSH document approval prevents snapshot reads w
   try {
     await fixture.probe(); await fixture.select();
     const path = join(fixture.directory, "generated.docx"); await writeFile(path, generatedDocx()); await sdk.attachments.document(fixture.sessionId, path);
-    await fixture.send("Generated revoked document inspection."); await fixture.approve(); await waitFor(() => gate.held);
+    await fixture.send("Generated revoked document inspection."); await waitFor(() => gate.held);
     const settings = structuredClone(sdk.settings.get()!.values);
     settings.permissions.tools.push({ id: "generated-document-denial", tool: "read_document", pathPrefix: "", decision: "deny" });
     await sdk.settings.update(settings, sdk.settings.get()!.revision);

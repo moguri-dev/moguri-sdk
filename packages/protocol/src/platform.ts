@@ -12,6 +12,8 @@ import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSche
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
 import { ProgressQuerySchema, type ProgressResponse } from "./progress.ts";
 import { RememberedApprovalSchema } from "./permissions.ts";
+import { WebAllowanceSchema } from "./web-policy.ts";
+export * from "./web-policy.ts";
 import { KanbanCommandSchema, KanbanQuerySchema, type KanbanResponse, type KanbanSnapshot } from "./kanban.ts";
 export * from "./kanban.ts";
 import { PricingCommandSchema, PricingQuerySchema, type PricingResponse, type PricingSnapshot } from "./pricing.ts";
@@ -134,6 +136,7 @@ export const SettingsSchema = object({
     tools: Type.Array(object({ id, tool: Type.String({ minLength: 1, maxLength: 80 }), decision, pathPrefix: Type.String({ maxLength: 4096 }) }), { maxItems: 100 }),
     commands: Type.Array(object({ id, command: Type.String({ minLength: 1, maxLength: 16384 }), decision }), { maxItems: 100 }),
     remembered: Type.Optional(Type.Array(RememberedApprovalSchema, { maxItems: 500 })),
+    webAllowlist: Type.Optional(Type.Array(WebAllowanceSchema, { maxItems: 500 })),
   }),
   memory: object({ enabled: Type.Boolean(), useInContext: Type.Boolean(), useTieredContext: Type.Optional(Type.Boolean()), maxFiles: Type.Integer({ minimum: 1, maximum: 5000 }) }),
   subagents: object({ enabled: Type.Boolean(), maxParallel: Type.Integer({ minimum: 1, maximum: 2 }) }),

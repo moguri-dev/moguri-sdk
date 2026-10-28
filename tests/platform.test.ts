@@ -124,7 +124,7 @@ test("hard tool denials win and explicit read delegation is attributed to delega
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("native gateway discovers real internal MCP tools and executes only after an exact user approval", mac, async () => {
+test("native gateway executes known builtin reads through policy without inference and rejects stale schemas", mac, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -132,16 +132,14 @@ test("native gateway discovers real internal MCP tools and executes only after a
     const tool = found.tools.find((tool) => tool.name === "grep_logs")!;
     assert.ok(tool.digest);
     const requested = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "original" }, tool.digest);
-    assert.equal(fixture.session().status, "waiting_input");
+    assert.equal(fixture.session().pendingApproval, null);
     assert.equal(fixture.requests.length, 0);
-    await fixture.approve();
     const completed = await sdk.jobs.wait(requested.id!);
     assert.equal(completed.status, "completed", completed.error ?? "");
     assert.match((await sdk.mcp.readResult(requested.id!)).text, /generated original/);
     assert.equal(fixture.requests.length, 0);
     assert.equal(fixture.session().status, "completed");
     const stale = await sdk.mcp.call(fixture.sessionId, "builtin", tool.name, { path: "fixture.txt", query: "original" }, "0".repeat(64));
-    await fixture.approve();
     const invalid = await sdk.jobs.wait(stale.id!);
     assert.equal(invalid.status, "partial");
     assert.match(invalid.error!, /changed/);

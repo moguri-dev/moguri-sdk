@@ -5,6 +5,20 @@ import type { SlashResult } from "./slash.ts";
 
 export async function toolingSlash(sdk: MoguriSdk, sessionId: string, name: string, argument: string): Promise<SlashResult> {
   const result = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+  if (name === "firewall") {
+    const parts = argument.trim().split(/\s+/).filter(Boolean);
+    if (!parts.length || parts.length === 1 && parts[0] === "list") return result({ effective: sdk.webAllowlist.list(sessionId),
+      all: sdk.webAllowlist.list(), boundary: "Local web/Agent-browser tools only, not OS filtering of approved shell scripts. Global means this profile." });
+    if (parts.length === 2 && parts[0] === "remove") return result(await sdk.webAllowlist.remove(parts[1]!));
+    if (parts.length === 3 && parts[0] === "add" && ["session", "project", "global"].includes(parts[1]!)) {
+      const session = sdk.getState().snapshot?.sessions.find((entry) => entry.id === sessionId);
+      if (!session) throw new ClientError("session_missing", "Choose an original session in this profile.");
+      if (parts[1] === "project" && !session.projectId) throw new ClientError("web_allowlist_scope", "This session has no real project. Choose session or global; no inherited root was invented.");
+      return result(await sdk.webAllowlist.add(parts[2]!, parts[1] === "session" ? { kind: "session", sessionId } :
+        parts[1] === "project" && session.projectId ? { kind: "project", projectId: session.projectId } : { kind: "global" }));
+    }
+    throw new ClientError("firewall_arguments", "Use /firewall [list], /firewall add session|project|global HOST_ORIGIN, or /firewall remove ID.");
+  }
   if (name === "home") {
     const parts = argument.trim().split(/\s+/).filter(Boolean);
     if (!parts.length || parts.length === 1 && parts[0] === "status") return result(await sdk.workspaces.home(sessionId));

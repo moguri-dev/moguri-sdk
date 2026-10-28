@@ -95,6 +95,7 @@ import { selectedSkillEvents } from "./skill-selection.ts";
 import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gateway.ts";
 import { dashboardOverview } from "./dashboard.ts";
 import { homeChat, homeWorkspace } from "./chat-workspace.ts";
+import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -115,6 +116,7 @@ export interface PlatformHost {
   finish: WorkspaceFinish;
   invalidateApprovals(sessionId?: string): void;
   externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }): Promise<string>;
+  webAccess?(session: Session, call: ToolCall): WebAccess | undefined;
   repositoryScope(session: Session): RepositoryScope;
   repositoryGit(session: Session, signal: AbortSignal): Promise<string | null>;
   remoteRepository(session: Session, repository: string, signal: AbortSignal): Promise<RepositoryApiMetadata>;
@@ -913,6 +915,14 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         disabledProviders: settings.modelPreferences.disabledProviders.filter((id) => !enabledEndpoints.some((provider) => provider.id === id)) } };
     }
     validateSettings(settings);
+    for (const entry of settings.permissions.webAllowlist ?? []) {
+      if (snapshot.settings.values.permissions.webAllowlist?.some((previous) => JSON.stringify(previous) === JSON.stringify(entry))) continue;
+      const scope = entry.scope;
+      if (scope.kind === "session" && !snapshot.sessions.some((session) => session.id === scope.sessionId) ||
+        scope.kind === "project" && !snapshot.projects.some((project) => project.id === scope.projectId)) {
+        throw new MoguriError("web_allowlist_scope", "A new website allowance must bind an existing original session or project in this profile.", 409);
+      }
+    }
     for (const choice of [settings.notifications.needsInputSound, settings.notifications.completedSound]) {
       if (choice && choice.id !== "default" && !snapshot.notificationSounds.some((sound) => sound.id === choice.id)) throw new MoguriError("notification_sound_missing", "Choose an existing sound from this actual profile. No missing sound was silently replaced.", 409);
     }
@@ -1367,7 +1377,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         const session = this.session(command.sessionId);
         if (session.controls.env === "Sandbox") throw new MoguriError("mcp_env", "No qualified native MCP execution transport exists. No Local gateway worker, credential or source-root fallback was used.", 409);
         const call: ToolCall = { id: randomUUID(), name: "mcp_gateway", arguments: { action: "call", serverId: command.serverId, tool: command.tool, arguments: command.arguments, schemaDigest: command.schemaDigest } };
-        const id = await this.host.externalCall(session, call, (signal) => this.callMcp(this.session(session.id), call.arguments, signal), finish.intent);
+        const id = await this.host.externalCall(session, call, (signal) => this.callMcp(this.session(session.id), call.arguments, signal, this.host.webAccess?.(this.session(session.id), call)), finish.intent);
         return finish([], { id });
       }
       case "subagent.run":
@@ -1412,7 +1422,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       }
     }
   }
-  async callMcp(session: Session, args: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+  async callMcp(session: Session, args: Record<string, unknown>, signal: AbortSignal, webAccess?: WebAccess): Promise<unknown> {
     if (session.controls.env !== "Local" || !this.snapshot().policy.allowedEnvs.includes("Local") && !session.localFinishing) throw new MoguriError("mcp_env", "No qualified MCP broker is available in the selected environment. No Local fallback.");
     const serverId = String(args.serverId);
     const server = this.server(serverId, session.projectId);
@@ -1423,7 +1433,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (serverId === "builtin" && isBrowserTool(String(args.tool))) {
       const tool = BROWSER_MCP_TOOLS.find((tool) => tool.name === args.tool)!;
       if (args.schemaDigest !== builtinToolDigest(tool)) throw new MoguriError("browser_schema", "The browser schema changed. Rediscover it and review the exact call.", 409);
-      const result = await this.browser.call(session.id, tool.name, input, signal);
+      const result = await this.browser.call(session.id, tool.name, input, signal, webAccess);
       return { content: [{ type: "text", text: result.text }], isError: result.outcome !== "completed", outcome: result.outcome };
     }
     if (!project && serverId === "builtin" && args.tool !== "fetch_page") throw new MoguriError("project_required", "This internal workspace tool requires a selected project.");
@@ -1435,7 +1445,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     const workingRoot = project?.path ?? (homeWorkspace(session) ? server ? this.managed.filesystem(session).root : session.homeRoot!.root : undefined);
     const root = workingRoot ?? join(this.stateDir, "gateway-workspace");
     if (!workingRoot) await mkdir(root, { recursive: true, mode: 0o700 });
-    return this.gateway.operate({ action: "call", server, root, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared, scripts: await this.scripts(project?.id) }, signal, session.id);
+    return this.gateway.operate({ action: "call", server, root, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared,
+      ...(serverId === "builtin" && args.tool === "fetch_page" ? { webAccess } : {}), scripts: await this.scripts(project?.id) }, signal, session.id);
   }
   async delegate(session: Session, call: ToolCall, signal: AbortSignal): Promise<{ text: string; isError: boolean; outcome: string }> {
     if (call.name === "command_job") return { text: JSON.stringify(this.commandJob(session, call, signal)), isError: false, outcome: "completed" };
@@ -1521,7 +1532,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       }
       if (action === "read_result") return { text: JSON.stringify(this.readResult(String(call.arguments.resultId), Number(call.arguments.offset ?? 0), 12000, session.id)), isError: false, outcome: "completed" };
       if (action === "call") {
-        const result = await this.callMcp(session, call.arguments, signal);
+        const result = await this.callMcp(session, call.arguments, signal, this.host.webAccess?.(session, call));
         const id = randomUUID();
         const browser = call.arguments.serverId === "builtin" && isBrowserTool(String(call.arguments.tool)) && isRecord(result);
         const partial = browser && (result.outcome === "partial" || result.outcome === "cancelled");

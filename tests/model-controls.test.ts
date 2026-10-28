@@ -111,7 +111,8 @@ test("an approved README edit can finish with reported reasoning output above 81
     await fixture.send("Add to readme file a mention to users of this repo, the first user is an app called Moguri which is an AI harness for local development.");
     const request = await waitFor(() => fixture.requests[0]);
     assert.equal(request.max_tokens ?? request.max_completion_tokens, 32768);
-    await fixture.approve(); assert.equal((await fixture.terminal()).status, "completed");
+    assert.equal((await fixture.terminal()).status, "completed");
+    assert.equal(fixture.session().pendingApproval, null);
     assert.equal(await readFile(join(fixture.project, "README.md"), "utf8"), text);
     assert.equal(fixture.requests.length, 2);
     const entries = fixture.service.controller.snapshot().budgetEntries;

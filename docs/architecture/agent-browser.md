@@ -21,7 +21,7 @@ Space/Enter interaction, visible keyboard focus and a 44-pixel hit target.
   switching, closing or restart. Element references also expire on navigation
   or an input action and are never resolved by guessed text/coordinates.
 - Control defaults off. Enabling permits browser use, not self-approval.
-  Existing exact nested-tool approvals, read-only/side restrictions, folder
+  Native status/read policy, scoped website approval, read-only/side restrictions, folder
   policy and allowed-Env policy remain authoritative. Sandbox and Remote
   cannot silently control a Local browser.
 - Builtin MCP tools provide status, navigation, bounded accessibility
@@ -30,6 +30,15 @@ Space/Enter interaction, visible keyboard focus and a 44-pixel hit target.
   credentials API, upload, download, popup, microphone or filesystem bridge.
   Agent-triggered JavaScript dialogs are dismissed, never accepted. Snapshots
   expose accessible names/roles, not password values or a DOM-to-host bridge.
+- Protocol 73 adds an exact `expectedUrl` for page reads/interactions and carries
+  the service-admitted website scope in host requests. Navigation, redirects,
+  subresources and same-origin WebSockets use that bounded scope. One approved
+  origin cannot silently authorize another. Permission/autonomy changes revoke
+  pending control; actual dispatched effects can remain partial. The native
+  network gate stays deny-by-default after revocation until direct user
+  navigation unloads the prior agent-controlled document. Local allowlists do
+  not authorize Remote, bypass Sandbox's firewall, or confine shell scripts.
+  See [native operations and scoped website approvals](native-network-policy.md).
 - Disabling revokes service admission and the native execution gate.
   Pending actions are cancelled without replay. An already dispatched effect
   may be partial; cancellation does not undo a website action or claim success.

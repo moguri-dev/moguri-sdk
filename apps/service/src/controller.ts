@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { projectIdentifier } from "../../../packages/protocol/src/sessions.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { isBrowserTool } from "../../../packages/protocol/src/browser.ts";
+import { browserUrl, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 import { basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
@@ -44,7 +44,8 @@ import { continueWorkInput, isKanbanCommand } from "../../../packages/protocol/s
 import { workflowGuidance, type WorkflowKind } from "../../../packages/protocol/src/workflows.ts";
 import { SessionContextSchema, SessionControlSchema, SessionMessageSchema, WaitSessionSchema, type CoordinationOrigin } from "../../../packages/protocol/src/coordination.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
-import { authorizeTool, rememberToolApproval, validateSettings } from "./permissions.ts";
+import { approvedWebAccess, authorizeTool, rememberToolApproval, toolWebTarget, validateSettings } from "./permissions.ts";
+import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type BoundaryReply, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext, readTools } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -102,6 +103,7 @@ interface Run {
   inFlight: boolean;
   calls: Map<string, ToolCall>;
   granted: Set<string>;
+  webScopes?: Map<string, WebAccess>;
   scopedReadPolicies: Map<string, string>;
   approval?: { id: string; requestId: string; call: ToolCall; policyRevision: number };
   approvalResponse?: string;
@@ -147,6 +149,7 @@ interface ExternalRun {
   sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
   policyRevision: number; permissionRevision: number; abort: AbortController; started: boolean; done: boolean;
   executing?: boolean; chatWriterId?: string; homeUncertain?: boolean;
+  webAccess?: WebAccess;
   localRoots?: string[];
   execute: (signal: AbortSignal) => Promise<unknown>;
   remoteMcpId?: string;
@@ -263,6 +266,7 @@ export class ControlPlane extends EventEmitter {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events, forget) => this.commit(events, undefined, forget),
       invalidateApprovals: (id) => this.invalidateApprovals(id),
       externalCall: (session, call, execute, identity) => this.externalCall(session, call, execute, identity),
+      webAccess: (session, call) => this.grantedWebAccess(session, call),
       repositoryScope: (session) => this.repositoryScope(session),
       memoryTarget: (session) => this.memoryTarget(session),
       remoteMemoryCapture: (root, maxFiles, denied, signal, progress) => this.remote.captureMemory(root, maxFiles, denied, signal, progress),
@@ -1137,6 +1141,8 @@ export class ControlPlane extends EventEmitter {
     return { event_type: type, payload, profile_id: this.profileId, project_id: session.projectId, session_id: session.id, turn_id: session.turnId, step_id: stepId } as EventInput;
   }
   private invalidateApprovals(sessionId?: string): void {
+    for (const run of [...this.runs.values()]) if (run.webScopes?.size && (!sessionId || run.sessionId === sessionId)) this.stop(run.sessionId);
+    for (const external of [...this.externalRuns.values()]) if (external.executing && external.webAccess && (!sessionId || external.sessionId === sessionId)) this.stop(external.sessionId);
     for (const run of this.runs.values()) if (run.approval) {
       if (sessionId && run.sessionId !== sessionId) continue;
       const approval = run.approval;
@@ -1147,6 +1153,8 @@ export class ControlPlane extends EventEmitter {
     for (const external of [...this.externalRuns.values()]) if (!external.started && (!sessionId || external.sessionId === sessionId)) this.finishExternal(external, "stopped", "Permissions changed. The external tool was not executed.");
   }
   private permissionContext(session: Session, call: ToolCall) {
+    const nativeId = this.runs.get(session.id)?.sandboxExecutionId;
+    const native = nativeId ? this.sandboxExecution(nativeId) : undefined;
     const cached = session.controls.env === "Remote" && call.name === "mcp_gateway" && call.arguments.action === "call" ?
       this.mcpCatalogs.get(String(call.arguments.schemaDigest)) : undefined;
     const mcpBinding = call.name === "mcp_gateway" && call.arguments.action === "call" ?
@@ -1156,7 +1164,19 @@ export class ControlPlane extends EventEmitter {
         session.controls.env === "Remote" ? [this.projection.settings.values.remote, cached?.helperDigest, this.remote.readiness.workerDigest] : null,
         ...(homeWorkspace(session) && homeDirectoryTool(call) ? [{ homeRoot: session.homeRoot }] : [])]) : undefined;
     return { sessionId: session.id, projectId: this.toolScope(session, call).project?.id ?? session.projectId, env: session.controls.env, autonomy: session.controls.autonomy,
-      automaticApprovals: session.controls.automaticApprovals === true, ...(mcpBinding ? { mcpBinding } : {}), ...(cached ? { mcpSchemaDigest: cached.digest } : {}) };
+      automaticApprovals: session.controls.automaticApprovals === true, ...(mcpBinding ? { mcpBinding } : {}), ...(cached ? { mcpSchemaDigest: cached.digest } : {}),
+      ...(native ? { enforcedWebDomains: native.networkScope?.allowedDomains ?? native.config.qualification?.allowedDomains ?? [] } : {}) };
+  }
+  private grantedWebAccess(session: Session, call: ToolCall): WebAccess | undefined {
+    if (!toolWebTarget(call)) return;
+    const run = this.runs.get(session.id), external = this.externalRuns.get(session.id);
+    const access = run?.granted.has(call.id) && run.calls.get(call.id) && frameDigest(run.calls.get(call.id)) === frameDigest(call) ? run.webScopes?.get(call.id) :
+      external?.executing && external.call.id === call.id && frameDigest(external.call) === frameDigest(call) ? external.webAccess : undefined;
+    if (!access) throw new MoguriError("web_authority", "This exact tool has no original admitted website scope. No request or browser action was dispatched.", 403);
+    return access;
+  }
+  private prepareWebAccess(session: Session, call: ToolCall): WebAccess | undefined {
+    return toolWebTarget(call) ? approvedWebAccess(this.projection.settings.values, call, this.permissionContext(session, call)) : undefined;
   }
   private toolScope(session: Session, call: ToolCall) {
     if (session.repositories && session.controls.env !== "Local") throw new MoguriError("repository_env", "Multi-repository tools currently require their original Local scope.", 409);
@@ -1550,7 +1570,7 @@ export class ControlPlane extends EventEmitter {
     const authorization = this.authorization(session, call, this.toolScope(session, call).root);
     if (authorization.decision === "allow") {
       this.commit([this.event(this.session(session.id), "tool.decided", { approvalId, allow: true,
-        actor: authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, stepId)]);
+        actor: authorization.actor === "policy" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, stepId)]);
       this.executeExternal(external);
     }
     return jobId;
@@ -1575,6 +1595,7 @@ export class ControlPlane extends EventEmitter {
       external.abort.signal.throwIfAborted();
       if (external.done || session.turnId !== external.turnId || this.projection.policy.revision !== external.policyRevision ||
         this.projection.settings.permissionRevision !== external.permissionRevision) throw new MoguriError("tool_stale", "The original external approval, turn or policy changed before dispatch. No replacement was started.", 409);
+      external.webAccess = this.prepareWebAccess(session, external.call);
       this.commit([this.event(session, "tool.started", { call: external.call }, external.stepId), this.event(session, "job.progress", { jobId: external.jobId, progress: "Running approved tool", status: "running" }, external.stepId)]);
       external.executing = true; this.externalEffects.add(external);
       return external.execute(external.abort.signal);
@@ -1820,7 +1841,8 @@ export class ControlPlane extends EventEmitter {
       run.mcpDispatches ??= new Map(); run.mcpDispatches.set(call.id, dispatch);
       return { kind: "remote-mcp", operationId: entry.id, scopeDigest: entry.scopeDigest, stepId: request.stepId, callDigest: dispatch.callDigest, env: "Remote",
         root: scope.root, helperDigest, server, tool: entry.tool, arguments: input, schemaDigest: cached.digest,
-        reviewedDigest: String(call.arguments.schemaDigest), ...(token ? { accessToken: token } : {}), ...(preparedMemory ? { preparedMemory } : {}) };
+        reviewedDigest: String(call.arguments.schemaDigest), ...(token ? { accessToken: token } : {}), ...(preparedMemory ? { preparedMemory } : {}),
+        ...(!server && entry.tool === "fetch_page" ? { webAccess: this.grantedWebAccess(session, call) } : {}) };
     } catch (error) {
       this.updateMcp(entry, { phase: "settled", status: run.abort.signal.aborted ? "stopped" : "failed", diagnostic: error instanceof MoguriError ? error.message : "Remote MCP admission failed; no operation was dispatched." });
       throw error;
@@ -2199,7 +2221,7 @@ export class ControlPlane extends EventEmitter {
         const scope = this.toolScope(current, call);
         return executeTool(scope.root, call, signal, () => {}, () => {}, (input) => this.platform.delegate(current, input, signal),
           { mode: current.mode, folders: folderPolicy(scope.settings), env: current.controls.env,
-            homeRoot: homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined }, this.nativeCatalog(current));
+            homeRoot: homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined, webAccess: this.grantedWebAccess(current, call) }, this.nativeCatalog(current));
       }, { id: envelope.id, digest: commandDigest });
       return finish([], { id });
     }
@@ -2432,13 +2454,15 @@ export class ControlPlane extends EventEmitter {
               approval.policyRevision !== this.projection.policy.revision) throw new MoguriError("approval_stale", "The original approval changed while waiting for its exact writer root. No tool was started.", 409);
           }
           const remembered = this.rememberApproval(session, approval.call, command.remember);
+          const webAccess = command.allow ? this.prepareWebAccess(session, approval.call) : undefined;
           const events: EventInput[] = [...remembered, this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
           if (command.allow) events.push(this.event(session, "tool.started", { call: approval.call }, run.stepId));
           finish(events);
           run.approval = undefined;
-          if (command.allow) this.grantTool(run, approval.call.id);
+          if (command.allow) this.grantTool(run, approval.call.id, webAccess);
           this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow: command.allow, mode, folders: folderPolicy(configuration), root: scope.root,
-            homeRoot: command.allow && homeWorkspace(session) && homeDirectoryTool(approval.call) ? session.homeRoot : undefined } });
+            homeRoot: command.allow && homeWorkspace(session) && homeDirectoryTool(approval.call) ? session.homeRoot : undefined,
+            webAccess: command.allow ? this.grantedWebAccess(session, approval.call) : undefined } });
           return {};
         } finally { if (run.approvalResponse === approval.id) run.approvalResponse = undefined; }
       }
@@ -2818,6 +2842,11 @@ export class ControlPlane extends EventEmitter {
       Boolean(this.writerReservations.has(key) && this.writerReservations.get(key) !== session.id);
   }
   private async assertCurrentTool(session: Session, call: ToolCall, modelOwned = true): Promise<void> {
+    const target = toolWebTarget(call);
+    if (target && !(target === "about:blank" && call.name === "mcp_gateway" && call.arguments.tool === "browser_snapshot")) {
+      try { browserUrl(target); }
+      catch { throw new MoguriError("web_destination", "Use one explicit HTTPS or loopback HTTP website URL without credentials. No approval or network work was consumed.", 400); }
+    }
     if (this.runs.get(session.id)?.yieldedTo && (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read") &&
       call.name !== "session_control") throw new MoguriError("coordination_yielded", "This coordinator yielded its writer lease to an owned child. Only read/coordination observations are available until the child settles.", 403);
     const current = this.session(session.id);
@@ -2853,7 +2882,8 @@ export class ControlPlane extends EventEmitter {
       this.projection.settings.permissionRevision !== permission || this.projection.policy.revision !== policy) throw new MoguriError("policy_changed", "Session or project policy changed during authorization. No new effect was admitted.", 409);
   }
   private scopedReadPolicy(): string { return JSON.stringify([this.profileId, this.projection.policy.revision, this.projection.settings.permissionRevision]); }
-  private grantTool(run: Run, callId: string): void {
+  private grantTool(run: Run, callId: string, access?: WebAccess): void {
+    if (access) (run.webScopes ??= new Map()).set(callId, access);
     run.granted.add(callId);
     run.scopedReadPolicies.set(callId, this.scopedReadPolicy());
   }
@@ -2984,12 +3014,14 @@ export class ControlPlane extends EventEmitter {
       this.decisions.reject(record.id, "The exact existing user delegation was revoked or denied. No model authority."); return;
     }
     const mode = current.pendingMode === "read-only" ? "read-only" : current.mode;
+    const webAccess = allow ? this.prepareWebAccess(current, call) : undefined;
     this.decisions.apply(record.id, choice, [this.event(current, "tool.decided", { approvalId: approval.id, allow, actor: "decision-provider", ruleId: source.delegationId, decisionId: record.id, decisionOrigin: decisionEvidence(record) }, source.parentStepId),
       ...(allow ? [this.event(current, "tool.started", { call }, source.parentStepId)] : [])]);
     run.approval = undefined;
-    if (allow) this.grantTool(run, call.id);
+    if (allow) this.grantTool(run, call.id, webAccess);
     this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow, mode, folders: folderPolicy(scope.settings), root: scope.root,
-      homeRoot: allow && homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined } });
+      homeRoot: allow && homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined,
+      webAccess: allow ? this.grantedWebAccess(current, call) : undefined } });
   }
   private async reviewTechnicalQuestion(run: Run, question: UserQuestion, delegationId: string): Promise<void> {
     const source: Extract<DecisionSource, { kind: "question" }> = { kind: "question", parentStepId: question.stepId, callId: question.callId,
@@ -3880,7 +3912,7 @@ export class ControlPlane extends EventEmitter {
         const hook = run.hooks?.calls.get(request.call.id);
         const automatic = session.controls.automaticApprovals === true;
         const hookRequiresHuman = Boolean(!automatic && hook && session.controls.autonomy === "Autopilot Max" && this.projection.settings.values.decisions.reviewDelegatedTools);
-        if (!automatic && !hook && authorization.decision === "allow" && authorization.ruleId && session.controls.autonomy === "Autopilot Max" &&
+        if (!automatic && !hook && authorization.actor !== "policy" && authorization.decision === "allow" && authorization.ruleId && session.controls.autonomy === "Autopilot Max" &&
           this.projection.settings.values.decisions.reviewDelegatedTools && request.call.name !== "ask_user") {
           run.approval = { ...approval, requestId: request.requestId };
           this.commit([this.event(session, "tool.requested", { approval }, request.stepId)]);
@@ -3895,10 +3927,15 @@ export class ControlPlane extends EventEmitter {
           await this.claimHomeWriter(run, request.call);
           await this.assertCurrentTool(session, request.call);
           if (run.done || run.abort.signal.aborted) throw new MoguriError("tool_stopping", "The original owner stopped before tool dispatch. No replacement was started.", 409);
-          this.grantTool(run, request.call.id);
-          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
+          const current = this.session(session.id), latest = this.authorization(current, request.call, this.toolScope(current, request.call).root);
+          if (approval.policyRevision !== this.projection.policy.revision || approval.permissionRevision !== this.projection.settings.permissionRevision ||
+            authorization.decision === "allow" && (latest.decision !== "allow" || latest.ruleId !== authorization.ruleId || latest.actor !== authorization.actor)) {
+            throw new MoguriError("tool_stale", "The original automatic tool policy changed during root admission. No effect or replacement approval was inferred.", 409);
+          }
+          this.grantTool(run, request.call.id, this.prepareWebAccess(current, request.call));
+          this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: authorization.actor === "policy" || ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(scope.settings), root: scope.root,
-            homeRoot: homeWorkspace(session) && homeDirectoryTool(request.call) ? session.homeRoot : undefined } });
+            homeRoot: homeWorkspace(session) && homeDirectoryTool(request.call) ? session.homeRoot : undefined, webAccess: this.grantedWebAccess(session, request.call) } });
           return;
         }
         run.approval = { ...approval, requestId: request.requestId };
@@ -3911,6 +3948,7 @@ export class ControlPlane extends EventEmitter {
       if (run.chatWriterId && homeWriteTool(request.call) && ["partial", "unconfirmed"].includes(request.outcome)) run.homeUncertain = true;
       run.calls.delete(request.call.id);
       run.granted.delete(request.call.id);
+      run.webScopes?.delete(request.call.id);
       const completed = this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
         ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) }, request.stepId);
       const mcp = run.mcpDispatches?.get(request.call.id);

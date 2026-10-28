@@ -14,6 +14,7 @@ import { INTERNAL_MCP_TOOLS } from "./gateway-tools.ts";
 import { readProjectFile } from "./files.ts";
 import { fetchPage } from "./web-page.ts";
 import { isBrowserTool, McpServerSchema, parse, type McpServerConfig } from "../../../packages/protocol/src/index.ts";
+import { WebAccessSchema, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 
 export interface McpOperation {
   action: "tools" | "call";
@@ -24,6 +25,7 @@ export interface McpOperation {
   arguments?: Record<string, unknown>;
   schemaDigest?: string;
   prepared?: unknown;
+  webAccess?: WebAccess;
   scripts?: { id: string; name: string; description: string; path: string; digest: string }[];
 }
 const operationSchema = Type.Object({
@@ -34,6 +36,7 @@ const operationSchema = Type.Object({
   prepared: Type.Optional(Type.Unknown()), scripts: Type.Optional(Type.Array(Type.Object({
     id: Type.String(), name: Type.String(), description: Type.String(), path: Type.String(), digest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   }), { maxItems: 64 })),
+  webAccess: Type.Optional(WebAccessSchema),
 }, { additionalProperties: false });
 const abort = new AbortController();
 let client: Client | undefined;
@@ -54,7 +57,7 @@ async function run(operation: McpOperation): Promise<unknown> {
         const lines = file.text.split("\n").map((text, index) => ({ line: index + 1, text })).filter((line) => line.text.includes(String(args.query))).slice(0, 100);
         return textResult({ path: file.path, digest: file.digest, matches: lines, boundedAt: 100 });
       }
-      if (request.params.name === "fetch_page") return textResult(await fetchPage(String(args.url), abort.signal));
+      if (request.params.name === "fetch_page") return textResult(await fetchPage(String(args.url), abort.signal, operation.webAccess));
       if (request.params.name === "search_memory" || request.params.name === "memory_graph") {
         if (operation.prepared === undefined) throw new Error("This memory tool has no authorized root-bound prepared data. No index or Local fallback was selected.");
         return textResult(operation.prepared);

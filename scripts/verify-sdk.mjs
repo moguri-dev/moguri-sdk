@@ -144,6 +144,12 @@ try {
       void sdk.getState().snapshot?.chatWriters[0]?.backgroundJobs;
       await sdk.workspaces.acknowledgeHomeWriter("generated-home-session","generated-home-writer",1,true);
       ` : ""}
+      ${installedProtocol >= 73 ? `
+      await sdk.webAllowlist.add("docs.example.invalid",{kind:"session",sessionId:"generated-session"},0);
+      await sdk.webAllowlist.add("https://example.invalid:8443",{kind:"project",projectId:"generated-project"},0);
+      void sdk.webAllowlist.list("generated-session")[0]?.scope.kind;
+      await sdk.webAllowlist.remove("generated-allowance",0);
+      ` : ""}
       ${installedProtocol >= 58 ? `
       const nativeCatalogue=await sdk.tools.catalog("generated-id","file");
       void nativeCatalogue.tools[0]?.parameters;void nativeCatalogue.tools[0]?.schemaDigest;
@@ -568,14 +574,16 @@ try {
       assert.equal((await sdk.coordination.read(s.id,{action:"inbox"})).data.messages[0].origin.actor,"user");
       const source=(await sdk.tools.catalog(s.id,"write_document")).tools.find(tool=>tool.name==="write_document");assert.ok(source);
       const admitted=await sdk.tools.execute(s.id,source.name,{path:"generated-installed.docx",format:"docx",expectedDigest:"absent",paragraphs:[{text:"Generated installed structured document."}]},source.schemaDigest);
-      const approval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;assert.ok(approval);
-      await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:approval.id,allow:true});
+      const approval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;
+      if(PROTOCOL_VERSION>=73)assert.equal(approval,null);
+      else{assert.ok(approval);await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:approval.id,allow:true});}
       assert.equal((await sdk.jobs.wait(admitted.id)).status,"completed");
       assert.ok((await readFile(join(project,"generated-installed.docx"))).length>0);
       const doc=(await sdk.tools.catalog(s.id,"inspect_document")).tools.find(tool=>tool.name==="inspect_document");assert.ok(doc);
       const checked=await sdk.tools.execute(s.id,doc.name,{path:"generated-installed.docx"},doc.schemaDigest);
-      const readApproval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;assert.ok(readApproval);
-      await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:readApproval.id,allow:true});
+      const readApproval=sdk.getState().snapshot.sessions.find(session=>session.id===s.id).pendingApproval;
+      if(PROTOCOL_VERSION>=73)assert.equal(readApproval,null);
+      else{assert.ok(readApproval);await sdk.command({type:"approval.respond",sessionId:s.id,approvalId:readApproval.id,allow:true});}
       assert.equal((await sdk.jobs.wait(checked.id)).status,"completed");
       assert.match(JSON.stringify(await sdk.mcp.readResult(checked.id)),/Generated installed structured document/);
       assert.equal((await sdk.tools.state(s.id,"SELECT count(*) AS count FROM todos")).data.rows[0].count,0);
@@ -666,6 +674,11 @@ try {
       assert.equal(original.projectId,null);assert.deepEqual(original.repositories.map(value=>value.projectId),[first.id,second.id]);
       await assert.rejects(()=>sdk.workspaces.files(opened.id,"."),{code:"repository_required"});
       assert.ok((await sdk.workspaces.files(opened.id,".",first.id)).entries.includes("generated-group.txt"));
+      if(PROTOCOL_VERSION>=73){
+        const current=sdk.settings.get();
+        await sdk.settings.update({...current.values,permissions:{...current.values.permissions,tools:[...current.values.permissions.tools,
+          {id:"generated-installed-folder-review",tool:"write_file",pathPrefix:"",decision:"ask"}]}},current.revision);
+      }
       const tool=(await sdk.tools.catalog(opened.id,"write_file")).tools.find(value=>value.name==="write_file");
       const started=await sdk.tools.execute(opened.id,tool.name,{repository:second.id,path:"generated-external.txt",text:"Generated installed selected-root edit.",expectedDigest:"absent"},tool.schemaDigest);
       const approval=sdk.getState().snapshot.sessions.find(value=>value.id===opened.id).pendingApproval;
@@ -687,6 +700,11 @@ try {
       assert.match(nativeDiagnostic,/recognizer.*SIGTERM/);
       const grant=sdk.approvals.list().find(value=>value.scope.kind==="project"&&value.scope.projectId===second.id);
       await sdk.approvals.revoke(grant.id);
+      if(PROTOCOL_VERSION>=73){
+        const current=sdk.settings.get();
+        await sdk.settings.update({...current.values,permissions:{...current.values.permissions,
+          tools:current.values.permissions.tools.filter(rule=>rule.id!=="generated-installed-folder-review")}},current.revision);
+      }
       await sdk.sessions.delete(opened.id,true);
       console.log("Installed protocol-65 typed root scopes, actual selected-root SDK edits, whole-tool grants, immediate read-only sides, private speech host and stream ownership gates pass without inference or audio capture.");
       }` : ""}
@@ -924,6 +942,31 @@ try {
       if(PROTOCOL_VERSION>=72)assert.equal((await sdk.workspaces.home(general.id)).root.root,await realpath(generatedHome));
       if(PROTOCOL_VERSION>=57)assert.equal((await sdk.candidates.eligibility(general.id)).eligible,false);
       assert.equal((await sdk.suggestions.preview(general.id)).preview.scope,"project-free");
+      if(PROTOCOL_VERSION>=73){
+        const before=(await sdk.budgets.dashboard()).totals.calls;
+        await sdk.webAllowlist.add("global.example.invalid",{kind:"global"});
+        await sdk.webAllowlist.add("project.example.invalid",{kind:"project",projectId:p.id});
+        await sdk.webAllowlist.add("session.example.invalid",{kind:"session",sessionId:general.id});
+        assert.deepEqual(sdk.webAllowlist.list(general.id).map(entry=>entry.site),["global.example.invalid","session.example.invalid"]);
+        assert.deepEqual(sdk.webAllowlist.list(s.id).map(entry=>entry.site),["global.example.invalid","project.example.invalid"]);
+        const shared=await sdk.slash(general.id,"/firewall list","tui");assert.equal(shared.kind,"text");assert.equal(JSON.parse(shared.text).effective.length,2);
+        for(const entry of [...sdk.webAllowlist.list()])await sdk.webAllowlist.remove(entry.id);
+        const write=(await sdk.tools.catalog(general.id,"write_file")).tools.find(tool=>tool.name==="write_file");
+        const written=await sdk.tools.execute(general.id,write.name,{path:"generated-installed-native-policy.txt",text:"GENERATED_NATIVE_POLICY\\n",expectedDigest:"absent"},write.schemaDigest);
+        assert.equal(sdk.getState().snapshot.sessions.find(session=>session.id===general.id).pendingApproval,null);
+        assert.equal((await sdk.jobs.wait(written.id)).status,"completed");
+        const read=(await sdk.tools.catalog(general.id,"read_file")).tools.find(tool=>tool.name==="read_file");
+        const refreshed=await sdk.tools.execute(general.id,read.name,{path:"generated-installed-native-policy.txt",expectedDigest:"0".repeat(64)},read.schemaDigest);
+        assert.equal((await sdk.jobs.wait(refreshed.id)).status,"completed");
+        const original=JSON.parse((await sdk.mcp.readResult(refreshed.id)).text),view=JSON.parse(original.text);
+        assert.equal(original.isError,false);assert.equal(view.text,"GENERATED_NATIVE_POLICY\\n");
+        assert.equal(view.sourceVersion.refreshed,true);assert.equal(view.sourceVersion.requestedDigest,"0".repeat(64));
+        assert.match(view.sourceRef.expectedDigest,/^[a-f0-9]{64}$/);assert.notEqual(view.sourceRef.expectedDigest,"0".repeat(64));
+        const nativeDecisions=sdk.getState().events.filter(event=>event.session_id===general.id&&event.event_type==="tool.decided");
+        assert.equal(nativeDecisions.length,2);assert.ok(nativeDecisions.every(event=>event.payload.actor==="policy"));
+        assert.equal((await sdk.budgets.dashboard()).totals.calls,before);
+        console.log("Installed protocol-73 SDK/shared TUI preserve exact scoped Local website allowances, policy-owned native Home writes/reads and explicit fresh-source provenance without a model call.");
+      }
       if(PROTOCOL_VERSION>=72&&process.platform==="darwin"){
         const homeOptions={stateDir:join(root,"home-execution-state"),provider:makeProvider(),retentionKey:Buffer.alloc(32,0x72),
           platform:{terminal:{...platform.terminal,defaultRoot:generatedHome,vault:remoteVault}}};
@@ -1001,9 +1044,10 @@ try {
           assert.equal(tool.scope.root,remoteRoot);
           const pending=await sdk.mcp.call(viewer.id,"builtin",tool.name,{path:"generated.ts",query:"SSH-only change"},tool.digest);
           const waiting=(await sdk.mcp.remoteCalls(viewer.id)).calls[0];
-          assert.equal(waiting.actor,"external");assert.equal(waiting.executionId,null);assert.equal(waiting.accessForwarded,false);
+          assert.equal(waiting.actor,"external");if(PROTOCOL_VERSION<73){assert.equal(waiting.executionId,null);assert.equal(waiting.accessForwarded,false);}
           const approval=sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).pendingApproval;
-          await sdk.command({type:"approval.respond",sessionId:viewer.id,approvalId:approval.id,allow:true});
+          if(PROTOCOL_VERSION>=73)assert.equal(approval,null);
+          else await sdk.command({type:"approval.respond",sessionId:viewer.id,approvalId:approval.id,allow:true});
           assert.equal((await sdk.jobs.wait(pending.id)).status,"completed");
           const call=(await sdk.mcp.remoteCalls(viewer.id)).calls[0],result=await sdk.mcp.remoteCall(viewer.id,call.id);
           assert.equal(call.status,"completed");assert.equal(call.root,remoteRoot);
@@ -1104,9 +1148,12 @@ try {
         const actualTool=(await sdk.mcp.tools("builtin","grep",0,operationSessionId)).tools.find(value=>value.name==="grep_logs");
         assert.ok(actualTool);
         const actualJob=await sdk.mcp.call(operationSessionId,"builtin",actualTool.name,{path:"generated.ts",query:"portableSdkMemory"},actualTool.digest);
-        let actualApproval;
-        for(let n=0;n<400&&!actualApproval;n++){actualApproval=sdk.getState().snapshot.sessions.find(value=>value.id===operationSessionId).pendingApproval;if(!actualApproval)await new Promise(resolve=>setTimeout(resolve,20));}
-        assert.ok(actualApproval);await sdk.command({type:"approval.respond",sessionId:operationSessionId,approvalId:actualApproval.id,allow:true});
+        if(PROTOCOL_VERSION>=73)assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===operationSessionId).pendingApproval,null);
+        else{
+          let actualApproval;
+          for(let n=0;n<400&&!actualApproval;n++){actualApproval=sdk.getState().snapshot.sessions.find(value=>value.id===operationSessionId).pendingApproval;if(!actualApproval)await new Promise(resolve=>setTimeout(resolve,20));}
+          assert.ok(actualApproval);await sdk.command({type:"approval.respond",sessionId:operationSessionId,approvalId:actualApproval.id,allow:true});
+        }
         assert.equal((await sdk.jobs.wait(actualJob.id)).status,"completed");
         assert.equal((await sdk.telemetry.operations({sessionId:operationSessionId,family:"mcp"})).totals.completed,1);
         assert.equal((await sdk.budgets.dashboard()).totals.calls,beforeCalls);
@@ -1280,9 +1327,13 @@ try {
         const refresh=await sdk.repositories.refresh(session.id,preview.bindingDigest,preview.revision,true);assert.equal((await sdk.jobs.wait(refresh.id)).status,"completed");
         assert.equal((await sdk.repositories.state(session.id)).observation.repository.publicOsiLicensed,true);assert.equal(repositoryLookups,1);
         const tool=(await sdk.mcp.tools("builtin","grep",0,session.id)).tools.find(value=>value.name==="grep_logs"),job=await sdk.mcp.call(session.id,"builtin",tool.name,{path:"fixture.txt",query:"Generated"},tool.digest);
-        let approval;
-        for(let n=0;n<400&&!approval;n++){approval=sdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval;if(!approval)await new Promise(resolve=>setTimeout(resolve,20));}
-        assert.ok(approval);await sdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});assert.equal((await sdk.jobs.wait(job.id)).status,"completed");
+        if(PROTOCOL_VERSION>=73)assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval,null);
+        else{
+          let approval;
+          for(let n=0;n<400&&!approval;n++){approval=sdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval;if(!approval)await new Promise(resolve=>setTimeout(resolve,20));}
+          assert.ok(approval);await sdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});
+        }
+        assert.equal((await sdk.jobs.wait(job.id)).status,"completed");
         const observed=await sdk.telemetry.operations({repositoryId:42,visibility:"open-source"});
         assert.equal(observed.totals.completed,1);assert.equal(observed.entries[0].repository.fullName,"generated/example");assert.equal(observed.entries[0].actor,"external");
         assert.equal(JSON.stringify(observed).includes("GENERATED_UNRETAINED_REPOSITORY_BODY"),false);assert.equal((await beta.telemetry.operations({repositoryId:42})).totals.attempts,0);
@@ -1581,7 +1632,8 @@ try {
         const tool=(await memorySdk.mcp.tools("builtin","memory",0,session.id)).tools.find(tool=>tool.name==="search_memory");
         const requested=await memorySdk.mcp.call(session.id,"builtin",tool.name,{query:"SSH-only change"},tool.digest);
         const approval=memorySdk.getState().snapshot.sessions.find(value=>value.id===session.id).pendingApproval;
-        await memorySdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});
+        if(PROTOCOL_VERSION>=73)assert.equal(approval,null);
+        else await memorySdk.command({type:"approval.respond",sessionId:session.id,approvalId:approval.id,allow:true});
         assert.equal((await memorySdk.jobs.wait(requested.id)).status,"completed");assert.match((await memorySdk.mcp.readResult(requested.id)).text,/SSH-only change/);
         assert.equal(memorySdk.getState().snapshot.sessions.find(value=>value.id===session.id).usage.length,0);
       }finally{memorySdk.disconnect();await memoryRuntime.close();}

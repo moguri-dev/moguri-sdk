@@ -70,8 +70,12 @@ current control identity. The user enables/disables access with the pane's
 **Agent control** switch. `mcp.tools` with `serverId: "builtin"` and query
 `"navigate"` discovers `browser_navigate`; query `"browser"` discovers all six
 tools, including `browser_status` and `browser_snapshot`. Invoke through the
-existing `mcp.call`/`mcp_gateway` exact-approval flow, supplying its discovered
-schema digest and fresh control/element identities. Results keep the normal
+existing `mcp.call`/`mcp_gateway` policy/approval flow, supplying its discovered
+schema digest and fresh control/element identities. Reads/interactions also
+copy the exact `expectedUrl` from status/snapshot. Protocol 73 carries the
+service-admitted website scope to the actual host, including redirects,
+subresources and WebSockets; clients cannot invent a substitute grant.
+Results keep the normal
 encrypted session/job retention and bounded `result.read` paging. Native input
 acknowledgement is not verification of a website's business action.
 
@@ -176,6 +180,39 @@ remain separate APIs. Reconnect/restart cannot replay PCM, and cancelling a
 retained partial job never acknowledges uncertain cleanup as successful.
 
 ## Remembered approvals and GitHub entry points
+
+Native file/data/readback operations are factory-policy approved rather than
+fake human decisions. Stricter explicit review/deny rules still win. Scripts
+and external MCPs require normal approval/delegation. Explicit Autopilot/Max
+remains automatic; this policy does not bypass hard environment or budget gates.
+
+`webAllowlist.list(sessionId?)` returns effective Local entries for that exact
+session or all entries in the connected profile. `add(site, scope,
+expectedSettingsRevision?)` and `remove(id, expectedSettingsRevision?)` use the
+existing atomic settings revision and validate original profile-owned sources:
+
+```ts
+await sdk.webAllowlist.add("docs.example.com", {
+  kind: "session", sessionId: session.id,
+});
+await sdk.webAllowlist.add("https://example.com:8443", { kind: "global" });
+const effective = sdk.webAllowlist.list(session.id);
+await sdk.webAllowlist.remove(effective[0]!.id);
+```
+
+Project scope is `{ kind: "project", projectId }`; global means this profile,
+not shared cross-profile policy. Exact hostnames permit default-port HTTPS;
+exact origins preserve scheme/port. Rules do not confine approved Local shell
+scripts, broaden Sandbox's actual firewall, authorize Remote, or enable browser
+control. Model tools cannot apply these settings. `/firewall` exposes the same
+user-only API in CLI/TUI and desktop.
+
+Protocol/schema 73 adds an optional `permissions.webAllowlist` with a strict
+atomic migration marker. No older record gains grants or changes ciphertext,
+receipts or accounting. Ordinary `read_file` refreshes a stale optional digest
+with explicit `sourceVersion` provenance and a fresh `sourceRef`; stale byte
+continuations restart at zero. `requireExactVersion: true` retains intentional
+pinning. Exact write/edit CAS and immutable original tool results are unchanged.
 
 `approvals.respond(sessionId, approvalId, allow, remember?)` atomically records
 the actual pending answer and optional `{ scope: "session" | "project" | "global",

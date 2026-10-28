@@ -1,14 +1,38 @@
 import { relative, isAbsolute, normalize } from "node:path";
 import { createHash } from "node:crypto";
 import type { Controls, RememberApproval, RememberedApproval, ToolCall, UserSettings } from "../../../packages/protocol/src/index.ts";
-import { appearanceErrors, commandFamily, sqlEndpoint, skillArchiveUrl, validateShortcutSet, validateModelPreferences, isPasteFilePath, MoguriError } from "../../../packages/protocol/src/index.ts";
+import { appearanceErrors, commandFamily, sqlEndpoint, skillArchiveUrl, validateShortcutSet, validateModelPreferences, isPasteFilePath, MoguriError,
+  canonicalWebSite, effectiveWebAllowances, webSiteMatches, isRecord, type WebAccess } from "../../../packages/protocol/src/index.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { validateRemoteTarget } from "./remote.ts";
 
-export interface Authorization { decision: "ask" | "allow" | "deny"; ruleId?: string; reason: string }
+export interface Authorization { decision: "ask" | "allow" | "deny"; ruleId?: string; reason: string; actor?: "policy" }
+export const automaticNativeTools = new Set([
+  "read_file", "list_files", "find_files", "search_files", "diff_files", "edit_file", "write_file", "query_data",
+  "sqlite_query", "sqlite_transaction", "inspect_document", "write_document", "edit_document", "discover_tools", "read_tool_result",
+  "read_agent_terminal", "read_command_job", "list_documents", "read_document", "search_document", "query_state", "mutate_state",
+  "session_context", "wait_session", "memory_search", "clock", "ask_user", "task_progress",
+]);
 export interface PermissionContext {
   sessionId: string; projectId: string | null; env: Controls["env"]; autonomy: Controls["autonomy"];
   automaticApprovals?: boolean; mcpBinding?: string; mcpSchemaDigest?: string;
+  enforcedWebDomains?: string[];
+}
+export function toolWebTarget(call: ToolCall): string | undefined {
+  if (call.name === "web_search") return "https://html.duckduckgo.com/html/";
+  if (["web_fetch", "fetch_page"].includes(call.name)) return typeof call.arguments.url === "string" ? call.arguments.url : undefined;
+  if (call.name !== "mcp_gateway" || call.arguments.action !== "call" || call.arguments.serverId !== "builtin" || !isRecord(call.arguments.arguments)) return;
+  const tool = call.arguments.tool, args = call.arguments.arguments;
+  if (tool === "fetch_page" || tool === "browser_navigate") return typeof args.url === "string" ? args.url : undefined;
+  if (["browser_snapshot", "browser_click", "browser_fill", "browser_press_key"].includes(String(tool))) return typeof args.expectedUrl === "string" ? args.expectedUrl : undefined;
+}
+export function approvedWebAccess(settings: UserSettings, call: ToolCall, context: PermissionContext): WebAccess | undefined {
+  const target = toolWebTarget(call);
+  if (!target) return;
+  return { version: 1, unrestricted: settings.permissions.defaultDecision !== "deny" && context.automaticApprovals === true && ["Autopilot", "Autopilot Max"].includes(context.autonomy),
+    sites: context.env === "Sandbox" ? [...new Set(context.enforcedWebDomains ?? [])] :
+      [...new Set(effectiveWebAllowances(settings.permissions.webAllowlist ?? [], context).map((entry) => entry.site))],
+    origins: target === "about:blank" ? [] : [new URL(target).origin] };
 }
 const argumentsDigest = (value: ToolCall["arguments"]) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const commandText = (call: ToolCall): string | null => call.name === "run_command" || call.name === "command_job" && call.arguments.action === "start" ?
@@ -103,6 +127,13 @@ export function validateSettings(settings: UserSettings): void {
       throw new MoguriError("unsafe_rule", "Use an exact command, safe command family or schema-bound MCP tool, never a blanket execution grant.");
     }
   }
+  const webIds = new Set<string>(), webScopes = new Set<string>();
+  for (const entry of settings.permissions.webAllowlist ?? []) {
+    const key = JSON.stringify([entry.scope.kind, entry.scope.kind === "session" ? entry.scope.sessionId :
+      entry.scope.kind === "project" ? entry.scope.projectId : null, entry.site]);
+    if (canonicalWebSite(entry.site) !== entry.site || webIds.has(entry.id) || webScopes.has(key)) throw new MoguriError("web_allowlist_rule", "Website entries need unique IDs and canonical sites within each exact scope.");
+    webIds.add(entry.id); webScopes.add(key);
+  }
   if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:ghp|gho|github_pat)_[A-Za-z0-9_]{20,}/.test(JSON.stringify(settings))) {
     throw new MoguriError("secret_in_settings", "Do not put credentials in prompts, arguments or settings. Use the credential backend.");
   }
@@ -124,6 +155,9 @@ export function authorizeTool(settings: UserSettings, call: ToolCall, root: stri
   const automatic: Authorization | undefined = context?.automaticApprovals === true && ["Autopilot", "Autopilot Max"].includes(context.autonomy) && defaultDecision !== "deny" ?
     { decision: "allow", ruleId: `autonomy:${context.sessionId}`, reason: "Automatic approvals explicitly enabled by the user for this session." } : undefined;
   const remembered = () => rememberedAuthorization(settings, call, context);
+  const nativeGateway = call.name === "mcp_gateway" && (call.arguments.action === "read_result" || call.arguments.action === "discover" ||
+    call.arguments.serverId === "builtin" && (call.arguments.action === "tools" ||
+      call.arguments.action === "call" && ["browser_status", "grep_logs", "search_memory", "memory_graph"].includes(String(call.arguments.tool))));
   if (call.name === "run_command" || call.name === "command_job" && call.arguments.action === "start" || call.name === "debug") {
     const exact = call.name === "debug" ? `debug ${JSON.stringify(call.arguments)}` : call.arguments.command;
     const commands = settings.permissions.commands.filter((rule) => rule.command === exact);
@@ -131,11 +165,22 @@ export function authorizeTool(settings: UserSettings, call: ToolCall, root: stri
     if (rule?.decision === "deny") return { decision: "deny", ruleId: rule.id, reason: "Denied by exact command policy." };
     return automatic ?? remembered() ?? (rule ? { decision: rule.decision, ruleId: rule.id, reason: `Exact command ${rule.decision} rule.` } : unspecified);
   }
-  if (call.name === "mcp_gateway" && call.arguments.action === "call") return automatic ?? remembered() ?? { decision: defaultDecision, reason: "External and script tools require exact nested-tool approval; annotations are not permission." };
+  const webTarget = toolWebTarget(call);
+  if (!webTarget && !nativeGateway && call.name === "mcp_gateway" && call.arguments.action === "call") return automatic ?? remembered() ?? { decision: defaultDecision, reason: "External and script tools require exact nested-tool approval; annotations are not permission." };
   const delegated = automatic ?? remembered();
   if (delegated) return delegated;
   const grant = matched.find((rule) => rule.decision === "allow");
   if (grant) return { decision: "allow", ruleId: grant.id, reason: "Explicit user tool delegation." };
   const ask = matched.find((rule) => rule.decision === "ask");
-  return ask ? { decision: "ask", ruleId: ask.id, reason: "Explicit user review rule." } : unspecified;
+  if (ask) return { decision: "ask", ruleId: ask.id, reason: "Explicit user review rule." };
+  if (defaultDecision !== "deny" && context && webTarget) {
+    const allowance = effectiveWebAllowances(settings.permissions.webAllowlist ?? [], context).find((entry) => webSiteMatches(entry.site, webTarget));
+    const enforced = context.env === "Sandbox" && context.enforcedWebDomains?.some((site) => webSiteMatches(site, webTarget));
+    if (allowance || enforced) return { decision: "allow", actor: "policy", ruleId: allowance?.id ?? "native:enforced-network", reason: allowance ?
+      `Actual-user ${allowance.scope.kind} Local website allowlist.` : "The exact verified guest already enforces this approved host." };
+  }
+  if (defaultDecision !== "deny" && (automaticNativeTools.has(call.name) || nativeGateway)) {
+    return { decision: "allow", actor: "policy", ruleId: `native:${call.name}`, reason: "Native operation is automatically permitted within its existing root, mode and hard policy." };
+  }
+  return unspecified;
 }

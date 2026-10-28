@@ -6,7 +6,7 @@ import { request } from "node:http";
 import { WebSocket } from "ws";
 import { envelope } from "../apps/service/src/controller.ts";
 import { MoguriClient } from "../packages/client/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
 
@@ -72,9 +72,10 @@ test("two clients share durable drafts, queue races, idempotency and cancellatio
   } finally { first.disconnect(); second.disconnect(); await fixture.close(); }
 });
 
-test("manual exact-argument approvals gate file reads and conflict-aware writes", mac, async () => {
+test("explicit strict review rules retain manual exact-argument file approvals and conflict-aware writes", mac, async () => {
   const fixture = await setupFixture();
   try {
+    await reviewNativeTools(fixture);
     await fixture.configure();
     await fixture.send("generated write task");
     const approval = await waitFor(() => fixture.session().pendingApproval);

@@ -420,6 +420,20 @@ export class EventStore {
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='chat_home_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid Home-backed chat schema marker. State was preserved.");
       }
+      if (version < 73) {
+        if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='native_web_policy_schema'").get()) {
+          throw new Error("Premature native website policy schema marker. State was preserved without relabelling.");
+        }
+        if (this.events().some((event) => event.event_type === "settings.updated" && Object.hasOwn(event.payload.settings.permissions, "webAllowlist"))) {
+          throw new Error("Website allowance history cannot be relabelled without its original schema marker. State was preserved.");
+        }
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('native_web_policy_schema','1');
+          PRAGMA user_version=73; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='native_web_policy_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid native website policy schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {

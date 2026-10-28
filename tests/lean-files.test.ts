@@ -56,7 +56,7 @@ test("compact search and its original retained source both exclude protected and
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("Local source conflicts recover through an explicit fresh read while stale edits remain rejected", async () => {
+test("ordinary reads refresh a stale source reference explicitly while stale edits remain rejected", async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-local-source-"));
   const run = (name: string, args: Record<string, unknown>) => executeTool(root, { id: "generated-source", name, arguments: args },
     new AbortController().signal, () => {}, () => {}, undefined, { mode: "agent", env: "Local", folders: { denied: [], readOnly: [] } });
@@ -65,7 +65,17 @@ test("Local source conflicts recover through an explicit fresh read while stale 
     const first = JSON.parse((await run("read_file", { path: "generated.txt" })).text);
     assert.equal(first.sourceRef.expectedDigest, digest("Generated original."));
     await writeFile(join(root, "generated.txt"), "Generated external update.");
-    await assert.rejects(() => run("read_file", first.sourceRef), /without expectedDigest/);
+    const refreshed = JSON.parse((await run("read_file", first.sourceRef)).text);
+    assert.equal(refreshed.text, "Generated external update.");
+    assert.equal(refreshed.sourceRef.expectedDigest, digest("Generated external update."));
+    assert.equal(refreshed.sourceVersion.refreshed, true);
+    assert.equal(refreshed.sourceVersion.requestedDigest, first.sourceRef.expectedDigest);
+    await assert.rejects(() => run("read_file", { ...first.sourceRef, requireExactVersion: true }), { code: "file_conflict" });
+    await assert.rejects(() => run("read_file", { path: "generated.txt", requireExactVersion: true }), { code: "file_version" });
+    const restarted = JSON.parse((await run("read_file", { ...first.sourceRef, offset: 8, limit: 9 })).text);
+    assert.equal(restarted.text, "Generated");
+    assert.equal(restarted.sourceVersion.continuationReset, true);
+    assert.equal(restarted.sourceRef.expectedDigest, refreshed.sourceRef.expectedDigest);
     await assert.rejects(() => run("edit_file", { ...first.sourceRef, edits: [{ oldText: "Generated original.", newText: "Must not publish." }] }), { code: "file_conflict" });
     const fresh = JSON.parse((await run("read_file", { path: "generated.txt" })).text);
     assert.equal(fresh.text, "Generated external update.");

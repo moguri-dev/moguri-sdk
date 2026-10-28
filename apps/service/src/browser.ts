@@ -3,10 +3,13 @@ import {
   MoguriError, browserUrl, validateBrowserArguments, type BrowserCommand, type BrowserQuery, type BrowserResponse,
   type BrowserRequest, type BrowserResult, type BrowserState, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
+import { assertWebAccess, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 
 interface Host {
   sessionId: string; hostId: string; lease: string; projectId: string | null; workspaceId: string | null;
   sequence: number; controlId: string | null; seen: number; url: string; title: string;
+  permissionRevision: number;
+  autonomy: string; automaticApprovals: boolean;
   pending?: { request: BrowserRequest; dispatched: boolean; settle(result: BrowserResult): void };
 }
 const failed = (text: string): BrowserResult => ({ text, outcome: "failed" });
@@ -34,7 +37,9 @@ export class BrowserBroker {
       const session = this.snapshot().sessions.find((session) => session.id === host.sessionId);
       if (!session || session.status === "archived" || session.controls.env !== "Local" ||
         !this.snapshot().policy.allowedEnvs.includes("Local") || session.projectId !== host.projectId || session.workspaceId !== host.workspaceId ||
-        session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent" || Date.now() - host.seen > this.staleMs) {
+        session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent" || Date.now() - host.seen > this.staleMs ||
+        host.permissionRevision !== this.snapshot().settings.permissionRevision || host.autonomy !== session.controls.autonomy ||
+        host.automaticApprovals !== (session.controls.automaticApprovals === true)) {
         this.revoke(host, "Browser control was revoked by its current owner or policy.");
       }
     }
@@ -54,7 +59,8 @@ export class BrowserBroker {
       if (previous && Date.now() - previous.seen <= this.staleMs) throw new MoguriError("browser_attached", "This session already has an owned browser. No replacement was inferred.", 409);
       if (previous) this.revoke(previous, "The original browser host expired.");
       this.hosts.set(session.id, { ...command, projectId: session.projectId, workspaceId: session.workspaceId, sequence: 0,
-        controlId: null, seen: Date.now(), url: "", title: "" });
+        controlId: null, seen: Date.now(), url: "", title: "", permissionRevision: snapshot.settings.permissionRevision,
+        autonomy: session.controls.autonomy, automaticApprovals: session.controls.automaticApprovals === true });
       return;
     }
     const host = this.owner(command);
@@ -75,6 +81,8 @@ export class BrowserBroker {
       const { session } = this.session(host.sessionId);
       if (!this.usable(host) || session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent") throw new MoguriError("browser_denied", "This browser has no current Local agent authority. Control remains off.", 403);
       host.controlId = randomUUID();
+      host.permissionRevision = this.snapshot().settings.permissionRevision;
+      host.autonomy = session.controls.autonomy; host.automaticApprovals = session.controls.automaticApprovals === true;
     }
   }
   state(sessionId: string): BrowserState {
@@ -82,7 +90,7 @@ export class BrowserBroker {
     const host = this.hosts.get(sessionId), available = Boolean(host && this.usable(host));
     return { available, controlId: available ? host!.controlId : null, url: available && host!.url ? host!.url : null, title: available ? host!.title : "",
       diagnostic: !available ? "Open this Local session's desktop Browser pane. No substitute browser was launched." :
-        host!.controlId ? "Agent control is on. Exact tool approvals still apply; page data is untrusted." : "Agent control is off. Enable the switch in the Browser pane to allow agent use." };
+        host!.controlId ? "Agent control is on. Scoped website policy and exact page ownership apply; page data is untrusted." : "Agent control is off. Enable the switch in the Browser pane to allow agent use." };
   }
   query(query: BrowserQuery): BrowserResponse {
     if (query.type === "browser.state") return { type: query.type, browser: this.state(query.sessionId) };
@@ -94,7 +102,7 @@ export class BrowserBroker {
     if (host.pending) host.pending.dispatched = true;
     return { type: query.type, controlId: host.controlId, request: host.pending?.request ?? null };
   }
-  async call(sessionId: string, tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<BrowserResult> {
+  async call(sessionId: string, tool: string, args: Record<string, unknown>, signal: AbortSignal, webAccess?: WebAccess): Promise<BrowserResult> {
     signal.throwIfAborted();
     validateBrowserArguments(tool, args);
     const state = this.state(sessionId);
@@ -102,11 +110,14 @@ export class BrowserBroker {
     if (!state.available || !state.controlId || args.controlId !== state.controlId) return failed("Browser control is off, unavailable or changed. Ask the user to enable Agent control, then use browser_status for its fresh controlId.");
     const host = this.hosts.get(sessionId)!;
     if (host.pending) return failed("Another browser action is still owned. Wait for its actual result; nothing was queued.");
-    if (tool === "browser_navigate") browserUrl(String(args.url));
+    const target = String(tool === "browser_navigate" ? args.url : args.expectedUrl);
+    if (target !== "about:blank") { browserUrl(target); assertWebAccess(webAccess, target); }
+    if (!webAccess) return failed("This browser action has no original admitted website scope. Nothing was dispatched.");
+    if (tool !== "browser_navigate" && host.url !== target) return failed("The browser page changed since its exact expectedUrl. Inspect the current status before requesting a new action.");
     return new Promise<BrowserResult>((resolve) => {
       const timer = setTimeout(() => this.cancelSession(sessionId, "The browser action timed out."), this.timeoutMs);
       const cancel = () => this.cancelSession(sessionId, "The owning browser action was cancelled.");
-      host.pending = { request: { id: randomUUID(), controlId: state.controlId!, tool, arguments: args }, dispatched: false,
+      host.pending = { request: { id: randomUUID(), controlId: state.controlId!, tool, arguments: args, webAccess }, dispatched: false,
         settle: (result) => {
           clearTimeout(timer); signal.removeEventListener("abort", cancel); host.pending = undefined; resolve(result);
         } };

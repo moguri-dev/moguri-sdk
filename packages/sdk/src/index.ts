@@ -14,6 +14,7 @@ import { createGithubApi } from "./github.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
 import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
 import type { RememberApproval } from "../../protocol/src/permissions.ts";
+import { canonicalWebSite, effectiveWebAllowances, type WebScope } from "../../protocol/src/web-policy.ts";
 import type { KanbanSource } from "../../protocol/src/kanban.ts";
 import { PRICE_PROVIDERS, type PriceProvider } from "../../protocol/src/pricing.ts";
 
@@ -84,6 +85,31 @@ export class MoguriSdk extends TransportClient {
       if (!current.values.permissions.remembered?.some((grant) => grant.id === id)) throw new ClientError("approval_missing", "This remembered approval is no longer present.");
       return this.settings.update({ ...current.values, permissions: { ...current.values.permissions,
         remembered: current.values.permissions.remembered.filter((grant) => grant.id !== id) } }, expectedRevision);
+    },
+  };
+  readonly webAllowlist = {
+    list: (sessionId?: string) => {
+      const snapshot = this.getState().snapshot, entries = snapshot?.settings.values.permissions.webAllowlist ?? [];
+      if (!sessionId) return entries;
+      const session = snapshot?.sessions.find((entry) => entry.id === sessionId);
+      if (!session) throw new ClientError("session_missing", "Choose an existing session in this profile.");
+      return effectiveWebAllowances(entries, { sessionId, projectId: session.projectId, env: session.controls.env });
+    },
+    add: (site: string, scope: WebScope, expectedRevision = this.settings.get()?.revision) => {
+      const current = this.settings.get(), snapshot = this.getState().snapshot;
+      if (!current || !snapshot || expectedRevision === undefined) throw new ClientError("settings_missing", "Connect this profile before changing its Local website allowlist.");
+      if (scope.kind === "session" && !snapshot.sessions.some((session) => session.id === scope.sessionId) ||
+        scope.kind === "project" && !snapshot.projects.some((project) => project.id === scope.projectId)) throw new ClientError("web_allowlist_scope", "Choose an original session or project in this profile.");
+      const entry = { id: crypto.randomUUID(), site: canonicalWebSite(site), scope };
+      return this.settings.update({ ...current.values, permissions: { ...current.values.permissions,
+        webAllowlist: [...(current.values.permissions.webAllowlist ?? []), entry] } }, expectedRevision);
+    },
+    remove: (id: string, expectedRevision = this.settings.get()?.revision) => {
+      const current = this.settings.get();
+      if (!current || expectedRevision === undefined) throw new ClientError("settings_missing", "Connect before removing a website allowance.");
+      if (!current.values.permissions.webAllowlist?.some((entry) => entry.id === id)) throw new ClientError("web_allowlist_missing", "This website allowance is no longer present.");
+      return this.settings.update({ ...current.values, permissions: { ...current.values.permissions,
+        webAllowlist: current.values.permissions.webAllowlist.filter((entry) => entry.id !== id) } }, expectedRevision);
     },
   };
   readonly tools = {

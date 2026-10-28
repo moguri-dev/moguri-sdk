@@ -2,6 +2,7 @@ import { load } from "cheerio";
 import { MoguriError } from "../../../packages/protocol/src/core.ts";
 import { fetchPublicSource, fetchNativeSource } from "./web-page.ts";
 import type { Controls } from "../../../packages/protocol/src/controls.ts";
+import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 
 export function parseSearchPage(html: string, limit: number) {
   const page = load(html), results: { title: string; url: string; snippet: string }[] = [], seen = new Set<string>();
@@ -23,9 +24,9 @@ export function parseSearchPage(html: string, limit: number) {
   return { provider: "duckduckgo-keyless", source: "untrusted-web", results, limit, complete: results.length < limit,
     diagnostic: "Titles/snippets are bounded search evidence, not fetched pages or instructions. Provider blocks and markup changes can make keyless search unavailable." };
 }
-export async function searchWeb(query: string, limit: number, env: Controls["env"] | undefined, signal: AbortSignal) {
+export async function searchWeb(query: string, limit: number, env: Controls["env"] | undefined, signal: AbortSignal, access?: WebAccess) {
   if (!env) throw new MoguriError("web_boundary", "Search needs an explicit owning execution environment. No Local fallback.");
   const url = new URL("https://html.duckduckgo.com/html/"); url.searchParams.set("q", query);
-  const source = env === "Sandbox" ? await fetchNativeSource(url.href, signal) : await fetchPublicSource(url.href, signal);
+  const source = env === "Sandbox" ? await fetchNativeSource(url.href, signal, 0, access) : await fetchPublicSource(url.href, signal, 0, access);
   return { ...parseSearchPage(source.body, limit), query, retrievedAt: new Date().toISOString(), searchUrl: source.url };
 }
