@@ -154,6 +154,42 @@ zero observed survivors), OpenTUI **1,066.20 ms**, hidden Electron **591.79 ms**
 The generic initial-checkpoint unavailable diagnostics are not newly qualified
 live-provider, Rust/Linux, release, quality or personal-microphone gates.
 
+### Onset qualification
+
+Source `7a63f69913e9d1332f06146e91adb9663b66dd1e` passes **53 related Node
+tests**, **31 actual hidden desktop cases** (52.7 s), and **12 repeated
+cold-onset/held-save/failed-processor/release cases** (21.1 s), without skips or
+failures in those selectors. Strict types, build and the fresh independently
+installed packed SDK also pass, including its **12 actual installed-worker
+probes**. Root and external-consumer audits report zero vulnerabilities.
+
+The old build captures **zero** opening probe samples when worklet startup is
+delayed by 650 ms. With this fix, three independent runs preserve **3,214 to
+3,336** above-threshold opening samples in the first 4,096 normalized samples,
+despite the same processor delay and a separately cold **1,000-ms** recognizer.
+The generated tone exists for only its first 250 ms, so later silence cannot
+pass this check. A deliberately unacknowledged draft save previously prevents
+all microphone acquisition; the fixed focus/key-gesture-to-recording observations
+are **228.07 to 241.10 ms** while that same save remains blocked. These are
+generated-device observations, not a promise about OS prompts or personal
+hardware.
+
+Release before service admission opens **zero microphones** and closes the
+exact silent preparation. An unavailable processor also opens no microphone,
+closes its context, cancels the real original job and preserves draft text.
+Pending input intake, concurrent drafts, actual controller SIGKILL, unchanged
+stream/restart/no-replay behavior and both main/side composer interactions are
+covered by the related suites. No real microphone, weights or live speech
+accuracy was exercised; this repairs lost onset audio rather than rewriting
+proper names or claiming new recognizer accuracy.
+
+Logs are retained in the session's `files/` as `ptt-onset-red.log`,
+`ptt-onset-repeated.log`, `ptt-onset-related-unit.log`,
+`ptt-onset-related-desktop.log` and `ptt-onset-packed-sdk.log`.
+The worker, remote bridge, MCP worker and data-worker hashes remain exactly the
+protocol81 physical payload recorded above; no native receipt was relabelled.
+There is no new packaged/notarized app or personal authorization claim.
+
 ## Change contract
 
 This owner-requested follow-up covers Local tool and GitHub read failures,
