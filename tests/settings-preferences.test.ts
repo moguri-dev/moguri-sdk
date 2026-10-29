@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   appearanceColors, appearanceErrors, colorContrast, effectiveGuidance, guidanceText, readinessGuidance,
 } from "../packages/protocol/src/preferences.ts";
-import { defaultSettings, normalizeSettings, parse, SettingsSchema } from "../packages/protocol/src/index.ts";
+import { AppearanceSchema, defaultSettings, normalizeSettings, parse, SettingsSchema } from "../packages/protocol/src/index.ts";
 import { resolveControls } from "../packages/protocol/src/controls.ts";
 import { authorizeTool, validateSettings } from "../apps/service/src/permissions.ts";
 
@@ -43,6 +43,31 @@ test("every named palette meets measured text, control, focus and selected-state
     assert.ok(colorContrast(colors.controlLine, colors.surface) >= 3);
   }
   assert.notDeepEqual(appearanceColors({ theme: "dark", palette: "ocean" }, "dark"), appearanceColors({ theme: "dark" }, "dark"));
+});
+
+test("requested missing palettes are shared, distinct and readable without changing saved or factory themes", () => {
+  const palettes = ["moguri", "ocean", "orchid", "rose", "terminal", "aubergine", "ember", "monochrome", "vaporwave", "crystal"];
+  const distinct = new Set<string>();
+  for (const palette of palettes) {
+    const appearance = parse(AppearanceSchema, { theme: "dark", palette });
+    assert.deepEqual(appearanceErrors(appearance), [], palette);
+    for (const mode of ["dark", "light"] as const) {
+      const colors = appearanceColors(appearance, mode);
+      assert.ok(colorContrast(colors.muted, colors.selected) >= 4.5, `${palette} ${mode}: secondary selection text`);
+      distinct.add(`${mode}:${JSON.stringify(colors)}`);
+      if (palette === "monochrome") for (const value of Object.values(colors)) {
+        assert.equal(value.slice(1, 3), value.slice(3, 5), `monochrome ${mode}: ${value}`);
+        assert.equal(value.slice(3, 5), value.slice(5, 7), `monochrome ${mode}: ${value}`);
+      }
+    }
+    const saved = normalizeSettings({ ...defaultSettings(), appearance });
+    assert.deepEqual(saved.appearance, { ...appearance, custom: {} });
+  }
+  assert.equal(distinct.size, palettes.length * 2);
+  assert.deepEqual(defaultSettings().appearance, { theme: "dark", palette: "moguri", custom: {} });
+  assert.equal(appearanceColors({ theme: "dark" }, "dark").accent, "#a8d7bc");
+  assert.equal(appearanceColors({ theme: "dark", palette: "ocean" }, "dark").accent, "#a7cfea");
+  assert.equal(appearanceColors({ theme: "dark", palette: "orchid" }, "dark").accent, "#cdbbe7");
 });
 
 test("custom palettes reject unreadable text and focus rather than silently replacing saved colors", () => {

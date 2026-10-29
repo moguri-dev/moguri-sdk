@@ -20,7 +20,7 @@ test("the 71-to-72 Home marker migration rolls back atomically, preserves cipher
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('native_web_policy_schema','chat_home_schema'); PRAGMA user_version=71; CREATE TRIGGER generated_home_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='chat_home_schema' BEGIN SELECT RAISE(ABORT,'Generated Home migration interruption'); END;"); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema'); PRAGMA user_version=71; CREATE TRIGGER generated_home_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='chat_home_schema' BEGIN SELECT RAISE(ABORT,'Generated Home migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated Home migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -64,6 +64,7 @@ test("missing, corrupt or premature Home markers and genuine Home history cannot
       const raw = new DatabaseSync(fixture.service.store.path);
       let original;
       try {
+        if (change === "premature" || change === "future-history") raw.exec("DELETE FROM retention_metadata WHERE id='theme_catalog_schema'");
         raw.exec(change === "corrupt" ? "UPDATE retention_metadata SET value='0' WHERE id='chat_home_schema'" :
           change === "premature" ? "PRAGMA user_version=71" :
           `DELETE FROM retention_metadata WHERE id='chat_home_schema'; ${change === "future-history" ? "PRAGMA user_version=71" : ""}`);

@@ -5,7 +5,11 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **69**, including
+Current source uses protocol **78** for the independently implemented
+[shared theme catalogue and terminal navigation](architecture/themes-and-tui.md),
+preserving the genuine protocol-76 baseline. It does not import the separately
+reserved protocol-77 model-continuity implementation; that lineage is rejected
+until actual combined-source convergence and requalification. Existing features include
 [direct effort and exact context-window shortcuts](architecture/model-controls.md#direct-tuning-slash-commands),
 [cascading model controls and complete slash discovery](architecture/model-controls.md#cascading-menus-and-complete-slash-discovery),
 [per-question refreshed side context](architecture/session-reliability.md#per-question-side-context),
@@ -699,6 +703,16 @@ all call these APIs. Examples and exact errors/lifecycle limits are in
 [dependency cache scopes](architecture/dependency-cache-scopes.md).
 
 ### Shared preference maintenance
+
+Protocol 78 adds the transactional `theme_catalog_schema=1` marker and the
+Rose, Terminal, Aubergine, Ember, Monochrome, Vaporwave and Crystal palette IDs.
+Existing Moguri/Ocean/Orchid IDs, saved Custom values and factory Dark are
+unchanged. `themePalettes`, `ThemePaletteSchema` and `appearanceColors` expose
+one browser-safe catalogue; `sdk.slash(sessionId, "/theme crystal dark")` uses
+the existing revision-bound settings API, without inference. `/theme list`
+inspects the catalogue and palette-only changes preserve the selected mode.
+Desktop and TUI render those same tokens. No new event kind or preference store
+is introduced; rollback/restart and strict lineage checks preserve retained data.
 
 Protocol 45 preserves old event/control bytes and explicitly saved retention
 values while filling new nested defaults. `settings.update/reset` includes

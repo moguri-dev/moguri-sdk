@@ -401,6 +401,10 @@ Dark remains the factory theme. Named palettes and custom element colors are
 typed profile preferences shared through the SDK. Color checks include text,
 controls, disabled states and visible keyboard focus. Custom themes do not
 change the semantic meaning of warnings or permission states.
+The [theme catalogue follow-up](themes-and-tui.md) adds the missing requested
+presets, preserves Ocean/Orchid/Moguri and saved custom choices, and binds the TUI
+to the same tokens. `/theme` uses the ordinary shared settings revision check;
+it never selects a model or grants permissions.
 
 ## Voice, shortcuts and notifications
 

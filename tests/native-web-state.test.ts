@@ -13,7 +13,7 @@ test("the 72-to-73 website policy marker is atomic, preserves ciphertext and nev
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id='native_web_policy_schema'; PRAGMA user_version=72; CREATE TRIGGER generated_web_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='native_web_policy_schema' BEGIN SELECT RAISE(ABORT,'Generated website migration interruption'); END;"); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema'); PRAGMA user_version=72; CREATE TRIGGER generated_web_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='native_web_policy_schema' BEGIN SELECT RAISE(ABORT,'Generated website migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated website migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -42,6 +42,7 @@ test("missing, corrupt, premature and relabelled website rules fail closed witho
       const raw = new DatabaseSync(fixture.service.store.path);
       let original;
       try {
+        if (change === "premature" || change === "future-history") raw.exec("DELETE FROM retention_metadata WHERE id='theme_catalog_schema'");
         raw.exec(change === "corrupt" ? "UPDATE retention_metadata SET value='0' WHERE id='native_web_policy_schema'" :
           change === "premature" ? "PRAGMA user_version=72" :
           `DELETE FROM retention_metadata WHERE id='native_web_policy_schema'; ${change === "future-history" ? "PRAGMA user_version=72" : ""}`);
