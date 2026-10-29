@@ -1,8 +1,8 @@
 import { writeFileSync } from "node:fs";
 const marker = process.argv.indexOf("--started-marker");
 const ready = () => {
-  if (process.argv.includes("--live") && !process.argv.includes("--no-ready")) process.stderr.write('[live] listening on "Generated audio device" at 16000 Hz; press Ctrl-C to stop\n');
   if (marker >= 0) writeFileSync(process.argv[marker + 1], String(process.pid));
+  if (process.argv.includes("--live") && !process.argv.includes("--no-ready")) process.stderr.write('[live] listening on "Generated audio device" at 16000 Hz; press Ctrl-C to stop\n');
 };
 const live = process.argv.includes("--live");
 const argument = (name) => process.argv[process.argv.indexOf(name) + 1];
