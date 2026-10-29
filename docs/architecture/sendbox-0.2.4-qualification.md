@@ -3,9 +3,10 @@
 This is the native-qualification slice of issue #35, not its wider loss/recovery
 hardening or Milestone 1 acceptance. Historical 0.2.3 receipts and archives remain
 unchanged. A current generated pass must never be reported as a physical run.
-The [protocol-77 model-controls follow-up](#protocol-77-model-controls-follow-up)
-records the latest exact image/host/package cut. The protocol-76 measurements
-below remain the original evidence, not relabelled qualification for new bytes.
+The [protocol-80 combined follow-up](#protocol-80-combined-follow-up) records
+the current exact image/host/package cut. Protocol-76 and
+[protocol-77](#protocol-77-model-controls-follow-up) measurements remain their
+original evidence, not relabelled qualification for new bytes.
 
 ## Change contract
 
@@ -433,3 +434,238 @@ model quality, real-microphone accuracy, release notarization, non-macOS host
 release or full #35/#17 acceptance is claimed. Development signing stays
 ad-hoc and CI stays main-push-only. Existing FFI/chunk/optional `.icon` and
 scoped consumer-install/deprecation notices remain visible, not vulnerabilities.
+
+## Protocol-80 combined follow-up
+
+The actual themes/TUI main `8eca0de54570556bd51510b9982b93451baf55ec`
+was merged into this branch with explicit user approval, preserving both
+histories. This is genuinely combined protocol/database **80**, not standalone
+79 or a relabelled 77/78 archive. The shared queue, actual client handlers,
+live controls and captured-group Sandbox extension follow
+[the workspace contract](workspace-experience.md) and
+[the native group contract](managed-sandbox.md#captured-project-group-extension-contract).
+
+The final measured runtime/client source is
+**`036ea701635fef1d068069788da42191e3ae413d`**. The clean physical run began
+**2026-10-29 at 14:43:13.827Z**; its tracked-source diff is empty, SHA-256
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+Subsequent evidence and element-scoped keyboard-test changes do not replace
+those runtime bytes. Moguri remains **0.30.0-alpha.1**.
+
+Every current store requires these independent string markers, each **`'1'`**:
+`model_selection_continuity_schema`, `theme_catalog_schema`,
+`queued_slash_schema`, `project_folder_actions_schema`,
+`sandbox_multi_root_schema`, and
+`theme_model_workspace_convergence_schema`. Actual genuine76/model77/theme78/
+workspace79 histories converge atomically without ciphertext, receipt, grant,
+palette, thinking-preference or hard-policy rewriting. Standalone79 reserved
+markers but did not implement the queued/native group runtime; erased
+convergence cannot make actual80 slash/native-map history into genuine79.
+Future81, missing/corrupt/premature markers and fabricated lineages fail before
+mutation. Original schema-9 artifact rekey rollback/restart remains supported.
+
+### Current prerequisites and immutable inputs
+
+Fresh generated foundation/workspace prerequisites and their source, limits and
+measurements are retained in the
+[group prerequisite record](managed-sandbox.md#fresh-prerequisites-before-group-integration).
+The model-control primitive additionally passes in **130.35 ms**, including
+actual supported versus ignored effort forwarding. The owned rootless loopback
+SSH primitive passes in **233.96 ms**, with one intercepted worker-origin request,
+not personal SSH or external-Linux qualification.
+
+The physical host is **macOS 26.6 / 25G72, Darwin 25.6.0, arm64** with exposed
+hardware virtualization. Apple Containerization CLI/daemon are **0.10.0**,
+daemon commit `6bdb647b69671c037e2188558ed2e5ba49af2e1a`. npm, packaged and
+guest Node are **26.12.0**; the separate direct-shell Node observation is
+26.11.1. Actual guest processes report **UID 501**, Linux **6.18.5**,
+`NoNewPrivs=1`, `Seccomp=2`, zero effective capabilities and enforced proxy use.
+No personal login, paid inference, real microphone, weights, administrator
+dialog, Finder automation or live source-checkout mount is involved.
+
+| Exact current identity | Value |
+| --- | --- |
+| Immutable Linux arm64 image | `docker.io/library/moguri-worker@sha256:d1cfc869aff32a0dc59d95d341d2eb21ea565398e6d6e3247512d62331c16c1d` |
+| Worker SHA-256 | `c16f1e8ade04a9a316edfb3d984a230c3faf11c3b8015b75b98ba6f7fbb576fc` |
+| Foreground bridge SHA-256 | `51c798ee919850deda2d14aa0182cf9c92e4a17ea7e6f8c65c7d6c6a05efff54` |
+| MCP worker SHA-256 | `9f2d7fa2c82fb6c5557b0c9903ab22dcaa418618a880863a834a8e30d153f2c3` |
+| Distribution digest | `114780569499a94fcaa5b45de798d9a7dceb32c6728305347c990c262cd7da91` |
+| Complete payload digest | `425da1bd40f117ba3396416bee6871260255be74bcb05c7adc64d8c15fba9842` |
+| Digest-pinned Node base | `docker.io/library/node@sha256:f6e55fb0e92f7f115549278ab36f68f0659790f5d4fd7cb4446486d8ed70d842` |
+| Vendor release/trust | SendBox **0.2.4**, `external-release-root`, original sequence/floor **8** |
+| Vendor archive SHA-256 | `94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31` |
+| Installed host SHA-256 | `cfa71d5db3ec747ab785c86c6d79dce174893955066ff80ecf6eab827afd2e73` |
+| Signed guest manifest SHA-256 | `afdf6182b6935322454ccc4d0f8426fafadcc1dbe27a35c88963646e1b34b91d` |
+| Guest trust key SHA-256 | `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88` |
+
+The installed root-owned signed guest binary is
+`73899eb50aa9bffa4bfb2e310969dbb57708f0a5f36d31efc52d19e60f1edc33`;
+the launcher is
+`f0a812b078172a8f9684e5428745122f49404bef1d95f2b314ab39ed1d6b50f8`;
+the signed BPF object is
+`23993c55f01abaa142310d7156f30ace4fc67ffcb46fdb5a2ab6a66d486fab48`.
+All actual root ownership/modes and the original Ed25519 trust floor were
+reverified. The public archive attestation still binds release workflow/tag
+`v0.2.4` and source `5e83a179ed83ef2b3b184b60b7fef82105aa504c`,
+rejecting self-hosted signers.
+
+The fresh **no-cache** image build passes in **36,614.88 ms**, including locked
+dependencies, actual Linux native PTY and a zero-vulnerability image audit.
+The **443,965,440-byte** OCI archive SHA-512 is
+`0945f43295139316948ef0fceb3035781ee37553fac2f7a5108f4155a450a897221e186a2c27f34025a83656131543d62da49edb0b5414a6c29c48d39d9b1993`.
+The **16,589,237-byte** no-script side-by-side installer SHA-512 is
+`e06d5ef4fabe6abe87d76f5a7c85797e8b2b6b42c6c5990461feb7dead237f2828f6483ef2b990fa3dcabed4fb0f6496112f6594d86131c0fa28fc4610715c3e`.
+Distribution bytes remain at `.native/sandbox-distribution/build-Bz7wrc`.
+
+### Actual current80 physical gates
+
+| Gate | Result | Elapsed |
+| --- | --- | --- |
+| Exact artifacts and public attestation | PASS | 5,404.19 ms |
+| Installed signed runtime and trust | PASS | 105.11 ms |
+| Prepared provider/CNAME ownership | PASS | 174.68 ms |
+| Cold guest effective egress | PASS | 4,011.83 ms |
+| Single-root generated model/tool/accounting | PASS | 5,630.74 ms |
+| Captured two-root model/tools and separate publication | PASS | 7,698.67 ms |
+| Exact original VM absence | PASS | 97.45 ms |
+
+All **seven gates PASS**, total **23,169.99 ms**. The first request in the fresh
+network guest is the anonymous selected-provider metadata GET at
+`https://api.individual.githubcopilot.com/models`: **HTTP 400 / 589.85 ms**,
+without warm-up or retry. Actual connected aliases are
+`api.githubcopilot.com` and `glb-db52c2cf8be544.github.com`.
+The signed effective policy has default-deny egress and fresh active GitHub Meta
+delegation: **244 domain patterns, 5,897 IPv4 CIDRs, 1,534 IPv6 CIDRs**,
+scope SHA-256
+`867a9a7203bad7d64ceb4006cea69b2057fc0b84bc4f35f51bc4cf2e4faa5264`.
+This remains shared-cloud delegation, not exact-host-only or strict GitHub-only
+egress. `raw.githubusercontent.com` and delegated address `140.82.121.6`
+connect through the enforced proxy; `example.com`, `1.1.1.1`, loopback and
+`169.254.169.254` are denied. A direct wire attempt to the delegated address
+does not connect. IPv6 wire coverage and hourly/outage soak are not inferred.
+
+The single-root guest records **3 solver starts/completions, 126 reported
+fixture tokens and 2 actual-user strict tool decisions**. The group records
+**7 starts/completions, 294 reported fixture tokens and 6 actual-user decisions**:
+read, write and shell operations in each of two explicitly selected original
+repositories. Both keep **zero unknown total-token calls and zero held capacity**.
+The group has no default model root; the native ready/journal map and every
+broker authorization bind the selected member. No controller inference fallback
+occurs. Group originals remain unchanged until **two independent actual-user
+source publications**, whose exact copied bytes and completed receipts are
+verified. HEAD/index preservation, source modes despite umask, whole-root leases,
+deleted-receipt refusal, partial copy and cancellation are separately exercised.
+
+The group input/output totals are **210/84**; its API-equivalent user-rate
+estimate is **USD 0.000378**. The single-root totals are **90/36** and estimated
+**USD 0.000162**. These are generated fixtures, not real provider billing.
+Provider-reported/billed USD remain null; all 3 and 7 cache observations remain
+unknown, not zero. No model result or provenance becomes a user approval.
+
+The exact four original guest IDs are
+`12cd4ef06b2f40766c7eca54769727fa`,
+`a7692bbd865d11e70523b31c0dafe2bc`,
+`fadd87afe92d27644d5ca3dea5e060f2`, and
+`db2793d0af42ad93f5a7031935ae4fbb`.
+Their captured name/image/mount identities are absent without corrective
+cleanup. Shared images, the builder and unrelated processes remain untouched.
+
+### Retained evidence and reproducibility
+
+The final receipt directory is
+`.native/qualification/current-sendbox-OmXUXf`.
+Generated single-root state is retained at
+`.native/qualification/native-service-PZp3SY`; group state at
+`.native/qualification/native-service-nniYsk`.
+
+| Retained file | SHA-256 |
+| --- | --- |
+| `qualification.json` | `c38fe807189c1e8a7b739aed020a128e7ee2402ada9c0db356c7e514c5b08bbc` |
+| `effective-network.json` | `447af9ac96e9c098cb78880cb1fa865f97a81413d12dcf5280a38e6b0681519f` |
+| `worker-effective-network.json` | `9c86dff0f28ef8773e4ff1aa1dea30fce675f2ed39c2ca6ccad6fb32eb1430b4` |
+| `worker-events.json` | `acc89f251e14223e8e0fd8b9696c9f1fb588a8c1a12324d1a49772f2a1f81f90` |
+| `worker-result.json` | `4d4372e8e9b610ba1d2a5ea12f52a1ce48c83d9eed5d64fcfedd98c11635afe1` |
+| `worker-accounting.json` | `2b5a38cb1d0a18c50d6c513ee09348ad8492fa2dc8dcf7de3f8843099724f723` |
+| `group-test.log` | `0a7dbc3bc73c00e78a2d0a8ed7ddc303b6c855811543888cee5abdc99d35bb8f` |
+| `group-result.json` | `c12bbbda45c4a12e172f570241e3a1035a8cfcc4477069f41ea708d10df759ed` |
+| `group-effective-network.json` | `15decaffe67581c578135a80defcab714a9def3d09031ce833b7251be9f9155a` |
+
+Earlier actual80 failures remain retained, not relabelled PASS. They exposed
+using the logical null root instead of the selected member during tool
+authorization, and a generated group fixture replacing the captured default
+network review with a narrower policy that had no signed Meta publication.
+The fixes use the existing exact per-call broker scope and preserve the actual
+reviewed configuration; no first-root fallback, wildcard, credential expansion
+or weakened evidence assertion was introduced. The original protocol76/77,
+standalone79, theme78 and unmarked intermediate77 archives remain distinct.
+
+```sh
+npm run build
+npm run prepare:sandbox
+node_modules/.bin/node --import tsx scripts/qualify-sandbox.mjs \
+  --distribution .native/sandbox-distribution/build-Bz7wrc \
+  --workload .native/sandbox-distribution/build-Bz7wrc/image.json \
+  --archive .native/sendbox-distribution/0.2.4/sendbox-0.2.4-macos-arm64.tar.gz
+```
+
+Use the fresh producer's actual paths/receipts if any inputs change. The harness
+retains child failures and refuses missing artifacts, unsupported physical
+prerequisites, skipped group tests, unknown accounting, changed mappings and
+unconfirmed teardown. It never installs or approves a privileged dialog.
+
+### Final client and installer checks
+
+| Check | Observed result |
+| --- | --- |
+| Full hidden source desktop | **280 passed, 3 explicit package/native skips / 8.1 min** |
+| Actual final packaged desktop/native/dictation/model/group/policy/queue cases | **38/38 / 54.5 s** |
+| Actual shipped CLI install/remove | **1/1 / 1.8 s**, generated private HOME, no personal PATH change |
+| Actual packaged Node/native discovery and all six markers | **PASS / 4,649.66 ms**, protocol80 and exact 0.2.4 |
+| Actual ZIP through production update consumer | **PASS / 109,935.02 ms**, exact signed tree |
+| Read-only DMG identity/native layout | **PASS**, 540x380, 80-point icons, app/Applications at 130,220 and 410,220 |
+| Independent installed SDK/types/browser/React/Node/CLI and 12 real worker probes | **PASS**, zero consumer vulnerabilities |
+| Type checks, production build and root/image audits | **PASS**, zero reported vulnerabilities |
+| Slow TUI continuation cancellation and three fresh repetitions | **PASS**; no premature input, duplicate route or model call |
+| Final serial source suite | **1,931 passed, 15 explicit physical-native skips / 1,946 total, zero failures / 27.3 min** |
+
+The full source desktop's package-only CLI and manual native cases are exercised
+by the actual-package follow-up. Its separate automatic bundled-UI variant is
+not claimed by that 38-case selector; generated managed-setup and actual
+automatic group/service qualification remain distinct evidence.
+Keyboard tests target the actual menu element rather than racing a separately
+focused global Enter. The canonical TUI cancellation guard waits for its real
+terminal record and restored/current draft before enabling resubmission; a
+slow-ack regression covers the intermittent failure seen in the preceding run.
+
+The final isolated development output is
+`release/qualification-builds/protocol80-036ea70/`.
+The optional `--qualifier` refuses an existing output tree, leaving every earlier
+app/ZIP/DMG intact. The actual **794,583,699-byte DMG** SHA-256 is
+`a28fb7ab0f02db3409e174a2fae4b2866f84b60a47a1ec839b8cdf2f088dfd21`.
+The **780,237,924-byte ZIP** SHA-512 is
+`d9edc7fbb4cbd302f4b5042e029f25701a9d1a5fb2578edbaa6be0f461d34fd3ba90edea09cc1b0d59c6626639b5b13efee2f88aafa35645fe9706ebc3679cd6`.
+The application-tree SHA-512 is
+`6dfc0a6075f7eab8971efae515d2738243e7b2f6a3c669912f1b79d53cdf0ed5383e2552787370dba43f5325615fe975c5322558a722719cb787e8b95a304e47`.
+The app is ad-hoc signed, not notarized, uploaded or installed. Hidden generated
+test windows are not the personal app, and DMG verification never opens Finder.
+
+### Remaining boundaries and external blocker
+
+Main-only CI run
+[40844207466](https://github.com/mbianchidev/moguri/actions/runs/40844207466)
+was declined before steps because GitHub account billing/spending eligibility
+blocked job startup. No job logs or observed code-test failure exist. The user
+must resolve that account-level eligibility; CI was not changed, disabled or
+repeatedly rerun. Working-branch pushes intentionally do not trigger CI.
+Separate runner notices about Ubuntu26 label migration and macOS arm64 capacity
+are not runtime qualification. Local FFI/chunk/optional `.icon` and scoped
+consumer-install/deprecation notices remain visible; the ICNS icon is present.
+
+This is partial issue #35 progress, with the additional user-directed interaction
+work, not closure of #35, roadmap #39 or final acceptance #17. Broader
+controller-loss/cancellation/inspection/storage-pressure hardening is still the
+next slice. No Meta hourly/24-hour or outage soak, exhaustive/IPv6 wire policy,
+personal login, live paid inference, billing/model quality, real-microphone
+accuracy, notarization or non-macOS release readiness is inferred. Native group
+consoles, SSH groups, native Git/plan-write and project MCP/hooks/background
+transports remain explicitly unqualified, without Local fallback.

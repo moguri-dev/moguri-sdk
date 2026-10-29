@@ -277,6 +277,11 @@ separately installed 0.2.4 runtime and cannot qualify or disqualify changed80
 artifacts by assumption. Exact final native and client artifacts require their
 own retained PASS/FAIL/SKIP evidence.
 
+The [final combined80 qualification](sendbox-0.2.4-qualification.md#protocol-80-combined-follow-up)
+records all seven actual artifact/network/worker/group/teardown gates as PASS,
+with exact current image, trust, installer and raw-receipt identities. The
+prerequisite table above remains its original earlier cut, not relabelled data.
+
 ## Provider and tool networking
 
 The screenshots' website prompts failed at provider admission, before either
