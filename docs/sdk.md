@@ -1686,8 +1686,13 @@ The original intake acknowledges frames without waiting for model startup;
 read returns the current transcript/revision, and the final capability job
 retains the acknowledged complete transcript. Duplicate/out-of-order frames,
 late audio after revocation and incomplete flushes are rejected, never replayed.
+`startCapture` resolves with the exact service lease acknowledgement, without
+waiting for a full conversation snapshot. Observe its job through the shared
+event stream or `jobs.wait`; no second capture queue or admission retry is used.
 `DraftEditor.startDictation(start, end)` replaces only its original provisional
 span, preserving surrounding typing and refusing foreign/overlapping changes.
+An ordinary autosave does not delay this local span; pending input intake and
+attachment capture are refused rather than arming a later recording.
 Insertion never sends a prompt.
 
 The retained batch API uses `voice.startCapture(sessionId, optionalOriginalId)`,

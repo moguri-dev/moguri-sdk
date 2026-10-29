@@ -109,6 +109,51 @@ postinstall notice remain visible. Main-only CI's account billing/spending
 eligibility failure and runner notices are recorded with the native evidence;
 no working-branch CI or personal authorization was triggered.
 
+## Push-to-talk audio onset
+
+The Ctrl+Space follow-up reuses the existing browser AudioContext/AudioWorklet
+and local SDK/capture lease with Node/React/TypeBox under their existing MIT
+notices; the installed NeMo-Speech runtime and model licenses are unchanged.
+There is no dependency, protocol, event, migration or recognizer/vocabulary
+change. No real microphone, personal account or model weights are used to
+qualify it.
+
+The generated red regressions reproduce two independent causes of clipped
+opening speech: no microphone starts while an unrelated draft save is awaiting
+its acknowledgement, and the complete first 250 ms of input is lost while the
+audio worklet initializes after the device has already opened.
+
+Only the actual recording gesture prepares a silent, input-free processing
+context, in parallel with admission. No microphone opens before the original
+service capture and fresh desktop permission check. The normalized graph is
+ready before device acquisition, and the returned stream connects synchronously
+before permission-release IPC or any other await. No initial PCM is truncated
+or replayed. First-time OS authorization remains explicit; an already granted
+permission does not repeat the OS prompt or a redundant post-prompt snapshot.
+
+Dictation binds its original local selection without awaiting an ordinary
+autosave. Existing autosave serialization and foreign-revision conflicts still
+protect edits. A pending input submission or attachment capture is refused
+rather than arming a delayed microphone. The SDK's ephemeral capture admission
+returns its exact service acknowledgement without waiting for a full conversation
+snapshot; job state continues through the shared event stream and `jobs.wait`.
+CLI/TUI use that same SDK contract, not a second capture queue.
+
+Release-before-admission, blur, sleep, profile/session change and failure abort
+the exact prepared graph and owned capture. A late service lease or device
+cannot open another microphone. Existing two-click/button, held shortcut,
+streaming/flush limits, cleanup errors and draft preservation remain distinct.
+The tests inspect real generated opening PCM and held-save timing, not a
+constant fake recognizer's final sentence as a proxy for captured audio.
+
+Before feature edits, all six generated Phase 0 executable groups pass:
+providers **1,095.06 ms** (32.71 ms cancellation), SQLite **66.95 ms**
+(0.0656 ms append p95), known-group PTY **159.98 ms** (152.30 ms cancellation,
+zero observed survivors), OpenTUI **1,066.20 ms**, hidden Electron **591.79 ms**
+(176.81 ms cold start, 442.88 MiB), and filesystem/Git **93.13 ms**.
+The generic initial-checkpoint unavailable diagnostics are not newly qualified
+live-provider, Rust/Linux, release, quality or personal-microphone gates.
+
 ## Change contract
 
 This owner-requested follow-up covers Local tool and GitHub read failures,

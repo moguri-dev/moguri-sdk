@@ -793,7 +793,7 @@ export class MoguriSdk extends TransportClient {
       const result = await this.request("/v1/voice", request);
       if (!isRecord(result) || result.id !== id || typeof result.token !== "string" || !/^[a-f0-9-]{36}$/.test(result.token)) throw new ClientError("speech_capture_response", "The service did not acknowledge the exact original capture. No microphone was started.");
       if (options.streaming && result.streaming !== true) throw new ClientError("speech_capture_response", "The service did not acknowledge streaming for this exact capture. No batch or cloud fallback was used.");
-      await this.refresh(); return { id, token: result.token };
+      return { id, token: result.token };
     },
     appendCapture: async (sessionId: string, id: string, token: string, sequence: number, bytes: Uint8Array): Promise<void> => {
       if (!bytes.length || bytes.length % 2 || bytes.length > 64 * 1024) throw new ClientError("speech_audio", "Use one bounded little-endian PCM16 frame.");

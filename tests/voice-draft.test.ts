@@ -41,3 +41,19 @@ test("editing the active dictated span or receiving a foreign draft cannot be ov
     assert.equal(editor.getState().text, "Generated other client.");
   } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
 });
+
+test("dictation refuses pending input intake instead of recording late into a newer local draft", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const editor = new DraftEditor(sdk, fixture.sessionId, fixture.session().draft), entered = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>();
+  let pending: Promise<unknown> | undefined;
+  try {
+    editor.edit("Generated original input."); await editor.flush();
+    pending = assert.rejects(editor.submit(async () => { entered.resolve(); await finish.promise; throw new Error("Generated original intake refusal."); }), /original intake refusal/);
+    await entered.promise;
+    editor.edit("Generated newer unsent input.");
+    assert.throws(() => editor.startDictation(), { code: "input_pending" });
+    finish.resolve(); await pending;
+    assert.equal(editor.getState().text, "Generated newer unsent input.");
+    assert.equal(fixture.requests.length, 0);
+  } finally { finish.resolve(); await pending; editor.dispose(); sdk.disconnect(); await fixture.close(); }
+});

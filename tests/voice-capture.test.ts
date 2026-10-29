@@ -60,6 +60,23 @@ test("the original capture can be cancelled after its client disconnects without
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("the exact capture admission does not wait for an unrelated full conversation snapshot", async (t) => {
+  const { fixture, sdk } = await captureFixture(), snapshot = Promise.withResolvers<void>();
+  const original = sdk.refresh.bind(sdk);
+  const refresh = t.mock.method(sdk, "refresh", () => snapshot.promise);
+  let lease: { id: string; token: string } | undefined;
+  const pending = sdk.voice.startCapture(fixture.sessionId).then((value) => { lease = value; return value; });
+  try {
+    await waitFor(() => lease, 1000);
+    assert.ok(lease); assert.ok(fixture.service.controller.snapshot().jobs.some((job) => job.id === lease!.id && job.status === "running"));
+    await sdk.voice.cancelCapture(fixture.sessionId, lease.id, lease.token);
+    assert.equal(fixture.requests.length, 0);
+  } finally {
+    snapshot.resolve(); await pending; refresh.mock.restore(); await original();
+    sdk.disconnect(); await fixture.close();
+  }
+});
+
 test("failed recognition remains the original owned capture error rather than a misleading missing lease", async () => {
   const { fixture, sdk } = await captureFixture(["--fail-with-diagnostic"]);
   try {

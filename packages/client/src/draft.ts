@@ -85,6 +85,7 @@ export class DraftEditor {
     this.timer = setTimeout(() => { void this.flush().catch(() => console.error("Moguri draft autosave failed; the unsent edit and error remain visible.")); }, 200);
   }
   startDictation(start = this.state.text.length, end = start): DraftDictation {
+    if (this.submission || this.intakeBarrier) throw new ClientError("input_pending", "Wait for the original input acknowledgement before dictating. Your newer local draft was preserved; no delayed microphone was started.");
     let source = this.state.text, from = start, to = end, closed = false;
     const external = this.externalRevision;
     const splitsPair = (offset: number) => offset > 0 && offset < source.length && /[\ud800-\udbff]/.test(source[offset - 1]!) && /[\udc00-\udfff]/.test(source[offset]!);
