@@ -74,6 +74,15 @@ the reviewed CLI/root/job lifecycle, not another Git engine. No dependency or
 client queue is added. Both new migration markers are transactional, and changed
 worker/bridge bytes require fresh qualification rather than inherited receipts.
 
+The [protocol-82 command/tool preference follow-up](command-tool-preferences.md)
+adds original workflow presets, atomic assigned children and a profile-owned
+ranked method preference. Exact discovered MCP leaves may expose their own
+typed model schemas while retaining gateway execution/account/root approvals.
+The existing worker, queue, coordination, SDK and stack remain authoritative;
+no dependency, new scheduler, global subagent opt-in or credential bypass is
+introduced. Its two distinct migration markers are atomic and preserve genuine
+81 and combined80 history. Changed worker/native bytes need a fresh receipt.
+
 D30's [lean tooling and coordination contract](lean-tooling.md) records
 prerequisite measurements, independent implementation, reused MIT libraries,
 strict schema-58 lineage convergence and qualified/unsupported boundaries. Typed native

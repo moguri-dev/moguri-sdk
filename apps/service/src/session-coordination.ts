@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { MoguriError, type Session, type Snapshot, type StoredEvent, type EventInput, type CommandResult, type PublicMessage } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, type Session, type Snapshot, type StoredEvent, type EventInput, type CommandResult, type PublicMessage, type QueueItem } from "../../../packages/protocol/src/index.ts";
 import type { CoordinationBinding, CoordinationCommand, CoordinationLink, CoordinationMessage, CoordinationMetadata, CoordinationOrigin, CoordinationQuery, CoordinationRead, CoordinationResponse, CoordinationTaskOrigin, SessionContextInput, SessionControlInput } from "../../../packages/protocol/src/coordination.ts";
 import { textFilePage } from "./files.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -22,6 +22,7 @@ interface Host {
   spawn(parent: Session, kind: "side" | "agent", title: string | undefined, origin: CoordinationOrigin, finish: WorkspaceFinish): CommandResult;
   resumeQueue(sessionId: string): void;
   parentSnapshot(sessionId: string): string;
+  orchestrating?(session: Session): boolean;
 }
 export class SessionCoordination {
   constructor(private readonly host: Host) {}
@@ -37,6 +38,18 @@ export class SessionCoordination {
     if (parent.controls.env === "Sandbox") return [];
     const scope = this.host.scope(parent), link: CoordinationLink = { parentId: parent.id, childId, parentScope: scope, childScope: scope, enabled: true, revision: 0, origin };
     return [{ event_type: "coordination.linked", profile_id: this.host.profileId, project_id: parent.projectId, session_id: childId, payload: { link } }];
+  }
+  creationTask(parent: Session, childId: string, link: CoordinationLink, item: QueueItem, intentId: string): EventInput[] {
+    const scope = this.host.scope(parent);
+    if (link.parentId !== parent.id || link.childId !== childId || !link.enabled || link.origin.actor !== "user" ||
+      link.parentScope !== scope || link.childScope !== scope) throw new MoguriError("coordination_birth", "The exact new child lost its original user/root grant. No task was admitted.", 409);
+    const message: CoordinationMessage = { id: hash(["coordination-message", parent.id, childId, intentId]),
+      fromSessionId: parent.id, toSessionId: childId, fromTurnId: parent.turnId, origin: { actor: "user" }, kind: "task",
+      text: item.text, deliveredTo: null, bindingDigest: hash([parent.id, childId, scope, scope, [link]]) };
+    return [{ event_type: "coordination.message", profile_id: this.host.profileId, project_id: parent.projectId, session_id: childId, payload: { message } },
+      { event_type: "queue.enqueued", profile_id: this.host.profileId, project_id: parent.projectId, session_id: childId, payload: {
+        item: { ...item, origin: { messageId: message.id, fromSessionId: parent.id, fromTurnId: parent.turnId, origin: message.origin } },
+      } }];
   }
   private check(link: CoordinationLink) {
     const parent = this.session(link.parentId), child = this.session(link.childId);
@@ -165,7 +178,7 @@ export class SessionCoordination {
   control(sourceId: string, input: SessionControlInput, origin: CoordinationOrigin, intentId: string, finish: WorkspaceFinish): CommandResult {
     const source = this.session(sourceId);
     if (input.action === "spawn") {
-      if (origin.actor === "model" && !this.host.snapshot().settings.values.subagents.enabled) throw new MoguriError("subagents_disabled", "Model-created child work requires explicit subagent enablement as well as the exact tool grant.");
+      if (origin.actor === "model" && !this.host.snapshot().settings.values.subagents.enabled && !this.host.orchestrating?.(source)) throw new MoguriError("subagents_disabled", "Model-created child work requires explicit subagent enablement or this exact user-requested orchestration, as well as the tool grant.");
       if (origin.actor === "model" && source.mode !== "agent") throw new MoguriError("read_only", "A read-only model cannot create another execution owner.", 403);
       return this.host.spawn(source, input.kind ?? "side", input.title, origin, finish);
     }

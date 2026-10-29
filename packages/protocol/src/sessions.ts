@@ -120,6 +120,8 @@ export const SessionWorkspaceCommandSchema = Type.Union([
     sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.mode"), sessionId: id, expectedRevision: revision, mode: SessionModeSchema }),
   object({ type: Type.Literal("session.spawn"), sessionId: id, kind: Type.Union([Type.Literal("agent"), Type.Literal("side")]), title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })) }),
+  object({ type: Type.Literal("session.spawn.prompt"), sessionId: id, prompt: Type.String({ minLength: 1, maxLength: 8000 }),
+    expectedDraftRevision: Type.Optional(revision) }),
   object({ type: Type.Literal("session.side"), sessionId: id }),
   object({ type: Type.Literal("session.side.prompt"), sessionId: id, prompt: Type.String({ minLength: 1, maxLength: 128 * 1024 }),
     expectedDraftRevision: Type.Optional(revision) }),

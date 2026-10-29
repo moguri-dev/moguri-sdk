@@ -5,12 +5,15 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **81** for
+Current source uses protocol **82** for
+[shared workflow commands, ranked methods and direct MCP schemas](architecture/command-tool-preferences.md).
+It retains protocol81
 [exact session request recovery](architecture/session-reliability.md#explicit-selection-and-retained-request-follow-up)
 and [built-in reviewed Git](architecture/github-workflows.md#git-operations).
 It preserves the genuinely combined80 model-continuity, theme, queued-command,
 project-folder and grouped-Sandbox lineages and their original encrypted history.
-Both new migration markers are appended atomically; earlier native/package
+Its distinct workflow-command and tool-preference migration markers are appended
+atomically alongside the preserved81 markers; earlier native/package
 receipts qualify only their original bytes. Existing features include
 [direct effort and exact context-window shortcuts](architecture/model-controls.md#direct-tuning-slash-commands),
 [cascading model controls and complete slash discovery](architecture/model-controls.md#cascading-menus-and-complete-slash-discovery),
@@ -30,6 +33,16 @@ accounting; the earlier schema-55 model-default upgrade is metadata-only.
 Schema 58 strictly converges the candidate-retention and earlier development
 lean-tooling lineages using their actual markers, preserving both guarantees.
 Older running services require reviewed restart.
+`ToolPreferencesSchema`, `toolMethods`, `defaultToolPreferences` and
+`effectiveToolPreferences` are browser-safe exports. Set the complete four-ID
+`settings.values.toolPreferences.order` with an exact settings revision, or
+reset the `toolPreferences` section. Ranking is model advice, not permission.
+`sdk.workflows.start(sessionId, kind, prompt?, expectedDraftRevision?)` shares
+the new presets; `sdk.sessions.spawnPrompt(sessionId, prompt, expectedDraftRevision?)`
+atomically assigns an actual Manual child. `/continue` takes no prompt.
+Direct MCP aliases are model-facing discoveries, not user-supplied permission
+metadata or a new credential API.
+
 Schema 59 adds an independent transactional metadata marker. Older source
 settings normalize to no configured skill sources; ciphertext, receipts,
 identities and existing accounting are unchanged.

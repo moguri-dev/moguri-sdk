@@ -61,6 +61,7 @@ try {
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
     ${installedProtocol >= 77 ? 'import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "moguri";' : ""}
+    ${installedProtocol >= 82 ? 'import {ToolPreferencesSchema,defaultToolPreferences,effectiveToolPreferences,type ToolPreferences,type WorkflowKind} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -78,6 +79,15 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 82 ? `
+      const ranked:ToolPreferences={order:["cli","rest","mcp-direct","mcp-gateway"]};
+      void ToolPreferencesSchema;void defaultToolPreferences;void effectiveToolPreferences(ranked);
+      const currentTools=sdk.settings.get()!;await sdk.settings.update({...currentTools.values,toolPreferences:ranked},currentTools.revision);
+      await sdk.settings.reset("toolPreferences",sdk.settings.get()!.revision);
+      const requestedWorkflows:WorkflowKind[]=["impeccable","continue","orchestrate","spar","critique","roast-me"];
+      for(const kind of requestedWorkflows)await sdk.workflows.start("generated-session",kind,kind==="continue"?"":"Generated typed actual task.");
+      await sdk.sessions.spawnPrompt("generated-session","Generated typed child assignment.",0);
+      ` : ""}
       ${installedProtocol >= 81 ? `
       const originalReceipt=await sdk.commandReceipt({type:"session.autonomy",sessionId:"generated-session",expectedRevision:0,autonomy:"Autopilot"},"generated-command");
       if(originalReceipt.status==="committed")void originalReceipt.result.revision;
@@ -507,7 +517,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}${installedProtocol >= 82 ? ",effectiveToolPreferences,defaultToolPreferences,slashCommands" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     const generatedHome=join(root,"generated-chat-home");await mkdir(generatedHome,{recursive:true});
@@ -1308,6 +1318,18 @@ try {
           frame({role:"assistant",content:JSON.stringify({pattern:"single",modelId:"generated-external-budget",confidence:0.95,reason:"Generated installed classifier-only advice."})});frame({},"stop");
         }else if(String(body.messages[user]?.content).includes("Generated installed Guided question")&&!body.messages.slice(user+1).some(value=>value.role==="tool")){
           frame({role:"assistant",tool_calls:[{index:0,id:"generated-installed-guided-call",type:"function",function:{name:"ask_user",arguments:JSON.stringify({question:"Choose a generated installed approach?",choices:["Generated installed first","Generated installed second"],allowFreeform:false,recommendation:{choiceIndex:1,reason:"Generated installed solver recommendation."}})}}]});frame({},"tool_calls");
+        }else if(PROTOCOL_VERSION>=82&&String(body.messages[user]?.content).includes("Generated installed direct MCP")){
+          const results=body.messages.slice(user+1).filter(value=>value.role==="tool");
+          let selected;
+          if(!results.length)selected={name:"mcp_gateway",arguments:{action:"tools",serverId:"builtin",query:"grep_logs"}};
+          else if(results.length===1)selected={name:"discover_tools",arguments:{query:JSON.parse(results[0].content).tools.find(value=>value.name==="grep_logs").directName}};
+          else if(results.length===2){
+            const name=JSON.parse(results[0].content).tools.find(value=>value.name==="grep_logs").directName;
+            assert.ok(body.tools.some(value=>value.function.name===name&&value.function.parameters.properties.path));
+            selected={name,arguments:{path:"generated.ts",query:"portableSdkMemory"}};
+          }
+          if(selected){frame({role:"assistant",tool_calls:[{index:0,id:"generated-installed-direct-"+generatedRequests.length,type:"function",function:{name:selected.name,arguments:JSON.stringify(selected.arguments)}}]});frame({},"tool_calls");}
+          else{frame({role:"assistant",content:"Generated installed direct result retained."});frame({},"stop");}
         }else{frame({role:"assistant",content:"Generated external budget response."});frame({},"stop");}
         response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42,...(PROTOCOL_VERSION>=66?{prompt_tokens_details:{cached_tokens:10}}:{})}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
       });
@@ -1596,6 +1618,41 @@ try {
           console.log("Installed protocol-70 SDK reduces 21 models to three, blocks disabled slash selection and enforces an exact retained provider source without fallback or inference.");
         }finally{betaProvider.state.models=savedModels;betaProvider.onChange();await beta.settings.update(savedSettings,beta.settings.get().revision);await beta.models.refresh();}
       }
+      ${installedProtocol >= 82 ? `{
+        const previousModels=structuredClone(betaProvider.state.models),previousWindow=generatedModel.contextWindow;
+        try{
+        generatedModel.contextWindow=32768;betaProvider.state.models[0].contextWindow=32768;betaProvider.onChange();await beta.models.refresh();
+        for(const name of ["impeccable","continue","suggestions","orchestrate","spawn","spar","critique","roast-me"])assert.ok(slashCommands.some(command=>command.name===name));
+        const before=beta.settings.get(),ranked=["cli","rest","mcp-direct","mcp-gateway"];
+        await beta.settings.update({...before.values,toolPreferences:{order:ranked}},before.revision);
+        assert.deepEqual(effectiveToolPreferences(sdk.settings.get().values.toolPreferences),defaultToolPreferences());
+        const opened=await beta.projects.add(project),parent=await beta.sessions.create(opened.id,"Generated installed command owner",{modelId:generatedModel.id,modelOptions:{contextWindow:32768}});
+        await beta.sessions.autonomy(parent.id,"Autopilot");
+        const current=()=>beta.getState().snapshot.sessions.find(value=>value.id===parent.id);
+        const terminal=async id=>{for(let n=0;n<400;n++){const value=beta.getState().snapshot.sessions.find(value=>value.id===id);if(!value.turnId&&["completed","failed","partial","stopped"].includes(value.status))return value;await new Promise(resolve=>setTimeout(resolve,20));}throw Error("Generated installed82 work did not settle.");};
+        const requestsBefore=generatedRequests.length;
+        const editor=new DraftEditor(beta,parent.id,current().draft);
+        try{editor.edit("Generated installed direct MCP task.");await editor.send("queue");}finally{editor.dispose();}
+        const directOutcome=await terminal(parent.id);
+        assert.equal(directOutcome.status,"completed",directOutcome.lastError??JSON.stringify(directOutcome.messages.slice(-3)));
+        assert.equal(generatedRequests.length,requestsBefore+4);
+        assert.match(JSON.stringify(generatedRequests[requestsBefore]),/1. CLI/);
+        const original=(await beta.tools.results(parent.id)).sources.find(value=>value.name==="mcp_gateway"&&value.rawComplete);
+        const sources=(await beta.tools.results(parent.id)).sources;
+        const actual=original??sources.find(value=>value.name==="mcp_gateway");
+        assert.ok(actual);assert.match((await beta.tools.resultById(parent.id,actual.operationId)).text,/portableSdkMemory/);
+        const assignment=await beta.sessions.spawnPrompt(parent.id,"Generated installed actual child assignment.");
+        const child=await terminal(assignment.id);assert.equal(child.status,"completed");assert.equal(child.controls.autonomy,"Manual");
+        assert.ok(child.messages.some(message=>message.role==="notice"&&message.text.includes("Generated installed actual child assignment.")));
+        await beta.workflows.start(parent.id,"impeccable","Generated installed actual UI task.");assert.equal((await terminal(parent.id)).status,"completed");
+        await beta.workflows.start(parent.id,"continue");assert.equal((await terminal(parent.id)).status,"completed");
+        const reopened=await sdk.profiles.open(beta.profileId);
+        try{assert.deepEqual(reopened.settings.get().values.toolPreferences.order,ranked);assert.equal((await reopened.tools.resultById(parent.id,actual.operationId,{expectedDigest:actual.digest,expectedRevision:actual.revision})).text,(await beta.tools.resultById(parent.id,actual.operationId)).text);}
+        finally{reopened.disconnect();}
+        await beta.settings.reset("toolPreferences",beta.settings.get().revision);
+        console.log("Installed protocol-82 typed commands/ranking, profile isolation, actual direct MCP leaf/worker/result, assigned Manual child, UI workflow and prompt-free continuation pass through the external SDK.");
+        }finally{generatedModel.contextWindow=previousWindow;betaProvider.state.models=previousModels;betaProvider.onChange();await beta.models.refresh();}
+      }` : ""}
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
       await sdk.profiles.globalBudget({basis:"estimate",tokens:rootCharges},0,true);
       assert.equal((await beta.budgets.status(betaMetered.id)).status.remainingTokens,0);

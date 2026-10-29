@@ -68,7 +68,7 @@ export * from "./shortcuts.ts";
 export * from "./queued-commands.ts";
 import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
 
-export const PROTOCOL_VERSION = 81;
+export const PROTOCOL_VERSION = 82;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -122,11 +122,15 @@ export type CommandResult = { id?: string; revision?: number; commandClaim?: imp
 export interface Project { id: string; name: string; path: string }
 export const ToolCallSchema = Type.Object({
   id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()),
+  directMcp: Type.Optional(object({ name: Type.String({ pattern: "^mcp_direct_[a-f0-9]{40}$" }), serverId: id,
+    tool: Type.String({ minLength: 1, maxLength: 160 }), schemaDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+    bindingDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) })),
   hook: Type.Optional(object({ id, revision, contentDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
     trigger: Type.Union([Type.Literal("turn.start"), Type.Literal("turn.end")]), actor: Type.Literal("user-configured-hook") })),
 });
 export interface ToolCall {
   id: string; name: string; arguments: Record<string, unknown>;
+  directMcp?: { name: string; serverId: string; tool: string; schemaDigest: string; bindingDigest: string };
   hook?: { id: string; revision: number; contentDigest: string; trigger: "turn.start" | "turn.end"; actor: "user-configured-hook" };
 }
 export interface PublicMessage {
@@ -184,6 +188,7 @@ export interface QueueItem {
   origin?: CoordinationTaskOrigin;
   workflow?: { kind: WorkflowKind };
   sidePromptOrigin?: { sessionId: string; commandDigest: string };
+  spawnPromptOrigin?: { sessionId: string; commandDigest: string };
   command?: QueuedSlash;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
@@ -313,7 +318,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "model.selection_remembered": { selection: ModelSelection | null; sourceSessionId: string; sourceProjectId: string | null; actor: "user" };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
-  "session.resumed": Record<string, never>;
+  "session.resumed": { continuation?: { sourceTurnId: string; finishedSequence: number; actor: "user" } };
   "session.blocked": { diagnostic: string };
   "draft.saved": { text: string; attachments: Attachment[]; source?: CommandDraftSource };
   "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
@@ -740,7 +745,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       if (!previous) {
         const head = owner.queue.find((item) => item.delivery !== "steer" && !item.held), parsed = head && parseSlashInput(head.text);
-        if (!head?.command || head.origin || head.workflow || head.sidePromptOrigin || head.mode || head.id !== next.queueItemId ||
+        if (!head?.command || head.origin || head.workflow || head.sidePromptOrigin || head.spawnPromptOrigin || head.mode || head.id !== next.queueItemId ||
           head.command.actor !== "user" || head.command.name !== next.name || head.command.client !== next.client ||
           head.command.bindingDigest !== next.bindingDigest || !parsed || parsed.name !== next.name || parsed.argument !== head.command.argument) {
           throw new MoguriError("command_history", "Queued command claim lost its exact ordered user input. No model prompt or authority was substituted.", 409);
@@ -1341,7 +1346,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "queue.edited": {
         const item = session.queue.find((item) => item.id === event.payload.messageId);
         if (item) {
-          item.text = event.payload.text; delete item.origin; delete item.workflow; delete item.sidePromptOrigin;
+          item.text = event.payload.text; delete item.origin; delete item.workflow; delete item.sidePromptOrigin; delete item.spawnPromptOrigin;
           if (event.payload.attachments) item.attachments = event.payload.attachments;
           if (event.payload.command === null) delete item.command;
           else if (event.payload.command !== undefined) item.command = structuredClone(event.payload.command);

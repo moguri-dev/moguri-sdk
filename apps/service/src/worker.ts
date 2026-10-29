@@ -14,6 +14,7 @@ import { executeRemoteMcp } from "./remote-mcp-runtime.ts";
 import { executeCompoundValidation } from "./compound-validation.ts";
 import { discoverTools } from "./tool-catalog.ts";
 import { OwnedDebugRuntime } from "./owned-debug.ts";
+import { resolveDirectMcpCall, modelToolName } from "./direct-mcp-tools.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -212,7 +213,7 @@ async function run(start: WorkerStart): Promise<void> {
           await finish("partial", "The provider deferred completion. Deferred continuation is not supported; no result or retry is assumed.");
           return;
         }
-        const calls = toolCalls(message);
+        const calls = toolCalls(message).map((call) => resolveDirectMcpCall(call, boundary.directMcpTools ?? []));
         if (message.stopReason === "length") {
           await finish("partial", `The model reached this response's ${boundary.maxTokens}-token output limit.${model.reasoning ? " Reasoning counts toward this limit." : ""}${calls.length ? " No tools from this incomplete response were executed." : ""} Review the partial response before continuing.`);
           return;
@@ -264,7 +265,7 @@ async function run(start: WorkerStart): Promise<void> {
           incompleteCleanup ||= result.outcome === "partial";
           const retained = await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call, ...result });
           if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The original tool result was not durably acknowledged; no continuation was authorized.");
-          context.push({ role: "toolResult", toolCallId: call.id, toolName: call.name,
+          context.push({ role: "toolResult", toolCallId: call.id, toolName: modelToolName(call),
             content: [{ type: "text", text: retained.value.source ? retainedToolText(result.text, retained.value.source) : result.text }],
             isError: result.isError, timestamp: Date.now() });
           if (incompleteCleanup) throw new Error("Tool side effects are partial or cleanup is unconfirmed. Inspect the partial tool result before continuing.");

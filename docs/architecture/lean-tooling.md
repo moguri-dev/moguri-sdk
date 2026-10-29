@@ -72,8 +72,10 @@ catalogue in 5.50 ms:
 | Generic stable gateway | 1 | 240 | 74 |
 
 Choose lazy typed native schemas: they retain provider-visible argument
-constraints while reducing initial catalogue exposure. Keep external MCP
-tools behind the existing gateway. The smaller generic envelope cannot
+constraints while reducing initial catalogue exposure. External MCP execution
+retains the existing gateway's authority; the later
+[ranked-method/direct-schema slice](command-tool-preferences.md) also permits
+exact discovered provider-facing leaf schemas. The smaller generic envelope cannot
 express each invoked native tool's parameters to provider validation.
 Empty-query browsing and exact names recover vocabulary-dependent misses.
 
@@ -99,6 +101,12 @@ prompts and act within existing autonomy/policy. Their default scope is current
 changes (and relevant dependencies), or the current project when clean. Debug
 may inspect only the session-owned Agent terminal/processes and permitted logs;
 other DAP targets need explicit selection and normal execution permission.
+
+The [shared workflow-command extension](command-tool-preferences.md#shared-command-behavior)
+adds UI design, prompt-free continuation, question-led collaboration, actual
+assigned children/orchestration and read-only constructive critique. Presets
+never manufacture answers or approvals. Project suggestions still require exact
+source review before generation; optional tool-less subagents remain off.
 
 Nested `AGENTS.md` and supplementary `moguri.md` are resolved root to target,
 with nearer textual rules and same-directory `moguri.md` taking precedence.

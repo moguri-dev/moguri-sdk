@@ -249,6 +249,8 @@ export class MoguriSdk extends TransportClient {
     rename: (sessionId: string, title: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.organize", sessionId, changes: { title }, expectedRevision }),
     mode: (sessionId: string, mode: SessionMode, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.mode", sessionId, expectedRevision, mode }),
     spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
+    spawnPrompt: (sessionId: string, prompt: string, expectedDraftRevision?: number) => this.command({ type: "session.spawn.prompt", sessionId, prompt,
+      ...(expectedDraftRevision === undefined ? {} : { expectedDraftRevision }) }),
     delete: (sessionId: string, confirm: true, expectedRevision?: number, children?: import("../../protocol/src/index.ts").SessionChildrenReview) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
       const deleted = snapshot?.candidateCleanups.some((cleanup) => cleanup.status === "completed" && cleanup.reason.kind === "session-delete" && cleanup.reason.sessionId === sessionId);

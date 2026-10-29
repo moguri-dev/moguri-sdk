@@ -7,6 +7,7 @@ export const digest = (value: string) => createHash("sha256").update(value).dige
 const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
 const combinedSchemaMarkers = ["model_selection_continuity_schema", "theme_catalog_schema", ...workspaceSchemaMarkers, "theme_model_workspace_convergence_schema"] as const;
 const recoverySchemaMarkers = ["session_request_recovery_schema", "builtin_git_schema"] as const;
+const commandToolSchemaMarkers = ["workflow_commands_schema", "tool_preferences_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -460,6 +461,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=81; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 82) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of commandToolSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=82; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
@@ -469,6 +477,20 @@ export class EventStore {
       for (const id of recoverySchemaMarkers) {
         if (version < 81 && marker(id) !== undefined) throw new Error(`Premature session request/Git schema marker ${id}. Original state was preserved.`);
         if (version >= 81) require(id, "session request/Git recovery");
+      }
+      for (const id of commandToolSchemaMarkers) {
+        if (version < 82 && marker(id) !== undefined) throw new Error(`Premature command/tool preference schema marker ${id}. Original state was preserved.`);
+        if (version >= 82) require(id, "command/tool preference");
+      }
+      if (version >= 4 && version < 82 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "session.resumed" && event.payload.continuation ||
+        event.event_type === "settings.updated" && event.payload.settings.toolPreferences !== undefined ||
+        (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && (event.payload.item.spawnPromptOrigin ||
+          event.payload.item.workflow && !["review", "security", "performance", "debug"].includes(event.payload.item.workflow.kind) ||
+          event.payload.item.command && ["impeccable", "continue", "orchestrate", "spawn", "spar", "critique", "roast-me", "tool-preferences"].includes(event.payload.item.command.name)) ||
+        event.event_type === "tool.requested" && event.payload.approval.call.directMcp ||
+        (event.event_type === "tool.started" || event.event_type === "tool.completed") && event.payload.call.directMcp)) {
+        throw new Error("Actual workflow/tool delivery history cannot become a pre-82 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

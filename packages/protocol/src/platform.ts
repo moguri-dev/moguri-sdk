@@ -2,6 +2,8 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
 import { McpServerSchema, SandboxSchema } from "./config.ts";
+import { ToolPreferencesSchema } from "./tool-preferences.ts";
+export * from "./tool-preferences.ts";
 import { SandboxManagementSchema, defaultSandboxManagement } from "./sandbox-management.ts";
 import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot, type ProjectCloneIntent } from "./sessions.ts";
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
@@ -143,6 +145,7 @@ export const SettingsSchema = object({
   subagents: object({ enabled: Type.Boolean(), maxParallel: Type.Integer({ minimum: 1, maximum: 2 }) }),
   evolution: object({ enabled: Type.Boolean() }),
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }),
+  toolPreferences: Type.Optional(ToolPreferencesSchema),
   skillSources: Type.Optional(Type.Array(SkillSourceSchema, { maxItems: 16 })),
   voice: object({
     language: Type.String({ minLength: 1, maxLength: 16 }),
@@ -218,7 +221,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
 export type SettingsSection = keyof UserSettings;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("interactions"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
-  Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("skillSources"),
+  Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("toolPreferences"), Type.Literal("skillSources"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("modelPreferences"), Type.Literal("startup"),
