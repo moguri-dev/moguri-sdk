@@ -1,10 +1,50 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MoguriSdk } from "../packages/sdk/src/index.ts";
+import { kanbanPreferences, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { githubBoardFixture } from "./fixtures/github-board.ts";
 import { ProjectIntegrations } from "../apps/service/src/project-integrations.ts";
 import { startService } from "../apps/service/src/server.ts";
+
+test("hiding a synced board preserves its captured source and cards without a new GitHub read even after presentation changes", async () => {
+  const fixture = await githubBoardFixture();
+  try {
+    await fixture.configure(true); assert.equal((await fixture.refresh()).status, "completed");
+    const configuration = (await fixture.sdk.projects.configuration(fixture.projectId)).configuration;
+    await fixture.sdk.projects.organize(fixture.projectId, { folderId: configuration.folderId, color: "#3b82f6", order: configuration.order }, configuration.revision);
+    const original = await fixture.sdk.issues.board(fixture.projectId), calls = fixture.calls.length, reads = fixture.reads.length;
+    await fixture.sdk.issues.configure(fixture.projectId, { ...original.board, kanban: { ...kanbanPreferences(original.board), visible: false } }, original.board.revision);
+    const hidden = await fixture.sdk.issues.board(fixture.projectId);
+    assert.equal(kanbanPreferences(hidden.board).visible, false);
+    assert.deepEqual(hidden.board.githubSource, original.board.githubSource);
+    assert.deepEqual(hidden.issues, original.issues);
+    assert.equal(fixture.calls.length, calls); assert.equal(fixture.reads.length, reads);
+    assert.equal((await fixture.refresh()).status, "failed");
+    assert.deepEqual((await fixture.sdk.issues.board(fixture.projectId)).board.githubSource, original.board.githubSource);
+  } finally { await fixture.close(); }
+});
+
+test("hiding navigation does not cancel an already owned read or let it publish through another board binding", async () => {
+  const fixture = await githubBoardFixture(), gate = Promise.withResolvers<void>();
+  let reading = false, aborted = false;
+  fixture.state.beforeRead = async (query, signal) => {
+    if (!query.includes("issues(")) return;
+    reading = true; signal.addEventListener("abort", () => { aborted = true; }, { once: true });
+    await gate.promise; signal.throwIfAborted();
+  };
+  try {
+    await fixture.configure(true); await waitFor(() => reading);
+    const job = fixture.service.controller.snapshot().jobs.findLast((job) => job.kind === "issues.refresh")!;
+    const { board } = await fixture.sdk.issues.board(fixture.projectId);
+    const calls = fixture.calls.length, reads = fixture.reads.length;
+    await fixture.sdk.issues.configure(fixture.projectId, { ...board, kanban: { ...kanbanPreferences(board), visible: false } }, board.revision);
+    assert.equal(fixture.calls.length, calls); assert.equal(fixture.reads.length, reads); assert.equal(aborted, false);
+    gate.resolve(); assert.equal((await fixture.sdk.jobs.wait(job.id)).status, "completed");
+    const hidden = await fixture.sdk.issues.board(fixture.projectId);
+    assert.equal(kanbanPreferences(hidden.board).visible, false); assert.equal(hidden.issues.length, 1);
+    assert.deepEqual(hidden.board.githubSource, board.githubSource);
+  } finally { gate.resolve(); await fixture.close(); }
+});
 
 test("GitHub synchronization reflects real draft, ready, closed and reopened PR states using reads only", async () => {
   let state = "open", draft = true, merged = false;

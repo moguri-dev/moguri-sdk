@@ -34,6 +34,12 @@ remain unavailable, not converted into passing product claims.
 Every project has a service-owned board, including before its first card. A
 project-scoped special chat exposes that board without starting inference.
 Hiding Kanban changes navigation only; cards, its chat and ongoing work survive.
+Visibility-only saves neither read GitHub nor recapture its source binding,
+including when that original binding has become stale. They do not cancel
+an already owned synchronization. Its commit still checks the exact effective
+board observation policy, captured repository/account/root and current card
+revisions. Visibility cannot restore stale GitHub authority: a later explicit
+refresh still refuses a changed binding before replacement metadata is read.
 Local cards and explicitly loaded GitHub/Linear items share the project view.
 Imported third-party text remains untrusted source data and imports stay
 read-only. Work item selection may bind a retained card from the session's own
