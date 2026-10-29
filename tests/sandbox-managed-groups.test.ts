@@ -8,14 +8,14 @@ import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { reviewNativeTools, waitFor } from "./fixture.ts";
 
-const configuration = await nativeConfiguration();
+const configuration = await nativeConfiguration(true);
 test("actual managed group guest uses two explicit original roots, real decisions, exact accounting and source publication", { skip: !configuration, timeout: 120000 }, async () => {
   assert.ok(configuration);
   const fixture = await nativeApiFixture(configuration, { group: true, providerBaseUrl: process.env.MOGURI_NATIVE_GROUP_PROVIDER }),
     { sdk, service, provider } = fixture, reportPath = process.env.MOGURI_NATIVE_GROUP_REPORT; let passed = false;
   try {
     const settings = structuredClone(sdk.settings.get()!);
-    settings.values.sandbox = fixture.reviewedConfiguration;
+    settings.values.sandbox = configuration;
     settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
     settings.values.budgets.rates = [{ modelId: provider.modelId, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
       effectiveAt: new Date().toISOString().slice(0, 10), source: "user-estimate" }];
