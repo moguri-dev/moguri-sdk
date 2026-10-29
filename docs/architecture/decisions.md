@@ -59,6 +59,13 @@ records parser licenses, limits and measured Phase 0 results before integration.
 Neither decision expands unrelated roadmap, model authority or unqualified
 execution transports.
 
+The owner-requested [shared themes and TUI follow-up](themes-and-tui.md) retains
+OpenTUI/React and the existing profile settings/event authority. Protocol 78 adds
+one independent theme-catalogue marker, not a second preference store or the
+separately reserved protocol-77 model-continuity migration. Its original JRPG
+presentation and actual mouse navigation do not copy franchise assets, create a
+GitHub inbox or qualify changed native worker/bridge payloads by version alone.
+
 D30's [lean tooling and coordination contract](lean-tooling.md) records
 prerequisite measurements, independent implementation, reused MIT libraries,
 strict schema-58 lineage convergence and qualified/unsupported boundaries. Typed native

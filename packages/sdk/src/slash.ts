@@ -9,6 +9,7 @@ import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol
 import { continueWorkInput, KanbanSourceSchema, kanbanPreferences, type ContinueWorkReview } from "../../protocol/src/kanban.ts";
 import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
 import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } from "../../protocol/src/model.ts";
+import { themePalettes, type Appearance } from "../../protocol/src/preferences.ts";
 
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
@@ -108,6 +109,7 @@ export const slashCommands = [
   { name: "queue", description: "Show queued prompts" },
   { name: "run", description: "Release a held prompt", argument: "ID" },
   { name: "settings", description: "Open shared settings" },
+  { name: "theme", description: "List or select shared color palettes and Dark, Light or System mode", argument: "[list|PALETTE [dark|light|system]|dark|light|system]" },
   { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
   { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
@@ -148,6 +150,23 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
   switch (command.name) {
+    case "theme": {
+      const settings = sdk.settings.get();
+      if (!settings) throw new ClientError("settings_missing", "Connect to this profile's settings before selecting a theme.");
+      const parts = command.argument.trim().split(/\s+/).filter(Boolean);
+      if (!parts.length || parts.length === 1 && parts[0] === "list") return { kind: "text",
+        text: `Theme: ${settings.values.appearance.palette ?? "moguri"} / ${settings.values.appearance.theme}\n\n${themePalettes.map((palette) => `${palette.id} / ${palette.name}: ${palette.description}`).join("\n")}\n\n/theme PALETTE [dark|light|system]. Mode and saved custom colors are preserved unless explicitly changed.` };
+      const [first, second] = parts, palette = themePalettes.find((palette) => palette.id === first);
+      const mode = palette ? second : first;
+      if (parts.length > 2 || !palette && second || !palette && !["dark", "light", "system"].includes(first!) ||
+        mode !== undefined && mode !== "dark" && mode !== "light" && mode !== "system") {
+        throw new ClientError("theme_input", "Use /theme list, /theme PALETTE [dark|light|system], or /theme dark|light|system. Choose a palette from /theme list.");
+      }
+      const appearance: Appearance = { ...settings.values.appearance, ...(palette ? { palette: palette.id } : {}),
+        ...(mode === "dark" || mode === "light" || mode === "system" ? { theme: mode } : {}) };
+      await sdk.settings.update({ ...settings.values, appearance }, settings.revision);
+      return { kind: "ok", message: `Theme set to ${appearance.palette ?? "moguri"} / ${appearance.theme}. Shared with this profile's clients.` };
+    }
     case "folder-group": {
       const input: unknown = JSON.parse(command.argument);
       if (!isRecord(input) || typeof input.name !== "string" || !Array.isArray(input.projectIds) ||

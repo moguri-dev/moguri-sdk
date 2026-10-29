@@ -128,6 +128,12 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version === 77 || retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()) {
+        throw new Error("This standalone theme build does not include the separate model-selection-continuity migration. Use a build supporting both lineages; state was preserved.");
+      }
+      if (version < 78 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='theme_catalog_schema'").get()) {
+        throw new Error("Invalid pre-78 theme catalogue lineage marker. State was preserved.");
+      }
       if (version < 70 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_preferences_schema'").get()) {
         throw new Error("Invalid pre-70 model preference lineage marker. State was preserved.");
       }
@@ -437,6 +443,19 @@ export class EventStore {
       if (version < 74) this.db.exec("PRAGMA user_version=74;");
       if (version < 75) this.db.exec("PRAGMA user_version=75;");
       if (version < 76) this.db.exec("PRAGMA user_version=76;");
+      if (version < 78) {
+        if (this.events().some((event) => event.event_type === "settings.updated" &&
+          event.payload.settings.appearance.palette !== undefined &&
+          !["moguri", "ocean", "orchid", "custom"].includes(event.payload.settings.appearance.palette))) {
+          throw new Error("New theme history cannot be relabelled without its original catalogue marker. State was preserved.");
+        }
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('theme_catalog_schema','1');
+          PRAGMA user_version=78; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='theme_catalog_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid theme catalogue schema marker. State was preserved.");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {
