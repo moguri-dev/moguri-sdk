@@ -12,10 +12,13 @@ function object(text: string) {
   if (!isRecord(value)) throw new ClientError("integration_input", "Use one complete JSON object. No operation was admitted.");
   return value;
 }
-export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "github" | "linear", argument: string): Promise<SlashResult> {
+export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "github" | "linear", argument: string, client: "desktop" | "tui" | "cli" = "cli"): Promise<SlashResult> {
   const match = argument.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/), action = match?.[1] ?? "history", tail = match?.[2] ?? "";
   if (name === "github") {
-    if (action === "repos") return result(await sdk.github.repositories(tail.startsWith("public ") ? { source: "public", query: tail.slice(7) } : { query: tail }));
+    if (action === "repos") {
+      const query = tail.startsWith("public ") ? tail.slice(7) : tail, repositories = await sdk.github.repositories({ source: tail.startsWith("public ") ? "public" : "account", query });
+      return client === "tui" ? { kind: "github-view", view: { kind: "repositories", query, result: repositories } } : result(repositories);
+    }
     if (action === "history" && !tail) return result(await sdk.github.history({ ...(session.projectId ? { projectId: session.projectId } : {}) }));
     if (action === "read" && tail) return result(await sdk.github.read(tail));
     if (action === "wait" && tail) return result(await sdk.github.wait(tail));
@@ -27,7 +30,10 @@ export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "
     if (action === "project" && !tail) return result(await sdk.github.project(scope));
     if ((action === "issues" || action === "pulls") && !tail) {
       const project = await sdk.github.project(scope);
-      return result(await sdk.github.browse(scope, { resource: action, repository: project.repository, account: project.account }));
+      const items = await sdk.github.browse(scope, { resource: action, repository: project.repository, account: project.account });
+      if (items.accountId !== project.accountId) throw new ClientError("github_account", "The captured GitHub account changed. No replacement picker was opened.");
+      return client === "tui" ? { kind: "github-view", view: { kind: "items", scope, context: project, resource: action === "pulls" ? "pull" : "issue",
+        items: items.items, nextPage: items.nextPage } } : result(items);
     }
     if (action === "source" || action === "start") {
       const [kind, number, hash, extra] = tail.split(/\s+/);

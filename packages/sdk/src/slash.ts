@@ -4,16 +4,32 @@ import { DashboardQuerySchema, ArtifactKindSchema, CandidatePatchSchema, Candida
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
-import { RememberApprovalSchema } from "../../protocol/src/permissions.ts";
+import { parseSlashApproval } from "../../protocol/src/permissions.ts";
 import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol/src/application-updates.ts";
 import { continueWorkInput, KanbanSourceSchema, kanbanPreferences } from "../../protocol/src/kanban.ts";
 import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
 import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } from "../../protocol/src/model.ts";
 import { themePalettes, type Appearance } from "../../protocol/src/preferences.ts";
 import { parseSlashInput, type SlashResult } from "../../protocol/src/queued-commands.ts";
+import { sessionSlash, sessionSlashCommands } from "./session-slash.ts";
 
 export type { SessionPanel, ArtifactEditorRequest, PlanEditorRequest, SlashResult } from "../../protocol/src/queued-commands.ts";
 export const slashCommands = [
+  ...sessionSlashCommands,
+  { name: "yolo", description: "Live session-only automatic tool delegation, with qualified Max when available; hard policy still applies" },
+  { name: "stop", description: "Live stop request for this exact session, holding undispatched input without claiming cleanup" },
+  { name: "session", description: "Return to this command's actual conversation view" },
+  { name: "sessions", description: "Open this client's session list without a model call" },
+  { name: "work-items", description: "Open work-item navigation for this exact session" },
+  { name: "code-requests", description: "Open existing session-linked code requests without an implicit GitHub fetch" },
+  { name: "sidebar", description: "Open, close or focus this client's session sidebar", argument: "[open|close]" },
+  { name: "new", description: "Create an idle chat in this project, or explicitly without a project", argument: "[global]" },
+  { name: "open", description: "Register an explicit Local project and create an idle chat", argument: "ABSOLUTE_PATH" },
+  { name: "connect", description: "Start the actual user-requested Copilot sign-in flow without opening a browser" },
+  { name: "cancel-login", description: "Cancel this profile's current provider sign-in flow" },
+  { name: "disconnect", description: "Disconnect this profile's provider without borrowing another account" },
+  { name: "resume", description: "Resume reviewed undispatched work without replaying a terminal command" },
+  { name: "quit", description: "Save drafts and leave a compatible TUI when this ordered action is reached" },
   { name: "approve", description: "Approve the current action once or remember a named tool/command in its exact scope", argument: "[once|session|project|global] [exact|family|tool]" },
   { name: "folder-chat", description: "List project folders or create a Local chat with every explicitly captured member root", argument: "[FOLDER_ID]" },
   { name: "folder-group", description: "Atomically name a navigation folder containing exact existing projects; no files are moved", argument: '{"name":"Folder","projectIds":["ID","ID"]}' },
@@ -128,12 +144,45 @@ export function parseSlash(text: string): { name: string; argument: string } | n
   return parseSlashInput(text);
 }
 export const isSharedSlash = (name: string): boolean => slashCommands.some((command) => command.name === name || "aliases" in command && command.aliases.some((alias) => alias === name));
-export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: string, client: "desktop" | "tui" | "cli"): Promise<SlashResult> {
+export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: string, client: "desktop" | "tui" | "cli",
+  queued?: { executionId: string; inputDigest: string; bindingDigest: string }): Promise<SlashResult> {
   const command = parseSlash(text);
   if (!command) throw new ClientError("slash", "Use a slash command beginning with /.");
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
   if (!session) throw new ClientError("session_missing", "Choose an existing session.");
+  const portable = await sessionSlash(sdk, session, command, client);
+  if (portable) return portable;
   switch (command.name) {
+    case "yolo":
+      if (command.argument) throw new ClientError("yolo_input", "Use /yolo without arguments. Env, model, budgets and hard policy are not overridden.");
+      await sdk.sessions.yolo(session.id);
+      return { kind: "ok", message: `${sdk.getState().snapshot?.sessions.find((entry) => entry.id === session.id)?.controls.autonomy ?? "Automatic"} session tool delegation enabled. Hard denials, default-deny policy, read-only scope, Env and budgets still apply; questions were not answered.` };
+    case "stop":
+      if (command.argument) throw new ClientError("stop_input", "Use /stop for this exact session.");
+      await sdk.command({ type: "session.stop", sessionId }); return { kind: "ok", message: "Stop requested. Inspect actual owned cancellation and cleanup; no success or replay was inferred." };
+    case "session": case "sessions": case "work-items": case "code-requests": case "sidebar": case "quit": {
+      if (command.name === "sidebar" ? command.argument && !["open", "close"].includes(command.argument) : command.argument) throw new ClientError("navigation_input", "Navigation takes no arguments; use /sidebar [open|close].");
+      if (command.name === "quit" && client !== "tui") throw new ClientError("command_client", "This quit action belongs to a compatible TUI; no desktop or service process was closed.");
+      return { kind: "client-view", name: command.name, argument: command.argument };
+    }
+    case "new": {
+      if (command.argument && command.argument !== "global") throw new ClientError("new_input", "Use /new or /new global. No previous project was inferred.");
+      const created = await sdk.sessions.create(command.argument === "global" ? null : session.projectId, "New chat");
+      return { kind: "session", sessionId: created.id!, side: false };
+    }
+    case "open": {
+      if (!command.argument) throw new ClientError("project_path", "Choose an explicit absolute Local project path.");
+      const project = await sdk.projects.add(command.argument), created = await sdk.sessions.create(project.id!, "New chat");
+      return { kind: "session", sessionId: created.id!, side: false };
+    }
+    case "connect": case "cancel-login": case "disconnect": {
+      if (command.argument) throw new ClientError("provider_input", "This provider control takes no arguments. Credentials were not read from command text.");
+      await sdk.command({ type: command.name === "connect" ? "provider.login" : command.name === "cancel-login" ? "provider.cancel" : "provider.logout" });
+      return { kind: "ok", message: command.name === "connect" ? "Sign-in requested. Complete the original provider flow yourself; no browser was opened." : command.name === "cancel-login" ? "Original sign-in cancellation requested." : "This profile's provider was disconnected." };
+    }
+    case "resume":
+      if (command.argument) throw new ClientError("resume_input", "Use /resume for this actual session after inspecting original effects.");
+      await sdk.command({ type: "session.resume", sessionId }); return { kind: "ok", message: "Undispatched work resumed. Terminal commands and unknown effects were not replayed." };
     case "theme": {
       const settings = sdk.settings.get();
       if (!settings) throw new ClientError("settings_missing", "Connect to this profile's settings before selecting a theme.");
@@ -182,10 +231,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "text", text: JSON.stringify({ jobId: started.id, diagnostic: "Original public-price refresh started, not claimed complete. Inspect the shared capability job; old catalogs and historical costs stay intact on failure." }, null, 2) };
     }
     case "approve": {
-      const [scope = "once", match = "exact", extra] = command.argument.trim().split(/\s+/).filter(Boolean);
-      if (!session.pendingApproval || extra || !["once", "session", "project", "global"].includes(scope) || !["exact", "family", "tool"].includes(match) || scope === "once" && match !== "exact") throw new ClientError("approval_input", "Use /approve once, session|project|global [exact|family|tool] for the actual pending action.");
-      await sdk.approvals.respond(session.id, session.pendingApproval.id, true, scope === "once" ? undefined : parse(RememberApprovalSchema, { scope, match }));
-      return { kind: "ok", message: scope === "once" ? "Approved this action." : `Approved and remembered in ${scope} scope. Hard policy still applies.` };
+      if (!session.pendingApproval) throw new ClientError("approval_input", "There is no actual pending action to approve.");
+      const remember = parseSlashApproval(command.argument);
+      await sdk.approvals.respond(session.id, session.pendingApproval.id, true, remember);
+      return { kind: "ok", message: remember ? `Approved and remembered in ${remember.scope} scope. Hard policy still applies.` : "Approved this action." };
     }
     case "approvals": {
       const [action, id, extra] = command.argument.trim().split(/\s+/).filter(Boolean);
@@ -201,6 +250,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "continue-work": {
       if (!session.projectId || !continueWorkInput(text)) throw new ClientError("project_work_input", "Use /continue-work or one exact Kanban card ID in an actual project chat.");
+      if (queued) return { kind: "continue-work", review: { profileId: sdk.profileId, sessionId: session.id, text, command: queued }, choices: ["kanban", "prompt"] };
       if (session.draft.text && session.draft.text !== text) throw new ClientError("continue_work_draft", "Another draft is saved. Keep or send it before reviewing this separate continuation request.");
       let expectedRevision = session.draft.revision;
       if (!session.draft.text) {
@@ -266,7 +316,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       throw new ClientError("agent_terminal_input", "Use /agent-terminal list [SEQUENCE ID] or /agent-terminal read COMMAND_ID [UTF8_OFFSET|tail]. No user console was accessed.");
     }
     case "github":
-    case "linear": return integrationSlash(sdk, session, command.name, command.argument);
+    case "linear": return integrationSlash(sdk, session, command.name, command.argument, client);
     case "knowledge":
     case "marketplace":
     case "hooks":
@@ -718,7 +768,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!action) return { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.artifacts, null, 2) };
       if (action === "edit" && id && !rest.length) {
         const value = await sdk.artifacts.read(id);
-        return { kind: "artifact-editor", artifact: { ...value.artifact, text: value.text, sessionId: value.artifact.originSessionId } };
+        const artifact = value.artifact;
+        return { kind: "artifact-editor", artifact: { id: artifact.id, revision: artifact.revision, kind: artifact.kind, name: artifact.name,
+          text: value.text, sessionId: artifact.originSessionId, projectId: artifact.projectId, status: artifact.status,
+          folderId: artifact.folderId, workItemId: artifact.workItemId } };
       }
       if (action === "history" && id && !rest.length) return { kind: "text", text: JSON.stringify(await sdk.artifacts.history(id), null, 2) };
       if ((action === "archive" || action === "restore") && id && !rest.length) {
@@ -1035,11 +1088,11 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!command.argument) throw new ClientError("slash_arguments", "Use /run QUEUED_PROMPT_ID.");
       await sdk.prompts.release(sessionId, command.argument, session.queueRevision); return { kind: "ok", message: "Released for admission." };
     }
-    case "settings": return { kind: "panel", panel: "Settings" };
     case "help": {
       const skills = (await sdk.commands.list(sessionId)).filter((entry) => entry.kind === "skill");
-      return { kind: "text", text: [...slashCommands.map((entry) => `/${entry.name}${"argument" in entry ? ` ${entry.argument}` : ""}  ${entry.description}`),
-        ...skills.map((entry) => `/${entry.name}  Skill / ${entry.skill.sourceName}: ${entry.description}`)].join("\n") };
+      const help = [...slashCommands.map((entry) => `/${entry.name}${"argument" in entry ? ` ${entry.argument}` : ""}  ${entry.description}`),
+        ...skills.map((entry) => `/${entry.name}  Skill / ${entry.skill.sourceName}: ${entry.description}`)].join("\n");
+      return client === "tui" ? { kind: "client-view", name: "help", argument: command.argument, text: help } : { kind: "text", text: help };
     }
     default: {
       const matches = (await sdk.commands.list(sessionId)).filter((entry) => entry.kind === "skill" && entry.name === command.name);

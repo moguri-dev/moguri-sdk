@@ -63,7 +63,7 @@ export class MoguriSdk extends TransportClient {
   readonly kanban = {
     open: (projectId: string) => this.command({ type: "kanban.open", projectId }),
     choose: (review: import("../../protocol/src/kanban.ts").ContinueWorkReview, choice: import("../../protocol/src/kanban.ts").ContinueWorkChoice) => {
-      if (review.profileId !== this.profileId) throw new ClientError("continue_work_stale", "The continuation review belongs to another profile. No prompt or task was dispatched.");
+      if (!("expectedRevision" in review) || review.profileId !== this.profileId) throw new ClientError("continue_work_stale", "Use the exact original draft review, or the owning queued client claim. No prompt or task was dispatched.");
       return this.command({ type: "message.send", sessionId: review.sessionId, expectedRevision: review.expectedRevision, delivery: "queue", continueWorkChoice: choice });
     },
     items: (projectId: string, source: KanbanSource = "kanban", page = 1, sessionId?: string) => this.query({ type: "kanban.items", projectId, source, page, ...(sessionId ? { sessionId } : {}) }),
@@ -211,6 +211,7 @@ export class MoguriSdk extends TransportClient {
       return this.sessions.configure(sessionId, { ...session.controls, autonomy,
         automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max" }, expectedRevision);
     },
+    yolo: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.yolo", sessionId, expectedRevision }),
     selectModel: async (sessionId: string, modelId: string | null, expectedRevision = this.sessionRevision(sessionId)) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
       if (!session) throw new ClientError("session_missing", "Choose an existing model-selection session.");

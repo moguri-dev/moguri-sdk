@@ -138,13 +138,14 @@ export class ProjectWorkRuntime {
     }
     return { id: run.id };
   }
-  async start(origin: Session, finish: WorkspaceFinish, input: { issueId?: string; consumeDraft?: { expectedRevision: number } } = {}): Promise<CommandResult> {
+  async start(origin: Session, finish: WorkspaceFinish, input: { issueId?: string; consumeDraft?: { expectedRevision: number } } = {}, queued?: { guard(): void }): Promise<CommandResult> {
+    queued?.guard();
     this.writable(origin);
     this.childBounds(origin);
     if (!finish.intent) throw new MoguriError("project_work_intent", "An exact actual-user command identity is required.");
     if (this.snapshot().projectWorkRuns.some((run) => run.commandId === finish.intent!.id)) throw new MoguriError("project_work_no_replay",
       "The original retained task already owns this command. Missing receipts never authorize another checkout or paid call.", 409);
-    if (origin.turnId || origin.queue.length || this.snapshot().projectWorkRuns.some((run) => run.originSessionId === origin.id && activeProjectWork(run))) {
+    if (origin.turnId || origin.queue.length && !queued || this.snapshot().projectWorkRuns.some((run) => run.originSessionId === origin.id && activeProjectWork(run))) {
       throw new MoguriError("project_work_busy", "Finish this chat's current turn, queue or delegated task before asking for another card.", 409);
     }
     if (input.consumeDraft && (origin.draft.revision !== input.consumeDraft.expectedRevision || origin.draft.attachments.length || !isContinueWork(origin.draft.text))) {
@@ -225,9 +226,10 @@ export class ProjectWorkRuntime {
       operationIds: [], prUrl: null, diagnostic: null, inspectedAt: null };
     if ([run.baseBranch, "main", "master"].includes(run.destinationBranch)) throw new MoguriError("project_work_protected", "Continue work cannot publish to a protected/default branch.", 403);
     const current = () => {
+      queued?.guard();
       const actual = this.session(origin.id);
       this.writable(actual);
-      if (digest(JSON.stringify(actual.controls)) !== originControlsDigest || actual.turnId || actual.queue.length ||
+      if (digest(JSON.stringify(actual.controls)) !== originControlsDigest || actual.turnId || actual.queue.length && !queued ||
         this.snapshot().policy.revision !== run.binding.policyRevision || this.snapshot().settings.permissionRevision !== run.binding.permissionRevision ||
         this.platform.sessions.projects.configuration(run.projectId).revision !== run.binding.configurationRevision ||
         JSON.stringify(sourceRootSync(this.platform.managed.project(actual).path)) !== JSON.stringify(run.binding.root) ||

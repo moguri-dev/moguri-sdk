@@ -26,11 +26,12 @@ import {
   type MemoryTarget, type BudgetEntry,
   type RoleSequenceRecord, projectRoleSequence, successfulRoleEntry, decisionEvidence,
   type SessionChildrenAction, type SessionChildrenReview, sessionChildBindings, sessionSubtree,
+  parseSlashApproval,
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, textFilePage } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
 import { QueuedCommands, type CommandEnvironment, type CommandOwner } from "./queued-commands.ts";
-import { isQueuedCommandCommand, parseSlashInput, type CommandBinding, type CommandClient } from "../../../packages/protocol/src/queued-commands.ts";
+import { isQueuedCommandCommand, parseSlashInput, type CommandBinding, type CommandClient, type LiveSlashControl } from "../../../packages/protocol/src/queued-commands.ts";
 import { sourceRootSync } from "./repository-source.ts";
 import { CopilotAdapter, KeyringCredentials, type ProviderAdapter, type PreparedModel } from "./provider.ts";
 import { validateTool, executeTool } from "./tools.ts";
@@ -383,6 +384,7 @@ export class ControlPlane extends EventEmitter {
     this.queuedCommands = new QueuedCommands(store, {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events) => this.commit(events),
       binding: (session) => this.commandBinding(session), environment: commandEnvironment,
+      canRun: (session) => this.commandBoundary(session),
       pause: (id) => this.paused.add(id), wake: () => this.wake(),
       subscribe: (listener) => { this.on("change", listener); return () => { this.off("change", listener); }; },
     });
@@ -716,6 +718,8 @@ export class ControlPlane extends EventEmitter {
       owner?.guard();
       if (!forget && events.some((event) => event.project_id && this.deletingProjects.has(event.project_id) || event.session_id && this.deletingSessions.has(event.session_id))) throw new MoguriError("workspace_removing", "This workspace is being removed. No late state was resurrected.", 409);
       if (owner) {
+        events = events.map((event) => event.event_type === "draft.saved" && event.session_id === owner.sessionId ? { ...event,
+          payload: { ...event.payload, source: { actor: "user", executionId: owner.id, inputId: owner.item.id } } } : event);
         const inserted = events.filter((event) => event.event_type === "queue.enqueued" && event.session_id === owner.sessionId);
         const ids = inserted.flatMap((event) => event.event_type === "queue.enqueued" ? [event.payload.item.id] : []);
         if (ids.length) events = [...events, this.event(this.session(owner.sessionId), "queue.reordered", { messageIds: [...ids, ...this.session(owner.sessionId).queue.map((item) => item.id)] })];
@@ -1212,6 +1216,73 @@ export class ControlPlane extends EventEmitter {
     }
     for (const external of [...this.externalRuns.values()]) if (!external.started && (!sessionId || external.sessionId === sessionId)) this.finishExternal(external, "stopped", "Permissions changed. The external tool was not executed.");
   }
+  private approvalDecisionActor(session: Session, call: ToolCall, automatic: boolean): Pick<Extract<EventInput, { event_type: "tool.decided" }>["payload"], "actor" | "ruleId"> {
+    if (!automatic) return { actor: "user" };
+    const nativeId = this.runs.get(session.id)?.sandboxExecutionId;
+    const root = nativeId ? this.sandboxExecution(nativeId).root : session.controls.env === "Remote" ? this.remoteWorkspace(session) : this.toolScope(session, call).root;
+    const authorization = this.authorization(session, call, root);
+    if (authorization.decision !== "allow") throw new MoguriError("automatic_review_required", "The current hard policy or exact review rule still requires an actual user decision. Yolo cannot override it.", 403);
+    return { actor: authorization.actor === "policy" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation",
+      ...(authorization.ruleId ? { ruleId: authorization.ruleId } : {}) };
+  }
+  private async enableYolo(session: Session, finish: WorkspaceFinish, consumeDraft = false, client: CommandClient = "cli"): Promise<CommandResult> {
+    const status = this.decisions.query({ type: "decisions.status", sessionId: session.id });
+    if (status.type !== "decisions.status") throw new MoguriError("decision_status", "The exact decision readiness changed response type. No model or autonomy fallback was inferred.", 409);
+    const controls: Controls = { ...session.controls, autonomy: status.ready ? "Autopilot Max" : "Autopilot", automaticApprovals: true };
+    const inputDigest = this.store.putBlob(JSON.stringify({ format: "moguri-live-control", version: 1, action: "yolo", actor: "user", client,
+      sessionId: session.id, profileId: this.profileId, targetTurnId: session.turnId, approvalId: session.pendingApproval?.id ?? null,
+      controlsBefore: session.controls, controls, decisionReadiness: status,
+      ...(consumeDraft ? { input: { text: session.draft.text, attachments: session.draft.attachments, revision: session.draft.revision } } : {}) }));
+    const control: LiveSlashControl = { version: 1, id: randomUUID(), actor: "user", action: "yolo", phase: "intent", inputDigest,
+      targetTurnId: session.turnId, approvalId: session.pendingApproval?.id ?? null, diagnostic: null };
+    const result = finish([this.event(session, "slash.live_recorded", { control }), this.event(session, "session.configured", { controls }),
+      ...(consumeDraft ? [this.event(session, "draft.saved", { text: "", attachments: session.draft.attachments })] : [])], { id: control.id, revision: session.revision + 1 });
+    try {
+      const current = this.session(session.id), pending = current.pendingApproval;
+      if (pending && pending.id === control.approvalId) {
+        const nativeId = this.runs.get(session.id)?.sandboxExecutionId;
+        const root = nativeId ? this.sandboxExecution(nativeId).root : current.controls.env === "Remote" ? this.remoteWorkspace(current) : this.toolScope(current, pending.call).root;
+        if (this.authorization(current, pending.call, root).decision === "allow") {
+          await this.perform({ id: randomUUID(), profileId: this.profileId, command: { type: "approval.respond", sessionId: current.id, approvalId: pending.id, allow: true } }, undefined, true);
+        }
+      }
+      this.commit([this.event(session, "slash.live_recorded", { control: { ...control, phase: "acknowledged",
+        diagnostic: "Actual-user session delegation applied. Current hard rules, questions, budgets, model and Env ownership were preserved." } })]);
+    } catch (error) {
+      if (this.projection.sessions.some((current) => current.id === session.id)) this.commit([this.event(session, "slash.live_recorded", { control: { ...control, phase: "partial",
+        diagnostic: "Delegation was retained, but pending-tool revalidation did not finish. Inspect the exact original action; no approval or paid retry was fabricated." } })]);
+      throw error;
+    }
+    return result;
+  }
+  private async liveStopOrApproval(session: Session, parsed: { name: string; argument: string }, client: CommandClient, finish: WorkspaceFinish): Promise<CommandResult> {
+    const action = parsed.name === "stop" ? "stop" : "approve";
+    if (action === "stop" && parsed.argument) throw new MoguriError("stop_input", "Use /stop without arguments for this actual session.");
+    if (action === "approve" && !session.pendingApproval) throw new MoguriError("approval_input", "There is no actual pending action to approve. The command draft was preserved.");
+    const remember = action === "approve" ? parseSlashApproval(parsed.argument) : undefined;
+    const inputDigest = this.store.putBlob(JSON.stringify({ format: "moguri-live-control", version: 1, action, actor: "user", client,
+      sessionId: session.id, profileId: this.profileId, targetTurnId: session.turnId, approvalId: session.pendingApproval?.id ?? null,
+      input: { text: session.draft.text, attachments: session.draft.attachments, revision: session.draft.revision }, ...(remember ? { remember } : {}) }));
+    const control: LiveSlashControl = { version: 1, id: randomUUID(), actor: "user", action, phase: "intent", inputDigest,
+      targetTurnId: session.turnId, approvalId: session.pendingApproval?.id ?? null, diagnostic: null };
+    const result = finish([this.event(session, "slash.live_recorded", { control }), this.event(session, "draft.saved", { text: "", attachments: session.draft.attachments })], { id: control.id });
+    try {
+      if (action === "stop") this.stop(session.id);
+      else {
+        const approvalId = control.approvalId;
+        if (!approvalId) throw new MoguriError("approval_input", "The live control lost its original exact pending approval. No replacement was approved.", 409);
+        await this.perform({ id: randomUUID(), profileId: this.profileId, command: { type: "approval.respond", sessionId: session.id,
+          approvalId, allow: true, ...(remember ? { remember } : {}) } });
+      }
+      if (this.projection.sessions.some((current) => current.id === session.id)) this.commit([this.event(session, "slash.live_recorded", { control: { ...control,
+        phase: "acknowledged", diagnostic: action === "stop" ? "Stop requested for the actual owner. Inspect its real cancellation and cleanup; no success or replay was inferred." : "The exact original pending approval was acknowledged as the actual user." } })]);
+    } catch (error) {
+      if (this.projection.sessions.some((current) => current.id === session.id)) this.commit([this.event(session, "slash.live_recorded", { control: { ...control, phase: "partial",
+        diagnostic: "The original live control did not finish. Inspect its actual target; no replacement action, actor or permission was invented." } })]);
+      throw error;
+    }
+    return result;
+  }
   private permissionContext(session: Session, call: ToolCall) {
     const nativeId = this.runs.get(session.id)?.sandboxExecutionId;
     const native = nativeId ? this.sandboxExecution(nativeId) : undefined;
@@ -1371,7 +1442,7 @@ export class ControlPlane extends EventEmitter {
       prUrl: parent.prUrl, workItemId: parent.workItemId,
     } }, ...coordination], { id });
   }
-  private askSide(command: Extract<CommandEnvelope["command"], { type: "session.side.prompt" }>, finish: WorkspaceFinish): CommandResult {
+  private askSide(command: Extract<CommandEnvelope["command"], { type: "session.side.prompt" }>, finish: WorkspaceFinish, owner?: CommandOwner): CommandResult {
     const source = this.session(command.sessionId), text = command.prompt;
     const intent = finish.intent;
     if (!intent) throw new MoguriError("side_prompt_intent", "The side question has no original command identity. No model was started.", 409);
@@ -1384,13 +1455,16 @@ export class ControlPlane extends EventEmitter {
     }
     if (!text.trim() || !text.isWellFormed()) throw new MoguriError("side_prompt", "Write a lossless non-empty side question. No prompt or source was replaced.");
     if (source.status === "archived") throw new MoguriError("archived", "Restore the original session before opening its side question.");
-    const consume = command.expectedDraftRevision !== undefined;
+    if (owner && (owner.sessionId !== source.id || owner.item.command?.name !== "side" || owner.item.command.argument !== text)) {
+      throw new MoguriError("command_source", "The side question must use its exact original queued command and context, not a newer composer draft.", 409);
+    }
+    const consume = !owner && command.expectedDraftRevision !== undefined;
     if (consume) {
       this.revision(source.draft.revision, command.expectedDraftRevision!);
       if (source.draft.text.trim().match(/^\/side\s+([\s\S]*)$/)?.[1] !== text) throw new MoguriError("side_prompt_draft", "The exact /side draft changed. No unrelated prompt or attachment was consumed.", 409);
       this.platform.inputs.assertDraftReady(source.id);
     }
-    const attachments = consume ? source.draft.attachments : [];
+    const attachments = owner ? owner.item.attachments : consume ? source.draft.attachments : [];
     this.attachments(source, attachments);
     const existing = source.kind === "side" ? source : this.projection.sessions.findLast((session) => session.parentSessionId === source.id &&
       session.createdParentSessionId === source.id && session.kind === "side" && session.status !== "archived");
@@ -1467,9 +1541,9 @@ export class ControlPlane extends EventEmitter {
       throw new MoguriError("candidate_cleanup_pending", "Exact candidate-owned model work has not settled. Proposal content and unknown budget capacity were preserved.", 409);
     }
   }
-  private async settleOwned(id: string): Promise<void> {
+  private async settleOwned(id: string, settlingArchiveId?: string): Promise<void> {
     const sessions = this.descendants(id);
-    for (const session of sessions) this.stop(session.id, true, false);
+    for (const session of sessions) this.stop(session.id, true, false, session.id === id ? settlingArchiveId : undefined);
     for (const session of sessions) {
       await this.platform.settleSession(session.id);
       await this.platform.sessions.terminals.closeSession(session.id);
@@ -2241,7 +2315,26 @@ export class ControlPlane extends EventEmitter {
     this.dispatching.set(envelope.id, { digest: hash, result });
     return result;
   }
-  private async perform(raw: unknown, owner?: CommandOwner): Promise<CommandResult> {
+  private async chooseQueuedContinuation(command: Extract<CommandEnvelope["command"], { type: "slash.client.choose" }>, finish: WorkspaceFinish): Promise<CommandResult> {
+    const original = this.queuedCommands.continuation(command), session = original.session, queueRevision = session.queueRevision;
+    const guard = () => {
+      const current = this.queuedCommands.continuation(command).session;
+      if (current.queueRevision !== queueRevision || current.turnId || this.removingSession(current.id) ||
+        current.projectId && this.deletingProjects.has(current.projectId)) throw new MoguriError("command_continuation_changed", "The actual original queue or owner changed during this choice. No replacement prompt or task was admitted.", 409);
+    };
+    const chosen: WorkspaceFinish = Object.assign((events: EventInput[], result: CommandResult = {}) => {
+      guard();
+      const ids = events.flatMap((event) => event.event_type === "queue.enqueued" && event.session_id === session.id ? [event.payload.item.id] : []);
+      return finish([...this.queuedCommands.continuationEvents(command), ...events,
+        ...(ids.length ? [this.event(this.session(session.id), "queue.reordered", { messageIds: [...ids, ...this.session(session.id).queue.map((item) => item.id)] })] : [])], result);
+    }, { intent: finish.intent });
+    if (command.choice === "prompt") return this.enqueuePrompt(session, original.item, "queue", false, false, chosen);
+    if (original.item.attachments.length) throw new MoguriError("project_work_draft", "This original continuation has attached context. Send that exact input normally, or cancel and review a separate Kanban request; no attachment was discarded.", 409);
+    const source = continueWorkInput(original.item.text);
+    if (!source) throw new MoguriError("command_continuation", "The original queued continuation text is invalid. No draft or model was substituted.", 409);
+    return this.projectWork.start(session, chosen, source, { guard });
+  }
+  private async perform(raw: unknown, owner?: CommandOwner, automaticApproval = false): Promise<CommandResult> {
     owner?.guard();
     if (this.shuttingDown) throw new MoguriError("shutting_down", "Moguri is shutting down. The draft was not sent.", 503);
     const envelope = parse(CommandSchema, raw);
@@ -2259,6 +2352,20 @@ export class ControlPlane extends EventEmitter {
     }
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
     const finish = this.commandFinish(envelope.id, commandDigest, owner);
+    if (command.type === "slash.restore.enqueue") {
+      const session = this.session(command.sessionId);
+      this.revision(session.revision, command.expectedRevision);
+      if (session.status !== "archived") throw new MoguriError("not_archived", "This explicit restore intake belongs to its actual archived session. No active draft was replaced.", 409);
+      return this.enqueueCommand(session, { name: "restore", argument: "" }, command.client, "queue", Boolean(command.held), finish, { text: "/restore", attachments: [] });
+    }
+    if (command.type === "slash.prompt.enqueue") {
+      const source = owner?.item.command;
+      if (!owner || owner.sessionId !== command.sessionId || !source || !["steer", "interrupt"].includes(source.name) || !source.argument.trim()) {
+        throw new MoguriError("command_source", "Only the actual queued executor can derive this exact original user follow-up. No current draft or active turn was replaced.", 403);
+      }
+      return this.enqueuePrompt(this.session(owner.sessionId), { text: source.argument, attachments: owner.item.attachments }, "queue", false, false, finish);
+    }
+    if (command.type === "slash.client.choose") return this.chooseQueuedContinuation(command, finish);
     if (isQueuedCommandCommand(command)) return this.queuedCommands.execute(command, finish);
     if (command.type === "session.home") {
       const session = this.session(command.sessionId);
@@ -2336,7 +2443,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "session.delete" && !this.projection.sessions.some((session) => session.id === command.sessionId) &&
       this.candidateCleanup.sessionDeleted(command.sessionId)) return finish([], { id: command.sessionId });
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
-    if (command.type === "session.side.prompt") return this.askSide(command, finish);
+    if (command.type === "session.side.prompt") return this.askSide(command, finish, owner);
     if (isKanbanCommand(command)) return this.projectWork.execute(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
@@ -2442,10 +2549,14 @@ export class ControlPlane extends EventEmitter {
             payload: { selection: modelSelection(controls), sourceSessionId: session.id, sourceProjectId: session.projectId, actor: "user" as const } }] : [])],
         { revision: session.revision + 1 });
       }
+      case "session.yolo":
+        this.revision(session.revision, command.expectedRevision);
+        return this.enableYolo(session, finish);
       case "session.archive": {
         if (command.expectedRevision !== undefined) this.revision(session.revision, command.expectedRevision);
         this.childrenDecision(session, "archive", command.children);
-        await this.settleOwned(session.id);
+        const archive = this.projection.commandExecutions.find((entry) => entry.sessionId === session.id && entry.name === "archive" && entry.status === "claimed");
+        await this.settleOwned(session.id, archive?.id);
         const current = this.session(session.id);
         const reviewed = this.childrenDecision(current, "archive", command.children);
         const targets = reviewed.action === "archive" ? reviewed.tree : [current];
@@ -2509,6 +2620,11 @@ export class ControlPlane extends EventEmitter {
         this.revision(session.draft.revision, command.expectedRevision);
         this.platform.inputs.assertDraftReady(session.id);
         const slash = parseSlashInput(session.draft.text);
+        if (slash?.name === "yolo" && !command.held) {
+          if (slash.argument) throw new MoguriError("yolo_input", "Use /yolo without arguments. The actual draft and hard policy were preserved.");
+          return this.enableYolo(session, finish, true, command.client ?? "cli");
+        }
+        if (slash && !command.held && ["approve", "stop"].includes(slash.name)) return this.liveStopOrApproval(session, slash, command.client ?? "cli", finish);
         if (slash && !command.continueWorkChoice) return this.enqueueCommand(session, slash, command.client ?? "cli", command.delivery, Boolean(command.held), finish);
         if (session.draft.text.startsWith("/") && !slash) throw new MoguriError("slash_input", "Choose a complete slash command. The original draft was preserved; no text was sent to a model.");
         const continuation = !command.held && command.delivery === "queue" && session.projectId ? continueWorkInput(session.draft.text) : null;
@@ -2562,12 +2678,14 @@ export class ControlPlane extends EventEmitter {
         this.stop(session.id);
         return {};
       case "approval.respond": {
+        if (automaticApproval && command.remember) throw new MoguriError("automatic_grant", "Automatic tool delegation cannot manufacture a remembered user approval.", 403);
         if (!command.allow && command.remember) throw new MoguriError("approval_remember", "Only an actual approval can create a remembered grant.");
         const external = this.externalRuns.get(session.id);
         if (external) {
           if (external.started || external.approvalId !== command.approvalId || external.policyRevision !== this.projection.policy.revision || external.permissionRevision !== this.projection.settings.permissionRevision) throw new MoguriError("approval_stale", "This external tool approval expired or changed.", 409);
           const remembered = this.rememberApproval(session, external.call, command.remember);
-          finish([...remembered, this.event(session, "tool.decided", { approvalId: external.approvalId, allow: command.allow, actor: "user" }, external.stepId)]);
+          finish([...remembered, this.event(session, "tool.decided", { approvalId: external.approvalId, allow: command.allow,
+            ...this.approvalDecisionActor(this.session(session.id), external.call, automaticApproval) }, external.stepId)]);
           if (!command.allow) this.finishExternal(external, "stopped", "External MCP request denied by the user.", undefined, "denied");
           else this.executeExternal(external);
           return {};
@@ -2596,7 +2714,8 @@ export class ControlPlane extends EventEmitter {
           }
           const remembered = this.rememberApproval(session, approval.call, command.remember);
           const webAccess = command.allow ? this.prepareWebAccess(session, approval.call) : undefined;
-          const events: EventInput[] = [...remembered, this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow, actor: "user" }, run.stepId)];
+          const events: EventInput[] = [...remembered, this.event(session, "tool.decided", { approvalId: approval.id, allow: command.allow,
+            ...this.approvalDecisionActor(this.session(session.id), approval.call, automaticApproval) }, run.stepId)];
           if (command.allow) events.push(this.event(session, "tool.started", { call: approval.call }, run.stepId));
           finish(events);
           run.approval = undefined;
@@ -2610,14 +2729,17 @@ export class ControlPlane extends EventEmitter {
     }
   }
   private enqueueCommand(session: Session, parsed: { name: string; argument: string }, client: CommandClient,
-    delivery: "queue" | "steer" | "interrupt", held: boolean, finish: WorkspaceFinish): CommandResult {
+    delivery: "queue" | "steer" | "interrupt", held: boolean, finish: WorkspaceFinish, input?: { text: string; attachments: Session["draft"]["attachments"] }): CommandResult {
     if (delivery !== "queue") throw new MoguriError("slash_delivery", "Slash commands use the ordered command queue. Steer/Interrupt text must remain an explicit prompt; nothing was sent.");
     if (session.queue.length >= 100) throw new MoguriError("queue_limit", "The queue is limited to 100 unclaimed prompts or commands.");
-    this.attachments(session, session.draft.attachments);
-    const command = this.queuedCommands.capture(session, parsed, client);
-    const item = { id: randomUUID(), text: session.draft.text, attachments: session.draft.attachments, delivery: "queue" as const,
+    const source = input ?? session.draft;
+    this.attachments(session, source.attachments);
+    const command = this.queuedCommands.capture(session, parsed, client, input ? undefined : session.draft.revision);
+    const item = { id: randomUUID(), text: source.text, attachments: source.attachments, delivery: "queue" as const,
       command, ...(held ? { held: true } : {}) };
-    const result = finish([this.event(session, "queue.enqueued", { item }), this.event(session, "draft.saved", { text: "", attachments: [] })], { id: item.id });
+    const consumesContext = ["review", "security", "performance", "debug", "continue-work", "steer", "interrupt"].includes(parsed.name) || parsed.name === "side" && Boolean(parsed.argument.trim());
+    const result = finish([this.event(session, "queue.enqueued", { item }), ...(input ? [] :
+      [this.event(session, "draft.saved", { text: "", attachments: consumesContext ? [] : session.draft.attachments })])], { id: item.id });
     if (!held && session.queue.every((entry) => entry.held || entry.delivery === "steer")) this.paused.delete(session.id);
     if (!held) this.pumpAll();
     return result;
@@ -2721,14 +2843,29 @@ export class ControlPlane extends EventEmitter {
   private context(sessionId: string): Message[] { return this.contextEntries(sessionId).map((entry) => entry.message); }
   private hasPasteFiles(session: Session): boolean { return this.platform.inputs.admittedFiles(session.id).length > 0; }
   private hasDocuments(session: Session): boolean { return this.platform.inputs.admittedDocuments(session.id).length > 0; }
+  private commandBoundary(session: Session): boolean {
+    if (this.nativeAdmissions.has(session.id) || [...this.externalEffects].some((owner) => owner.sessionId === session.id)) return false;
+    const run = this.runs.get(session.id);
+    if (!session.turnId) return !run && !this.externalRuns.has(session.id);
+    if (run && (run.turnId !== session.turnId || run.inFlight || run.abort.signal.aborted || run.approvalResponse)) return false;
+    const compound = this.projection.compoundWorkflows.find((record) => record.id === session.turnId && record.sessionId === session.id && record.status === "waiting_validation");
+    if (compound && (!run || !run.calls.size)) return true;
+    if (!run || run.done) return false;
+    if (run.approval && session.pendingApproval?.id === run.approval.id &&
+      [...run.calls.values()].every((call) => call.id === run.approval?.call.id)) return true;
+    const question = this.projection.questions.find((question) => question.id === session.pendingQuestionId && question.sessionId === session.id &&
+      question.turnId === session.turnId && question.status === "open");
+    return Boolean(question && [...run.calls.values()].every((call) => call.name === "ask_user"));
+  }
   private pumpAll(): void {
     if (this.shuttingDown) return;
     this.settleHomeBackgroundWriters();
     for (let session of this.projection.sessions) {
       const command = session.queue.find((item) => item.delivery !== "steer" && !item.held);
       if (command?.command) {
-        if (!this.removingSession(session.id) && !session.turnId && !this.runs.has(session.id) && !this.nativeAdmissions.has(session.id) &&
-          session.status !== "archived" && !this.paused.has(session.id) && !this.queuedCommands.busy(session.id)) this.queuedCommands.pump(session, command);
+        if (!this.removingSession(session.id) && this.commandBoundary(session) &&
+          (session.status !== "archived" || command.command.name === "restore") &&
+          (!this.paused.has(session.id) || session.status === "archived" && command.command.name === "restore") && !this.queuedCommands.busy(session.id)) this.queuedCommands.pump(session, command);
         continue;
       }
       if (this.queuedCommands.busy(session.id)) continue;
@@ -2776,13 +2913,14 @@ export class ControlPlane extends EventEmitter {
   }
   private prepareNativeRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl">): void {
     if (this.nativeAdmissions.has(current.id)) return;
-    const abort = new AbortController(), controls = frameDigest(current.controls), permissionRevision = this.projection.settings.permissionRevision;
+    const envelope = (value: Controls) => frameDigest(Object.fromEntries(Object.entries(value).filter(([key]) => key !== "autonomy" && key !== "automaticApprovals")));
+    const abort = new AbortController(), controls = envelope(current.controls), permissionRevision = this.projection.settings.permissionRevision;
     let preparedEpoch: number | undefined;
     const actual = () => {
       abort.signal.throwIfAborted();
       const session = this.session(current.id);
       if (this.shuttingDown || session.turnId !== turnId || session.controls.env !== "Sandbox" ||
-        frameDigest(session.controls) !== controls || this.projection.settings.permissionRevision !== permissionRevision ||
+        envelope(session.controls) !== controls || this.projection.settings.permissionRevision !== permissionRevision ||
         this.deletingSessions.has(session.id) || this.deletingProjects.has(session.projectId ?? "") ||
         preparedEpoch !== undefined && preparedEpoch !== this.providerEpoch) {
         throw new MoguriError("sandbox_stale", "The exact native turn, scope or policy changed before worker admission. No model or replacement guest was started.", 409);
@@ -4149,8 +4287,8 @@ export class ControlPlane extends EventEmitter {
       if ((!child || !child.turnId && !child.queue.some((item) => !item.held)) && !this.otherWriter(this.session(parent.id))) delete run.yieldedTo;
     }
   }
-  private stop(sessionId: string, holdQueue = true, includeCreatedChildren = true): void {
-    this.queuedCommands.cancel(sessionId);
+  private stop(sessionId: string, holdQueue = true, includeCreatedChildren = true, settlingArchiveId?: string): void {
+    this.queuedCommands.cancel(sessionId, settlingArchiveId);
     this.projectWork.stopOrigin(sessionId);
     try { this.decisions.cancelSession(sessionId); } catch (error) { console.error("Decision cancellation persistence failed; actual owned abort was still requested:", error instanceof MoguriError ? error.code : "decision_stop"); }
     if (includeCreatedChildren) for (const session of this.projection.sessions) if (session.createdParentSessionId === sessionId) this.stop(session.id);

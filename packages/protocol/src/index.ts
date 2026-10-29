@@ -66,7 +66,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 export * from "./queued-commands.ts";
-import { CommandClientSchema, parseSlashInput, projectCommandExecution, type CommandExecution, type QueuedSlash } from "./queued-commands.ts";
+import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
 
 export const PROTOCOL_VERSION = 80;
 export const PROFILE_ID = "default";
@@ -87,6 +87,7 @@ export const CommandSchema = object({
       folderProjects: Type.Optional(Type.Array(object({ projectId: id, revision: Type.Integer({ minimum: 0 }) }), { minItems: 1, maxItems: 1000 })),
       title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
+    object({ type: Type.Literal("session.yolo"), ...sessionId, expectedRevision: revision }),
     object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema) }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
     object({ type: Type.Literal("session.resume"), ...sessionId }),
@@ -196,7 +197,7 @@ export interface Session {
   revision: number;
   status: SessionStatus;
   beforeArchive?: SessionStatus;
-  draft: { revision: number; text: string; attachments: Attachment[] };
+  draft: { revision: number; text: string; attachments: Attachment[]; source?: CommandDraftSource };
   queue: QueueItem[];
   queueRevision: number;
   messages: PublicMessage[];
@@ -279,6 +280,8 @@ export interface Connection {
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
   "slash.command_recorded": { execution: CommandExecution };
+  "slash.live_recorded": { control: LiveSlashControl };
+  "slash.continuation_chosen": { choice: QueuedContinuationChoice };
   "project.added": { project: Project };
   "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; purpose?: "kanban"; projectFolderId?: string; repositories?: SessionRepository[]; homeRoot?: SessionHomeRoot; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; workItemUrl?: string | null; githubSource?: GithubSessionOrigin; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "session.home_bound": { root: SessionHomeRoot };
@@ -308,7 +311,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "session.restored": Record<string, never>;
   "session.resumed": Record<string, never>;
   "session.blocked": { diagnostic: string };
-  "draft.saved": { text: string; attachments: Attachment[] };
+  "draft.saved": { text: string; attachments: Attachment[]; source?: CommandDraftSource };
   "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
   "queue.enqueued": { item: QueueItem };
   "queue.edited": { messageId: string; text: string; attachments?: Attachment[]; command?: QueuedSlash | null };
@@ -434,7 +437,7 @@ export type StoredEvent = EventInput & {
 };
 export const eventTypes: readonly EventType[] = [
   "coordination.linked", "coordination.message", "coordination.delivered", "command.inspected", "process.ended",
-  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
@@ -481,6 +484,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const dependencyRegistries = new Map<string, DependencyRegistry>();
   const jobs = new Map<string, CapabilityJob>();
   const commandExecutions = new Map<string, CommandExecution>();
+  const liveControls = new Map<string, { sessionId: string; control: LiveSlashControl }>();
+  const continuationChoices = new Set<string>();
   const oauthAuthorizations = new Map<string, McpAuthorization>();
   const configurationProposals = new Map<string, ConfigurationProposal>();
   const attention = new Map<string, Attention>();
@@ -704,6 +709,26 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings, compactions, planSaves, remoteMcpCalls, sandboxWorkspaces]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
       for (const [id, execution] of commandExecutions) if (execution.projectId === event.payload.deletedProjectId) commandExecutions.delete(id);
     }
+    if (event.event_type === "slash.live_recorded") {
+      const control = event.payload.control, previous = liveControls.get(control.id);
+      if (!Value.Check(LiveSlashControlSchema, control) || !event.session_id || !sessions.has(event.session_id) ||
+        control.phase === "intent" && previous || control.phase !== "intent" && (!previous || previous.sessionId !== event.session_id ||
+          previous.control.phase !== "intent" || JSON.stringify([previous.control.action, previous.control.actor, previous.control.inputDigest, previous.control.targetTurnId, previous.control.approvalId]) !==
+          JSON.stringify([control.action, control.actor, control.inputDigest, control.targetTurnId, control.approvalId]))) {
+        throw new MoguriError("live_control_history", "Live control history lost its original actual-user intent or completion target. Nothing was replayed.", 409);
+      }
+      liveControls.set(control.id, { sessionId: event.session_id, control: structuredClone(control) });
+    }
+    if (event.event_type === "slash.continuation_chosen") {
+      const choice = event.payload.choice, execution = commandExecutions.get(choice.executionId);
+      if (!Value.Check(QueuedContinuationChoiceSchema, choice) || !execution || execution.name !== "continue-work" || execution.status !== "claimed" ||
+        execution.stopRequested || execution.inputDigest !== choice.inputDigest || execution.bindingDigest !== choice.bindingDigest ||
+        execution.profileId !== event.profile_id || execution.projectId !== event.project_id || execution.sessionId !== event.session_id ||
+        !execution.projectId || !sessions.has(execution.sessionId) || continuationChoices.has(execution.id)) {
+        throw new MoguriError("command_choice_history", "Queued continuation lost its exact original user, claim or input. No choice or delegation was reconstructed.", 409);
+      }
+      continuationChoices.add(execution.id);
+    }
     if (event.event_type === "slash.command_recorded") {
       const next = event.payload.execution, previous = commandExecutions.get(next.id), owner = sessions.get(next.sessionId);
       if (!owner || next.profileId !== event.profile_id || next.sessionId !== event.session_id || next.projectId !== event.project_id) {
@@ -719,12 +744,9 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         owner.queue = owner.queue.filter((item) => item.id !== head.id); owner.queueRevision++;
       }
       commandExecutions.set(next.id, projectCommandExecution(previous, next));
-      if (!owner.turnId) {
-        const blocked = blockedSessions.has(owner.id) || Boolean(owner.workspaceId ? blockedWorkspaces.has(owner.workspaceId) : owner.projectId && blockedProjects.has(owner.projectId));
-        if (next.status === "running") owner.status = "running";
-        else if (next.status === "completed") owner.status = blocked ? "waiting_input" : owner.queue.length ? "queued" : "idle";
-        else owner.status = "waiting_input";
-        if (next.diagnostic && next.status !== "completed") owner.lastError = next.diagnostic;
+      if (!owner.turnId && ["failed", "partial", "cancelled"].includes(next.status)) {
+        owner.status = "waiting_input";
+        if (next.diagnostic) owner.lastError = next.diagnostic;
       }
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
@@ -1264,12 +1286,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "context.changed": session.activeCompactionId = event.payload.activeCompactionId; session.revision++; break;
       case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
-      case "session.resumed": session.status = session.queue.length ? "queued" : "idle"; session.lastError = null; break;
+      case "session.resumed": session.status = session.queue.some((item) => !item.command) ? "queued" : "idle"; session.lastError = null; break;
       case "session.blocked": session.status = "waiting_input"; session.lastError = event.payload.diagnostic; break;
-      case "draft.saved": session.draft = { ...event.payload, revision: session.draft.revision + 1 }; break;
+      case "draft.saved": {
+        const source = event.payload.source, owner = source ? commandExecutions.get(source.executionId) : undefined;
+        if (source && (!Value.Check(CommandDraftSourceSchema, source) || !owner || owner.status !== "running" || owner.stopRequested ||
+          owner.profileId !== event.profile_id || owner.sessionId !== session.id || owner.queueItemId !== source.inputId)) {
+          throw new MoguriError("command_draft_history", "Draft provenance lost its exact original user-command owner. No current draft or source was inferred.", 409);
+        }
+        session.draft = { ...event.payload, revision: session.draft.revision + 1 }; break;
+      }
       case "queue.enqueued":
         session.queue.push(structuredClone(event.payload.item)); session.queueRevision++;
-        if (!session.turnId) session.status = "queued";
+        if (!session.turnId && !event.payload.item.command) session.status = "queued";
         break;
       case "queue.edited": {
         const item = session.queue.find((item) => item.id === event.payload.messageId);

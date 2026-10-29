@@ -3,7 +3,8 @@ import { Value } from "typebox/value";
 import { MAX_TEXT, MoguriError } from "./core.ts";
 import { ArtifactKindSchema, type ArtifactExport, type ArtifactKind } from "./artifacts.ts";
 import type { PlanBinding } from "./plan-saves.ts";
-import type { ContinueWorkReview } from "./kanban.ts";
+import { ContinueWorkReviewSchema, type ContinueWorkReview } from "./kanban.ts";
+import { GithubItemSchema, GithubProjectResponseSchema, GithubRepositorySchema, GithubScopeSchema } from "./github-workflows.ts";
 import type { QueueItem } from "./index.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -14,6 +15,16 @@ export type CommandClient = Static<typeof CommandClientSchema>;
 export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
 export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
 export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
+export const GithubCommandViewSchema = Type.Union([
+  object({ kind: Type.Literal("repositories"), query: Type.String({ maxLength: 4096 }),
+    result: object({ type: Type.Literal("github.repositories"), boundary: Type.Literal("controller-gh-account-not-ssh"), account: id, accountId: id,
+      source: Type.Union([Type.Literal("account"), Type.Literal("public")]), repositories: Type.Array(GithubRepositorySchema, { maxItems: 3000 }),
+      page: Type.Integer({ minimum: 1 }), nextPage: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]), warning: Type.String({ maxLength: 8192 }) }) }),
+  object({ kind: Type.Literal("items"), scope: GithubScopeSchema, context: GithubProjectResponseSchema,
+    resource: Type.Union([Type.Literal("issue"), Type.Literal("pull")]), items: Type.Array(GithubItemSchema, { maxItems: 3000 }),
+    nextPage: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]) }),
+]);
+export type GithubCommandView = Static<typeof GithubCommandViewSchema>;
 export type SlashResult =
   | { kind: "ok"; message: string }
   | { kind: "session"; sessionId: string; side: boolean }
@@ -25,7 +36,8 @@ export type SlashResult =
   | { kind: "profiles" }
   | { kind: "profile"; profileId: string }
   | { kind: "export"; document: ArtifactExport; path?: string }
-  | { kind: "client-view"; name: string; argument: string };
+  | { kind: "github-view"; view: GithubCommandView }
+  | { kind: "client-view"; name: string; argument: string; text?: string };
 const nullableId = Type.Union([id, Type.Null()]);
 const panel = Type.Union([
   Type.Literal("Terminal"), Type.Literal("Browser"), Type.Literal("Insights"), Type.Literal("Dashboard"), Type.Literal("PR"),
@@ -41,13 +53,14 @@ export const SlashResultSchema = Type.Union([
   object({ kind: Type.Literal("copy"), text: longText }),
   object({ kind: Type.Literal("profiles") }),
   object({ kind: Type.Literal("profile"), profileId: id }),
-  object({ kind: Type.Literal("client-view"), name: Type.String({ minLength: 1, maxLength: 128 }), argument: Type.String({ maxLength: MAX_TEXT }) }),
+  object({ kind: Type.Literal("github-view"), view: GithubCommandViewSchema }),
+  object({ kind: Type.Literal("client-view"), name: Type.String({ minLength: 1, maxLength: 128 }), argument: Type.String({ maxLength: MAX_TEXT }), text: Type.Optional(longText) }),
   object({ kind: Type.Literal("export"), document: object({ filename: Type.String({ minLength: 1, maxLength: 4096 }),
     mediaType: Type.Literal("application/json"), text: longText, digest: hash }), path: Type.Optional(Type.String({ maxLength: 4096 })) }),
   object({ kind: Type.Literal("artifact-editor"), artifact: object({ id: nullableId, revision: Type.Integer({ minimum: 0 }), kind: ArtifactKindSchema,
     name: Type.String({ maxLength: 160 }), text: longText, projectId: nullableId, sessionId: nullableId,
     status: Type.Union([Type.Literal("active"), Type.Literal("archived")]), folderId: Type.Optional(nullableId), workItemId: Type.Optional(nullableId) }) }),
-  object({ kind: Type.Literal("continue-work"), review: object({ profileId: id, sessionId: id, expectedRevision: Type.Integer({ minimum: 0 }), text: Type.String({ maxLength: MAX_TEXT }) }),
+  object({ kind: Type.Literal("continue-work"), review: ContinueWorkReviewSchema,
     choices: Type.Tuple([Type.Literal("kanban"), Type.Literal("prompt")]) }),
   object({ kind: Type.Literal("panel"), panel, url: Type.Optional(Type.String({ maxLength: 8192 })), path: Type.Optional(Type.String({ maxLength: 4096 })),
     text: Type.Optional(longText), allProjects: Type.Optional(Type.Boolean()), planEditor: Type.Optional(object({
@@ -66,7 +79,7 @@ export const CommandBindingSchema = object({
 export type CommandBinding = Static<typeof CommandBindingSchema>;
 export const QueuedSlashSchema = object({
   version: Type.Literal(1), actor: Type.Literal("user"), client: CommandClientSchema, name: Type.String({ minLength: 1, maxLength: 128 }),
-  argument: Type.String({ maxLength: MAX_TEXT }), binding: CommandBindingSchema, bindingDigest: hash,
+  argument: Type.String({ maxLength: MAX_TEXT }), binding: CommandBindingSchema, bindingDigest: hash, draftRevision: Type.Optional(Type.Integer({ minimum: 0 })),
 });
 export type QueuedSlash = Static<typeof QueuedSlashSchema>;
 export const CommandExecutionSchema = object({
@@ -82,15 +95,33 @@ export const CommandExecutionSchema = object({
   diagnostic: Type.Union([Type.String({ minLength: 1, maxLength: 4096 }), Type.Null()]),
 });
 export type CommandExecution = Static<typeof CommandExecutionSchema>;
+export const CommandDraftSourceSchema = object({ actor: Type.Literal("user"), inputId: id, executionId: id });
+export type CommandDraftSource = Static<typeof CommandDraftSourceSchema>;
 export interface QueuedCommandsSnapshot { commandExecutions: CommandExecution[] }
+export const LiveSlashControlSchema = object({
+  version: Type.Literal(1), id, actor: Type.Literal("user"),
+  action: Type.Union([Type.Literal("yolo"), Type.Literal("approve"), Type.Literal("stop")]),
+  phase: Type.Union([Type.Literal("intent"), Type.Literal("acknowledged"), Type.Literal("partial")]),
+  inputDigest: hash, targetTurnId: nullableId, approvalId: nullableId,
+  diagnostic: Type.Union([Type.String({ minLength: 1, maxLength: 4096 }), Type.Null()]),
+});
+export type LiveSlashControl = Static<typeof LiveSlashControlSchema>;
 export interface CommandClaim { executionId: string; token: string; revision: number }
+export const QueuedContinuationChoiceSchema = object({
+  executionId: id, inputDigest: hash, bindingDigest: hash, choice: Type.Union([Type.Literal("kanban"), Type.Literal("prompt")]), actor: Type.Literal("user"),
+});
+export type QueuedContinuationChoice = Static<typeof QueuedContinuationChoiceSchema>;
 export const QueuedCommandCommandSchema = Type.Union([
+  object({ type: Type.Literal("slash.restore.enqueue"), sessionId: id, client: CommandClientSchema, expectedRevision: Type.Integer({ minimum: 0 }), held: Type.Optional(Type.Boolean()) }),
+  object({ type: Type.Literal("slash.prompt.enqueue"), sessionId: id }),
   object({ type: Type.Literal("slash.client.attach"), clientId: id, client: CommandClientSchema,
     handlers: Type.Array(Type.String({ minLength: 1, maxLength: 160 }), { minItems: 1, maxItems: 100, uniqueItems: true }) }),
   object({ type: Type.Literal("slash.client.claim"), clientId: id, executionId: id, expectedRevision: Type.Integer({ minimum: 0 }) }),
   object({ type: Type.Literal("slash.client.complete"), clientId: id, executionId: id, expectedRevision: Type.Integer({ minimum: 0 }),
     token: Type.String({ minLength: 32, maxLength: 256 }), outcome: Type.Union([Type.Literal("completed"), Type.Literal("cancelled"), Type.Literal("failed"), Type.Literal("partial")]),
-    diagnostic: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }),
+    diagnostic: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), restoreInput: Type.Optional(Type.Boolean()) }),
+  object({ type: Type.Literal("slash.client.choose"), clientId: id, executionId: id, expectedRevision: Type.Integer({ minimum: 0 }),
+    token: Type.String({ minLength: 32, maxLength: 256 }), choice: Type.Union([Type.Literal("kanban"), Type.Literal("prompt")]) }),
   object({ type: Type.Literal("slash.client.detach"), clientId: id }),
 ]);
 export type QueuedCommandCommand = Static<typeof QueuedCommandCommandSchema>;

@@ -1086,6 +1086,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `sessions` | Revisioned controls/modelOptions, local context preview, rename/mode/pin/unread/group/attach/delete, explicit side/agent children and work-item/verified-PR context. Side sessions cannot acquire write authority. |
 | `projects` | Configuration, ordered folders/color, atomic reorder, relocation/removal, scoped Git/source reads, reviewed MCP imports and explicit default-file publication. |
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
+| `commands` | Service-owned slash intake through `submit`; archived `restore` preserves its saved draft. `read/claim/choose/complete` bind original input, root and private client ownership. `attach` supplies real UI handlers; `detachAll` awaits teardown without replay. |
 | `plans` | Digest-checked Local/Remote plan read/save and independent snapshots. Remote writes require the reviewed binding and an owned no-model operation; actual saves/info/exact-stop expose partial/recovery outcomes without replay. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
@@ -1103,7 +1104,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `routing` | Automatic configured-model policy, service-owned `capabilities(env?)`, exact policy/configure CAS and ordinary routing/selected-response history. Explicit Single and reviewed worktree Compound policies remain available. Finite automatic budgets, images and synthetic tuning stay blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
-| `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
+| `slash` / `slashCommands` | One browser-safe low-level dispatcher/catalogue. Frontend text uses `commands.submit`, not eager `slash` dispatch. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
@@ -1662,14 +1663,16 @@ try {
   editor.edit("Review the generated change.");
   const held = await editor.send("queue", true); // No model call, even when idle.
   console.log(held.id);
+  editor.edit("/read-only");
+  await editor.submit((expectedDraftRevision) =>
+    sdk.commands.submit(sessionId, { client: "cli", expectedDraftRevision }));
 } finally {
   editor.dispose();
 }
-await sdk.slash(sessionId, "/read-only", "cli");
 const side = await sdk.sessions.spawn(sessionId, "side");
 const plan = await sdk.plans.read(sessionId);
 // A read-only session cannot save a plan or promote a question-only child.
-// Native panel/copy results from slash() must be handled by the client binding.
+// Actual UI results require a compatible commands.attach handler and acknowledgement.
 ```
 
 Release a held prompt with `prompts.release(sessionId, messageId,
@@ -1677,6 +1680,25 @@ observedQueueRevision)` only after explicit user admission. A selected available
 model, ready environment and policy are required then, not when holding text.
 `/run ID` uses this same operation. Returning to agent mode is a safe-boundary
 request; immediate restriction and model-declared tools are service-enforced.
+
+`DraftEditor.submit(intake)` fences its original acknowledgement and buffers
+later input. Only canonical queued-command draft provenance may merge an owned
+delayed context capture; foreign draft edits still require explicit conflict
+resolution. Submission, context capture and clipboard success are not inferred
+from matching text. A lost acknowledgement never triggers a paid retry.
+
+`commands.attach(client, handlers, {canApply?, onError?})` returns
+`{clientId, wake, dispose}`. Handlers receive the original SDK/session, execution,
+input/result, private claim and AbortSignal. They return an explicit completed,
+cancelled, failed or partial outcome after actual application. A set-state
+callback or printed unavailable action is not successful native UI delivery.
+`commands.choose(clientId, claim, choice)` atomically binds an actual original
+queued continuation choice and its admission; it never consumes a newer draft.
+Only cancelled, non-mutating continuation reviews may request `restoreInput`,
+and restoration requires an unchanged empty original composer. UI instances
+should await their attachment disposal, or `commands.detachAll()`, before
+closing their test/runtime resources. Service-capable commands do not depend on
+these clients remaining connected.
 
 Project settings use `projects.configuration` and
 `projects.configure(projectId, settings, observedRevision)`.

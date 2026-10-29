@@ -72,7 +72,8 @@ workflow prompts and model-produced text do not acquire that authority. The
 shared parser and lower-level `sdk.slash(...)` remain reusable; explicit direct
 SDK dispatch is not a substitute for chat intake.
 
-The service claims the exact next unheld command before a model turn, retaining
+Desktop, TUI and CLI text now use this intake. The service claims the exact next
+unheld command before a new model turn, retaining
 `slash.command_recorded` ownership and encrypted input/result grants. Compiled
 shared SDK handlers execute against the actual profile controller, including
 `/model` and `/theme`, even when every text client disconnects. They do not enter
@@ -83,13 +84,23 @@ using an older model or replaying effects. User edits reparse exact queued
 command intent; genuinely ordinary text can become a new prompt only through
 that explicit edit.
 
+Commands can also reach the head at an actual owned human-review boundary:
+an exact open question/tool approval or compound validation wait, with no
+in-flight inference, unrelated executing tool or native admission. This is
+ordered queue scheduling, not a live-command exemption. An earlier unheld
+ordinary prompt still blocks later commands. Inspection does not answer the
+question or approve validation; paid follow-ups retain their existing gates.
+Command activity has its own lifecycle instead of fabricating a model-running
+session status or invalidating an otherwise unchanged GitHub mutation review.
+
 UI-only results remain retained and block later work until an actual compatible
 client acknowledges application. The API is
 `sdk.commands.attach(client, handlers, {canApply?, onError?})`, returning
 `{clientId, wake, dispose}`. Handlers are keyed by result kind or
 `client-view:NAME`, receive the original immutable-profile SDK, session,
 execution/input/result and AbortSignal, and return an explicit outcome.
-`commands.read`, `claim` and `complete` expose the same exact record. One client
+The context also carries the original client ID and private claim.
+`commands.read`, `claim`, `choose` and `complete` expose the same exact record. One client
 owns at most one UI claim; its revision and private claim token cannot be
 borrowed by a competing client. No handler means waiting, never raw model text,
 eager navigation or fabricated success.
@@ -97,9 +108,58 @@ eager navigation or fabricated success.
 Stop/close, client detach and restart distinguish undispatched results from
 claimed or running unknown work. Terminal work is not replayed. A disconnected
 SDK drops late socket generations/invalidation frames instead of issuing new
-snapshot reads. Interactive continuation/editor/native UI acknowledgement,
-text-client wiring and the user-selected live-control exceptions are separate
-integration gates for this follow-up, not implied complete by these primitives.
+snapshot reads. `commands.detachAll()` awaits owned view-client teardown;
+intentional profile/quit handoffs can finish their original acknowledgement,
+never through a replacement service connection.
+
+Desktop acknowledges an actually rendered source-bound surface. TUI uses
+OpenTUI's real committed renderables, frame counter and renderer-idle/output
+boundary, not a new terminal parser or a `setState` callback. Clipboard/export
+effects await their native acknowledgement. Editors open with their actual
+revision; archive/continuation choices stay pending until the actual user
+accepts or cancels them. Existing dirty-edit, question, terminal and settling
+operation guards remain in force. Direct click/Tab/key navigation remains
+direct. Service command results are separately retained and displayed, never
+inserted into model messages. TUI `/commands` opens keyboard-readable original
+history. Late text replies cannot undo Escape or a newer navigation; collapsed
+conversation references do not duplicate old response bodies as fresh output.
+
+`slash.continuation_chosen` binds the actual user, exact original input digest,
+root binding and owning claim. Choosing the model atomically completes that
+claim and inserts the original text/context ahead of later input, without
+consuming a newer composer draft. Kanban uses its existing source/control/
+budget checks and private worktree/job path, plus the same exact queue boundary.
+Cancellation can restore an unchanged empty original composer only; otherwise
+the newer draft stays intact and the complete original input stays retained.
+An archived `/restore` has a distinct queued intake that never replaces its
+saved draft or releases older held work.
+
+Draft submission fences its own acknowledgement and buffers later typing.
+Only authoritative `draft.saved.source` metadata tied to the exact original
+queued execution can merge a delayed owned context capture into that newer
+draft. A known revision conflict can retry once after that exact merge;
+foreign text changes still require explicit conflict resolution. Neither text
+similarity nor a higher revision manufactures ownership.
+
+Unheld `/stop`, `/approve` and `/yolo` are the only live text controls. Their
+`slash.live_recorded` intent/acknowledged/partial phases retain the actual user,
+original input and real turn/approval target. Held versions stay inert.
+`/yolo` uses real decision-provider readiness to select Max or Autopilot and
+revalidates already pending tools through the existing authorization path.
+Automatic delegation records its actual actor, never a remembered user grant
+or a structured-question answer. Env/model/budget and hard denials do not change.
+Typed `/steer` and `/interrupt` instead derive an ordered exact follow-up;
+only the internal original-command executor can admit that derivation.
+
+CLI service-capable commands finish or return an explicit queued identity.
+`--hold` never runs them. `commands list/read` inspects original records without
+replay. A native UI result with no actual compatible CLI handler stays
+`waiting-client`, not falsely completed; supported profile/export and interactive
+continuation handlers acknowledge their actual effect or user choice.
+
+These are source integration behaviors, not physical protocol80 qualification.
+The exact final SDK, desktop, native worker/image and installer still need their
+own retained checks. Earlier protocol77/78 receipts remain historical evidence.
 
 ### Navigation group actions
 

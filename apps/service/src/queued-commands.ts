@@ -23,6 +23,7 @@ interface Host {
   events(): StoredEvent[];
   subscribe(listener: () => void): () => void;
   binding(session: Session): CommandBinding;
+  canRun(session: Session): boolean;
   commit(events: EventInput[]): void;
   wake(): void;
   pause(sessionId: string): void;
@@ -64,10 +65,10 @@ export class QueuedCommands {
   private readonly active = new Map<string, Active>();
   private readonly clients = new Map<string, { client: CommandClient; handlers: Set<string> }>();
   constructor(private readonly store: EventStore, private readonly host: Host) {}
-  capture(session: Session, parsed: { name: string; argument: string }, client: CommandClient): QueuedSlash {
+  capture(session: Session, parsed: { name: string; argument: string }, client: CommandClient, draftRevision?: number): QueuedSlash {
     if (!this.host.environment) throw new MoguriError("command_transport", "This controller has no qualified shared-SDK command executor. The original draft was preserved.", 409);
     const binding = parse(CommandBindingSchema, this.host.binding(session));
-    return parse(QueuedSlashSchema, { version: 1, actor: "user", client, ...parsed, binding, bindingDigest: frameDigest(binding) });
+    return parse(QueuedSlashSchema, { version: 1, actor: "user", client, ...parsed, binding, bindingDigest: frameDigest(binding), ...(draftRevision === undefined ? {} : { draftRevision }) });
   }
   busy(sessionId: string): boolean {
     return this.pending.has(sessionId) || this.host.snapshot().commandExecutions.some((entry) => entry.sessionId === sessionId && !terminalCommandExecution(entry.status));
@@ -105,7 +106,36 @@ export class QueuedCommands {
     }
     return { type: query.type, execution, item, result };
   }
-  execute(command: QueuedCommandCommand, finish: (events: EventInput[], result?: CommandResult) => CommandResult): CommandResult {
+  private assertClaim(command: { clientId: string; expectedRevision: number; token: string }, execution: CommandExecution): void {
+    if (!this.clients.has(command.clientId)) throw new MoguriError("command_client_missing", "The actual original command client is no longer attached.", 409);
+    if (execution.revision !== command.expectedRevision) throw new MoguriError("command_revision", "The original queued claim changed. No choice or action was repeated.", 409);
+    const expected = execution.claim ? Buffer.from(execution.claim.tokenDigest, "hex") : null, actual = Buffer.from(digest(command.token), "hex");
+    if (execution.status !== "claimed" || execution.claim?.clientId !== command.clientId || !expected || expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+      throw new MoguriError("command_claim", "This is not the exact original client claim. No result or permission was acknowledged.", 403);
+    }
+  }
+  continuation(command: Extract<QueuedCommandCommand, { type: "slash.client.choose" }>) {
+    const read = this.query({ type: "slash.read", executionId: command.executionId }), execution = read.execution;
+    this.assertClaim(command, execution);
+    const review = read.result?.kind === "continue-work" ? read.result.review : null;
+    if (!review || !("command" in review) || execution.name !== "continue-work" || review.profileId !== execution.profileId ||
+      review.sessionId !== execution.sessionId || review.text !== read.item.text || review.command.executionId !== execution.id ||
+      review.command.inputDigest !== execution.inputDigest || review.command.bindingDigest !== execution.bindingDigest) {
+      throw new MoguriError("command_continuation", "Choose only the exact retained original continuation input, not a newer draft or another command.", 409);
+    }
+    const session = this.host.snapshot().sessions.find((session) => session.id === execution.sessionId);
+    if (!session || execution.stopRequested || frameDigest(this.host.binding(session)) !== execution.bindingDigest) {
+      throw new MoguriError("command_scope", "The original continuation root/profile/Env changed. No replacement source was delegated.", 409);
+    }
+    return { ...read, session };
+  }
+  continuationEvents(command: Extract<QueuedCommandCommand, { type: "slash.client.choose" }>): EventInput[] {
+    const { execution } = this.continuation(command);
+    return [{ event_type: "slash.continuation_chosen", profile_id: execution.profileId, project_id: execution.projectId, session_id: execution.sessionId,
+      payload: { choice: { executionId: execution.id, inputDigest: execution.inputDigest, bindingDigest: execution.bindingDigest, choice: command.choice, actor: "user" } } },
+    this.event({ ...execution, revision: execution.revision + 1, status: "completed", mutationAttempted: true, updatedAt: new Date().toISOString(), diagnostic: null })];
+  }
+  execute(command: Exclude<QueuedCommandCommand, { type: "slash.client.choose" | "slash.restore.enqueue" | "slash.prompt.enqueue" }>, finish: (events: EventInput[], result?: CommandResult) => CommandResult): CommandResult {
     if (command.type === "slash.client.attach") {
       if (this.clients.has(command.clientId)) throw new MoguriError("command_client_conflict", "This exact command client is already attached. Do not replace its active claims.", 409);
       const result = finish([], { id: command.clientId });
@@ -138,18 +168,33 @@ export class QueuedCommands {
         diagnostic: "The exact compatible client owns this UI result; application acknowledgement is still pending." })],
       { commandClaim: { executionId: execution.id, token, revision: execution.revision + 1 } });
     }
-    const expected = execution.claim ? Buffer.from(execution.claim.tokenDigest, "hex") : null, actual = Buffer.from(digest(command.token), "hex");
-    if (execution.status !== "claimed" || execution.claim?.clientId !== command.clientId || !expected || expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-      throw new MoguriError("command_claim", "This is not the exact original client claim. No result or permission was acknowledged.", 403);
-    }
+    this.assertClaim(command, execution);
     const session = this.host.snapshot().sessions.find((session) => session.id === execution.sessionId);
     if (command.outcome === "completed" && (!session || frameDigest(this.host.binding(session)) !== execution.bindingDigest)) {
       throw new MoguriError("command_scope", "The original UI action's root/Env changed before its acknowledgement. Report its actual partial outcome; do not retry the action.", 409);
     }
     const outcome = command.outcome === "cancelled" && execution.mutationAttempted ? "partial" : command.outcome;
+    if (command.restoreInput && (command.outcome !== "cancelled" || read.result?.kind !== "continue-work" || execution.mutationAttempted)) {
+      throw new MoguriError("command_restore", "Only actual cancellation of an unchanged, non-mutating continuation may restore its original input.", 409);
+    }
+    const restore: EventInput[] = [];
+    let diagnostic = command.diagnostic ?? "The original UI action did not complete. Existing service effects and the exact input were retained; nothing was replayed.";
+    if (command.restoreInput) {
+      let sameBinding = false;
+      try { sameBinding = Boolean(session && frameDigest(this.host.binding(session)) === execution.bindingDigest); }
+      catch (error) {
+        console.error("Cancelled command draft was not restored because its original source could not be verified:", error instanceof Error ? error.message : "unknown source error");
+      }
+      if (sameBinding && session && read.item.command?.draftRevision !== undefined && session.draft.revision === read.item.command.draftRevision + 1 &&
+        !session.draft.text && !session.draft.attachments.length) {
+        restore.push({ event_type: "draft.saved", profile_id: execution.profileId, project_id: execution.projectId, session_id: execution.sessionId,
+          payload: { text: read.item.text, attachments: read.item.attachments } });
+        diagnostic += " The unchanged empty composer received its exact original input.";
+      } else diagnostic += " A newer draft or changed source was preserved. The complete original input remains in this command's retained record.";
+    }
     if (outcome !== "completed") this.host.pause(execution.sessionId);
     const result = finish([this.event({ ...execution, revision: execution.revision + 1, status: outcome, updatedAt: new Date().toISOString(),
-      diagnostic: outcome === "completed" ? null : command.diagnostic ?? "The original UI action did not complete. Existing service effects and the exact input were retained; nothing was replayed." }),
+      diagnostic: outcome === "completed" ? null : diagnostic }), ...restore,
     ...(outcome === "completed" ? [] : this.held(execution.sessionId))], { id: execution.id, revision: execution.revision + 1 });
     this.host.wake(); return result;
   }
@@ -165,7 +210,7 @@ export class QueuedCommands {
   private async run(sessionId: string, item: QueueItem, environment: () => Promise<CommandEnvironment>): Promise<void> {
     const transport = await environment();
     const session = this.host.snapshot().sessions.find((session) => session.id === sessionId);
-    if (!session || session.turnId || session.status === "archived" || session.queue.find((entry) => entry.delivery !== "steer" && !entry.held)?.id !== item.id) {
+    if (!session || !this.host.canRun(session) || session.status === "archived" && item.command?.name !== "restore" || session.queue.find((entry) => entry.delivery !== "steer" && !entry.held)?.id !== item.id) {
       console.info("Queued command admission ended before dispatch because its original owner/head changed.");
       return;
     }
@@ -178,7 +223,7 @@ export class QueuedCommands {
     const owner: CommandOwner = { id: execution.id, profileId: this.store.profileId, sessionId, item, signal: abort.signal, guard: () => {
       abort.signal.throwIfAborted();
       const current = this.host.snapshot().sessions.find((session) => session.id === sessionId), retained = this.record(execution.id);
-      if (!current || retained?.status !== "running" || retained.stopRequested || frameDigest(this.host.binding(current)) !== command.bindingDigest) {
+      if (!current || !this.host.canRun(current) || retained?.status !== "running" || retained.stopRequested || frameDigest(this.host.binding(current)) !== command.bindingDigest) {
         throw new MoguriError("command_scope", "The original queued command's profile, Env or root changed. No replacement source or execution was used.", 409);
       }
     } };
@@ -194,7 +239,8 @@ export class QueuedCommands {
     try {
       owner.guard();
       const sdk = new ServiceCommandSdk(transport, owner, this.host, active);
-      const result: SlashResult = parse(SlashResultSchema, await executeSlash(sdk, sessionId, item.text, command.client));
+      const result: SlashResult = parse(SlashResultSchema, await executeSlash(sdk, sessionId, item.text, command.client,
+        { executionId: execution.id, inputDigest, bindingDigest: execution.bindingDigest }));
       abort.signal.throwIfAborted();
       const current = this.record(execution.id);
       if (!current) { console.info("Queued command source was explicitly removed; its result was discarded without recreating session state."); return; }
@@ -216,10 +262,11 @@ export class QueuedCommands {
       ...this.held(sessionId)]);
     }
   }
-  cancel(sessionId: string): void {
+  cancel(sessionId: string, settlingArchiveId?: string): void {
     const active = this.active.get(sessionId);
     if (!active) {
       const pending = this.host.snapshot().commandExecutions.find((entry) => entry.sessionId === sessionId && !terminalCommandExecution(entry.status));
+      if (pending && pending.id === settlingArchiveId && pending.name === "archive" && pending.status === "claimed") return;
       if (pending) {
         this.host.pause(sessionId);
         this.host.commit([this.event({ ...pending, revision: pending.revision + 1, stopRequested: true, updatedAt: new Date().toISOString(),
@@ -234,11 +281,18 @@ export class QueuedCommands {
     active.abort.abort(new MoguriError("command_cancelled", "The actual user stopped this original queued command. No later operation may inherit it.", 409));
   }
   recover(): EventInput[] {
-    return this.host.snapshot().commandExecutions.filter((entry) => ["running", "claimed"].includes(entry.status)).flatMap((entry) => [
+    const events: EventInput[] = this.host.snapshot().commandExecutions.filter((entry) => ["running", "claimed"].includes(entry.status)).flatMap((entry) => [
       this.event({ ...entry, revision: entry.revision + 1, status: "partial", stopRequested: true, updatedAt: new Date().toISOString(),
         diagnostic: "The service restarted during original command/client ownership. Completion is unknown; no command or UI effect was replayed." }),
       ...this.held(entry.sessionId),
     ]);
+    const lives = new Map<string, Extract<StoredEvent, { event_type: "slash.live_recorded" }>>();
+    for (const event of this.host.events()) if (event.event_type === "slash.live_recorded") lives.set(event.payload.control.id, event);
+    for (const event of lives.values()) if (event.payload.control.phase === "intent" && this.host.snapshot().sessions.some((session) => session.id === event.session_id)) {
+      events.push({ event_type: "slash.live_recorded", profile_id: event.profile_id, project_id: event.project_id, session_id: event.session_id, turn_id: event.turn_id,
+        payload: { control: { ...event.payload.control, phase: "partial", diagnostic: "The service restarted after original live-control intent. Existing delegation and actual effects were retained; no approval, stop, answer or paid call was replayed." } } });
+    }
+    return events;
   }
   async close(): Promise<void> {
     for (const sessionId of this.active.keys()) this.cancel(sessionId);

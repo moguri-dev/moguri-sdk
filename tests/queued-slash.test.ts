@@ -162,3 +162,71 @@ test("editing a held command rebinds its actual new command intent instead of re
     assert.equal(fixture.requests.length, 0);
   } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
 });
+
+test("service-capable former TUI commands finish headlessly instead of waiting for a terminal view", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready(), editor = new DraftEditor(sdk, fixture.sessionId, fixture.session().draft);
+  try {
+    for (const text of ["/notifications", "/defaults", "/board", "/issue create feature Generated headless card"]) {
+      editor.edit(text); await editor.submit((expectedDraftRevision) => sdk.commands.submit(fixture.sessionId, { client: "tui", expectedDraftRevision, held: true }));
+    }
+    sdk.disconnect();
+    await fixture.service.controller.dispatch({ id: "generated-headless-former-tui-release", profileId: "default", command: { type: "session.resume", sessionId: fixture.sessionId } });
+    await waitFor(() => fixture.service.controller.snapshot().commandExecutions.filter((entry) => entry.status === "completed").length === 4);
+    assert.ok(fixture.service.controller.snapshot().issues.some((issue) => issue.title === "Generated headless card"));
+    assert.equal(fixture.requests.length, 0); assert.equal(fixture.session().queue.length, 0);
+    assert.equal(fixture.session().messages.length, 0);
+  } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
+});
+
+test("non-model commands preserve composer attachments rather than silently consuming unrelated context", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready(), editor = new DraftEditor(sdk, fixture.sessionId, fixture.session().draft);
+  try {
+    await editor.attach("fixture.txt"); const original = editor.getState().attachments;
+    editor.edit("/theme rose");
+    await editor.submit((expectedDraftRevision) => sdk.commands.submit(fixture.sessionId, { client: "cli", expectedDraftRevision }));
+    await waitFor(() => fixture.service.controller.snapshot().commandExecutions.some((entry) => entry.status === "completed"));
+    assert.deepEqual(fixture.session().draft.attachments, original);
+    assert.equal(fixture.session().draft.text, ""); assert.equal(fixture.requests.length, 0);
+  } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
+});
+
+test("a queued side question uses original input context without consuming the newer main draft", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({ responseMode: "text" }), sdk = await new MoguriSdk(fixture.service.connection).ready(), editor = new DraftEditor(sdk, fixture.sessionId, fixture.session().draft);
+  try {
+    await fixture.configure(); await sdk.refresh(); await editor.attach("fixture.txt");
+    editor.edit("/side Generated queued read-only question.");
+    await editor.submit((expectedDraftRevision) => sdk.commands.submit(fixture.sessionId, { client: "cli", expectedDraftRevision, held: true }));
+    assert.equal(fixture.session().draft.attachments.length, 0);
+    editor.edit("Generated newer main draft that must not be sent."); await editor.flush();
+    await sdk.command({ type: "session.resume", sessionId: fixture.sessionId });
+    const side = await waitFor(() => fixture.service.controller.snapshot().sessions.find((session) => session.kind === "side" && session.status === "completed"));
+    assert.equal(side.mode, "read-only"); assert.equal(fixture.requests.length, 1);
+    assert.match(JSON.stringify(fixture.requests[0]), /fixture\.txt/);
+    assert.equal(JSON.stringify(fixture.requests[0]).includes("Generated newer main draft"), false);
+    assert.equal(fixture.session().draft.text, "Generated newer main draft that must not be sent.");
+    assert.equal(fixture.session().messages.length, 0);
+  } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
+});
+
+test("typed interrupt stays ordered and derives its exact follow-up without interrupting an earlier model or consuming a newer draft", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({ responseMode: "text" }), sdk = await new MoguriSdk(fixture.service.connection).ready(), editor = new DraftEditor(sdk, fixture.sessionId, fixture.session().draft);
+  try {
+    await fixture.configure(); await sdk.refresh(); await fixture.send("generated slow original follow-up boundary");
+    await waitFor(() => fixture.requests.length === 1); const turnId = fixture.session().turnId;
+    await sdk.refresh(); editor.receive(fixture.session().draft);
+    for (const text of ["/interrupt Generated exact queued follow-up.", "Generated later ordinary prompt."]) {
+      editor.edit(text); await editor.submit((expectedDraftRevision) => sdk.commands.submit(fixture.sessionId, { client: "cli", expectedDraftRevision }));
+    }
+    assert.equal(fixture.session().turnId, turnId); assert.equal(fixture.requests.length, 1);
+    assert.equal(fixture.service.controller.events(0).some((event) => event.event_type === "turn.stop_requested"), false);
+    editor.edit("Generated newer composer remains unsent."); await editor.flush();
+    await sdk.command({ type: "session.stop", sessionId: fixture.sessionId }); await fixture.terminal();
+    await sdk.command({ type: "session.resume", sessionId: fixture.sessionId });
+    await waitFor(() => fixture.requests.length === 3 && fixture.session().status === "completed");
+    assert.deepEqual(fixture.session().messages.filter((message) => message.role === "user").map((message) => message.text),
+      ["generated slow original follow-up boundary", "Generated exact queued follow-up.", "Generated later ordinary prompt."]);
+    assert.equal(fixture.session().draft.text, "Generated newer composer remains unsent.");
+    await assert.rejects(() => sdk.command({ type: "slash.prompt.enqueue", sessionId: fixture.sessionId }), { code: "command_source" });
+    assert.equal(fixture.requests.length, 3);
+  } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
+});

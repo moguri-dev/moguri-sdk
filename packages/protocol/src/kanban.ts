@@ -61,7 +61,13 @@ export function eligibleKanbanIssues(board: BoardConfig & { projectId: string },
     .sort((a, b) => phases.indexOf(a.phaseId) - phases.indexOf(b.phaseId) || compareIssues(a, b));
 }
 export type ContinueWorkChoice = "kanban" | "prompt";
-export interface ContinueWorkReview { profileId: string; sessionId: string; expectedRevision: number; text: string }
+const continueWorkFields = { profileId: id, sessionId: id, text: Type.String({ maxLength: 128 * 1024 }) };
+export const ContinueWorkReviewSchema = Type.Union([
+  object({ ...continueWorkFields, expectedRevision: revision }),
+  object({ ...continueWorkFields, command: object({ executionId: id, inputDigest: hash, bindingDigest: hash }) }),
+]);
+export type ContinueWorkReview = Static<typeof ContinueWorkReviewSchema>;
+export type DraftContinueWorkReview = Extract<ContinueWorkReview, { expectedRevision: number }>;
 export function continueWorkInput(text: string): { issueId?: string } | null {
   const value = text.trim();
   if (/^continue work[.!]?$/i.test(value)) return {};

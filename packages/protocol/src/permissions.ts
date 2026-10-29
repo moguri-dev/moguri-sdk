@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { MoguriError } from "./core.ts";
 
 export function approvalProject(session: { projectId: string | null; repositories?: { projectId: string; name: string }[] }, repository: unknown): string | null {
   if (session.projectId) return session.projectId;
@@ -13,6 +14,15 @@ export const RememberApprovalSchema = Type.Object({
   match: Type.Union([Type.Literal("exact"), Type.Literal("family"), Type.Literal("tool")]),
 }, { additionalProperties: false });
 export type RememberApproval = Static<typeof RememberApprovalSchema>;
+export function parseSlashApproval(argument: string): RememberApproval | undefined {
+  const [scope = "once", match = "exact", extra] = argument.trim().split(/\s+/).filter(Boolean);
+  if (extra || scope === "once" && match !== "exact" ||
+    scope !== "once" && scope !== "session" && scope !== "project" && scope !== "global" ||
+    match !== "exact" && match !== "family" && match !== "tool") {
+    throw new MoguriError("approval_input", "Use /approve once, or session|project|global [exact|family|tool] for the actual pending action.");
+  }
+  return scope === "once" ? undefined : { scope, match };
+}
 export const RememberedApprovalSchema = Type.Object({
   id,
   scope: Type.Union([
