@@ -227,6 +227,10 @@ missing receipt or controller restart can replay preparation or substitute a
 fresh checkout. Unknown VM cleanup/accounting remains quarantined. Every
 model/tool frame uses the existing worker, actual tool authorization and
 all-role ledger; selected-provider/CNAME and GitHub Meta scope stays unchanged.
+Native authorization, pending approvals and explicit automatic delegation use
+the broker-selected member's guest root, not the group's intentionally null
+logical root. A root-less group never becomes a project-free workspace or a
+Local permission fallback.
 
 Publication explicitly chooses one captured repository and exact retained paths.
 It binds that member's original Local root and bases, revalidates the complete

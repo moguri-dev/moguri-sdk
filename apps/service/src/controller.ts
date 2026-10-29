@@ -1239,9 +1239,7 @@ export class ControlPlane extends EventEmitter {
   }
   private approvalDecisionActor(session: Session, call: ToolCall, automatic: boolean): Pick<Extract<EventInput, { event_type: "tool.decided" }>["payload"], "actor" | "ruleId"> {
     if (!automatic) return { actor: "user" };
-    const nativeId = this.runs.get(session.id)?.sandboxExecutionId;
-    const root = nativeId ? this.sandboxExecution(nativeId).root : session.controls.env === "Remote" ? this.remoteWorkspace(session) : this.toolScope(session, call).root;
-    const authorization = this.authorization(session, call, root);
+    const authorization = this.authorization(session, call, this.toolScope(session, call).root);
     if (authorization.decision !== "allow") throw new MoguriError("automatic_review_required", "The current hard policy or exact review rule still requires an actual user decision. Yolo cannot override it.", 403);
     return { actor: authorization.actor === "policy" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation",
       ...(authorization.ruleId ? { ruleId: authorization.ruleId } : {}) };
@@ -1261,9 +1259,7 @@ export class ControlPlane extends EventEmitter {
     try {
       const current = this.session(session.id), pending = current.pendingApproval;
       if (pending && pending.id === control.approvalId) {
-        const nativeId = this.runs.get(session.id)?.sandboxExecutionId;
-        const root = nativeId ? this.sandboxExecution(nativeId).root : current.controls.env === "Remote" ? this.remoteWorkspace(current) : this.toolScope(current, pending.call).root;
-        if (this.authorization(current, pending.call, root).decision === "allow") {
+        if (this.authorization(current, pending.call, this.toolScope(current, pending.call).root).decision === "allow") {
           await this.perform({ id: randomUUID(), profileId: this.profileId, command: { type: "approval.respond", sessionId: current.id, approvalId: pending.id, allow: true } }, undefined, true);
         }
       }
@@ -3217,8 +3213,7 @@ export class ControlPlane extends EventEmitter {
       if (native.workspaceId !== current.sandboxWorkspaceId) throw new MoguriError("sandbox_changed", "The exact native stage changed after turn admission. No new tool was approved.", 409);
       await this.sandboxWorkspaces.assert(current);
     }
-    const root = nativeRun ? this.sandboxExecution(nativeRun).root :
-      current.controls.env === "Remote" ? this.remoteWorkspace(current) : scope.root;
+    const root = scope.root;
     const execution = this.projection.executions.find((value) => value.id === this.runs.get(current.id)?.executionId);
     if (execution && (execution.workspace !== root || execution.configDigest !== frameDigest(this.projection.settings.values.remote))) throw new MoguriError("remote_changed", "Remote workspace/target changed after turn admission. No new effect was authorized in the old worker.", 409);
     await assertSessionTool(current, root, scope.settings, call, current.controls.env === "Local");
@@ -4249,8 +4244,7 @@ export class ControlPlane extends EventEmitter {
         if (!run.declaredTools.has(request.call.name)) throw new MoguriError("tool_unavailable", "This capability was not enabled or declared for this turn.");
         const scope = this.toolScope(session, request.call);
         await this.assertCurrentTool(session, request.call);
-        const authorization = this.authorization(session, request.call, run.sandboxExecutionId ? this.sandboxExecution(run.sandboxExecutionId).root :
-          session.controls.env === "Remote" ? this.remoteWorkspace(session) : scope.root);
+        const authorization = this.authorization(session, request.call, scope.root);
         if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
         if (session.controls.autonomy === "Autopilot Max") this.decisions.capability(session.controls.env);
         const recommendation = session.controls.autonomy === "Guided" ? session.messages.findLast((message) => message.role === "assistant" && message.id === request.stepId)?.text.trim().slice(0, 1200) : undefined;

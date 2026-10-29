@@ -53,6 +53,10 @@ theme78 and workspace79 histories gain only their validated missing features,
 in one marker/version transaction. All retained profiles are checked before
 mutation. Existing ciphertext, receipts, grants, palette/custom choices,
 thinking intent and hard policy remain untouched.
+Preflight can read the original authenticated pre-10 project/session artifact
+compartments before their independent-artifact rekeying. It does not mint a new
+scope or repair a missing key; actual schema-9 failure/rollback/restart remains
+recoverable before any combined marker is inserted.
 
 Missing, corrupt or premature feature/convergence markers, unmarked77,
 unknown78, falsely combined79 and future81 are refused, not repaired from a

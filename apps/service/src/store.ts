@@ -480,7 +480,7 @@ export class EventStore {
       require("theme_model_workspace_convergence_schema", "combined theme/model/workspace");
     }
     if (version < 4 || version >= 80) return;
-    const events = this.readEvents(0, true);
+    const events = this.readEvents(0, true, version < 10);
     if (model === undefined && events.some((event) =>
       (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.preferredThinkingEffort !== undefined ||
       event.event_type === "model.selection_remembered" && event.payload.selection?.preferredThinkingEffort !== undefined ||
@@ -788,16 +788,17 @@ export class EventStore {
     return { ...event, seq } as StoredEvent;
   }
   events(after = 0): StoredEvent[] { return this.readEvents(after, false); }
-  private readEvents(after: number, allProfiles: boolean): StoredEvent[] {
+  private readEvents(after: number, allProfiles: boolean, legacyArtifactScopes = false): StoredEvent[] {
     return this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after).flatMap((row) => {
       const event: unknown = JSON.parse(String(row.data));
       const data = this.validEvent(event, Number(row.seq));
       if (!allProfiles && data.profile_id !== this.profileId) return [];
-      const scope = scopeFor(data, data.artifact_id ?? null);
+      const encrypted: unknown = data.payload, legacy = scopeFor(data);
+      const scope = legacyArtifactScopes && isRecord(encrypted) && encrypted.scope === legacy.scope ? legacy : scopeFor(data, data.artifact_id ?? null);
       const key = this.key(scope, false);
       if (!key) return [];
       const decoded = this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, Number(row.seq));
-      if (artifactIdentity(decoded) !== (data.artifact_id ?? null)) throw new Error("Artifact retention identity is corrupt. State was preserved.");
+      if (!legacyArtifactScopes && artifactIdentity(decoded) !== (data.artifact_id ?? null)) throw new Error("Artifact retention identity is corrupt. State was preserved.");
       return [decoded];
     });
   }

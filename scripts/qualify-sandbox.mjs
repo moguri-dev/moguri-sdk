@@ -313,12 +313,19 @@ await gate("groupedWorkspace", ["installedRuntime", "providerScope"], async () =
   const installation = join(directory, "group-installation.json"), output = join(directory, "group-result.json");
   await write("group-installation.json", { executable: configuration.executable, bundle: configuration.bundlePath, key: configuration.trustRootPath,
     version: configuration.qualification.release, ...configuration.qualification });
-  const child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", "tests/sandbox-managed-groups.test.ts"], {
-    cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: installation, MOGURI_NATIVE_WORKLOAD: resolve(values.workload),
-      MOGURI_NATIVE_GROUP_REPORT: output, MOGURI_NATIVE_GROUP_PROVIDER: values.provider },
-    encoding: "utf8", timeout: 150_000, maxBuffer: 8 * 1024 * 1024,
-  });
-  await writeFile(join(directory, "group-test.log"), child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
+  const childLog = join(directory, "group-test.log");
+  let child;
+  try {
+    child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", "tests/sandbox-managed-groups.test.ts"], {
+      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: installation, MOGURI_NATIVE_WORKLOAD: resolve(values.workload),
+        MOGURI_NATIVE_GROUP_REPORT: output, MOGURI_NATIVE_GROUP_PROVIDER: values.provider },
+      encoding: "utf8", timeout: 150_000, maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    await writeFile(childLog, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 });
+    throw error;
+  }
+  await writeFile(childLog, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
   for (const [key, count] of [["tests", 1], ["pass", 1], ["fail", 0], ["skipped", 0]]) {
     assert.match(child.stdout, new RegExp(`# ${key} ${count}(?:\\r?\\n|$)`), "Actual group execution cannot be substituted by a skipped/generated-only case.");
   }
