@@ -60,6 +60,7 @@ try {
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
+    ${installedProtocol >= 77 ? 'import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -77,6 +78,12 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 77 ? `
+      const boundedPreference:Controls=selectModelControls({...factoryControls(),modelOptions:{thinkingEffort:"max"}},{id:"generated-high-only",thinkingLevels:["high"]});
+      const preferred:ModelSelection={modelId:"generated-high-only",thinkingEffort:"high",preferredThinkingEffort:"max"};
+      void boundedPreference.preferredThinkingEffort;void preferred;void supportedThinkingEffort("high",["max"]);
+      void routingModelReady;void routingWorkingWindow;
+      ` : ""}
       ${installedProtocol >= 76 ? `
       const reviewedChildren:SessionChildrenReview={action:"detach",expected:[{sessionId:"generated-child",parentSessionId:"generated-parent"}]};void reviewedChildren;
       const deleteWithReview=(view:MoguriSdk,id:string,review:SessionChildrenReview)=>view.sessions.delete(id,true,0,review);void deleteWithReview;

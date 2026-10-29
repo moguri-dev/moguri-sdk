@@ -292,9 +292,11 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "ok", message: `Context window set to ${tokens.toLocaleString("en-US")} tokens. Thinking effort and other controls were preserved; history was not truncated.` };
     }
     case "model-settings": {
-      if (!command.argument) return { kind: "text", text: JSON.stringify({ options: session.controls.modelOptions ?? {}, context: (await sdk.sessions.context(session.id)).context }, null, 2) };
+      if (!command.argument) return { kind: "text", text: JSON.stringify({ options: session.controls.modelOptions ?? {},
+        ...(session.controls.preferredThinkingEffort !== undefined ? { preferredThinkingEffort: session.controls.preferredThinkingEffort } : {}),
+        context: (await sdk.sessions.context(session.id)).context }, null, 2) };
       if (command.argument === "reset") {
-        const { modelOptions: _, ...controls } = session.controls;
+        const { modelOptions: _, preferredThinkingEffort: __, ...controls } = session.controls;
         await sdk.sessions.configure(session.id, controls, session.revision, session.controls.modelId !== null);
       } else {
         const options = parse(ModelOptionsSchema, JSON.parse(command.argument));

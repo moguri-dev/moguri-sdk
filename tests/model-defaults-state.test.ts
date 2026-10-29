@@ -83,7 +83,8 @@ test("remembered model metadata cannot acquire a foreign, model-authored or forg
   try {
     await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
     const events = fixture.service.controller.events(0), index = events.findIndex((event) => event.event_type === "model.selection_remembered");
-    for (const patch of [{ actor: "model" }, { sourceSessionId: "generated-unknown-source" }, { selection: { modelId: "generated-other-model" } }]) {
+    for (const patch of [{ actor: "model" }, { sourceSessionId: "generated-unknown-source" }, { selection: { modelId: "generated-other-model" } },
+      { selection: { modelId: fixture.modelId, preferredThinkingEffort: "max" } }]) {
       const changed = structuredClone(events);
       Object.assign(changed[index]!.payload, patch);
       assert.throws(() => projectEvents(changed), /Remembered model selection/);
@@ -96,5 +97,75 @@ test("remembered model metadata cannot acquire a foreign, model-authored or forg
       assert.throws(() => projectEvents(changed), /Remembered model selection/);
     }
     assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+async function writePreContinuityState(service: Awaited<ReturnType<typeof setupFixture>>["service"]) {
+  const events = service.store.events();
+  if (events.some((event) => (event.event_type === "session.created" || event.event_type === "session.configured") &&
+    event.payload.controls.preferredThinkingEffort !== undefined || event.event_type === "model.selection_remembered" &&
+    event.payload.selection?.preferredThinkingEffort !== undefined)) throw new Error("Generate actual pre-continuity controls, not relabelled model preferences.");
+  const path = service.store.path; await service.close();
+  const db = new DatabaseSync(path);
+  try { db.exec("PRAGMA user_version=76;"); }
+  finally { db.close(); }
+}
+
+test("schema 76 upgrades model continuity without rewriting encrypted history, receipts or legacy effort", async () => {
+  const fixture = await setupFixture({ reasoning: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  let store: EventStore | undefined;
+  try {
+    await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, modelId: fixture.modelId, modelOptions: { thinkingEffort: "high" } });
+    const before = retainedCiphertextRows(fixture.service.store.db), path = fixture.service.store.path;
+    const metadata = fixture.service.store.db.prepare("SELECT id,value FROM retention_metadata ORDER BY id").all();
+    sdk.disconnect(); await writePreContinuityState(fixture.service);
+    store = new EventStore(path, fixture.retentionKey);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+    assert.deepEqual(store.db.prepare("SELECT id,value FROM retention_metadata ORDER BY id").all(), metadata);
+    assert.deepEqual(retainedCiphertextRows(store.db), before);
+    const snapshot = projectEvents(store.events());
+    assert.deepEqual(snapshot.sessions[0]?.controls.modelOptions, { thinkingEffort: "high" });
+    assert.equal(snapshot.sessions[0]?.controls.preferredThinkingEffort, undefined);
+    const events = store.events(); store.close(); store = new EventStore(path, fixture.retentionKey);
+    assert.deepEqual(store.events(), events); assert.deepEqual(retainedCiphertextRows(store.db), before);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); store?.close(); await fixture.close(); }
+});
+
+test("interrupted continuity version advance preserves its old version and bytes before exact recovery", async (t) => {
+  const fixture = await setupFixture(), path = fixture.service.store.path;
+  let store: EventStore | undefined;
+  try {
+    const before = retainedCiphertextRows(fixture.service.store.db);
+    await writePreContinuityState(fixture.service);
+    const exec = DatabaseSync.prototype.exec;
+    const fault = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
+      if (/PRAGMA user_version=77/.test(sql)) throw new Error("Generated continuity version interruption");
+      return exec.call(this, sql);
+    });
+    try { assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated continuity version interruption/); }
+    finally { fault.mock.restore(); }
+    const failed = new DatabaseSync(path);
+    try {
+      assert.equal(failed.prepare("PRAGMA user_version").get()?.user_version, 76);
+      assert.deepEqual(retainedCiphertextRows(failed), before);
+    } finally { failed.close(); }
+    store = new EventStore(path, fixture.retentionKey);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+    assert.deepEqual(retainedCiphertextRows(store.db), before);
+  } finally { store?.close(); await fixture.close(); }
+});
+
+test("actual retained effort preferences cannot be relabelled as pre-continuity history", async () => {
+  const fixture = await setupFixture({ reasoning: true }), sdk = await new MoguriSdk(fixture.service.connection).ready(), path = fixture.service.store.path;
+  try {
+    fixture.provider.state.models[0]!.thinkingLevels = ["low", "high"]; fixture.provider.onChange(); await sdk.refresh();
+    await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, modelId: fixture.modelId,
+      preferredThinkingEffort: "max", modelOptions: { thinkingEffort: "high" } });
+    const before = retainedCiphertextRows(fixture.service.store.db);
+    sdk.disconnect(); await fixture.service.close();
+    const db = new DatabaseSync(path); try { db.exec("PRAGMA user_version=76;"); } finally { db.close(); }
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /effort preference history cannot be relabelled/i);
+    const failed = new DatabaseSync(path); try { assert.deepEqual(retainedCiphertextRows(failed), before); } finally { failed.close(); }
   } finally { sdk.disconnect(); await fixture.close(); }
 });

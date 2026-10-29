@@ -1307,9 +1307,17 @@ profile/project/session model settings still win, and existing chats are not
 rewritten.
 
 `sessions.selectModel(sessionId, modelId, revision?)` records an explicit choice
-and clears old model-specific options. `sessions.modelOptions` records actual
+and clears the old working-window override. Since protocol 77 it preserves the
+thinking preference, uses an exact/next-higher supported effort or the highest
+supported effort if none is higher, and never changes the requested model.
+Optional `controls.preferredThinkingEffort` retains the original effort only
+when it differs from the actual `modelOptions.thinkingEffort`; switching back
+to a supporting model restores it. Kupo and provider-controlled models keep
+that informational preference without receiving a fixed-model override.
+`sessions.modelOptions` records actual
 effort changes; its optional fourth `true` also marks an explicit same-value
-effort selection. `sessions.configure` normally remembers model/effort deltas;
+effort selection and replaces any retained preference. An explicit default or
+`/model-settings reset` clears it. `sessions.configure` normally remembers model/effort deltas;
 its fourth `false` performs configuration without recording a new selection.
 Raw `session.configure` commands opt in with `rememberModelSelection: true`.
 Window-only/autonomy/env changes, session creation and model/role calls do not
@@ -1317,7 +1325,8 @@ become selections.
 Resetting tuning on a session with no selected model also preserves the
 remembered choice; `sessions.selectModel(sessionId, null)` explicitly clears it.
 
-`snapshot.lastModelSelection` contains only the profile's model/effort pair.
+`snapshot.lastModelSelection` contains the profile's model/effort pair and its
+optional retained effort preference, never a provider payload.
 The independent profile event survives source-session/project deletion and
 restart. Startup provenance labels the fallback `last-used`. Working-window
 settings are not copied from the source session; explicit model-option defaults
@@ -2079,6 +2088,17 @@ stop before inference without silently dropping or compacting history.
 Use the selected `provider.models[].thinkingLevels`, not a hardcoded effort
 list. A transport may have reasoning but not expose configurable effort;
 unsupported options fail explicitly. Omitting effort uses the model default.
+`supportedThinkingEffort(preferred, supported)` and
+`selectModelControls(controls, model)` are shared browser-safe selection helpers.
+Fallback applies to an explicit model switch, not an unsupported same-model
+effort request or permission to substitute a provider. The control plane
+revalidates the resulting actual option before persistence/admission.
+Disabling a selected model/provider atomically clears affected session
+selections through existing `session.configured` events. Re-enable does not
+reselect; drafts, held queues, actual admitted accounting and retained effort
+remain independent. Registry availability and the shared
+`routingModelReady`/`routingWorkingWindow` capability checks keep unavailable
+models out of actual Kupo admissions.
 `sessions.context(sessionId)` reads an estimate including saved draft,
 instructions, tools and conversation without calling a model. The normalized
 provider payload stays service-side.

@@ -33,6 +33,89 @@ test("a profile can keep only three of twenty-one models enabled and disabled ID
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("disabling a selected model atomically clears the session and still requires selection after re-enable without losing its draft or effort", async () => {
+  const fixture = await setupFixture({ reasoning: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await sdk.refresh();
+    await sdk.sessions.modelOptions(fixture.sessionId, { thinkingEffort: "high" }, undefined, true);
+    await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: fixture.session().draft.revision,
+      text: "Generated draft awaiting explicit model re-selection.", attachments: [] });
+    await sdk.models.setEnabled(fixture.modelId, false);
+    assert.equal(fixture.session().controls.modelId, null);
+    assert.equal(fixture.session().controls.modelOptions, undefined);
+    assert.equal(fixture.session().draft.text, "Generated draft awaiting explicit model re-selection.");
+    await sdk.models.setEnabled(fixture.modelId, true);
+    assert.equal(fixture.session().controls.modelId, null);
+    await assert.rejects(() => sdk.command({ type: "message.send", sessionId: fixture.sessionId,
+      expectedRevision: fixture.session().draft.revision, delivery: "queue" }), /select an available model/i);
+    await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
+    assert.deepEqual(fixture.session().controls.modelOptions, { thinkingEffort: "high" });
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("a failed selection invalidation rolls back the model disable and its command rather than partially changing availability", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await sdk.refresh();
+    const controls = structuredClone(fixture.session().controls), events = fixture.service.store.events();
+    fixture.service.store.db.exec("CREATE TRIGGER generated_model_invalidation_failure BEFORE INSERT ON events WHEN json_extract(NEW.data,'$.event_type')='session.configured' BEGIN SELECT RAISE(ABORT,'Generated selection invalidation failure'); END");
+    try { await assert.rejects(() => sdk.models.setEnabled(fixture.modelId, false), /no success was recorded/i); }
+    finally { fixture.service.store.db.exec("DROP TRIGGER generated_model_invalidation_failure"); }
+    assert.deepEqual(fixture.session().controls, controls);
+    assert.deepEqual(fixture.service.store.events(), events);
+    assert.ok(sdk.getState().snapshot!.provider.models.some((model) => model.id === fixture.modelId));
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("cleared model selection and its retained effort survive actual restart and provider re-enable", async () => {
+  const fixture = await setupFixture({ reasoning: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  let restarted: Awaited<ReturnType<typeof startService>> | undefined, peer: MoguriSdk | undefined;
+  try {
+    await fixture.configure(); await sdk.refresh();
+    await sdk.sessions.modelOptions(fixture.sessionId, { thinkingEffort: "high" }, undefined, true);
+    await sdk.models.setProviderEnabled("github-copilot", false);
+    assert.equal(fixture.session().controls.modelId, null);
+    sdk.disconnect(); await fixture.service.close();
+    restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    peer = await new MoguriSdk(restarted.connection).ready();
+    const current = () => peer!.getState().snapshot!.sessions.find((session) => session.id === fixture.sessionId)!;
+    assert.equal(current().controls.modelId, null);
+    await peer.models.setProviderEnabled("github-copilot", true);
+    assert.equal(current().controls.modelId, null);
+    await peer.sessions.selectModel(fixture.sessionId, fixture.modelId);
+    assert.deepEqual(current().controls.modelOptions, { thinkingEffort: "high" });
+    assert.equal(fixture.requests.length, 0);
+  } finally { peer?.disconnect(); sdk.disconnect(); await restarted?.close(); await fixture.close(); }
+});
+
+test("raw settings disable invalidates matching selected sessions without choosing a fallback", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await sdk.refresh();
+    const settings = sdk.settings.get()!;
+    await sdk.settings.update({ ...settings.values, modelPreferences: { ...defaultModelPreferences(), disabledModels: [fixture.modelId] } }, settings.revision);
+    assert.equal(fixture.session().controls.modelId, null);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("held prompts survive model invalidation and cannot resume until explicit selection", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await sdk.refresh();
+    await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: fixture.session().draft.revision,
+      text: "Generated held prompt keeps its original intent.", attachments: [] });
+    await sdk.command({ type: "message.send", sessionId: fixture.sessionId, expectedRevision: fixture.session().draft.revision, delivery: "queue", held: true });
+    const queue = structuredClone(fixture.session().queue);
+    await sdk.models.setEnabled(fixture.modelId, false); await sdk.models.setEnabled(fixture.modelId, true);
+    await assert.rejects(() => sdk.command({ type: "session.resume", sessionId: fixture.sessionId }), /select an available model/i);
+    assert.equal(fixture.session().controls.modelId, null); assert.deepEqual(fixture.session().queue, queue);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
 test("configured but unqualified SSH inventory never discovers hosts, reads credentials or prepares a model", async () => {
   let fetches = 0, credentialReads = 0;
   const registry = new ModelRegistry({

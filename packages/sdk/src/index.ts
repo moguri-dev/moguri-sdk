@@ -1,5 +1,5 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { isRecord, QuerySchema, parse, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
+import { isRecord, QuerySchema, parse, selectModelControls, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
@@ -203,11 +203,12 @@ export class MoguriSdk extends TransportClient {
       return this.sessions.configure(sessionId, { ...session.controls, autonomy,
         automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max" }, expectedRevision);
     },
-    selectModel: (sessionId: string, modelId: string | null, expectedRevision = this.sessionRevision(sessionId)) => {
-      const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
+    selectModel: async (sessionId: string, modelId: string | null, expectedRevision = this.sessionRevision(sessionId)) => {
+      const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
       if (!session) throw new ClientError("session_missing", "Choose an existing model-selection session.");
-      const { modelOptions: _, ...controls } = session.controls;
-      return this.sessions.configure(sessionId, { ...controls, modelId }, expectedRevision, true);
+      const model = modelId === null ? null : snapshot?.provider.models.find((model) => model.id === modelId);
+      if (modelId !== null && !model) throw new ClientError("model_unavailable", "Explicitly choose an available model. No other model or provider was substituted.");
+      return this.sessions.configure(sessionId, selectModelControls(session.controls, model ?? null), expectedRevision, true);
     },
     env: (sessionId: string, env: Controls["env"], expectedRevision = this.sessionRevision(sessionId)) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((value) => value.id === sessionId);
@@ -220,7 +221,9 @@ export class MoguriSdk extends TransportClient {
     modelOptions: (sessionId: string, modelOptions: ModelOptions, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
       if (!session) throw new ClientError("session_missing", "Choose an existing session.");
-      return this.sessions.configure(sessionId, { ...session.controls, modelOptions }, expectedRevision,
+      const { preferredThinkingEffort: _, ...controls } = session.controls;
+      const keepPreference = rememberModelSelection !== true && modelOptions.thinkingEffort === session.controls.modelOptions?.thinkingEffort;
+      return this.sessions.configure(sessionId, { ...(keepPreference ? session.controls : controls), modelOptions }, expectedRevision,
         session.controls.modelId === null ? false : rememberModelSelection);
     },
     context: (sessionId: string) => this.query({ type: "session.context", sessionId }),

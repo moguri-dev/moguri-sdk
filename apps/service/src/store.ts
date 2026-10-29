@@ -437,6 +437,15 @@ export class EventStore {
       if (version < 74) this.db.exec("PRAGMA user_version=74;");
       if (version < 75) this.db.exec("PRAGMA user_version=75;");
       if (version < 76) this.db.exec("PRAGMA user_version=76;");
+      if (version < 77) {
+        if (this.events().some((event) =>
+          (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.preferredThinkingEffort !== undefined ||
+          event.event_type === "model.selection_remembered" && event.payload.selection?.preferredThinkingEffort !== undefined ||
+          event.event_type === "settings.updated" && (event.payload.settings.startup.global.preferredThinkingEffort !== undefined || event.payload.settings.startup.profile.preferredThinkingEffort !== undefined))) {
+          throw new Error("Model effort preference history cannot be relabelled as pre-77 state. State was preserved.");
+        }
+        this.db.exec("PRAGMA user_version=77;");
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private migrateWorkflowFeatures(version: number): void {

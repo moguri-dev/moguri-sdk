@@ -31,6 +31,8 @@ import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import { BudgetPlanSchema, projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 import type { RoutingTurn, RoutingPlan, KupoResponsePhase, KupoObservation } from "./routing.ts";
+export { routingModelReady, routingWorkingWindow } from "./routing.ts";
+export type { BoundedRoutingModel } from "./routing.ts";
 import type { ContextCompaction } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
@@ -64,7 +66,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 76;
+export const PROTOCOL_VERSION = 77;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -543,7 +545,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         event.payload.sourceProjectId !== null && typeof event.payload.sourceProjectId !== "string" ||
         !source && !retainedSource || source && source.projectId !== event.payload.sourceProjectId ||
         selection !== null && !Value.Check(ModelSelectionSchema, selection) ||
-        source && (selection?.modelId !== actual?.modelId || selection?.thinkingEffort !== actual?.thinkingEffort)) {
+        source && (selection?.modelId !== actual?.modelId || selection?.thinkingEffort !== actual?.thinkingEffort ||
+          selection?.preferredThinkingEffort !== actual?.preferredThinkingEffort)) {
         throw new MoguriError("model_preference_corrupt", "Remembered model selection lost its exact profile/user/source controls. No inferred choice or model fallback was used.", 409);
       }
       lastModelSelection = selection ? structuredClone(selection) : null;

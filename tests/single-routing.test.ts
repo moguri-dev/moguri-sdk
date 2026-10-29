@@ -326,6 +326,9 @@ test("revoking routing authority invalidates an actual pending solver approval r
     await assert.rejects(() => fixture.sdk.command({ type: "approval.respond", sessionId: fixture.sessionId, approvalId: approval.id, allow: true }), /expired|changed|cancelled/i);
     await fixture.terminal();
     assert.equal(fixture.session().status, "partial");
+    assert.equal(fixture.session().controls.modelId, null);
+    assert.equal(fixture.requests.length, 1); assert.equal(fixture.solver.requests.length, 1);
+    assert.ok(fixture.service.controller.snapshot().budgetEntries.every((entry) => entry.status === "settled" && entry.reportedTokens === 42));
     assert.equal(fixture.service.controller.events(0).some((event) => event.event_type === "tool.started"), false);
   } finally { await fixture.close(); }
 });

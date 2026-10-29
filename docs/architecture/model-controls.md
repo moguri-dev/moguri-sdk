@@ -8,7 +8,7 @@ controls and progressive disclosure, not new client-only execution behavior.
 
 Provider/model availability belongs to the actual profile, not client-only
 picker state. Providers can be disabled without signing out, deleting secrets
-or changing existing sessions. Local/SSH endpoint configuration remains exact;
+or silently selecting another model. Local/SSH endpoint configuration remains exact;
 the provider-list action changes its existing enabled flag and the shared
 availability preference atomically. Copilot availability is independent of
 its retained login. Enabling may refresh configured metadata, never authorize
@@ -36,8 +36,11 @@ share the service registry; hiding a row alone is insufficient. New selection
 and new model admissions reject disabled or unselected IDs, including prepared
 calls held before admission. Already admitted work retains its actual result,
 charges and cancellation outcome; configuration never refunds an unknown hold
-or replays a call. Existing session/default IDs remain visible as unavailable
-instead of being cleared or rebound to another provider.
+or replays a call. Since protocol 77, explicitly disabling a selected model
+clears the affected session selection atomically and preserves its effort
+preference for the next explicit choice. Re-enabling is not reselection.
+Saved defaults and exact provider choices remain unavailable rather than being
+rebound to another provider; temporary discovery failures do not erase them.
 
 Reuse TypeBox/React/Electron and maintained pi-ai under their existing
 MIT/component notices; no dependency or provider-evidence call is added.
@@ -223,6 +226,80 @@ or paid inference was used. Experimental OpenTUI FFI, lazy Ghostty chunk,
 optional `.icon` and transitive deprecation notices remain non-blocking.
 Physical SendBox, external Linux, live-provider, quality and full-milestone
 exclusions remain unchanged. CI remains main-push-only, not a passing PR check.
+
+## Model-selection continuity
+
+The owner requires a fresh session model selection after explicitly disabling
+that selected model, rather than silently choosing a replacement or restoring
+the selection when availability returns. The service must persist invalidation
+with the availability change. Original drafts, queue intent, already admitted
+results and accounting remain retained; the next model admission needs an
+explicit available selection. Historical defaults and exact provider choices
+are not rewritten as another model.
+
+Switching models preserves the user's thinking preference. Keep an exact
+supported effort; otherwise use the next higher supported effort, or the
+highest supported effort when no higher value exists. Max therefore uses High
+on a High-limited model, not Model default. The user explicitly requires Max
+to return when switching back to a Max-capable model. Preserve an optional
+`preferredThinkingEffort` separately from the actual transport option when they
+differ, including a model without adjustable thinking or synthetic Kupo.
+Kupo still controls its actual roles and gains no fixed-model effort override.
+Explicitly choosing an effort or Model default replaces/clears that preference.
+Model switches retain their existing working-window reset, without truncating
+history or changing model, provider, environment, autonomy or budget.
+
+These are shared control-plane/SDK rules, not renderer-only state. Reuse
+TypeBox, React/Electron and maintained pi-ai under their existing MIT/component
+notices; no new dependency, discovery request or inference is needed. The
+optional preference extends existing controls and remembered-model events.
+A metadata-only schema/protocol-77 upgrade retains legacy events,
+encrypted history, receipts and unknown accounting without rewriting them.
+Like the 74-76 metadata advances, it adds no retention table or lineage marker:
+the existing controls/event shapes gain only an optional non-authorizing field.
+Legacy controls acquire no invented preference or model call during migration,
+and future preference history cannot be relabelled as pre-77 data.
+
+The freshly repeated prerequisites pass before implementation: generated
+providers **1,070.74 ms** (cancellation **30.41 ms**), SQLite **63.02 ms**
+(append p95 **0.0556 ms**), owned PTY **160.89 ms** (cancellation **151.73 ms**,
+zero survivors), OpenTUI **1,049.69 ms**, hidden Electron **750.82 ms**
+(startup **253.24 ms**, **439.47 MiB**) and bounded filesystem/Git
+**89.60 ms**. Maintained supported/ignored thinking transport probes pass
+in **83.75 ms**. Fixed historical unavailable-checkpoint diagnostics are not
+relabelled as current native/live qualification.
+
+The desktop model list distinguishes GPT, Claude, Google and Grok using the
+existing inline icon mechanism. This is cosmetic identification from declared
+catalog labels, never evidence of model family, training independence, quality
+or permission. Unavailable models are not eligible Kupo inputs or checkable
+pool choices. Retained unavailable approvals remain inspectable/removable,
+not checked as though active or rebound to another provider.
+Clearing the picker does not turn an already owned routed tool into an
+ordinary fixed-model tool: authorization still binds the retained routing
+record and its current selection/policy. Revocation keeps the real partial
+outcome and completed role charges, not a relabelled failure or fresh permission.
+
+Generated tests must prove nearest-effort ordering, preference restoration,
+explicit reset, shared SDK/slash/TUI behavior, disable/re-enable without
+reselection, active-call accounting, failed atomic persistence, revision/profile
+isolation, restart/migration failure recovery, vendor icons and unavailable
+Kupo controls/admission. Native artifact qualification must follow the actual
+new worker/protocol bytes; the earlier protocol-76 measurements remain
+historical, not relabelled qualification for a changed image.
+
+The source shared-runtime selection/effort/availability/routing/upgrade suite
+passes **138/138 cases** in **19,436.18 ms**. It includes a real generated
+worker request with `reasoning_effort: high` while the stored preference is Max,
+held queue preservation, a failed atomic invalidation append, actual
+restart/upgrade, source actor validation and cancellation/accounting gates.
+The source desktop menus/defaults/provider/Kupo/geometry suite passes
+**23/23 flows** in **38.4 seconds**, including the disabled-current-model
+reselection, all four icon paths and preference reset/restoration. Actual
+OpenTUI keyboard/model-related flows pass **16/16** in **16,769.08 ms**.
+These generated passes are not paid-provider, microphone, notarization or new
+physical-native evidence. Protocol-77 package/native identities require their
+own retained qualification before delivery.
 
 ## Cascading menus and complete slash discovery
 
