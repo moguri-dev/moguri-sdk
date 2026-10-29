@@ -3,8 +3,10 @@
 This is the native-qualification slice of issue #35, not its wider loss/recovery
 hardening or Milestone 1 acceptance. Historical 0.2.3 receipts and archives remain
 unchanged. A current generated pass must never be reported as a physical run.
-The [protocol-80 combined follow-up](#protocol-80-combined-follow-up) records
-the current exact image/host/package cut. Protocol-76 and
+The [protocol-81 session/Git follow-up](#protocol-81-session-and-git-follow-up)
+records the current exact worker/VM cut. The
+[protocol-80 combined follow-up](#protocol-80-combined-follow-up) retains the
+latest separately packaged desktop cut. Protocol-76 and
 [protocol-77](#protocol-77-model-controls-follow-up) measurements remain their
 original evidence, not relabelled qualification for new bytes.
 
@@ -669,3 +671,68 @@ personal login, live paid inference, billing/model quality, real-microphone
 accuracy, notarization or non-macOS release readiness is inferred. Native group
 consoles, SSH groups, native Git/plan-write and project MCP/hooks/background
 transports remain explicitly unqualified, without Local fallback.
+
+## Protocol-81 session and Git follow-up
+
+The [session/request and Git change](session-reliability.md#explicit-selection-and-retained-request-follow-up)
+starts from merged combined80 `9cc20bd`, adds its two independent schema markers
+and preserves all six combined80 markers. It changes worker/native bytes, so
+the preceding receipts do not qualify this payload.
+
+**PASS**, actual clean source
+`f0cc4bec5e676051b7dba3f2f9439ce77a7e7b67`, protocol **81**,
+Moguri `0.30.0-alpha.1`, pinned Node **26.12.0**. The first producer built a
+fresh no-cache Linux arm64 image in **50,878.70 ms**. Its exact bytes were
+reverified after the client error-recovery correction; the correction did not
+change the compiled guest payload. The current physical qualification took
+**23,075.63 ms** using the already installed signed SendBox **0.2.4**, unchanged
+trust root and release floor. No installer was run, personal account used,
+administrator dialog opened or real checkout mounted.
+
+| Exact artifact | SHA-256 |
+| --- | --- |
+| Immutable workload image | `313fbf99db1ab6e545a3d72561639ff9820a57b80fbd59d0a503ff20c4487cd7` |
+| Distribution manifest | `87656f598d9908a15bd7dc0142bcb43f0f5ec6024d1bd0807b9c1d8ebcc40410` |
+| Worker | `ebf9e8a90d781162b1486dbe7c5658849dc29321abadb9398edcbd7a0f9b886f` |
+| Remote bridge | `7a97ffa45cc99f3893f67d8863ad52d6cc262fd9a2f8cff898f5ea66f0e65351` |
+| MCP worker | `29604cc04eceb049d5e406a97835ce5ffac45c97c1f0f4925f10755cd8d08951` |
+| Data worker | `3cb1b3a638ec81abf253a796dd16cdc65dc1bce671c573561dfa1a8960e86d0a` |
+| Original physical qualification receipt | `8daa8364047c1baf36f3328587b12ad4747e9719425a809ed06951f23c1df422` |
+
+| Actual gate | Result | Measurement |
+| --- | --- | --- |
+| Exact distribution/archive/attestation and compiled payload | PASS | 4,606.72 ms |
+| Existing installed signed host/guest/root/floor | PASS | 99.62 ms |
+| Captured provider endpoint/public alias scope | PASS | 150.80 ms |
+| Cold original guest network with actual effective Meta report | PASS | 4,145.39 ms |
+| Real service/worker calls, complete accounting and private outputs | PASS | 5,528.37 ms |
+| Actual two-root group and separately accepted source publication | PASS | 8,413.15 ms |
+| Exact owned guest teardown | PASS | 86.82 ms; original owned guests absent |
+
+Original producer and physical evidence is retained locally at
+`.native/sandbox-distribution/build-Zdp7U7/` and
+`.native/qualification/current-sendbox-FYv7Dk/qualification.json`.
+The latter keeps its original source, harness hashes, effective network reports,
+accounting, group publication and teardown witnesses. The public 0.2.4 archive
+and attestation identities above remain unchanged; no old evidence was relabelled.
+Both root and independently installed packed-consumer audits report zero
+vulnerabilities. Actual installed SDK/CLI/worker checks include the new exact
+receipt, original-result grants, managed rename/reopen and twelve owned-worker
+continuation probes. The full hidden source desktop passes **284**, with
+**3 explicit package/native skips**, in **8.5 min**. This does not claim a new
+packaged/notarized protocol81 app or installer.
+
+The new finite Git adapters remain **Local individual project/worktree only**.
+This physical guest pass does not enable them in Sandbox, Remote, groups or
+Home; those scopes cannot borrow a controller checkout. Previous limits on
+group consoles, native Git/plan-write, project MCP/hooks/background transports,
+external Linux release, live model quality/billing, microphone accuracy and
+long-running network/recovery soak remain separate gates.
+
+Current main CI run
+[40910372489](https://github.com/mbianchidev/moguri/actions/runs/40910372489)
+was refused before either job executed a step: recent account payments failed
+or the spending limit needs increasing in GitHub **Billing & plans**. Its
+Ubuntu26 migration and macOS arm64 capacity notices remain visible. Main-only CI
+was not disabled, broadened to working branches or rerun to conceal that
+external gate.
