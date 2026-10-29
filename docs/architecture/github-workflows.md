@@ -150,6 +150,24 @@ project-free and captured-group transports cannot use the Local pipeline.
 SDK/client user reviews remain explicit. Per-operation cancellation propagates
 to the retained job and records real failed/partial outcomes across restart.
 
+Managed branch rename also binds the original workspace revision/change set.
+After actual Git verification, its tagged `workspace.saved`, matching change-set
+name, completed Git record and job result commit atomically. Root identity,
+base commit and staged/dirty bytes are unchanged. Git read helpers suppress
+both optional index locks and `diff.autoRefreshIndex`; a read must not rewrite
+an unprimed managed index. Active fixed-branch Kanban tasks cannot be renamed.
+Switching a managed root or creating-and-checking-out another branch is refused
+before effects: create without checkout or create a separate managed worktree
+instead of silently moving an existing conversation/change set.
+
+A failed managed metadata acknowledgement retains the actual renamed ref and
+original complete Git result as **partial**, with old metadata preserved.
+After the actual user separately acknowledges that exact operation's inspection,
+`workspace.reconcile` may repair only that original workspace revision using
+matching root/common directory, HEAD, raw index and file state. It performs no
+Git rename, keeps the operation partial and does not resume a queue. Old reports
+cannot be reused after another metadata revision or external branch change.
+
 Generated tests must prove local bare-remote publication, new branch
 creation/rename, history-preserving revert, unchanged unrelated staged/dirty
 work, stale HEAD/index/root/ref rejection, hard denials, exact approval and

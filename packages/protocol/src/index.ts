@@ -303,7 +303,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "sandbox.frame_recorded": { executionId: string; sequence: number; digest: string };
   "sandbox.publication_recorded": { publication: SandboxPublication };
   "sandbox.setup_recorded": { operation: SandboxSetupOperation };
-  "workspace.saved": { workspace: ManagedWorkspace };
+  "workspace.saved": { workspace: ManagedWorkspace; branchOperation?: { operationId: string; previousBranch: string } };
   "change_set.saved": { changeSet: ChangeSet };
   "question.asked": { question: UserQuestion };
   "question.answered": { questionId: string; answer: QuestionAnswer };
@@ -892,6 +892,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (question) Object.assign(question, { status: "cancelled", diagnostic: event.payload.diagnostic, revision: question.revision + 1 });
     }
     if (event.event_type === "workspace.saved") {
+      const proof = event.payload.branchOperation;
+      if (proof) {
+        const previous = managedWorkspaces.get(event.payload.workspace.id), operation = githubOperations.get(proof.operationId), next = event.payload.workspace;
+        if (!previous || !operation || operation.kind !== "git.branch.rename" || operation.workspaceId !== next.id ||
+          operation.projectId !== next.projectId || operation.root.root !== next.path || previous.branch !== proof.previousBranch ||
+          next.identity?.device !== operation.root.device || next.identity.inode !== operation.root.inode ||
+          next.revision !== previous.revision + 1 || previous.status !== "ready" || next.status !== "ready" ||
+          (["projectId", "path", "baseCommit", "gitCommonDir", "createdAt", "changeSetId", "jobId"] as const).some((key) =>
+            previous[key] !== next[key]) ||
+          JSON.stringify(previous.identity) !== JSON.stringify(next.identity)) throw new MoguriError("workspace_branch_corrupt", "Managed branch metadata lost its original verified Git operation/root/change set. State was preserved.", 409);
+      }
       managedWorkspaces.set(event.payload.workspace.id, structuredClone(event.payload.workspace));
       if (event.payload.workspace.status === "partial") blockedWorkspaces.add(event.payload.workspace.id);
       if (event.payload.workspace.status === "removed") blockedWorkspaces.delete(event.payload.workspace.id);

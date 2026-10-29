@@ -5,7 +5,7 @@ import { assertFolderName, validateProjectPath } from "./project-policy.ts";
 import { runProgram } from "./program.ts";
 
 const git = (root: string, args: string[], signal: AbortSignal, filters: string[] = []) => runProgram("git", [
-  "--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false",
+  "--no-pager", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false", "-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false",
   ...filters, "--literal-pathspecs", ...args,
 ], {
   cwd: root, signal, label: "Read workspace Git state", timeoutMs: 30_000, maxBytes: 512 * 1024,

@@ -251,6 +251,7 @@ export class PlatformRuntime {
       remoteRead: host.remoteRead,
       nativeRead: host.nativeRead,
       job: (kind, projectId, execute, start, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, start, workspaceId),
+      recoverGitBranch: (inspection) => this.github.recoverManagedBranch(inspection),
     }, () => this.sessions.projects);
     this.workspace = new WorkspaceRuntime({
       snapshot: () => this.snapshot(), project: (id, workspaceId) => this.managed.project({ projectId: id, workspaceId: workspaceId ?? null }), commit: (events) => this.host.commit(events),
@@ -347,6 +348,7 @@ export class PlatformRuntime {
       },
       rootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => host.localRootBusy(root, exceptJobId, permitRebaseRecovery, ownerSessionId) || this.snapshot().terminals.some((terminal) =>
         terminal.env === "Local" && terminal.binding?.root === root && !["closed", "failed", "acknowledged"].includes(terminal.status)),
+      branchEvents: (document, branch, operationId) => this.managed.branchEvents(document, branch, operationId),
       closing: host.closingProject, commit: host.commit,
       job: (kind, projectId, workspaceId, execute, start, settled, lifecycle, sessionId) =>
         this.job(kind, projectId, sessionId ?? null, execute, settled, start, workspaceId, lifecycle),

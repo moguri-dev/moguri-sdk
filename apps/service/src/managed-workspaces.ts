@@ -5,6 +5,7 @@ import { join, relative, isAbsolute } from "node:path";
 import {
   MoguriError, defaultProjectSettings, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
   type ManagedWorkspaceCommand, type ManagedWorkspaceQuery, type ManagedWorkspaceResponse, type EventInput, type CommandResult, type CapabilityJob, type GitWorkspaceRegistration,
+  type GithubReviewDocument,
 } from "../../../packages/protocol/src/index.ts";
 import { runProgram } from "./program.ts";
 import { profileIndexId } from "./store.ts";
@@ -25,6 +26,7 @@ interface Host {
   writeBusy(projectId: string, workspaceId: string): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
   nativeRead?(session: Session, query: WorkspaceReadQuery, repository?: string): Promise<WorkspaceReadResult>;
+  recoverGitBranch?(inspection: WorkspaceInspection): Promise<EventInput[] | null>;
   job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (text: string) => void) => Promise<unknown>, start: (job: CapabilityJob) => void, settled: () => void, workspaceId: string): string;
 }
 export class ManagedWorkspaces {
@@ -40,12 +42,34 @@ export class ManagedWorkspaces {
     if (!session) throw new MoguriError("session_missing", "Choose an existing session.", 404);
     return session;
   }
-  private event(workspace: ManagedWorkspace): EventInput {
+  private event(workspace: ManagedWorkspace): Extract<EventInput, { event_type: "workspace.saved" }> {
     return { event_type: "workspace.saved", profile_id: this.host.snapshot().profileId, project_id: workspace.projectId, payload: { workspace } };
   }
   private saved(id: string, changes: Partial<ManagedWorkspace>): ManagedWorkspace {
     const current = this.workspace(id), value = { ...current, ...changes, revision: current.revision + 1 };
     this.host.commit([this.event(value)]); return value;
+  }
+  branchEvents(document: GithubReviewDocument, branch: string, operationId: string): EventInput[] {
+    if (!document.scope.workspaceId) return [];
+    const workspace = this.workspace(document.scope.workspaceId), snapshot = this.host.snapshot();
+    const changeSet = snapshot.changeSets.find((changeSet) => changeSet.id === workspace.changeSetId);
+    if (document.action.kind !== "git.branch.rename" || document.action.from !== workspace.branch || document.action.to !== branch ||
+      workspace.status !== "ready" || workspace.projectId !== document.scope.projectId || workspace.branch !== document.git.branch ||
+      document.managedBranch?.revision !== workspace.revision || document.managedBranch.changeSetId !== workspace.changeSetId ||
+      document.managedBranch.branch !== workspace.branch || document.managedBranch.baseCommit !== workspace.baseCommit ||
+      workspace.path !== document.root.root || workspace.gitCommonDir !== document.git.commonDir ||
+      workspace.identity?.device !== document.root.device || workspace.identity.inode !== document.root.inode ||
+      !changeSet || changeSet.workspaceId !== workspace.id || changeSet.projectId !== workspace.projectId ||
+      changeSet.branch !== workspace.branch || changeSet.baseCommit !== workspace.baseCommit ||
+      snapshot.projectWorkRuns.some((run) => run.workspaceId === workspace.id && !["completed", "failed", "cancelled", "partial"].includes(run.status))) {
+      throw new MoguriError("git_workspace_binding", "The captured managed branch/change set is stale or belongs to an active fixed-branch task. No metadata or publication authority was moved.", 409);
+    }
+    const next = { ...workspace, branch, revision: workspace.revision + 1,
+      diagnostic: "Branch name updated from the exact verified Git rename; root, base and original change-set identity were preserved." };
+    return [{ ...this.event(next), correlation_id: operationId,
+      payload: { workspace: next, branchOperation: { operationId, previousBranch: workspace.branch } } },
+      { event_type: "change_set.saved", profile_id: snapshot.profileId, project_id: workspace.projectId, correlation_id: operationId,
+        payload: { changeSet: { ...changeSet, branch } } }];
   }
   private job(id: string, kind: string, projectId: string, execute: (signal: AbortSignal, progress: (text: string) => void) => Promise<unknown>, start: (job: CapabilityJob) => void): string {
     this.active.add(id);
@@ -57,7 +81,7 @@ export class ManagedWorkspaces {
       cwd: project.path, signal, timeoutMs: 30_000, maxBytes: 512 * 1024, label: "Managed workspace Git operation",
       env: { ...(!network ? { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } : {}),
         ...(network && process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
-        GIT_LFS_SKIP_SMUDGE: "1", GIT_TERMINAL_PROMPT: "0" },
+        GIT_LFS_SKIP_SMUDGE: "1", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
     });
   }
   private async filters(project: Project, signal: AbortSignal): Promise<string[]> {
@@ -285,6 +309,13 @@ export class ManagedWorkspaces {
     if (command.type === "workspace.reconcile") {
       if (this.workspace(workspace.id).revision !== command.expectedRevision) throw new MoguriError("workspace_conflict", "Workspace changed during inspection.", 409);
       const absent = !inspection.registered && !inspection.exists;
+      if (!absent && inspection.diagnostic && this.host.recoverGitBranch) {
+        const recovered = await this.host.recoverGitBranch(inspection);
+        if (recovered) {
+          if (this.workspace(workspace.id).revision !== command.expectedRevision) throw new MoguriError("workspace_conflict", "Workspace changed during original Git-rename inspection. Nothing was rebound.", 409);
+          return finish(recovered, { revision: workspace.revision + 1 });
+        }
+      }
       if (!absent && (inspection.diagnostic || !inspection.registered || !inspection.canonical)) throw new MoguriError("workspace_unconfirmed", inspection.diagnostic ?? "Workspace is not safely reconcilable.", 409);
       const metadata = absent ? null : await lstat(workspace.path, { bigint: true });
       return finish([this.event({ ...workspace, status: absent ? "removed" : "ready", identity: metadata ? { device: String(metadata.dev), inode: String(metadata.ino) } : workspace.identity, revision: workspace.revision + 1, diagnostic: absent ? "User inspected: owned root and registration are absent. The branch was not deleted." : "User inspected matching Git/root identity. No operation was replayed." })], { revision: workspace.revision + 1 });

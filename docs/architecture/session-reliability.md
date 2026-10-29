@@ -60,6 +60,13 @@ late acknowledgements, original result ownership and actual TUI/hidden desktop
 flows are required, together with the independently installed SDK. Changed
 worker bytes require their own qualification, not historical protocol80 receipts.
 
+Managed Git rename retains its captured metadata revision and appends the tagged
+`workspace.saved`, matching change-set branch and terminal Git/job records
+atomically. A lost metadata acknowledgement remains partial until exact user
+inspection and metadata-only reconciliation; no Git effect is replayed.
+Managed checkout changes cannot move an existing captured change set. Read-only
+Git previews also suppress index-stat refresh, preserving the original index.
+
 ## Change contract
 
 This owner-requested follow-up covers Local tool and GitHub read failures,

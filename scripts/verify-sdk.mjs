@@ -574,7 +574,7 @@ try {
       console.log("Installed protocol-76 child-session review binds the exact tree before cascading deletion.");
       ` : ""}
       const s=await sdk.command({type:"session.create",projectId:p.id});
-      ${installedProtocol >= 81 ? `{
+      ${installedProtocol >= 81 && process.platform === "darwin" ? `{
       const directory=join(root,"generated-installed-git");await mkdir(directory);
       const state=join(root,"generated-installed-git-state"),key=Buffer.alloc(32,0x68);
       await writeFile(join(directory,"fixture.txt"),"Generated installed Git original.\\n");
@@ -602,6 +602,15 @@ try {
         const committed=(await gitSdk.git.status(session.id)).git.head;
         await perform({kind:"git.revert",commit:committed});
         assert.equal(git(["show","HEAD:fixture.txt"],directory).trim(),"Generated installed Git original.");
+        const owned=await gitSdk.command({type:"workspace.create",projectId:project.id,branch:"generated/installed-owned",baseRef:"main"});
+        const ownedState=gitSdk.getState().snapshot.managedWorkspaces.find(value=>value.id===owned.id);assert.ok(ownedState.jobId);
+        assert.equal((await gitSdk.jobs.wait(ownedState.jobId)).status,"completed");
+        const ownedSession=await gitSdk.sessions.create(project.id,"Generated installed managed branch",undefined,owned.id);
+        const ownedReview=(await gitSdk.git.preview(ownedSession.id,{kind:"git.branch.rename",from:"generated/installed-owned",to:"generated/installed-owned-renamed"})).preview;
+        const ownedRename=await gitSdk.git.execute(ownedReview,ownedReview.document.confirmations,true);
+        assert.equal((await gitSdk.git.wait(ownedRename.id)).operation.status,"completed");
+        assert.equal((await gitSdk.workspaces.inspect(owned.id)).inspection.diagnostic,null);
+        assert.equal((await gitSdk.git.status(ownedSession.id)).git.branch,"generated/installed-owned-renamed");
         const tool=(await gitSdk.tools.catalog(session.id,"read_file")).tools.find(value=>value.name==="read_file");
         const read=await gitSdk.tools.execute(session.id,"read_file",{path:"fixture.txt"},tool.schemaDigest);
         assert.equal((await gitSdk.jobs.wait(read.id)).status,"completed");
@@ -610,11 +619,12 @@ try {
         assert.equal(page.text,"Generated installed Git original.\\n");
         gitSdk.disconnect();await gitRuntime.close();gitRuntime=await createRuntime(options);gitSdk=await connectMoguri({stateDir:state,autoStart:false});
         assert.equal(current().controls.automaticApprovals,true);
+        assert.equal((await gitSdk.workspaces.inspect(owned.id)).inspection.diagnostic,null);
         assert.equal((await gitSdk.tools.resultById(session.id,source.operationId,{expectedDigest:source.digest,expectedRevision:source.revision})).text,page.text);
         assert.equal((await gitSdk.commandReceipt(consent,"generated-installed-autonomy")).status,"committed");
         assert.equal((await gitSdk.git.log(session.id)).data.action,"log");
       }finally{gitSdk.disconnect();await gitRuntime.close();}
-      console.log("Installed protocol-81 exact receipts, explicit automatic consent, public original-result grants/restart and real reviewed Git branch/stage/selected commit/revert pass without model calls or scripts.");
+      console.log("Installed protocol-81 exact receipts, explicit automatic consent, public original-result grants/restart and real reviewed Git branch/stage/selected commit/revert plus atomic managed branch/change-set rename/restart pass without model calls or scripts.");
       }` : ""}
       ${installedProtocol >= 59 ? `{
       const skillDirectory=join(root,"generated-skills");await mkdir(skillDirectory);

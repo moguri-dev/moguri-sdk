@@ -122,6 +122,7 @@ export const GithubReviewDocumentSchema = object({
     mode: Type.Union([Type.Literal("100644"), Type.Literal("100755"), Type.Null()]), bytes: count,
   }), { maxItems: 100 })),
   unaffectedIndexDigest: Type.Optional(hash), indexEntriesDigest: Type.Optional(hash), workingTreeDigest: Type.Optional(hash),
+  managedBranch: Type.Optional(object({ revision: count, changeSetId: id, branch: ref, baseCommit: gitHash })),
 });
 export type GithubReviewDocument = Static<typeof GithubReviewDocumentSchema>;
 export interface GithubPreview { document: GithubReviewDocument; digest: string }

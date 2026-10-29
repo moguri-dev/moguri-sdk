@@ -376,6 +376,11 @@ reuse the existing private-index pattern and preserve the real index, unrelated
 staged files and unstaged bytes; they do not borrow the artifact helper's
 different new-branch publication semantics. Normal pushes also compare the
 captured destination SHA/absence, without granting non-fast-forward writes.
+Managed rename binds `document.managedBranch` and atomically updates the original
+workspace/change-set name without changing root/base identity. Existing managed
+roots cannot be switched to another change set. A partial metadata
+acknowledgement requires separate exact user inspection and metadata-only
+`workspaces.reconcile`; it never reruns Git or relabels the operation successful.
 `git_read` and `git_write` expose the same capabilities to the actual model
 catalogue; ordinary `/git` commands execute through the original service queue.
 Unsupported Remote/Sandbox/group/Home execution never borrows a Local checkout.

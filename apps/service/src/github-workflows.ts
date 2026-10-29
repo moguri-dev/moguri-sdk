@@ -10,6 +10,7 @@ import {
   type GithubOperationResult, type GithubPreview, type GithubQuery, type GithubResponse, type GithubScope, type GithubCommand,
   type GithubReviewDocument, type GithubRepository, type GithubWorkSource, type GithubSourceBinding, type GitRead, type GitReadData,
 } from "../../../packages/protocol/src/github-workflows.ts";
+import type { WorkspaceInspection } from "../../../packages/protocol/src/worktrees.ts";
 import { candidateGitState, readGit, readGitBinding, readWorkspaceGit } from "./project-git.ts";
 import { isProtectedProjectPath, scopedPath } from "./files.ts";
 import { validateProjectPath } from "./project-policy.ts";
@@ -655,6 +656,9 @@ export class GitHubWorkflows {
       confirmations: ["I reviewed this exact Local root, action, inputs and policy."],
     };
     const main = this.host.configuration(scope.projectId).values.repo.mainBranch;
+    if (scope.workspaceId && (action.kind === "git.branch.create" && action.checkout ||
+      action.kind === "git.switch" && action.branch !== git.branch)) throw new MoguriError("git_workspace_switch",
+      "A managed worktree retains its captured change-set branch. Create a branch without checkout or create a separate managed worktree for another branch; no existing conversation or root was moved.", 409);
     if (action.kind === "git.branch.create" || action.kind === "git.branch.rename") {
       const branch = action.kind === "git.branch.create" ? action.branch : action.to;
       validateGithubRef(branch);
@@ -664,6 +668,13 @@ export class GitHubWorkflows {
         validateGithubRef(action.from);
         if (action.from !== git.branch) throw new MoguriError("git_branch_changed", "Rename only the exact captured current branch. No other worktree or branch was changed.", 409);
         if ([main, "main", "master"].includes(action.from)) document.confirmations.push(`I explicitly approve renaming protected/main branch ${action.from} to ${action.to}.`);
+        if (scope.workspaceId) {
+          if (!this.host.branchEvents) throw new MoguriError("git_workspace_binding", "This host cannot atomically retain a managed branch rename. No Git effect was admitted.", 409);
+          const workspace = this.host.snapshot().managedWorkspaces.find((workspace) => workspace.id === scope.workspaceId);
+          if (!workspace) throw new MoguriError("git_workspace_binding", "The captured managed workspace disappeared. No base checkout was used.", 409);
+          document.managedBranch = { revision: workspace.revision, changeSetId: workspace.changeSetId, branch: workspace.branch, baseCommit: workspace.baseCommit };
+          this.host.branchEvents(document, action.to, "preview");
+        }
       }
     }
     if (action.kind === "git.switch") {
@@ -938,6 +949,28 @@ export class GitHubWorkflows {
     if (scope.sessionId !== authority.sessionId || !filesystemWriter(action)) throw new MoguriError("git_tool_owner", "This model Git review lost its exact owning session or action.", 403);
     return (await this.preview(scope, action, AbortSignal.any([authority.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]), undefined, undefined, authority)).preview;
   }
+  async recoverManagedBranch(inspection: WorkspaceInspection): Promise<EventInput[] | null> {
+    const workspace = inspection.workspace;
+    if (!this.host.branchEvents || !inspection.exists || !inspection.canonical || !inspection.registered || !inspection.branch) return null;
+    for (const operation of this.operations().filter((operation) => operation.workspaceId === workspace.id &&
+      operation.projectId === workspace.projectId && operation.kind === "git.branch.rename" && operation.status === "partial" &&
+      operation.inspection && operation.resultDigest)) {
+      if (!operation.resultDigest) continue;
+      const document = parse(GithubReviewDocumentSchema, JSON.parse(this.store.blob(operation.reviewDigest)));
+      const result = parse(GithubOperationResultSchema, JSON.parse(this.store.blob(operation.resultDigest)));
+      if (document.action.kind !== "git.branch.rename" || document.action.from !== workspace.branch || document.action.to !== inspection.branch ||
+        document.managedBranch?.revision !== workspace.revision || document.managedBranch.changeSetId !== workspace.changeSetId ||
+        document.scope.workspaceId !== workspace.id || stable(document.root) !== stable(operation.root) ||
+        result.operationId !== operation.id || result.kind !== operation.kind || result.branch !== inspection.branch ||
+        result.head !== document.git.head || result.outcome !== "completed") continue;
+      const actual = await this.gitState(workspace.path, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000));
+      if (stable(sourceRootSync(workspace.path)) !== stable(document.root) || actual.commonDir !== document.git.commonDir ||
+        actual.head !== document.git.head || actual.branch !== result.branch || actual.indexDigest !== document.git.indexDigest ||
+        actual.worktreeDigest !== document.git.worktreeDigest) throw new MoguriError("git_workspace_recovery", "The original partial rename no longer matches its exact root, HEAD, index or files. No metadata, Git effect or successful outcome was replayed.", 409);
+      return this.host.branchEvents(document, result.branch, operation.id);
+    }
+    return null;
+  }
   async execute(command: GithubCommand, finish: WorkspaceFinish, modelSource?: ModelAdviceSource, projectWorkId?: string, toolAuthority?: GitToolAuthority): Promise<CommandResult> {
     command = structuredClone(parse(GithubCommandSchema, command));
     toolAuthority?.guard();
@@ -1019,7 +1052,10 @@ export class GitHubWorkflows {
           result.outcome === "conflicts" && !["git.rebase", "git.revert"].includes(result.kind)) throw new MoguriError("github_partial", "Final Git/GitHub ownership, typed result or cancellation acknowledgement is missing. Inspect retained observations.", 409);
         if (result.outcome === "partial") throw new MoguriError("github_partial", "Only a partial acknowledgement was observed. No completed operation was inferred.", 409);
         if (result.outcome === "conflicts") throw new MoguriError("github_conflicts", `${result.kind === "git.revert" ? "Revert" : "Rebase"} stopped with conflicts. Both histories and the actual index/worktree are preserved; inspect the retained operation before explicit recovery.`, 409);
-        return [this.event({ ...operation, revision: operation.revision + 1, status: "completed", resultDigest,
+        const document = parse(GithubReviewDocumentSchema, JSON.parse(this.store.blob(operation.reviewDigest)));
+        const branch = operation.workspaceId && operation.kind === "git.branch.rename" ? this.host.branchEvents?.(document, result.branch, operation.id) : [];
+        if (operation.workspaceId && operation.kind === "git.branch.rename" && !branch) throw new MoguriError("git_workspace_binding", "The exact managed branch acknowledgement is missing. Inspect the partial original operation.", 409);
+        return [...(branch ?? []), this.event({ ...operation, revision: operation.revision + 1, status: "completed", resultDigest,
           updatedAt: new Date(this.now()).toISOString(), diagnostic: null })];
       },
       failed: (error, cancelled) => {
