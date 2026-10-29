@@ -42,12 +42,13 @@ try {
       const setup=service.controller.sandboxSetup.status();
       assert.equal(setup.supported,true);assert.equal(setup.bundledVersion,${JSON.stringify(definition.distribution.vendor.version)});
       assert.equal(service.connection.protocolVersion,${PROTOCOL_VERSION});
-      assert.equal(service.store.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()?.value,"1");
+      const markers=["model_selection_continuity_schema","theme_catalog_schema","queued_slash_schema","project_folder_actions_schema","sandbox_multi_root_schema","theme_model_workspace_convergence_schema"];
+      for(const id of markers)assert.equal(service.store.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value,"1");
       assert.deepEqual(service.controller.snapshot().provider.models.map(model=>model.id),[KUPO_MODEL_ID]);
       assert.equal(service.controller.snapshot().provider.status,"disconnected");
       assert.equal(service.store.events().some(event=>event.event_type==="model.started"),false);
       console.log(JSON.stringify({status:"PASS",primitive:"Actual packaged Node/service discovers bundled Sandbox without path injection, model, network or keychain access",
-        node:process.versions.node,protocol:service.connection.protocolVersion,bundledVersion:setup.bundledVersion,modelSelectionSchema:1}));
+        node:process.versions.node,protocol:service.connection.protocolVersion,bundledVersion:setup.bundledVersion,schemaMarkers:markers}));
     }finally{await service.close();}
   `;
   const output = execFileSync(join(runtime, "node_modules", "node", "bin", "node"), ["--input-type=module"], {
