@@ -5,6 +5,7 @@ import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-co
 import { executeTool } from "./tools.ts";
 import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
 import { isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
+import { retainedToolText } from "../../../packages/protocol/src/tooling.ts";
 import { localProvider, localModelFetch } from "./local-provider.ts";
 import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 import { streamMetrics } from "./stream-metrics.ts";
@@ -263,7 +264,9 @@ async function run(start: WorkerStart): Promise<void> {
           incompleteCleanup ||= result.outcome === "partial";
           const retained = await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call, ...result });
           if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The original tool result was not durably acknowledged; no continuation was authorized.");
-          context.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: result.text }], isError: result.isError, timestamp: Date.now() });
+          context.push({ role: "toolResult", toolCallId: call.id, toolName: call.name,
+            content: [{ type: "text", text: retained.value.source ? retainedToolText(result.text, retained.value.source) : result.text }],
+            isError: result.isError, timestamp: Date.now() });
           if (incompleteCleanup) throw new Error("Tool side effects are partial or cleanup is unconfirmed. Inspect the partial tool result before continuing.");
           if (result.endTurn) {
             if (call.name !== "project_work" || call.arguments.action !== "publish" || result.isError || result.outcome !== "completed") throw new Error("Only an acknowledged project-work publication can end this turn.");

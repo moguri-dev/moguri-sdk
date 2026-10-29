@@ -68,7 +68,9 @@ export * from "./shortcuts.ts";
 export * from "./queued-commands.ts";
 import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
 
-export const PROTOCOL_VERSION = 80;
+export const PROTOCOL_VERSION = 81;
+export const QUERY_TIMEOUT_MS = 30_000;
+export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -87,6 +89,7 @@ export const CommandSchema = object({
       folderProjects: Type.Optional(Type.Array(object({ projectId: id, revision: Type.Integer({ minimum: 0 }) }), { minItems: 1, maxItems: 1000 })),
       title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
+    object({ type: Type.Literal("session.autonomy"), ...sessionId, expectedRevision: revision, autonomy: ControlsSchema.properties.autonomy }),
     object({ type: Type.Literal("session.yolo"), ...sessionId, expectedRevision: revision }),
     object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema) }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
@@ -276,6 +279,7 @@ export interface Connection {
   wsUrl: string;
   token: string;
   pid: number;
+  storeId?: string;
 }
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
@@ -304,7 +308,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "question.asked": { question: UserQuestion };
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
-  "session.configured": { controls: Controls };
+  "session.configured": { controls: Controls; autonomySelection?: { actor: "user"; commandId: string; commandDigest: string; autonomy: Controls["autonomy"] } };
   "session.continue_work_chosen": { choice: "kanban" | "prompt"; draftRevision: number; actor: "user" };
   "model.selection_remembered": { selection: ModelSelection | null; sourceSessionId: string; sourceProjectId: string | null; actor: "user" };
   "session.archived": Record<string, never>;
@@ -1266,6 +1270,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         }
         break;
       case "session.configured":
+        if (event.payload.autonomySelection && (event.payload.autonomySelection.actor !== "user" ||
+          !event.payload.autonomySelection.commandId || !/^[a-f0-9]{64}$/.test(event.payload.autonomySelection.commandDigest) ||
+          event.payload.autonomySelection.autonomy !== event.payload.controls.autonomy ||
+          event.payload.controls.automaticApprovals !== ["Autopilot", "Autopilot Max"].includes(event.payload.controls.autonomy))) {
+          throw new MoguriError("autonomy_consent_corrupt", "Explicit autonomy selection lost its actual user command or selected consent. Original state was preserved.", 409);
+        }
         if (session.defaults) for (const key of controlKeys) if (JSON.stringify(session.controls[key]) !== JSON.stringify(event.payload.controls[key])) session.defaults.sources[key] = "session";
         session.controls = structuredClone(event.payload.controls); session.revision++; break;
       case "session.organized": {

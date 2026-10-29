@@ -100,6 +100,7 @@ export const slashCommands = [
   { name: "capability", description: "Inspect historical bytes, explicitly enable/disable, roll back disabled or insert a reviewed skill", argument: "[history ID|version ID SHA|enable/disable ID REV confirm-state|rollback ID REV SHA confirm-rollback|use ID SHA]" },
   { name: "containment", description: "Inspect process-group limits or require qualified SendBox for whole-session containment", argument: "[status|require-sandbox confirm-policy]" },
   { name: "cache", description: "Inspect verified Local dependency plans and explicit private registry scopes", argument: "[inspect MANAGER|prepare MANAGER SHA accept-metadata|install MANAGER SHA accept-metadata replace-node-modules|registries|registry-save REV ID|- JSON|registry-remove ID REV confirm-remove|token ID|clear-token ID]" },
+  { name: "git", description: "Built-in exact-root Git reads and reviewed branch, stage, commit, revert and push operations", argument: "[status|branches|log|show SHA|diff [staged]|preview ACTION_JSON|execute confirm-write JSON|history|read/wait ID]" },
   { name: "github", description: "Repository discovery, project PRs/issues and reviewed GitHub writes", argument: "[repos [public QUERY]|project|issues|pulls|source issue|pull NUMBER|start issue|pull NUMBER SHA|browse JSON|preview ACTION_JSON|execute confirm-write JSON|history]" },
   { name: "linear", description: "Reviewed Linear issue/project/comment workflows and explicit two-way local ticket sync", argument: "[status|import [CURSOR]|catalog JSON|issue UUID|preview JSON|execute SHA confirm-write JSON|history|read/wait ID|stop ID confirm-stop|token]" },
   { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
@@ -316,6 +317,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       };
       throw new ClientError("agent_terminal_input", "Use /agent-terminal list [SEQUENCE ID] or /agent-terminal read COMMAND_ID [UTF8_OFFSET|tail]. No user console was accessed.");
     }
+    case "git":
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument, client);
     case "knowledge":

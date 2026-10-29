@@ -26,12 +26,29 @@ export class DraftEditor {
   private readonly ownedInputs = new Set<string>();
   private externalRevision = 0;
   private disposed = false;
+  private retryUnsent = false;
+  private readonly unsubscribe: () => void;
   constructor(private readonly client: MoguriClient, readonly sessionId: string, draft: Session["draft"]) {
     this.revision = draft.revision;
     this.latest = draft;
     this.base = draft;
     this.state = { text: draft.text, attachments: draft.attachments, dirty: false, saving: false, conflict: false, error: null };
+    this.unsubscribe = client.subscribe(() => {
+      if (!this.retryUnsent) return;
+      if (this.task) void this.task.then(this.recoverUnsent, this.recoverUnsent);
+      else this.recoverUnsent();
+    });
   }
+  private recoverUnsent = (): void => {
+    if (!this.retryUnsent || this.disposed || this.task || this.captureTask || this.intakeBarrier || this.client.getState().status !== "connected") return;
+    this.retryUnsent = false;
+    const session = this.client.getState().snapshot?.sessions.find((session) => session.id === this.sessionId);
+    if (!session || session.status === "archived") {
+      this.update({ error: "The original draft session is unavailable or archived. Your unsent edit is preserved; no other session was used." }); return;
+    }
+    this.receive(session.draft);
+    if (this.state.dirty && !this.state.conflict) void this.flush().catch(() => console.error("Moguri reconnected draft save failed; its unsent edit and exact error remain visible."));
+  };
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   getState = () => this.state;
   private update(change: Partial<DraftState>): void { this.state = { ...this.state, ...change }; for (const listener of this.listeners) listener(); }
@@ -111,6 +128,7 @@ export class DraftEditor {
         const text = this.state.text;
         const attachments = this.state.attachments;
         this.update({ saving: true, error: null });
+        this.retryUnsent = false;
         try {
           const result = await this.client.command({
             type: "draft.save", sessionId: this.sessionId, expectedRevision: this.revision, text, attachments,
@@ -120,6 +138,7 @@ export class DraftEditor {
           this.base = { revision: result.revision, text, attachments };
           this.update({ dirty: text !== this.state.text || attachments !== this.state.attachments });
         } catch (error) {
+          this.retryUnsent = error instanceof ClientError && error.code === "disconnected";
           const conflict = error instanceof ClientError && error.code === "revision_conflict";
           const saved = this.client.getState().snapshot?.sessions.find((session) => session.id === this.sessionId)?.draft;
           if (conflict && !reconciledOwnWrite && saved && saved.revision > this.revision && saved.source && this.ownedInputs.has(saved.source.inputId)) {
@@ -133,7 +152,7 @@ export class DraftEditor {
           throw error;
         } finally { this.update({ saving: false }); }
       }
-    })().finally(() => { this.task = undefined; this.receive(this.latest); });
+    })().finally(() => { this.task = undefined; this.receive(this.latest); this.recoverUnsent(); });
     return this.task;
   }
   paste(pastedText: string, start = this.state.text.length, end = start): Promise<void> {
@@ -154,6 +173,7 @@ export class DraftEditor {
       if (this.state.conflict) throw new ClientError("revision_conflict", this.state.error ?? "Resolve the current draft conflict before capturing a paste.");
       this.update({ saving: true, error: null });
       const attachments = this.state.attachments;
+      this.retryUnsent = false;
       const result = await this.client.command({ type: "draft.paste", sessionId: this.sessionId, expectedRevision: this.revision,
         text: before.text, attachments, pastedText, start, end });
       if (result.revision === undefined) throw new Error("The service did not acknowledge the pasted file. Your unsent text is preserved.");
@@ -169,7 +189,7 @@ export class DraftEditor {
       this.update({ dirty: true, conflict: this.state.conflict || error instanceof ClientError && error.code === "revision_conflict",
         error: error instanceof Error ? error.message : "Paste capture failed. The complete unsent text is preserved." });
       throw error;
-    }).finally(() => { this.captureTask = undefined; this.update({ saving: false }); this.receive(this.latest); });
+    }).finally(() => { this.captureTask = undefined; this.update({ saving: false }); this.receive(this.latest); this.recoverUnsent(); });
     this.captureTask = task;
     return task;
   }
@@ -204,6 +224,7 @@ export class DraftEditor {
       await this.flush();
       if (this.state.dirty || this.state.conflict || this.state.text !== requested) throw new Error("Save or resolve the exact original draft before sending. Newer text was preserved.");
       const submitted = { ...this.state }, revision = this.revision, barrier = Promise.withResolvers<void>();
+      this.retryUnsent = false;
       this.intakeBarrier = barrier.promise;
       this.update({ text: "", attachments: [], dirty: false, saving: true, error: null });
       try {
@@ -256,5 +277,5 @@ export class DraftEditor {
     if (saved) this.receive(saved);
     return result;
   }
-  dispose(): void { this.disposed = true; clearTimeout(this.timer); this.listeners.clear(); }
+  dispose(): void { this.disposed = true; this.unsubscribe(); clearTimeout(this.timer); this.listeners.clear(); }
 }

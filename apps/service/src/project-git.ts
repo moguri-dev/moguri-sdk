@@ -23,6 +23,9 @@ export async function gitReadFilters(root: string, signal: AbortSignal): Promise
   }
   return [...drivers].flatMap((driver) => ["-c", `filter.${driver}.smudge=`, "-c", `filter.${driver}.clean=`, "-c", `filter.${driver}.process=`, "-c", `filter.${driver}.required=false`]);
 }
+export async function readGit(root: string, args: string[], signal: AbortSignal): Promise<string> {
+  return git(root, args, signal, await gitReadFilters(root, signal));
+}
 
 export async function readGitBinding(root: string, signal: AbortSignal): Promise<{ gitCommonDir: string; head: string; branch: string }> {
   const filters = await gitReadFilters(root, signal), read = (args: string[]) => git(root, args, signal, filters);

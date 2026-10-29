@@ -4,6 +4,7 @@ import { GithubIssueCreateActionSchema } from "./github-workflows.ts";
 import { LinearIssueCreateInputSchema } from "./linear-workflows.ts";
 import { DocumentReadOptionsSchema, DocumentSearchOptionsSchema } from "./documents.ts";
 import type { CapabilityJob } from "./platform.ts";
+import { isRecord } from "./core.ts";
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const object = <T extends Record<string, import("typebox").TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -103,13 +104,38 @@ export type EditDocumentInput = Static<typeof EditDocumentSchema>;
 export type SqliteQueryInput = Static<typeof SqliteQuerySchema>;
 export type SqliteTransactionInput = Static<typeof SqliteTransactionSchema>;
 
-export const ReadToolResultSchema = object({
-  stepId: Type.String({ minLength: 1, maxLength: 128 }), callId: Type.String({ minLength: 1, maxLength: 256 }),
+const resultPage = {
   offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 2 * 1024 * 1024 })),
-});
+  expectedDigest: Type.Optional(hash), expectedRevision: Type.Optional(Type.Integer({ minimum: 1 })),
+};
+export const ReadToolSourceSchema = Type.Union([
+  object({ stepId: Type.String({ minLength: 1, maxLength: 128 }), callId: Type.String({ minLength: 1, maxLength: 256 }), ...resultPage }),
+  object({ operationId: hash, ...resultPage }),
+]);
+const resultCursor = object({ sequence: Type.Integer({ minimum: 0 }), id: hash });
+const resultList = {
+  before: Type.Optional(resultCursor), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+};
+export const ReadToolResultSchema = Type.Union([
+  ReadToolSourceSchema, object({ action: Type.Literal("list"), ...resultList }),
+]);
+export type ReadToolSource = Static<typeof ReadToolSourceSchema>;
+export interface RetainedToolSource {
+  operationId: string; sessionId: string; turnId: string; stepId: string; callId: string; revision: number;
+}
+export function retainedToolText(text: string, source: RetainedToolSource): string {
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch (error) { if (!(error instanceof SyntaxError)) throw error; value = text; }
+  return JSON.stringify({ ...(isRecord(value) ? value : { text }), retainedSource: source });
+}
+export interface RetainedToolSummary extends RetainedToolSource {
+  name: string; sequence: number; outcome: string; rawComplete: boolean; digest: string;
+}
 export const ToolingQuerySchema = Type.Union([
+  object({ type: Type.Literal("tooling.results"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), ...resultList }),
   object({ type: Type.Literal("tooling.catalog"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), query: Type.String({ maxLength: 200 }), offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 512 })) }),
-  object({ type: Type.Literal("tooling.result"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), input: ReadToolResultSchema }),
+  object({ type: Type.Literal("tooling.result"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), input: ReadToolSourceSchema }),
   object({ type: Type.Literal("tooling.command"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), input: CommandJobReadSchema }),
   object({ type: Type.Literal("tooling.state"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), input: StateQuerySchema }),
 ]);
@@ -120,7 +146,8 @@ export const ToolingCommandSchema = Type.Union([object({
 }), object({ type: Type.Literal("tooling.command.acknowledge"), sessionId: Type.String({ minLength: 1, maxLength: 128 }),
   jobId: Type.String({ minLength: 1, maxLength: 128 }), expectedDigest: hash, confirmInspection: Type.Literal(true) })]);
 export interface ToolingCatalog { type: "tooling.catalog"; tools: { name: string; description: string; parameters: unknown; schemaDigest: string }[]; offset: number; nextOffset: number | null; total: number; query: string }
-export interface ToolingResult { type: "tooling.result"; text: string; nextOffset: number | null; offset: number; bytes: number; rawComplete: boolean; digest: string; outcome: string }
+export interface ToolingResult { type: "tooling.result"; source: RetainedToolSource; text: string; nextOffset: number | null; offset: number; bytes: number; rawComplete: boolean; digest: string; outcome: string }
+export interface ToolingResults { type: "tooling.results"; sources: RetainedToolSummary[]; nextBefore: { sequence: number; id: string } | null }
 export interface CommandJobRead {
   id: string; status: CapabilityJob["status"]; env: "Local"; root: string; text: string | null;
   source: "live-owned-command-tail" | "unavailable" | "retained-command-result"; nextOffset: number | null;
@@ -128,4 +155,4 @@ export interface CommandJobRead {
   inspectionDigest?: string; diagnostic?: string; digest?: string; bytes?: number; offset?: number; eof?: boolean;
   exitCode?: number; signal?: number | null; cleanup?: "known-group-stopped" | "unconfirmed";
 }
-export type ToolingResponse = ToolingCatalog | ToolingResult | { type: "tooling.command"; data: CommandJobRead } | { type: "tooling.state"; data: unknown };
+export type ToolingResponse = ToolingCatalog | ToolingResult | ToolingResults | { type: "tooling.command"; data: CommandJobRead } | { type: "tooling.state"; data: unknown };

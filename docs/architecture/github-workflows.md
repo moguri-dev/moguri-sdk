@@ -126,10 +126,47 @@ output, read acknowledgement or checkbox from an earlier scope counts.
 
 ## Git operations
 
+The protocol-81 built-in follow-up reuses this reviewed pipeline for bounded
+`git_read` and `git_write` native agent tools, SDK calls and ordinary queued
+`/git` commands. It must not manufacture shell scripts for covered operations.
+The installed Git CLI and existing Node/TypeBox/React/SQLite licenses above
+are unchanged; no Git implementation or dependency is added. The measured
+prerequisites are recorded in [session reliability](session-reliability.md).
+
+The actual user selected **a new revert commit preserving history** for
+"roll back to the previous commit". There is no implicit reset, clean, force
+rename, checkout overwrite, stash, branch deletion or history rewrite.
+Creation/rename/push bind the exact current branch, HEAD, index, common Git
+directory, canonical root and destination ref/absence. Integration and staged
+commit operations require appropriate clean/in-progress state and retain
+truthful conflicts/partial effects without automatic abort or replay.
+
+Agent mutations need the original actual approved model turn/step/call and
+current policy, not a model's `confirm` field. Their independent operation
+retains model provenance rather than impersonating user acceptance.
+The model's existing root ownership is handed to the exact Git job only;
+other writers and unknown outcomes still block. Unsupported Remote, Sandbox,
+project-free and captured-group transports cannot use the Local pipeline.
+SDK/client user reviews remain explicit. Per-operation cancellation propagates
+to the retained job and records real failed/partial outcomes across restart.
+
+Generated tests must prove local bare-remote publication, new branch
+creation/rename, history-preserving revert, unchanged unrelated staged/dirty
+work, stale HEAD/index/root/ref rejection, hard denials, exact approval and
+writer ownership, conflicts, stop/lost acknowledgements, migration/reopen and
+headless actual model-tool execution. Hidden desktop/TUI and packed SDK
+coverage must exercise these same APIs, not replacement client commands.
+
 | Action | Behavior |
 | --- | --- |
-| `git.push` | Push the captured HEAD SHA to one explicit destination branch. Main/master/configured-main require a separate exact confirmation. |
-| `git.push` with `forceWithLease` | Only `--force-with-lease=<full-ref>:<captured-sha-or-absence>`. Never raw `--force`, implicit refreshed leases or automatic retries. |
+| `git.branch.create` | Create one absent local branch at the exact resolved start. Optional checkout requires a clean source; a later failed switch preserves the created branch as partial work. |
+| `git.branch.rename` | Rename only the captured current branch to an absent name. Preserve HEAD/index/dirty bytes; protected names require their own confirmation. |
+| `git.switch` | Switch to one existing local branch on a clean source, without remote guessing or ignored-file overwrite. |
+| `git.stage` / `git.unstage` | Explicit canonical files only. Pin their bytes/modes and unaffected index; never stage a directory or reset working files. Filters/text normalization are not approximated. |
+| `git.commit` | Commit only selected staged paths with a private index and normal Git hooks. Preserve the actual index, unrelated staged work and partially staged working bytes; reverify the committed tree/parent. |
+| `git.revert` | Create a new commit whose tree exactly matches the current single-parent commit's parent. Require a clean source; never move HEAD back or guess a merge mainline. |
+| `git.push` | Push the captured HEAD SHA to one explicit destination using its exact SHA/absence lease. A normal push also requires locally proven fast-forward ancestry. Main/master/configured-main require a separate exact confirmation. |
+| `git.push` with `forceWithLease` | Separately permit non-fast-forward replacement only at the captured lease. Never raw `--force`, implicit refreshed leases or automatic retries. |
 | `git.rebase`, `mode: start` | Require a clean committed current branch and no existing integration operation; resolve and pin the onto commit. No automatic stash or updates to other branches. |
 | `git.rebase`, `mode: continue` | Require the exact retained in-progress rebase and explicitly resolved/staged conflict entries. One continued step can expose another conflict. |
 | `git.rebase`, `mode: abort` | Separately review the current rebase/index/worktree. Git abort deliberately discards the displayed in-progress resolution and restores its original state. |

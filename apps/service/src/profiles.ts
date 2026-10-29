@@ -244,6 +244,10 @@ export class ProfileRuntime {
     const result = this.perform(envelope.id, hash, command).finally(() => this.pending.delete(envelope.id));
     this.pending.set(envelope.id, { digest: hash, result }); return result;
   }
+  receipt(envelope: CommandEnvelope): CommandResult | undefined {
+    this.profile(envelope.profileId);
+    return this.global.receipt(envelope.id, digest(JSON.stringify({ profileId: envelope.profileId, command: envelope.command })));
+  }
   private async perform(id: string, hash: string, command: ProfileCommand): Promise<CommandResult> {
     if (this.closed) throw new MoguriError("shutting_down", "No new profile action can start during shutdown.", 503);
     const finish = (events: EventInput[], result: CommandResult) => {

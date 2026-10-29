@@ -78,6 +78,16 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 81 ? `
+      const originalReceipt=await sdk.commandReceipt({type:"session.autonomy",sessionId:"generated-session",expectedRevision:0,autonomy:"Autopilot"},"generated-command");
+      if(originalReceipt.status==="committed")void originalReceipt.result.revision;
+      const retainedSources=await sdk.tools.results("generated-session",{limit:5});void retainedSources.sources[0]?.operationId;
+      const retainedPage=await sdk.tools.resultById("generated-session","a".repeat(64),{offset:0,expectedDigest:"b".repeat(64),expectedRevision:1});
+      void retainedPage.source.turnId;void retainedPage.source.revision;
+      await sdk.git.status("generated-session");await sdk.git.log("generated-session",{head:"a".repeat(40),offset:0,limit:10});
+      const builtinGitReview=await sdk.git.preview("generated-session",{kind:"git.commit",paths:["generated.ts"],message:"Generated selected commit"});
+      await sdk.git.execute(builtinGitReview.preview,builtinGitReview.preview.document.confirmations,true);
+      ` : ""}
       ${installedProtocol >= 77 ? `
       const boundedPreference:Controls=selectModelControls({...factoryControls(),modelOptions:{thinkingEffort:"max"}},{id:"generated-high-only",thinkingLevels:["high"]});
       const preferred:ModelSelection={modelId:"generated-high-only",thinkingEffort:"high",preferredThinkingEffort:"max"};
@@ -564,6 +574,48 @@ try {
       console.log("Installed protocol-76 child-session review binds the exact tree before cascading deletion.");
       ` : ""}
       const s=await sdk.command({type:"session.create",projectId:p.id});
+      ${installedProtocol >= 81 ? `{
+      const directory=join(root,"generated-installed-git");await mkdir(directory);
+      const state=join(root,"generated-installed-git-state"),key=Buffer.alloc(32,0x68);
+      await writeFile(join(directory,"fixture.txt"),"Generated installed Git original.\\n");
+      git(["init","--initial-branch=main"],directory);git(["config","user.name","Generated fixture"],directory);git(["config","user.email","fixture@example.invalid"],directory);
+      git(["config","commit.gpgSign","false"],directory);git(["config","core.hooksPath","/dev/null"],directory);
+      git(["add","--","fixture.txt"],directory);git(["commit","--no-gpg-sign","-m","Generated installed Git base"],directory);
+      const options={stateDir:state,retentionKey:key,provider:makeProvider()};
+      let gitRuntime=await createRuntime(options),gitSdk=await connectMoguri({stateDir:state,autoStart:false});
+      try{
+        const project=await gitSdk.command({type:"project.add",path:directory}),session=await gitSdk.sessions.create(project.id);
+        const current=()=>gitSdk.getState().snapshot.sessions.find(value=>value.id===session.id);
+        const consent={type:"session.autonomy",sessionId:session.id,autonomy:"Autopilot",expectedRevision:current().revision};
+        await gitSdk.command(consent,"generated-installed-autonomy");
+        assert.equal((await gitSdk.commandReceipt(consent,"generated-installed-autonomy")).status,"committed");
+        assert.equal(current().controls.automaticApprovals,true);
+        const perform=async action=>{const review=(await gitSdk.git.preview(session.id,action)).preview;
+          const admitted=await gitSdk.git.execute(review,review.document.confirmations,true);
+          const result=await gitSdk.git.wait(admitted.id);assert.equal(result.operation.status,"completed",result.operation.diagnostic);return result;};
+        const base=(await gitSdk.git.status(session.id)).git.head;
+        await perform({kind:"git.branch.create",branch:"generated/installed",start:base,checkout:true});
+        await perform({kind:"git.branch.rename",from:"generated/installed",to:"generated/installed-renamed"});
+        await writeFile(join(directory,"fixture.txt"),"Generated installed Git change.\\n");
+        await perform({kind:"git.stage",paths:["fixture.txt"]});
+        await perform({kind:"git.commit",paths:["fixture.txt"],message:"Generated installed selected commit"});
+        const committed=(await gitSdk.git.status(session.id)).git.head;
+        await perform({kind:"git.revert",commit:committed});
+        assert.equal(git(["show","HEAD:fixture.txt"],directory).trim(),"Generated installed Git original.");
+        const tool=(await gitSdk.tools.catalog(session.id,"read_file")).tools.find(value=>value.name==="read_file");
+        const read=await gitSdk.tools.execute(session.id,"read_file",{path:"fixture.txt"},tool.schemaDigest);
+        assert.equal((await gitSdk.jobs.wait(read.id)).status,"completed");
+        const source=(await gitSdk.tools.results(session.id)).sources.find(value=>value.name==="read_file");assert.ok(source);
+        const page=await gitSdk.tools.resultById(session.id,source.operationId,{expectedDigest:source.digest,expectedRevision:source.revision});
+        assert.equal(page.text,"Generated installed Git original.\\n");
+        gitSdk.disconnect();await gitRuntime.close();gitRuntime=await createRuntime(options);gitSdk=await connectMoguri({stateDir:state,autoStart:false});
+        assert.equal(current().controls.automaticApprovals,true);
+        assert.equal((await gitSdk.tools.resultById(session.id,source.operationId,{expectedDigest:source.digest,expectedRevision:source.revision})).text,page.text);
+        assert.equal((await gitSdk.commandReceipt(consent,"generated-installed-autonomy")).status,"committed");
+        assert.equal((await gitSdk.git.log(session.id)).data.action,"log");
+      }finally{gitSdk.disconnect();await gitRuntime.close();}
+      console.log("Installed protocol-81 exact receipts, explicit automatic consent, public original-result grants/restart and real reviewed Git branch/stage/selected commit/revert pass without model calls or scripts.");
+      }` : ""}
       ${installedProtocol >= 59 ? `{
       const skillDirectory=join(root,"generated-skills");await mkdir(skillDirectory);
       const skillPath=join(skillDirectory,"SKILL.md");

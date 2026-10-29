@@ -11,6 +11,7 @@ import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../p
 import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../protocol/src/extensions.ts";
 import { createCacheApi } from "./cache.ts";
 import { createGithubApi } from "./github.ts";
+import { createGitApi } from "./git.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
 import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
 import type { RememberApproval } from "../../protocol/src/permissions.ts";
@@ -53,6 +54,7 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly github = createGithubApi(this);
+  readonly git = createGitApi(this);
   readonly prices = {
     catalog: () => this.query({ type: "pricing.catalog" }),
     refresh: (providers: PriceProvider[] = [...PRICE_PROVIDERS], expectedRevision = this.getState().snapshot?.providerPriceRevision) => {
@@ -124,6 +126,9 @@ export class MoguriSdk extends TransportClient {
     catalog: async (sessionId: string, query = "", offset = 0) => { await this.prepareHome(sessionId); return this.query({ type: "tooling.catalog", sessionId, query, offset }); },
     execute: (sessionId: string, name: string, args: Record<string, unknown>, schemaDigest: string) => this.command({ type: "tooling.execute", sessionId, name, arguments: args, schemaDigest }),
     result: (sessionId: string, stepId: string, callId: string, offset = 0) => this.query({ type: "tooling.result", sessionId, input: { stepId, callId, offset } }),
+    results: (sessionId: string, options: { before?: { sequence: number; id: string }; limit?: number } = {}) => this.query({ type: "tooling.results", sessionId, ...options }),
+    resultById: (sessionId: string, operationId: string, options: { offset?: number; expectedDigest?: string; expectedRevision?: number } = {}) =>
+      this.query({ type: "tooling.result", sessionId, input: { operationId, ...options } }),
     command: (sessionId: string, jobId: string, offset = 0, targetSessionId?: string) => this.query({ type: "tooling.command", sessionId, input: { jobId, offset, ...(targetSessionId ? { targetSessionId } : {}) } }),
     acknowledgeCommand: (sessionId: string, jobId: string, expectedDigest: string, confirmInspection: true) => this.command({ type: "tooling.command.acknowledge", sessionId, jobId, expectedDigest, confirmInspection }),
     state: (sessionId: string, sql: string, parameters?: (string | number | boolean | null)[], limit = 100) => this.query({ type: "tooling.state", sessionId, input: { sql, ...(parameters ? { parameters } : {}), limit } }),
@@ -206,10 +211,7 @@ export class MoguriSdk extends TransportClient {
         ...((rememberModelSelection ?? changed) ? { rememberModelSelection: true } : {}) });
     },
     autonomy: (sessionId: string, autonomy: Controls["autonomy"], expectedRevision = this.sessionRevision(sessionId)) => {
-      const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
-      if (!session) throw new ClientError("session_missing", "Choose an existing session before changing autonomy.");
-      return this.sessions.configure(sessionId, { ...session.controls, autonomy,
-        automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max" }, expectedRevision);
+      return this.command({ type: "session.autonomy", sessionId, autonomy, expectedRevision });
     },
     yolo: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.yolo", sessionId, expectedRevision }),
     selectModel: async (sessionId: string, modelId: string | null, expectedRevision = this.sessionRevision(sessionId)) => {

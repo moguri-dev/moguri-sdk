@@ -5,9 +5,9 @@ import { join, resolve } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { Type } from "typebox";
 import { ControlPlane } from "./controller.ts";
-import { EventStore } from "./store.ts";
+import { digest, EventStore } from "./store.ts";
 import type { ProviderAdapter } from "./provider.ts";
-import { CommandSchema, GLOBAL_PROFILE_ID, isApplicationCommand, isApplicationQuery, isUpdateQuery, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QUERY_ID_PATTERN, QueryCancellationSchema, QuerySchema, SpeechCaptureRequestSchema, StorageMoveRequestSchema, UpdateTokenRequestSchema, UpdateInstallRequestSchema, isRecord, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
+import { CommandSchema, GLOBAL_PROFILE_ID, isApplicationCommand, isApplicationQuery, isUpdateQuery, isProfileCommand, isProfileQuery, MoguriError, parse, PROFILE_ID, PROTOCOL_VERSION, QUERY_TIMEOUT_MS, QUERY_ID_PATTERN, QueryCancellationSchema, QuerySchema, SpeechCaptureRequestSchema, StorageMoveRequestSchema, UpdateTokenRequestSchema, UpdateInstallRequestSchema, isRecord, TerminalInputSchema, type Connection, type StoredEvent, type RuntimeCloseOptions } from "../../../packages/protocol/src/index.ts";
 import type { PlatformOptions } from "./platform.ts";
 import { retentionKey } from "./retention-key.ts";
 import { ProfileRuntime } from "./profiles.ts";
@@ -143,7 +143,8 @@ export async function startService(options: ServiceOptions) {
     });
     const rootApplication = application;
     await rootApplication.updates.initialize();
-    const executeCommand = async (envelope: CommandEnvelope, owner?: CommandOwner): Promise<CommandResult> => {
+    const pendingCommands = new Map<string, { digest: string; result: Promise<CommandResult> }>();
+    const performCommand = async (envelope: CommandEnvelope, owner?: CommandOwner): Promise<CommandResult> => {
       if (owner && owner.profileId !== envelope.profileId) throw new MoguriError("command_profile", "The queued command cannot change its immutable owning profile.", 403);
       owner?.guard();
       if (isApplicationCommand(envelope.command)) {
@@ -152,6 +153,15 @@ export async function startService(options: ServiceOptions) {
       }
       if (isProfileCommand(envelope.command)) return rootProfiles.dispatch(envelope, envelope.command);
       return (await rootProfiles.control(envelope.profileId)).dispatch(envelope, owner);
+    };
+    const executeCommand = (envelope: CommandEnvelope, owner?: CommandOwner): Promise<CommandResult> => {
+      const key = `${envelope.profileId}:${envelope.id}`, hash = digest(JSON.stringify(envelope.command)), pending = pendingCommands.get(key);
+      if (pending) {
+        if (pending.digest !== hash) return Promise.reject(new MoguriError("idempotency_conflict", "This pending command has different original arguments.", 409));
+        return pending.result;
+      }
+      const result = performCommand(envelope, owner).finally(() => pendingCommands.delete(key));
+      pendingCommands.set(key, { digest: hash, result }); return result;
     };
     const executeQuery = async (profileId: string, query: PlatformQuery, signal: AbortSignal, owner?: CommandOwner): Promise<PlatformResponse> => {
       if (owner && owner.profileId !== profileId) throw new MoguriError("command_profile", "The queued read cannot inherit another profile.", 403);
@@ -190,7 +200,7 @@ export async function startService(options: ServiceOptions) {
         const profileId = suppliedProfile === undefined ? PROFILE_ID : typeof suppliedProfile === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(suppliedProfile) ? suppliedProfile : null;
         if (!profileId || profileId === GLOBAL_PROFILE_ID) throw new MoguriError("profile_scope", "Choose one explicit user profile. No Default fallback was used.", 403);
         if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(await rootProfiles.snapshot(profileId))); return; }
-        if (!["/v1/commands", "/v1/query", "/v1/query-cancel", "/v1/terminal", "/v1/voice", "/v1/lifecycle", "/v1/application"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
+        if (!["/v1/commands", "/v1/command-receipt", "/v1/query", "/v1/query-cancel", "/v1/terminal", "/v1/voice", "/v1/lifecycle", "/v1/application"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
         let bytes = 0;
@@ -258,10 +268,8 @@ export async function startService(options: ServiceOptions) {
         }
         if (request.url === "/v1/query") {
           const query = parse(QuerySchema, body);
-          if (isApplicationQuery(query) || isProfileQuery(query)) {
-            response.end(JSON.stringify(await executeQuery(profileId, query, new AbortController().signal))); return;
-          }
           const abort = new AbortController();
+          const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(QUERY_TIMEOUT_MS)]);
           const requestId = request.headers["x-moguri-query-id"];
           if (requestId !== undefined && (typeof requestId !== "string" || !new RegExp(QUERY_ID_PATTERN).test(requestId))) throw new MoguriError("query_identity", "Use one exact UUID for this cancellable query.");
           const key = requestId ? `${profileId}:${requestId}` : null;
@@ -276,13 +284,31 @@ export async function startService(options: ServiceOptions) {
           response.once("close", disconnected);
           try {
             abort.signal.throwIfAborted();
-            const result = await executeQuery(profileId, query, abort.signal);
+            const result = await new Promise<PlatformResponse>((resolve, reject) => {
+              const cancelled = () => reject(signal.reason);
+              signal.addEventListener("abort", cancelled, { once: true });
+              void executeQuery(profileId, query, signal).then(resolve, reject).finally(() => signal.removeEventListener("abort", cancelled));
+              if (signal.aborted) cancelled();
+            });
             if (!response.destroyed) response.end(JSON.stringify(result));
+          } catch (error) {
+            if (signal.aborted && !abort.signal.aborted) throw new MoguriError("query_timeout", "This source read reached its thirty-second service deadline. No state was changed or original tool replayed. Inspect the selected source before explicitly reading again.", 504);
+            throw error;
           } finally { response.off("close", disconnected); if (key) activeQueries.delete(key); }
           return;
         }
         const command = parse(CommandSchema, body);
         if (command.profileId !== profileId) throw new MoguriError("profile_scope", "Request scope and command profile differ. No foreign receipt or effect was used.", 403);
+        if (request.url === "/v1/command-receipt") {
+          await rootProfiles.control(profileId);
+          const result = isApplicationCommand(command.command) ? rootApplication.receipt(command) :
+            isProfileCommand(command.command) ? rootProfiles.receipt(command) :
+            (await rootProfiles.control(profileId)).store.receipt(command.id, digest(JSON.stringify(command.command)));
+          if (result !== undefined) { response.end(JSON.stringify({ status: "committed", result })); return; }
+          const pending = pendingCommands.get(`${profileId}:${command.id}`);
+          if (pending && pending.digest !== digest(JSON.stringify(command.command))) throw new MoguriError("idempotency_conflict", "The pending command has different original arguments.", 409);
+          response.end(JSON.stringify({ status: pending ? "pending" : "unknown" })); return;
+        }
         response.end(JSON.stringify(await executeCommand(command)));
       };
       void handle().catch((error: unknown) => {
@@ -325,7 +351,7 @@ export async function startService(options: ServiceOptions) {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Loopback binding failed.");
     expectedHost = `127.0.0.1:${address.port}`;
-    const connection: Connection = { protocolVersion: PROTOCOL_VERSION, baseUrl: `http://${expectedHost}`, wsUrl: `ws://${expectedHost}/v1/events`, token, pid: process.pid };
+    const connection: Connection = { protocolVersion: PROTOCOL_VERSION, baseUrl: `http://${expectedHost}`, wsUrl: `ws://${expectedHost}/v1/events`, token, pid: process.pid, storeId: digest(retention.id) };
     commandEnvironment.resolve({ connection, command: executeCommand, query: (profileId, query, owner, signal) => executeQuery(profileId, query, signal, owner) });
     const pendingConnection = join(options.stateDir, `connection-${process.pid}.tmp`);
     await writePrivate(pendingConnection, JSON.stringify(connection));

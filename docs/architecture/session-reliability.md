@@ -1,5 +1,65 @@
 # Session reliability and compact controls
 
+## Explicit selection and retained-request follow-up
+
+The protocol-81 follow-up starts from merged combined80 (`9cc20bd`). It reuses
+Node.js, React/OpenTUI, TypeBox and the SDK under their existing MIT/component
+notices, SQLite under its public-domain terms, and the installed Git CLI under
+GPL-2.0. No dependency, model call, credential lookup or new client queue is
+needed. Main-only CI remains unchanged.
+
+Before feature edits, the generated Phase 0 baseline passes provider fixtures
+in 1,092.49 ms (31.08 ms cancellation), SQLite in 74.33 ms (0.063 ms append
+p95, 0.60 ms rebuild), known-group PTY cancellation in 151.20 ms with zero
+observed survivors, OpenTUI updates in 17.23 ms, hidden Electron startup in
+213.92 ms (447.19 MiB, 8.05 ms scroll frames), and 2,000-file search/Git reads
+in 0.94/6.49 ms. Missing packages were restored with the locked install, with
+zero npm advisories. The baseline's unavailable live-account, Rust/Linux,
+physical guest, quality and notarization gates are not newly qualified.
+
+An explicit autonomy-selection command must retain actual user intent even
+when reselecting a legacy saved value. Loading old controls or editing a model,
+window, budget or draft must not upgrade bounded consent. New selections and
+explicitly consented defaults must survive subsequent turns, competing clients
+and restart; hard denials and execution/budget/root restrictions still win.
+
+Public retained results must have discoverable original identities, not require
+models to invent opaque step IDs. Reads bind the actual profile/session,
+turn/step/call and operation revision, with digest-pinned UTF-8 continuation.
+Hooks, private roles, another session and user-console input/output are excluded.
+Deletion cannot be repaired by replaying the source operation.
+
+Snapshot recovery must not leave a healthy event socket permanently
+disconnected, apply an old connection's late snapshot, or indefinitely postpone
+a command acknowledgement behind streaming refreshes. Capability deadlines are
+service-owned; a shorter generic transport timer is not a capability failure.
+An uncertain mutation is inspected by its exact original command identity,
+never resent. A retained receipt is acknowledged as committed; pending and
+unknown outcomes remain distinguishable and preserve local drafts.
+
+The Electron custom-protocol proxy shares that read deadline and explicitly
+forwards the read-only original-command receipt route. A transient initial
+snapshot failure may authenticate the same exact profile over its event socket;
+authentication and missing-profile failures cannot fall back to Default.
+Draft autosave resumes only a save rejected as disconnected **before dispatch**,
+against the freshly received original draft revision. A newer peer edit becomes
+a visible conflict. Unknown dispatched saves, input submissions, paste captures,
+tool/Git effects and approvals are never replayed by this recovery path.
+
+Late verified SSH frames retain the original tool's raw-result grant as well
+as its compact text, binding actual profile/session/turn/model-step/call.
+Paging/reopen uses those bytes, not a live file reread. The original partial
+turn and its accounting remain partial; reconciliation does not resume a model
+or promote late output into successful completion.
+
+Protocol 81 requires separate `session_request_recovery_schema` and
+`builtin_git_schema` markers. Its atomic migration preserves all six combined80
+lineage markers, ciphertext, original grants/receipts and unknown charges.
+Generated interrupted migration/reopen, stale/disconnected/concurrent clients,
+late acknowledgements, original result ownership and actual TUI/hidden desktop
+flows are required, together with the independently installed SDK. Changed
+worker bytes require their own qualification, not historical protocol80 receipts.
+
 ## Change contract
 
 This owner-requested follow-up covers Local tool and GitHub read failures,

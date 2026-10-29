@@ -88,8 +88,11 @@ test("an interrupted schema-60 workflow migration rolls back and keeps original 
 });
 
 async function privateWorkflow59Fixture() {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
-  await sdk.sessions.autonomy(fixture.sessionId, "Autopilot"); sdk.disconnect(); await fixture.service.close();
+  const fixture = await setupFixture(), session = fixture.session();
+  fixture.service.store.commit([{ event_type: "session.configured", profile_id: "default", session_id: session.id,
+    project_id: session.projectId, payload: { controls: { ...session.controls, autonomy: "Autopilot", automaticApprovals: true } } }]);
+  fixture.service.controller.refreshProfile();
+  await fixture.service.close();
   const raw = new DatabaseSync(fixture.service.store.path);
   try {
     removePost77FixtureMarkers(raw, fixture.service.controller.events(0));

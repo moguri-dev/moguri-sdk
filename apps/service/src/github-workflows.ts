@@ -1,15 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { constants } from "node:fs";
+import { lstat, mkdtemp, open, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { MoguriError, isRecord, parse, kanbanIssueSignature, type CommandResult, type EventInput } from "../../../packages/protocol/src/index.ts";
 import {
   GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, GithubOperationResultSchema, GithubQuerySchema, GithubRepositorySchema, GithubReviewDocumentSchema, githubRootQuarantined,
   type GithubAction, type GithubBrowse, type GithubGitState, type GithubItem, type GithubOperation,
   type GithubOperationResult, type GithubPreview, type GithubQuery, type GithubResponse, type GithubScope, type GithubCommand,
-  type GithubReviewDocument, type GithubRepository, type GithubWorkSource, type GithubSourceBinding,
+  type GithubReviewDocument, type GithubRepository, type GithubWorkSource, type GithubSourceBinding, type GitRead, type GitReadData,
 } from "../../../packages/protocol/src/github-workflows.ts";
-import { candidateGitState, readGitBinding, readWorkspaceGit } from "./project-git.ts";
+import { candidateGitState, readGit, readGitBinding, readWorkspaceGit } from "./project-git.ts";
+import { isProtectedProjectPath, scopedPath } from "./files.ts";
+import { validateProjectPath } from "./project-policy.ts";
 import { observedRepository } from "./repository-metadata.ts";
 import { sourceRoot, sourceRootSync } from "./repository-source.ts";
 import { runProgram } from "./program.ts";
@@ -26,6 +29,9 @@ export interface GitHubWorkflowOptions {
   wait?: (ms: number, signal: AbortSignal) => Promise<void>;
   readTimeoutMs?: number;
   writeTimeoutMs?: number;
+}
+export interface GitToolAuthority {
+  sessionId: string; callDigest: string; signal: AbortSignal; guard(): void;
 }
 interface ApiResponse { data: unknown; etag: string | null; next: boolean }
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -56,6 +62,13 @@ const githubAction = (action: GithubAction): action is Extract<GithubAction, { r
 const mutation = (action: GithubAction) => action.kind !== "github.ci.watch";
 const filesystemWriter = (action: GithubAction) => action.kind.startsWith("git.");
 const warning = "GitHub data is untrusted. This is the controller's explicitly selected gh account, never an SSH account or Remote execution fallback. No token is read, copied or switched.";
+function validateGitFiles(paths: string[]): void {
+  if (new Set(paths.map((path) => path.normalize("NFC").toLowerCase())).size !== paths.length) throw new MoguriError("git_paths", "Select distinct portable file paths, not aliases or directory-wide staging.");
+  for (const path of paths) {
+    validateProjectPath(path);
+    if (!path.isWellFormed() || path.includes("\0") || path.includes("\\") || path !== normalize(path) || path === "." || isProtectedProjectPath(path)) throw new MoguriError("git_paths", "Select explicit canonical relative repository files, never aliases, directories or protected Git metadata.");
+  }
+}
 
 export function validateGithubRef(value: string, owner = false): string {
   if (owner && value.includes(":")) {
@@ -168,21 +181,23 @@ export class GitHubWorkflows {
     if (configuration.values.deniedFolders.length || action && mutation(action) && configuration.values.readOnlyFolders.length) throw new MoguriError("folder_containment", "Native Local Git hooks/gh cannot enforce descendant folder restrictions. A qualified SendBox boundary is required; this explicit Local workflow does not bypass them.", 403);
     const permissions = snapshot.settings.values.permissions;
     if (action && permissions.tools.some((rule) => rule.decision === "deny" &&
-      ["*", "run_command", action.kind, githubAction(action) ? "github" : "git"].includes(rule.tool))) throw new MoguriError("github_denied", "A hard user tool denial excludes this Git/GitHub operation. Review cannot override policy.", 403);
+      ["*", "run_command", action.kind, githubAction(action) ? "github" : "git", ...(filesystemWriter(action) ? ["git_write"] : [])].includes(rule.tool))) throw new MoguriError("github_denied", "A hard user tool denial excludes this Git/GitHub operation. Review cannot override policy.", 403);
     if (action && permissions.commands.some((rule) => rule.decision === "deny" && rule.command === action.kind)) throw new MoguriError("github_denied", "A hard exact-command denial excludes this operation.", 403);
     return digest(stable({ profileId: snapshot.profileId, policy: snapshot.policy, permissionRevision: snapshot.settings.permissionRevision,
       permissions, configuration, ...(action && githubAction(action) ? { credentialEpoch: this.credentialEpoch } : {}), session: session ? { id: session.id, projectId: session.projectId, workspaceId: session.workspaceId,
         env: session.controls.env, kind: session.kind, mode: session.mode, pendingMode: session.pendingMode,
         ...(action ? { status: session.status } : {}) } : null }));
   }
-  private async context(scope: GithubScope, action: GithubAction | undefined, signal: AbortSignal, jobId?: string, projectWorkId?: string) {
-    const ownerSessionId = projectWorkId && action ? this.workAuthority(scope, action, projectWorkId) : undefined;
+  private async context(scope: GithubScope, action: GithubAction | undefined, signal: AbortSignal, jobId?: string, projectWorkId?: string, toolAuthority?: GitToolAuthority) {
+    toolAuthority?.guard();
+    const ownerSessionId = toolAuthority?.sessionId ?? (projectWorkId && action ? this.workAuthority(scope, action, projectWorkId) : undefined);
     const policyDigest = this.policy(scope, action), project = this.host.project(scope.projectId, scope.workspaceId);
     await this.host.assertRoot(scope.projectId, scope.workspaceId, signal);
     const root = await sourceRoot(project.path);
     const recoveryState = action?.kind === "git.rebase" && action.mode !== "start" ? await this.gitState(root.root, signal) : null;
     const current = () => {
       signal.throwIfAborted();
+      toolAuthority?.guard();
       if (this.policy(scope, action) !== policyDigest || this.host.project(scope.projectId, scope.workspaceId).path !== root.root ||
         stable(sourceRootSync(root.root)) !== stable(root)) throw new MoguriError("github_stale", "The reviewed root identity, session or policy changed. No stale authority or fallback root was used.", 409);
       if (action && filesystemWriter(action)) {
@@ -194,14 +209,14 @@ export class GitHubWorkflows {
     };
     current(); return { root, policyDigest, current, recoveryState };
   }
-  private async git(root: string, args: string[], signal: AbortSignal, write = false): Promise<string> {
-    const command = ["--no-pager", "--literal-pathspecs", ...args];
+  private async git(root: string, args: string[], signal: AbortSignal, write = false, environment: NodeJS.ProcessEnv = {}): Promise<string> {
+    const command = ["--no-pager", "-c", "core.fsmonitor=false", "--literal-pathspecs", ...args];
     if (write && this.host.snapshot().settings.values.permissions.commands.some((rule) => rule.decision === "deny" && rule.command === ["git", ...command].join(" "))) throw new MoguriError("github_denied", "The exact Git invocation is denied by user policy.", 403);
     try {
       return await this.run("git", command, { cwd: root, signal, label: write ? "Reviewed Git operation" : "Read reviewed Git state",
         timeoutMs: write ? this.options.writeTimeoutMs ?? 120_000 : this.options.readTimeoutMs ?? 30_000, maxBytes: 512 * 1024,
         env: { GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: write ? "1" : "0", GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true",
-          ...(process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}) } });
+          ...(process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}), ...environment } });
     } catch (error) { throw new MoguriError(error instanceof MoguriError ? error.code : "github_program", diagnostic(error), error instanceof MoguriError ? error.status : 502); }
   }
   private async gitState(root: string, signal: AbortSignal): Promise<GithubGitState> {
@@ -245,6 +260,117 @@ export class GitHubWorkflows {
       indexDigest: createHash("sha256").update(indexBytes).digest("hex"), statusDigest: digest(parsed.status),
       worktreeDigest: digest(state), status: parsed.status.replaceAll("\0", "\n"),
       rebaseDigest: rebases.length ? digest(stable(rebases)) : null, rebaseOriginalHead: original, rebaseOnto: onto, rebaseBranch };
+  }
+  private async indexEntries(root: string, signal: AbortSignal) {
+    const output = await readGit(root, ["ls-files", "--stage", "-z"], signal);
+    return output.split("\0").filter(Boolean).map((line) => {
+      const match = line.match(/^([0-9]{6}) ([a-f0-9]{40}(?:[a-f0-9]{24})?) ([0-3])\t([\s\S]+)$/);
+      if (!match) throw new MoguriError("git_index", "Git returned an unsupported exact index entry. No stage or commit was inferred.", 409);
+      return { path: match[4]!, mode: match[1]!, sha: match[2]!, stage: Number(match[3]) };
+    });
+  }
+  private async treeEntries(root: string, base: string, signal: AbortSignal) {
+    return (await readGit(root, ["ls-tree", "-r", "-z", base], signal)).split("\0").filter(Boolean).map((line) => {
+      const match = line.match(/^([0-9]{6}) (?:blob|commit) ([a-f0-9]{40}(?:[a-f0-9]{24})?)\t([\s\S]+)$/);
+      if (!match) throw new MoguriError("git_tree", "Git returned an unsupported exact committed tree.", 409);
+      return { path: match[3]!, mode: match[1]!, sha: match[2]!, stage: 0 };
+    });
+  }
+  private async workingTreeDigest(root: string, base: string, signal: AbortSignal, exclude: string[] = []) {
+    let paths: string[] = [];
+    if (exclude.length) {
+      const selected = new Set(exclude), entries = [...await this.indexEntries(root, signal), ...await this.treeEntries(root, base, signal)];
+      paths = [...new Set(entries.map((entry) => entry.path).filter((path) => !selected.has(path)))].sort();
+      if (!paths.length) return digest("");
+    }
+    return digest(await readGit(root, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", base, "--", ...paths], signal));
+  }
+  private async noIntegration(root: string, signal: AbortSignal): Promise<void> {
+    for (const name of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]) {
+      const marker = (await readGit(root, ["rev-parse", "--git-path", name], signal)).trim();
+      try { await lstat(resolve(root, marker)); throw new MoguriError("git_integration", "Resolve the current merge/cherry-pick/revert explicitly before this Git operation. No abort, reset or stash was performed.", 409); }
+      catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+    }
+  }
+  private effectScope(document: GithubReviewDocument, signal: AbortSignal): void {
+    signal.throwIfAborted();
+    if (this.policy(document.scope, document.action) !== document.policyDigest ||
+      stable(sourceRootSync(document.root.root)) !== stable(document.root) ||
+      this.host.project(document.scope.projectId, document.scope.workspaceId).path !== document.root.root) {
+      throw new MoguriError("github_stale", "The captured Git root identity, owner or current policy changed. Inspect the retained operation; no replacement checkout was used.", 409);
+    }
+  }
+  private async reviewedFiles(root: string, paths: string[], signal: AbortSignal): Promise<NonNullable<GithubReviewDocument["files"]>> {
+    validateGitFiles(paths);
+    const files: NonNullable<GithubReviewDocument["files"]> = [];
+    let totalBytes = 0;
+    const format = (await readGit(root, ["rev-parse", "--show-object-format"], signal)).trim();
+    if (format !== "sha1" && format !== "sha256") throw new MoguriError("git_format", "This Git object format is not supported by exact-byte staging.", 409);
+    for (const path of paths) {
+      signal.throwIfAborted();
+      const absolute = await scopedPath(root, path, true);
+      let file: Awaited<ReturnType<typeof open>>;
+      try { file = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW); }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+        files.push({ path, digest: null, blob: null, mode: null, bytes: 0 }); continue;
+      }
+      try {
+        const metadata = await file.stat(), buffer = Buffer.alloc(2 * 1024 * 1024 + 1);
+        if (!metadata.isFile() || metadata.size >= buffer.length) throw new MoguriError("git_paths", "Built-in staging accepts regular files up to 2 MiB each, not directories, links or submodules.", 409);
+        let length = 0;
+        while (length < buffer.length) {
+          signal.throwIfAborted();
+          const read = await file.read(buffer, length, buffer.length - length, length);
+          if (!read.bytesRead) break;
+          length += read.bytesRead;
+        }
+        if (length === buffer.length) throw new MoguriError("git_paths", "The selected file grew beyond its exact staging bound. No file prefix was accepted.", 409);
+        const bytes = buffer.subarray(0, length), current = await lstat(await scopedPath(root, path));
+        const blob = (await readGit(root, ["hash-object", "--no-filters", "--", path], signal)).trim();
+        const expected = createHash(format).update(`blob ${length}\0`).update(bytes).digest("hex");
+        if (!sha.test(blob) || blob !== expected || metadata.dev !== current.dev || metadata.ino !== current.ino ||
+          metadata.mode !== current.mode) throw new MoguriError("git_file_changed", "A selected file changed while its original bytes were captured. Review it again before staging.", 409);
+        files.push({ path, digest: createHash("sha256").update(bytes).digest("hex"), blob, mode: metadata.mode & 0o111 ? "100755" : "100644", bytes: bytes.length });
+        totalBytes += bytes.length;
+        if (totalBytes > 8 * 1024 * 1024) throw new MoguriError("git_paths", "The complete staging review exceeds 8 MiB. Select a smaller exact set; no file prefix was staged.", 409);
+      } finally { await file.close(); }
+    }
+    return files;
+  }
+  private async gitRead(scope: GithubScope, input: GitRead, signal: AbortSignal): Promise<Extract<GithubResponse, { type: "git.read" }>> {
+    const permissions = this.host.snapshot().settings.values.permissions;
+    if (permissions.tools.some((rule) => rule.decision === "deny" && ["*", "git", "git_read", "run_command"].includes(rule.tool))) throw new MoguriError("github_denied", "A hard user denial excludes this built-in Git read.", 403);
+    const context = await this.context(scope, undefined, signal), root = context.root.root, git = await this.gitState(root, signal);
+    let data: GitReadData;
+    if (input.action === "status") data = { action: input.action, status: git.status };
+    else if (input.action === "branches") {
+      const output = await readGit(root, ["for-each-ref", "--format=%(refname:short)%09%(objectname)%09%(upstream:short)", "refs/heads", "refs/remotes"], signal);
+      data = { action: input.action, branches: output.trimEnd().split("\n").filter(Boolean).map((line) => {
+        const [name, hash, upstream] = line.split("\t");
+        if (!name || !hash || !sha.test(hash)) throw new MoguriError("git_response", "Git returned an invalid exact branch identity.", 409);
+        return { name, sha: hash, upstream: upstream || null };
+      }) };
+    } else if (input.action === "log") {
+      const head = input.head ?? git.head, offset = input.offset ?? 0, limit = input.limit ?? 20;
+      const output = await readGit(root, ["log", "--no-show-signature", `--max-count=${limit + 1}`, `--skip=${offset}`, "--format=%H%x09%P%x09%s", head, "--"], signal);
+      const commits = output.trimEnd().split("\n").filter(Boolean).map((line) => {
+        const [hash, parents, ...subject] = line.split("\t"), parentIds = parents ? parents.split(" ") : [];
+        if (!hash || !sha.test(hash) || parentIds.some((parent) => !sha.test(parent))) throw new MoguriError("git_response", "Git returned an invalid exact history identity.", 409);
+        return { sha: hash, parents: parentIds, subject: subject.join("\t") };
+      });
+      data = { action: input.action, head, commits: commits.slice(0, limit), nextOffset: commits.length > limit ? offset + limit : null };
+    } else {
+      if (input.action === "diff" && input.path) {
+        validateProjectPath(input.path);
+        if (isProtectedProjectPath(input.path)) throw new MoguriError("git_paths", "Protected Git metadata is not a diff source.", 403);
+      }
+      const text = await readGit(root, input.action === "show" ?
+        ["show", "--no-show-signature", "--no-ext-diff", "--no-textconv", "--no-renames", "--format=fuller", input.commit, "--"] :
+        ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", ...(input.staged ? ["--cached"] : []), "--", input.path ?? "."], signal);
+      data = { action: input.action, text };
+    }
+    context.current(); return { type: "git.read", root: context.root, git, data };
   }
   private async remote(root: string, name: string, ref: string, signal: AbortSignal, expectedUrl?: string) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$/.test(name)) throw new MoguriError("github_remote", "Select one configured safe Git remote name.");
@@ -315,8 +441,8 @@ export class GitHubWorkflows {
     }
     return { account: login, accountId: `${login.toLowerCase()}:${id}` };
   }
-  private async repositories(query: Extract<GithubQuery, { type: "github.repositories" }>): Promise<Extract<GithubResponse, { type: "github.repositories" }>> {
-    const policy = this.discoveryPolicy(), root = dirname(this.store.path), signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]);
+  private async repositories(query: Extract<GithubQuery, { type: "github.repositories" }>, requested?: AbortSignal): Promise<Extract<GithubResponse, { type: "github.repositories" }>> {
+    const policy = this.discoveryPolicy(), root = dirname(this.store.path), signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]);
     const identity = await this.discoveryAccount(root, query.account, signal);
     if (query.accountId && query.accountId !== identity.accountId) throw new MoguriError("github_account", "The repository page belongs to a different numeric GitHub account. Reload account selection explicitly.", 409);
     if (query.source === "public" && !query.query.trim()) throw new MoguriError("github_search", "Enter a public repository search before sending it to GitHub.");
@@ -388,20 +514,20 @@ export class GitHubWorkflows {
       defaultBranch: string(data.default_branch), branch: git.branch, url: metadata.url, binding: this.sourceBinding(scope, context.root), warning,
       remote: { name: configuration.values.repo.upstream, fetchUrl, pushUrls } };
   }
-  async projectItem(scope: GithubScope, source: GithubWorkSource): Promise<{ item: GithubItem; accountId: string; binding: GithubSourceBinding }> {
-    const project = await this.projectContext(scope, source);
+  async projectItem(scope: GithubScope, source: GithubWorkSource, requested?: AbortSignal): Promise<{ item: GithubItem; accountId: string; binding: GithubSourceBinding }> {
+    const project = await this.projectContext(scope, source, undefined, undefined, requested);
     if (project.repository.toLowerCase() !== source.repository.toLowerCase() || project.account.toLowerCase() !== source.account.toLowerCase() ||
       source.accountId !== undefined && project.accountId !== source.accountId) {
       throw new MoguriError("github_source", "Choose an item from this project's exact repository and current account. No cross-repository or account fallback was used.", 409);
     }
     const response = await this.browse(scope, { resource: source.kind, repository: source.repository, account: source.account,
-      number: source.number, page: 1, perPage: 1 }, AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]));
+      number: source.number, page: 1, perPage: 1 }, AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]));
     const selected = response.items[0], expected = `https://github.com/${source.repository}/${source.kind === "pull" ? "pull" : "issues"}/${source.number}`;
     if (response.accountId !== project.accountId || !selected || !selected.id || !selected.title.trim() || !["open", "closed"].includes(selected.state) ||
       selected.number !== source.number || selected.url !== expected || selected.kind !== source.kind) {
       throw new MoguriError("github_source", "The returned GitHub item did not match the exact selected repository, account and number.", 409);
     }
-    const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]), configuration = this.host.configuration(scope.projectId);
+    const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]), configuration = this.host.configuration(scope.projectId);
     const context = await this.context(scope, undefined, signal);
     const fresh = await readWorkspaceGit(context.root.root,
       { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders }, false, signal);
@@ -516,9 +642,9 @@ export class GitHubWorkflows {
     if ((action.kind === "github.pr.update" || action.kind === "github.issue.update") && action.title === undefined && action.body === undefined && action.state === undefined) throw new MoguriError("github_edit", "Select at least one exact field to update; omitted fields are preserved.");
     if (action.kind === "git.tag.create" && (action.annotated ? !action.message.trim() : action.message !== "")) throw new MoguriError("github_tag", "Annotated tags require an exact nonempty message; lightweight tags must not carry a discarded message.");
   }
-  private async preview(scope: GithubScope, action: GithubAction, signal: AbortSignal, jobId?: string, projectWorkId?: string): Promise<{ preview: GithubPreview; current(): void }> {
+  private async preview(scope: GithubScope, action: GithubAction, signal: AbortSignal, jobId?: string, projectWorkId?: string, toolAuthority?: GitToolAuthority): Promise<{ preview: GithubPreview; current(): void }> {
     this.validateAction(action);
-    const context = await this.context(scope, action, signal, jobId, projectWorkId), root = context.root.root;
+    const context = await this.context(scope, action, signal, jobId, projectWorkId, toolAuthority), root = context.root.root;
     const git = await this.gitState(root, signal);
     if (context.recoveryState && stable(context.recoveryState) !== stable(git)) throw new MoguriError("github_stale", "The exact in-progress rebase changed during recovery review. No quarantine exception or Git effect was adopted.", 409);
     if (action.kind.startsWith("git.") && action.kind !== "git.rebase" && git.rebaseDigest) throw new MoguriError("github_rebase", "Resolve the current rebase with a separate reviewed continue/abort before another Git write.", 409);
@@ -529,6 +655,68 @@ export class GitHubWorkflows {
       confirmations: ["I reviewed this exact Local root, action, inputs and policy."],
     };
     const main = this.host.configuration(scope.projectId).values.repo.mainBranch;
+    if (action.kind === "git.branch.create" || action.kind === "git.branch.rename") {
+      const branch = action.kind === "git.branch.create" ? action.branch : action.to;
+      validateGithubRef(branch);
+      if ((await readGit(root, ["for-each-ref", "--format=%(refname)", `refs/heads/${branch}`], signal)).trim()) throw new MoguriError("git_branch_exists", "The exact destination branch already exists or contains child refs. No force rename or overwrite was performed.", 409);
+      if (action.kind === "git.branch.create") document.targetSha = await this.commitRef(root, action.start, signal);
+      else {
+        validateGithubRef(action.from);
+        if (action.from !== git.branch) throw new MoguriError("git_branch_changed", "Rename only the exact captured current branch. No other worktree or branch was changed.", 409);
+        if ([main, "main", "master"].includes(action.from)) document.confirmations.push(`I explicitly approve renaming protected/main branch ${action.from} to ${action.to}.`);
+      }
+    }
+    if (action.kind === "git.switch") {
+      const refs = (await readGit(root, ["for-each-ref", "--format=%(refname)%09%(objectname)", `refs/heads/${action.branch}`], signal)).trim().split("\n");
+      const selected = refs.filter((line) => line.split("\t")[0] === `refs/heads/${action.branch}`);
+      if (selected.length !== 1) throw new MoguriError("git_branch_missing", "Select one existing local branch. No remote branch or implicit tracking checkout was created.", 409);
+      document.targetSha = selected[0]!.split("\t")[1]!;
+    }
+    if (action.kind === "git.switch" || action.kind === "git.revert" || action.kind === "git.branch.create" && action.checkout) {
+      if (git.status || git.branch === "(detached)") throw new MoguriError("git_dirty", "This operation needs a clean committed current branch. Unrelated staged, dirty and untracked work was preserved; no stash, reset or overwrite was attempted.", 409);
+      await this.noIntegration(root, signal);
+    }
+    if (action.kind === "git.revert") {
+      if (action.commit !== git.head) throw new MoguriError("git_revert", "Rollback preserves history by reverting the exact current commit only. Select the current HEAD SHA; no older range, merge mainline or reset was inferred.", 409);
+      const parents = (await readGit(root, ["rev-list", "--parents", "--max-count=1", action.commit], signal)).trim().split(" ");
+      if (parents.length !== 2 || !sha.test(parents[1]!)) throw new MoguriError("git_revert", "Rollback requires one exact parent. Root and merge commits need a separately specified workflow; no mainline was guessed.", 409);
+      document.targetSha = parents[1]!;
+      document.confirmations.push(`Create a new revert commit for ${git.head}, preserving its history.`);
+    }
+    if (action.kind === "git.stage" || action.kind === "git.unstage") {
+      await this.noIntegration(root, signal);
+      document.files = await this.reviewedFiles(root, action.paths, signal);
+      const selected = new Set(action.paths), entries = await this.indexEntries(root, signal);
+      const tracked = new Set([...entries, ...await this.treeEntries(root, git.head, signal)].map((entry) => entry.path));
+      if (document.files.some((file) => !tracked.has(file.path) && (action.kind === "git.unstage" || file.digest === null))) throw new MoguriError("git_paths", "A selected path has no original staged/tracked entry or current file. No directory, implicit set or missing file was staged.", 409);
+      document.unaffectedIndexDigest = digest(stable(entries.filter((entry) => !selected.has(entry.path))));
+      document.workingTreeDigest = await this.workingTreeDigest(root, git.head, signal, action.paths);
+      if (action.kind === "git.stage") {
+        const attributes = (await readGit(root, ["check-attr", "-z", "filter", "text", "eol", "--", ...action.paths], signal)).split("\0");
+        if (attributes.at(-1) === "") attributes.pop();
+        if (attributes.length !== action.paths.length * 9) throw new MoguriError("git_attributes", "Git did not return every exact file/transformation attribute. No missing value was treated as safe.", 409);
+        const configuration = await readGit(root, ["config", "--null", "--list"], signal);
+        if (attributes.some((value, index) => index % 3 === 2 && !["unspecified", "unset"].includes(value)) ||
+          configuration.split("\0").some((entry) => /^core\.autocrlf\n(?:true|input)$/i.test(entry))) throw new MoguriError("git_filtered_path", "Built-in exact-byte staging does not apply filters or text normalization. Review the configured Git transformation explicitly; no file was staged.", 409);
+      }
+    }
+    if (action.kind === "git.commit") {
+      await this.noIntegration(root, signal);
+      validateGitFiles(action.paths);
+      const selected = new Set(action.paths), entries = await this.indexEntries(root, signal), base = await this.treeEntries(root, git.head, signal);
+      if (selected.size !== action.paths.length || entries.some((entry) => entry.stage !== 0) ||
+        action.paths.some((path) => !entries.some((entry) => entry.path === path) && !base.some((entry) => entry.path === path)) ||
+        !(await readGit(root, ["diff", "--cached", "--name-only", git.head, "--", ...action.paths], signal)).trim()) throw new MoguriError("git_commit", "Commit requires exact resolved paths with actual staged changes. Nothing was staged, resolved or taken from unstaged files automatically.", 409);
+      const expected = [...base.filter((entry) => !selected.has(entry.path)), ...entries.filter((entry) => selected.has(entry.path))]
+        .sort((a, b) => a.path.localeCompare(b.path, "en"));
+      document.indexEntriesDigest = digest(stable(expected));
+      document.workingTreeDigest = await this.workingTreeDigest(root, git.head, signal);
+      document.confirmations.push("Commit only the selected staged paths; preserve the real index and all unstaged work.");
+    }
+    if (["git.commit", "git.revert", "git.branch.rename"].includes(action.kind)) {
+      const worktrees = (await readGit(root, ["worktree", "list", "--porcelain", "-z"], signal)).split("\0");
+      if (worktrees.filter((value) => value === `branch refs/heads/${git.branch}`).length !== 1) throw new MoguriError("git_branch_owner", "This branch is detached or checked out by multiple worktrees. No other root's HEAD or branch binding was changed.", 409);
+    }
     if (action.kind === "git.push" || action.kind === "git.tag.push" || action.kind === "git.tag.delete" && action.location === "remote") {
       const destination = action.kind === "git.push" ? action.destination ?? action.branch : null;
       const ref = destination ? `refs/heads/${destination}` : `refs/tags/${"tag" in action ? action.tag : ""}`;
@@ -592,15 +780,17 @@ export class GitHubWorkflows {
     parse(GithubReviewDocumentSchema, document); context.current();
     return { preview: { document, digest: digest(JSON.stringify(document)) }, current: context.current };
   }
-  async query(query: GithubQuery): Promise<GithubResponse> {
+  async query(query: GithubQuery, requested?: AbortSignal): Promise<GithubResponse> {
     query = structuredClone(parse(GithubQuerySchema, query));
-    if (query.type === "github.repositories") return this.repositories(query);
-    if (query.type === "github.project") return this.projectContext(query.scope);
+    const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]);
+    signal.throwIfAborted();
+    if (query.type === "git.read") return this.gitRead(query.scope, query.input, signal);
+    if (query.type === "github.repositories") return this.repositories(query, signal);
+    if (query.type === "github.project") return this.projectContext(query.scope, undefined, undefined, undefined, signal);
     if (query.type === "github.branch") {
       validateGithubRef(query.branch);
-      const context = await this.projectContext(query.scope, { account: query.account, accountId: query.accountId });
+      const context = await this.projectContext(query.scope, { account: query.account, accountId: query.accountId }, undefined, undefined, signal);
       if (context.repository !== query.repository) throw new MoguriError("github_source", "The branch must belong to this exact project repository.", 409);
-      const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]);
       const data = record((await this.api(context.binding.root.root, `repos/${query.repository}/branches/${encodeURIComponent(query.branch)}`, signal)).data);
       const head = string(record(data.commit).sha);
       if (string(data.name) !== query.branch || !sha.test(head) ||
@@ -610,11 +800,11 @@ export class GitHubWorkflows {
       return { type: query.type, branch: query.branch, sha: head, accountId: context.accountId, binding: context.binding };
     }
     if (query.type === "github.source") {
-      const result = await this.projectItem(query.scope, query.source);
+      const result = await this.projectItem(query.scope, query.source, signal);
       return { type: query.type, source: query.source, ...result, digest: digest(stable([query.source, result.accountId, result.binding, result.item])), warning };
     }
-    if (query.type === "github.preview") return { type: query.type, preview: (await this.preview(query.scope, query.action, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000))).preview };
-    if (query.type === "github.browse") return this.browse(query.scope, query.input, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000));
+    if (query.type === "github.preview") return { type: query.type, preview: (await this.preview(query.scope, query.action, signal)).preview };
+    if (query.type === "github.browse") return this.browse(query.scope, query.input, signal);
     if (query.type === "github.history") {
       const values = this.operations().filter((value) => !query.projectId || value.projectId === query.projectId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       return { type: query.type, operations: values.slice(query.offset, query.offset + query.limit), total: values.length };
@@ -743,9 +933,17 @@ export class GitHubWorkflows {
     this.workAuthority(scope, action, projectWorkId);
     return (await this.preview(scope, action, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), undefined, projectWorkId)).preview;
   }
-  async execute(command: GithubCommand, finish: WorkspaceFinish, modelSource?: ModelAdviceSource, projectWorkId?: string): Promise<CommandResult> {
+  async toolPreview(scope: GithubScope, action: GithubAction, authority: GitToolAuthority): Promise<GithubPreview> {
+    authority.guard();
+    if (scope.sessionId !== authority.sessionId || !filesystemWriter(action)) throw new MoguriError("git_tool_owner", "This model Git review lost its exact owning session or action.", 403);
+    return (await this.preview(scope, action, AbortSignal.any([authority.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000)]), undefined, undefined, authority)).preview;
+  }
+  async execute(command: GithubCommand, finish: WorkspaceFinish, modelSource?: ModelAdviceSource, projectWorkId?: string, toolAuthority?: GitToolAuthority): Promise<CommandResult> {
     command = structuredClone(parse(GithubCommandSchema, command));
-    const ownerSessionId = projectWorkId && modelSource && command.type === "github.execute" ? this.workAuthority(command.scope, command.action, projectWorkId) : undefined;
+    toolAuthority?.guard();
+    if (toolAuthority && (!modelSource || projectWorkId || command.type !== "github.execute" ||
+      command.scope.sessionId !== toolAuthority.sessionId || !filesystemWriter(command.action))) throw new MoguriError("git_tool_owner", "Only the exact approved model Git call can hand its root to this job.", 403);
+    const ownerSessionId = toolAuthority?.sessionId ?? (projectWorkId && modelSource && command.type === "github.execute" ? this.workAuthority(command.scope, command.action, projectWorkId) : undefined);
     if (projectWorkId && !ownerSessionId || modelSource && !ownerSessionId && (command.type !== "github.execute" || command.action.kind !== "github.issue.create" || !command.scope.sessionId)) throw new MoguriError("github_model_scope", "Model writes require the exact issue adapter or retained user-delegated project task, never arbitrary Git writes, merges or inspection acknowledgement.", 403);
     const intent = finish.intent;
     if (!intent || !/^[a-f0-9]{64}$/.test(intent.digest)) throw new MoguriError("github_intent", "An actual-user canonical command identity is required before Git/GitHub admission.", 409);
@@ -770,7 +968,7 @@ export class GitHubWorkflows {
       if (receipt) return receipt;
       throw new MoguriError("github_no_replay", "The original retained operation has no command receipt. Inspect its independent history; source deletion, lost receipts or restart cannot replay it.", 409);
     }
-    const { preview, current } = await this.preview(command.scope, command.action, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), undefined, projectWorkId);
+    const { preview, current } = await this.preview(command.scope, command.action, AbortSignal.any([AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(toolAuthority ? [toolAuthority.signal] : [])]), undefined, projectWorkId, toolAuthority);
     const concurrent = this.operations().find((operation) => operation.commandId === intent.id);
     if (concurrent) {
       if (concurrent.commandDigest !== intent.digest) throw new MoguriError("github_command_conflict", "A concurrent command already owns this canonical identity with different input.", 409);
@@ -788,16 +986,18 @@ export class GitHubWorkflows {
     const operationId = randomUUID(), inputDigest = this.store.putBlob(JSON.stringify(command)), reviewDigest = this.store.putBlob(JSON.stringify(preview.document));
     try {
       this.host.job(command.action.kind, command.scope.projectId, command.scope.workspaceId,
-        (signal, progress, jobId) => this.perform(operationId, preview.document, signal, progress, jobId),
+        (signal, progress, jobId) => this.perform(operationId, preview.document, signal, progress, jobId, toolAuthority),
         (job) => {
           if (lease && this.host.rootBusy(root, undefined, permit(), ownerSessionId)) throw new MoguriError("workspace_busy", "An owned writer or unrelated quarantine acquired the exact root during review. No dispatch.", 409);
           if (projectWorkId) this.workAuthority(command.scope, command.action, projectWorkId);
+          toolAuthority?.guard();
           this.policy(command.scope, command.action);
           const now = new Date(this.now()).toISOString(), operation: GithubOperation = {
             version: 1, id: operationId, profileId: preview.document.profileId, projectId: command.scope.projectId,
             workspaceId: command.scope.workspaceId ?? null, originSessionId: command.scope.sessionId ?? null, root: preview.document.root,
             kind: command.action.kind, actor: modelSource ? "model" : "user", ...(modelSource ? { modelSource } : {}), commandId: intent.id, commandDigest: intent.digest, reviewDigest, inputDigest,
             ...(projectWorkId ? { projectWorkId } : {}),
+            ...(toolAuthority ? { toolCallDigest: toolAuthority.callDigest } : {}),
             resultDigest: null, jobId: job.id, revision: 0, status: "running", dispatched: false, cancelRequested: false,
             createdAt: now, updatedAt: now, diagnostic: null,
           };
@@ -816,9 +1016,9 @@ export class GitHubWorkflows {
         this.results.set(id, { value: result, digest: resultDigest });
         if (result.operationId !== id || result.kind !== operation.kind || operation.cancelRequested ||
           (result.kind === "github.ci.watch") !== (result.outcome === "ci" && result.ci !== null) ||
-          result.outcome === "conflicts" && result.kind !== "git.rebase") throw new MoguriError("github_partial", "Final Git/GitHub ownership, typed result or cancellation acknowledgement is missing. Inspect retained observations.", 409);
+          result.outcome === "conflicts" && !["git.rebase", "git.revert"].includes(result.kind)) throw new MoguriError("github_partial", "Final Git/GitHub ownership, typed result or cancellation acknowledgement is missing. Inspect retained observations.", 409);
         if (result.outcome === "partial") throw new MoguriError("github_partial", "Only a partial acknowledgement was observed. No completed operation was inferred.", 409);
-        if (result.outcome === "conflicts") throw new MoguriError("github_conflicts", "Rebase stopped with conflicts. Both histories and the actual index/worktree are preserved; explicitly review continue or abort.", 409);
+        if (result.outcome === "conflicts") throw new MoguriError("github_conflicts", `${result.kind === "git.revert" ? "Revert" : "Rebase"} stopped with conflicts. Both histories and the actual index/worktree are preserved; inspect the retained operation before explicit recovery.`, 409);
         return [this.event({ ...operation, revision: operation.revision + 1, status: "completed", resultDigest,
           updatedAt: new Date(this.now()).toISOString(), diagnostic: null })];
       },
@@ -832,9 +1032,9 @@ export class GitHubWorkflows {
       },
     };
   }
-  private async perform(id: string, document: GithubReviewDocument, ownerSignal: AbortSignal, progress: (text: string) => void, jobId: string): Promise<GithubOperationResult> {
+  private async perform(id: string, document: GithubReviewDocument, ownerSignal: AbortSignal, progress: (text: string) => void, jobId: string, toolAuthority?: GitToolAuthority): Promise<GithubOperationResult> {
     const abort = new AbortController(); this.active.set(id, abort);
-    const signal = AbortSignal.any([ownerSignal, this.shutdown.signal, abort.signal]);
+    const signal = AbortSignal.any([ownerSignal, this.shutdown.signal, abort.signal, ...(toolAuthority ? [toolAuthority.signal] : [])]);
     const cancelled = () => {
       const operation = this.operation(id);
       if (operation.status === "running" && !operation.cancelRequested) this.update(id, { cancelRequested: true });
@@ -849,7 +1049,7 @@ export class GitHubWorkflows {
         if (document.action.kind === "git.push" && (document.action.destination ?? document.action.branch) === project.defaultBranch) throw new MoguriError("github_work_protected", "The task destination became the actual default branch before dispatch.", 403);
         signal.throwIfAborted();
       }
-      const fresh = await this.preview(document.scope, document.action, signal, jobId, this.operation(id).projectWorkId);
+      const fresh = await this.preview(document.scope, document.action, signal, jobId, this.operation(id).projectWorkId, toolAuthority);
       if (fresh.preview.digest !== digest(JSON.stringify(document))) throw new MoguriError("github_review", "The exact reviewed root, Git/index/remote/resource/account or policy changed before dispatch. No effect was attempted.", 409);
       fresh.current(); await this.host.assertRoot(document.scope.projectId, document.scope.workspaceId, signal); fresh.current();
       if (this.operation(id).status !== "running" || this.operation(id).dispatched) throw new MoguriError("github_no_replay", "This retained intent is no longer an original undispatched operation.", 409);
@@ -861,10 +1061,12 @@ export class GitHubWorkflows {
     } finally { signal.removeEventListener("abort", cancelled); }
   }
   private async localResult(id: string, document: GithubReviewDocument, signal: AbortSignal, outcome: GithubOperationResult["outcome"] = "completed", remoteSha: string | null = null): Promise<GithubOperationResult> {
+    this.effectScope(document, signal);
     const state = await this.gitState(document.root.root, signal);
+    this.effectScope(document, signal);
     return { version: 1, operationId: id, kind: document.action.kind, outcome, head: state.head, branch: state.branch, status: state.status,
       rebaseInProgress: state.rebaseDigest !== null, remoteSha, resource: null, ci: null,
-      diagnostic: outcome === "conflicts" ? "The actual rebase stopped with conflicts; inspect and explicitly continue/abort. No automatic cleanup." : null };
+      diagnostic: outcome === "conflicts" ? `The actual ${document.action.kind} stopped with conflicts; inspect before explicit recovery. No automatic cleanup.` : null };
   }
   private acknowledge(id: string, document: GithubReviewDocument, resource: GithubItem | null = null, remoteSha: string | null = null): void {
     const value = parse(GithubOperationResultSchema, {
@@ -877,11 +1079,94 @@ export class GitHubWorkflows {
   }
   private async gitWrite(id: string, document: GithubReviewDocument, signal: AbortSignal): Promise<GithubOperationResult> {
     const action = document.action, root = document.root.root;
+    this.effectScope(document, signal);
+    if (action.kind === "git.branch.create" || action.kind === "git.branch.rename" || action.kind === "git.switch") {
+      if (action.kind === "git.branch.create") {
+        await this.git(root, ["branch", "--", action.branch, document.targetSha!], signal, true);
+        this.acknowledge(id, document);
+        if (action.checkout) { this.effectScope(document, signal); await this.git(root, ["switch", "--no-guess", "--no-overwrite-ignore", "--", action.branch], signal, true); }
+      } else if (action.kind === "git.branch.rename") await this.git(root, ["branch", "--move", "--", action.from, action.to], signal, true);
+      else await this.git(root, ["switch", "--no-guess", "--no-overwrite-ignore", "--", action.branch], signal, true);
+      this.acknowledge(id, document);
+      const branch = action.kind === "git.branch.rename" ? action.to : action.branch;
+      const actual = (await readGit(root, ["rev-parse", "--verify", "--end-of-options", `refs/heads/${branch}`], signal)).trim();
+      const after = await this.gitState(root, signal), switched = action.kind === "git.switch" || action.kind === "git.branch.create" && action.checkout;
+      if (actual !== (action.kind === "git.branch.rename" ? document.git.head : document.targetSha) ||
+        after.head !== (switched ? document.targetSha : document.git.head) ||
+        after.branch !== (switched || action.kind === "git.branch.rename" ? branch : document.git.branch) ||
+        (switched ? Boolean(after.status) : after.indexDigest !== document.git.indexDigest || after.worktreeDigest !== document.git.worktreeDigest)) {
+        throw new MoguriError("github_partial", "The actual branch/HEAD/index/worktree differs from the exact reviewed branch operation. Preserve it and inspect; no force rename, rollback or retry was performed.", 409);
+      }
+      if (action.kind === "git.branch.rename" && (await readGit(root, ["for-each-ref", "--format=%(refname)", `refs/heads/${action.from}`], signal)).trim()) throw new MoguriError("github_partial", "The original branch ref still exists after rename acknowledgement. No deletion or retry was inferred.", 409);
+      return this.localResult(id, document, signal);
+    }
+    if (action.kind === "git.stage" || action.kind === "git.unstage") {
+      if (!document.files || !document.unaffectedIndexDigest || !document.workingTreeDigest) throw new MoguriError("git_review", "The original complete file/index review is missing. No staging effect was dispatched.", 409);
+      await this.git(root, action.kind === "git.stage" ? ["add", "--", ...action.paths] :
+        ["restore", "--staged", `--source=${document.git.head}`, "--", ...action.paths], signal, true);
+      this.acknowledge(id, document);
+      const entries = await this.indexEntries(root, signal), selected = new Set(action.paths);
+      const expected = action.kind === "git.stage" ? document.files.flatMap((file) => file.blob && file.mode ? [{
+        path: file.path, mode: file.mode, sha: file.blob, stage: 0,
+      }] : []) : (await this.treeEntries(root, document.git.head, signal)).filter((entry) => selected.has(entry.path));
+      const order = <T extends { path: string }>(values: T[]) => values.sort((a, b) => a.path.localeCompare(b.path, "en"));
+      if (digest(stable(entries.filter((entry) => !selected.has(entry.path)))) !== document.unaffectedIndexDigest ||
+        stable(order(entries.filter((entry) => selected.has(entry.path)))) !== stable(order(expected)) ||
+        stable(await this.reviewedFiles(root, action.paths, signal)) !== stable(document.files) ||
+        await this.workingTreeDigest(root, document.git.head, signal, action.paths) !== document.workingTreeDigest ||
+        (await this.gitState(root, signal)).head !== document.git.head) throw new MoguriError("github_partial", "The exact staged entries, selected bytes or unrelated index/worktree changed. Inspect the retained review and current Git state; no rollback or successful stage was invented.", 409);
+      return this.localResult(id, document, signal);
+    }
+    if (action.kind === "git.commit" || action.kind === "git.revert") {
+      try {
+        if (action.kind === "git.commit") {
+          const directory = await mkdtemp(join(dirname(this.store.path), "git-index-")), index = join(directory, "index");
+          try {
+            const environment = { GIT_INDEX_FILE: index }, selected = new Set(action.paths), entries = await this.indexEntries(root, signal);
+            await this.git(root, ["read-tree", document.git.head], signal, true, environment);
+            for (const path of action.paths) {
+              const entry = entries.find((entry) => entry.path === path);
+              await this.git(root, entry ? ["update-index", "--add", "--cacheinfo", `${entry.mode},${entry.sha},${path}`] :
+                ["update-index", "--force-remove", "--", path], signal, true, environment);
+            }
+            if (entries.some((entry) => selected.has(entry.path) && entry.stage !== 0) ||
+              stable(await this.gitState(root, signal)) !== stable(document.git)) throw new MoguriError("git_commit_changed", "The captured original HEAD/index/worktree changed during selected-path commit preparation. No commit was attempted.", 409);
+            this.effectScope(document, signal);
+            await this.git(root, ["commit", "--no-gpg-sign", "--message", action.message], signal, true, environment);
+          } finally { await rm(directory, { recursive: true, force: true }); }
+        } else await this.git(root, ["revert", "--no-edit", "--no-gpg-sign", "--", document.git.head], signal, true);
+      } catch (error) {
+        if (!signal.aborted && action.kind === "git.revert" && (await readGit(root, ["ls-files", "--unmerged", "-z"], signal)).length) return this.localResult(id, document, signal, "conflicts");
+        throw error;
+      }
+      this.acknowledge(id, document);
+      const after = await this.gitState(root, signal);
+      const parents = (await readGit(root, ["rev-list", "--parents", "--max-count=1", after.head], signal)).trim().split(" ");
+      if (parents.length !== 2 || parents[1] !== document.git.head || after.branch !== document.git.branch) throw new MoguriError("github_partial", "The resulting commit does not have the captured original HEAD as its exact parent/branch. Both histories remain; no successful commit or cleanup was inferred.", 409);
+      if (action.kind === "git.commit") {
+        const committed = (await this.treeEntries(root, after.head, signal)).sort((a, b) => a.path.localeCompare(b.path, "en"));
+        if (!document.indexEntriesDigest || after.indexDigest !== document.git.indexDigest ||
+          digest(stable(committed)) !== document.indexEntriesDigest ||
+          await this.workingTreeDigest(root, document.git.head, signal) !== document.workingTreeDigest) throw new MoguriError("github_partial", "The committed tree/index or remaining dirty bytes differ from the original staged review. Inspect actual hook/writer effects; no rollback or complete success was inferred.", 409);
+      } else {
+        const trees = await Promise.all([after.head, document.targetSha!].map((commit) => readGit(root, ["rev-parse", "--verify", `${commit}^{tree}`], signal)));
+        if (trees[0] !== trees[1] || after.status) throw new MoguriError("github_partial", "The revert did not restore the exact previous committed tree with a clean index/worktree. Inspect its real outcome; no reset or automatic abort was performed.", 409);
+      }
+      return this.localResult(id, document, signal);
+    }
     if (action.kind === "git.push" || action.kind === "git.tag.push" || action.kind === "git.tag.delete" && action.location === "remote") {
       const remote = document.remote!;
       const flags = ["push", "--porcelain", "--no-mirror", "--no-follow-tags", "--recurse-submodules=no"];
-      if (action.kind === "git.push" && action.forceWithLease || action.kind === "git.tag.delete") flags.push(`--force-with-lease=${remote.ref}:${remote.sha ?? ""}`);
       const source = action.kind === "git.push" ? document.git.head : action.kind === "git.tag.push" ? document.targetSha! : "";
+      if (action.kind === "git.push" && !action.forceWithLease && remote.sha && remote.sha !== source) {
+        try { await readGit(root, ["merge-base", "--is-ancestor", remote.sha, source], signal); }
+        catch (error) {
+          if (signal.aborted) throw error;
+          throw new MoguriError("git_non_fast_forward", "The captured destination is not a locally proven ancestor of this exact HEAD. No normal push was attempted. Explicitly refresh missing Git objects or separately review force-with-lease.", 409);
+        }
+      }
+      if (action.kind === "git.push" || action.kind === "git.tag.push" || action.kind === "git.tag.delete") flags.push(`--force-with-lease=${remote.ref}:${remote.sha ?? ""}`);
+      this.effectScope(document, signal);
       await this.git(root, [...flags, "--", remote.url, `${source}:${remote.ref}`], signal, true);
       this.acknowledge(id, document);
       const after = await this.remote(root, remote.name, remote.ref, signal, remote.url), expected = source || null;

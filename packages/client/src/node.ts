@@ -36,11 +36,13 @@ export async function readPrivateConnection(stateDir = stateDirectory()): Promis
   try { value = JSON.parse(await readFile(path, "utf8")); } catch (error) { if (error instanceof SyntaxError) throw new Error("Invalid Moguri connection JSON. State was preserved; no replacement service was started."); throw error; }
   if (!isRecord(value) || typeof value.protocolVersion !== "number" || !Number.isSafeInteger(value.protocolVersion) || value.protocolVersion < 1 || typeof value.baseUrl !== "string" ||
     typeof value.wsUrl !== "string" || typeof value.token !== "string" || !value.token.length || value.token.length > 256 ||
-    typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid < 2) throw new Error("Invalid Moguri connection file. State was preserved; no replacement service was started.");
+    typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid < 2 ||
+    value.storeId !== undefined && (typeof value.storeId !== "string" || !/^[a-f0-9]{64}$/.test(value.storeId))) throw new Error("Invalid Moguri connection file. State was preserved; no replacement service was started.");
   const url = new URL(value.baseUrl);
   if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.pathname !== "/" || url.search || url.hash || url.username || url.password ||
     value.wsUrl !== `ws://${url.host}/v1/events`) throw new Error("Moguri service must use an authenticated loopback endpoint.");
-  return { protocolVersion: value.protocolVersion, baseUrl: value.baseUrl, wsUrl: value.wsUrl, token: value.token, pid: value.pid };
+  return { protocolVersion: value.protocolVersion, baseUrl: value.baseUrl, wsUrl: value.wsUrl, token: value.token, pid: value.pid,
+    ...(typeof value.storeId === "string" ? { storeId: value.storeId } : {}) };
 }
 export async function serviceUpgradeReview(connection: Connection, stateDir: string): Promise<ServiceUpgradeReview> {
   const root = await realpath(stateDir);

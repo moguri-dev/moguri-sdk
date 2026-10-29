@@ -6,7 +6,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION, defaultSettings, projectEvents } from "../packages/protocol/src/index.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { assertPreCombinedHistory, assertPreContinuityHistory, assertPreThemeHistory, removePost77FixtureMarkers, removeWorkspaceFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { assertPreCombinedHistory, assertPreContinuityHistory, assertPreThemeHistory, removePost77FixtureMarkers, removeRecoveryFixtureMarkers, removeWorkspaceFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { nativeGroupPublicationFixture } from "./fixtures/native-publication.ts";
 import type { StoredEvent } from "../packages/protocol/src/index.ts";
 
@@ -20,6 +20,7 @@ function metadata(db: DatabaseSync) {
 }
 function genuinePredecessor(db: DatabaseSync, version: 76 | 77 | 78 | 79, events: readonly StoredEvent[]) {
   assertPreCombinedHistory(events);
+  removeRecoveryFixtureMarkers(db, events);
   if (version < 78) removePost77FixtureMarkers(db, events);
   if (version === 78) removeWorkspaceFixtureMarkers(db, events);
   if (version === 76 || version === 78) {
@@ -71,7 +72,7 @@ for (const version of [76, 77, 78, 79] as const) test(`genuine schema ${version}
     const rows = retainedCiphertextRows(db); db.close();
     const store = new EventStore(pathFor(fixture), fixture.retentionKey);
     try {
-      assert.equal(PROTOCOL_VERSION, 80); assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 80);
+      assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
       for (const id of allMarkers) assert.equal(store.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value, "1");
       assert.deepEqual(retainedCiphertextRows(store.db), rows);
       if (version === 78) assert.equal(projectEvents(store.events()).settings.values.appearance.palette, "vaporwave");
@@ -80,8 +81,8 @@ for (const version of [76, 77, 78, 79] as const) test(`genuine schema ${version}
   } finally { await fixture.close(); }
 });
 
-test("unknown, unmarked and falsely combined predecessor lineages and future81 are refused before any mutation", async (t) => {
-  for (const lineage of ["unknown-78", "unmarked-77", "false-model-78", "false-theme-79", "future-81"] as const) await t.test(lineage, async () => {
+test("unknown, unmarked and falsely combined predecessor lineages and future schemas are refused before any mutation", async (t) => {
+  for (const lineage of ["unknown-78", "unmarked-77", "false-model-78", "false-theme-79", "future"] as const) await t.test(lineage, async () => {
     const fixture = await setupFixture();
     try {
       await fixture.service.close();
@@ -91,7 +92,7 @@ test("unknown, unmarked and falsely combined predecessor lineages and future81 a
       if (lineage === "unmarked-77") { genuinePredecessor(db, 77, events); db.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'"); }
       if (lineage === "false-model-78") { genuinePredecessor(db, 78, events); db.exec("INSERT INTO retention_metadata(id,value) VALUES ('model_selection_continuity_schema','1')"); }
       if (lineage === "false-theme-79") { genuinePredecessor(db, 79, events); db.exec("INSERT INTO retention_metadata(id,value) VALUES ('theme_catalog_schema','1')"); }
-      if (lineage === "future-81") db.exec("PRAGMA user_version=81");
+      if (lineage === "future") db.exec(`PRAGMA user_version=${PROTOCOL_VERSION + 1}`);
       const before = metadata(db); db.close();
       assert.throws(() => new EventStore(pathFor(fixture), fixture.retentionKey), /schema marker|lineage|newer schema/i);
       const preserved = new DatabaseSync(pathFor(fixture));
@@ -151,7 +152,7 @@ for (const version of [76, 77, 78, 79] as const) test(`combined80 migration from
     try { assert.deepEqual(metadata(preserved), before); preserved.exec("DROP TRIGGER generated_workspace_marker_failure"); } finally { preserved.close(); }
     const restarted = new EventStore(pathFor(fixture), fixture.retentionKey);
     try {
-      assert.equal(restarted.db.prepare("PRAGMA user_version").get()?.user_version, 80);
+      assert.equal(restarted.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
       for (const id of allMarkers) assert.equal(restarted.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value, "1");
     } finally { restarted.close(); }
   } finally { await fixture.close(); }

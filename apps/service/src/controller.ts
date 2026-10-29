@@ -14,7 +14,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
-  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, selectModelControls, UserQuestionSchema,
+  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, selectAutonomyControls, selectModelControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults, type RememberApproval, type ChatWriter,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
@@ -40,7 +40,8 @@ import { sourceRoot } from "./repository-source.ts";
 import { recoverCachedUsage, RetainedTelemetry } from "./retained-telemetry.ts";
 import type { SideContext } from "../../../packages/protocol/src/index.ts";
 import { catalogForModel, discoverTools, toolSchemaDigest } from "./tool-catalog.ts";
-import { CommandJobReadSchema, type ToolingQuery, type ToolingResponse } from "../../../packages/protocol/src/tooling.ts";
+import { CommandJobReadSchema, retainedToolText, type ToolingQuery, type ToolingResponse } from "../../../packages/protocol/src/tooling.ts";
+import { publicToolResults } from "./retained-tool-results.ts";
 import { SessionCoordination, coordinatedMessageContext } from "./session-coordination.ts";
 import { SessionStateSql } from "./session-state-sql.ts";
 import { IssueTools } from "./issue-tools.ts";
@@ -1188,10 +1189,14 @@ export class ControlPlane extends EventEmitter {
         }
       }
       if (frame.request.kind === "tool.complete") {
-        const call = frame.request.call;
-        const declared = this.history.some((event) => event.turn_id === execution.turnId &&
-          canonicalModelResponse(this.history, event)?.message.toolCalls?.some((value) => frameDigest(value) === frameDigest(call)));
-        if (declared) events.push({ ...scope, event_type: "tool.completed", payload: { call, text: frame.request.text, isError: frame.request.isError, outcome: frame.request.outcome } });
+        const request = frame.request, call = request.call;
+        const declared = this.history.some((event) => {
+          if (event.profile_id !== this.profileId || event.session_id !== execution.sessionId || event.turn_id !== execution.turnId) return false;
+          const response = canonicalModelResponse(this.history, event);
+          return response?.usage.stepId === request.stepId && response.message.toolCalls?.some((value) => frameDigest(value) === frameDigest(call));
+        });
+        if (declared) events.push({ ...scope, event_type: "tool.completed", payload: { call, text: frame.request.text, isError: frame.request.isError, outcome: frame.request.outcome,
+          ...(frame.request.rawText !== undefined ? { rawDigest: this.store.putBlob(frame.request.rawText), rawComplete: frame.request.rawComplete === true } : {}) } });
       }
       events.push({ ...scope, event_type: "execution.frame_recorded", payload: { executionId: execution.id, sequence: frame.sequence, digest: frame.digest } });
     }
@@ -1879,16 +1884,29 @@ export class ControlPlane extends EventEmitter {
       if (target !== session.id) this.coordination.access(session.id, target);
       return { type: query.type, data: this.platform.commandJobRead(target, query.input.jobId, query.input.offset) };
     }
-    const source = this.history.findLast((event) => event.session_id === session.id && event.step_id === query.input.stepId &&
-      event.event_type === "tool.completed" && event.payload.call.id === query.input.callId);
-    if (source?.event_type !== "tool.completed" || source.payload.call.hook ||
-      this.history.some((event) => event.event_type === "turn.control_started" && event.turn_id === source.turn_id)) {
-      throw new MoguriError("tool_result_scope", "Choose an original public tool result in this exact retained session. Hooks, private roles and other sessions are excluded.", 403);
+    const sources = publicToolResults(this.history, this.projection.operationEntries, this.profileId, session.id);
+    if (query.type === "tooling.results") {
+      const sorted = sources.sort((a, b) => b.event.seq - a.event.seq || b.source.operationId.localeCompare(a.source.operationId));
+      const selected = sorted.filter(({ event, source }) => !query.before || event.seq < query.before.sequence ||
+        event.seq === query.before.sequence && source.operationId < query.before.id).slice(0, (query.limit ?? 20) + 1);
+      const page = selected.slice(0, query.limit ?? 20), last = page.at(-1);
+      return { type: query.type, sources: page.map(({ source, event }) => ({ ...source, name: event.payload.call.name,
+        sequence: event.seq, outcome: event.payload.outcome, rawComplete: event.payload.rawComplete === true,
+        digest: event.payload.rawDigest ?? digest(event.payload.text) })),
+        nextBefore: selected.length > page.length && last ? { sequence: last.event.seq, id: last.source.operationId } : null };
     }
-    const text = source.payload.rawDigest ? this.store.blob(source.payload.rawDigest) : source.payload.text;
+    const input = query.input;
+    const matches = sources.filter(({ source }) => "operationId" in input ? source.operationId === input.operationId :
+      (source.stepId === input.stepId || source.operationId === input.stepId) && source.callId === input.callId);
+    if (matches.length !== 1) throw new MoguriError("tool_result_scope", "This source identity does not select one original public result in its owning session. List retained sources with read_tool_result action=list and use the returned operationId. Private roles, hooks and other sessions remain excluded; no tool was replayed.", 403);
+    const { source, event } = matches[0]!, hash = event.payload.rawDigest ?? digest(event.payload.text);
+    if (input.expectedDigest && input.expectedDigest !== hash || input.expectedRevision !== undefined && input.expectedRevision !== source.revision) {
+      throw new MoguriError("tool_result_changed", "The original retained result changed after this page/review. Read its current identity from offset zero; no old and late result pages were mixed.", 409);
+    }
+    const text = event.payload.rawDigest ? this.store.blob(event.payload.rawDigest) : event.payload.text;
     const page = textFilePage(text, { offset: query.input.offset ?? 0, limit: 12000 });
-    return { type: query.type, text: page.text, offset: page.offset, nextOffset: page.nextOffset, bytes: page.bytes,
-      digest: source.payload.rawDigest ?? digest(text), rawComplete: source.payload.rawComplete === true, outcome: source.payload.outcome };
+    return { type: query.type, source, text: page.text, offset: page.offset, nextOffset: page.nextOffset, bytes: page.bytes,
+      digest: hash, rawComplete: event.payload.rawComplete === true, outcome: event.payload.outcome };
   }
   private compactionEvent(session: Session, compaction: ContextCompaction): EventInput {
     return { ...this.event(session, "compaction.saved", { compaction }), turn_id: compaction.turnId, step_id: compaction.stepId };
@@ -2453,7 +2471,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "tooling.execute") {
       const session = this.session(command.sessionId);
       if (session.controls.env !== "Local") throw new MoguriError("tool_env", "Standalone tool jobs are qualified only for Local. Remote/Sandbox use their owned model worker; no controller fallback was used.", 409);
-      if (["ask_user", "task_progress", "run_subagent", "debug", "discover_tools", "query_state", "mutate_state", "create_issue", "project_work", "session_context", "session_message", "session_control", "wait_session"].includes(command.name) || command.name.startsWith("propose_")) {
+      if (["git_write", "ask_user", "task_progress", "run_subagent", "debug", "discover_tools", "query_state", "mutate_state", "create_issue", "project_work", "session_context", "session_message", "session_control", "wait_session"].includes(command.name) || command.name.startsWith("propose_")) {
         throw new MoguriError("tool_owner", "This tool needs its owning model turn, not a standalone user job.", 403);
       }
       const declared = this.nativeCatalog(session).find((tool) => tool.name === command.name);
@@ -2560,11 +2578,14 @@ export class ControlPlane extends EventEmitter {
     const session = this.session(command.sessionId);
     if (session.status === "archived" && command.type !== "session.restore") throw new MoguriError("archived", "Restore this session before editing or resuming it.", 409);
     switch (command.type) {
+      case "session.autonomy":
       case "session.configure": {
         if (session.turnId) throw new MoguriError("turn_active", "Stop the current turn before changing its controls.", 409);
         this.revision(session.revision, command.expectedRevision);
-        let controls = command.controls.autonomy !== session.controls.autonomy && command.controls.automaticApprovals === undefined ?
-          { ...command.controls, automaticApprovals: command.controls.autonomy === "Autopilot" || command.controls.autonomy === "Autopilot Max" } : command.controls;
+        const selected = command.type === "session.autonomy";
+        const requested = selected ? selectAutonomyControls(session.controls, command.autonomy) : command.controls;
+        const autonomyChanged = requested.autonomy !== session.controls.autonomy;
+        let controls = autonomyChanged ? selectAutonomyControls(requested, requested.autonomy) : requested;
         if (controls.modelId !== session.controls.modelId) {
           const model = controls.modelId === null ? null : this.snapshot().provider.models.find((model) => model.id === controls.modelId);
           if (controls.modelId === null || model) {
@@ -2580,8 +2601,10 @@ export class ControlPlane extends EventEmitter {
           const { preferredThinkingEffort: _, ...changed } = controls; controls = changed;
         }
         this.available(controls, false, session);
-        return finish([this.event(session, "session.configured", { controls }),
-          ...(command.rememberModelSelection ? [{ event_type: "model.selection_remembered" as const, profile_id: this.profileId,
+        return finish([this.event(session, "session.configured", { controls, ...(selected || autonomyChanged ? { autonomySelection: {
+          actor: "user" as const, commandId: envelope.id, commandDigest, autonomy: controls.autonomy,
+        } } : {}) }),
+          ...(!selected && command.rememberModelSelection ? [{ event_type: "model.selection_remembered" as const, profile_id: this.profileId,
             payload: { selection: modelSelection(controls), sourceSessionId: session.id, sourceProjectId: session.projectId, actor: "user" as const } }] : [])],
         { revision: session.revision + 1 });
       }
@@ -2839,6 +2862,8 @@ export class ControlPlane extends EventEmitter {
   }
   private originalContextEntries(sessionId: string, includeSideParent = true): ContextEntry[] {
     const entries: ContextEntry[] = [];
+    const sources = new Map(publicToolResults(this.history, this.projection.operationEntries, this.profileId, sessionId)
+      .map(({ event, source }) => [event.id, source]));
     const userWrites = new Set(this.history.filter((event) => event.profile_id === this.profileId && event.session_id === sessionId && event.event_type === "turn.control_started" &&
       (event.payload.purpose === "plan.save" || event.payload.purpose === "role.sequence" || event.payload.purpose === "compound.workflow")).map((event) => event.turn_id));
     for (const event of this.history) if (event.profile_id === this.profileId && event.session_id === sessionId) {
@@ -2860,7 +2885,7 @@ export class ControlPlane extends EventEmitter {
       else if (event.event_type === "tool.completed" && !event.payload.call.hook && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: event.payload.call.name,
-          content: [{ type: "text", text: event.payload.text }], isError: event.payload.isError, timestamp: Date.parse(event.timestamp),
+          content: [{ type: "text", text: sources.has(event.id) ? retainedToolText(event.payload.text, sources.get(event.id)!) : event.payload.text }], isError: event.payload.isError, timestamp: Date.parse(event.timestamp),
         },
       });
     }
@@ -4107,6 +4132,38 @@ export class ControlPlane extends EventEmitter {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
+      if (request.call.name === "git_read" || request.call.name === "git_write") {
+        const id = frameDigest(["model-git-intent", run.turnId, request.stepId, request.call.id]), hash = frameDigest(request.call.arguments);
+        const callDigest = frameDigest(request.call), policyRevision = this.projection.policy.revision, permissionRevision = this.projection.settings.permissionRevision;
+        const guard = () => {
+          run.abort.signal.throwIfAborted();
+          const current = this.session(session.id);
+          if (run.done || this.runs.get(session.id) !== run || current.turnId !== run.turnId ||
+            current.controls.env !== "Local" || !run.granted.has(request.call.id) || frameDigest(run.calls.get(request.call.id)) !== callDigest ||
+            this.projection.policy.revision !== policyRevision || this.projection.settings.permissionRevision !== permissionRevision ||
+            !this.nativeCatalog(current).some((tool) => tool.name === request.call.name) ||
+            this.authorization(current, request.call, this.toolScope(current, request.call).root).decision === "deny") {
+            throw new MoguriError("git_tool_owner", "The exact approved model Git call, root, owner or current policy changed. No replacement or permission was inferred.", 409);
+          }
+        };
+        try {
+          await this.assertCurrentTool(session, request.call); guard();
+          const finish: WorkspaceFinish = Object.assign((events: EventInput[], result: CommandResult = {}) => {
+            guard(); this.commit(events, { id, digest: hash, result }); return result;
+          }, { intent: { id, digest: hash } });
+          const result = request.call.name === "git_read" ? await this.platform.gitTools.read(session, request.call.arguments, run.abort.signal) :
+            await this.platform.gitTools.write(session, request.call.arguments, this.modelAdviceSource(session, request),
+              { sessionId: session.id, callDigest, signal: run.abort.signal, guard }, finish);
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: result });
+        } catch (error) {
+          const original = this.projection.githubOperations.find((operation) => operation.commandId === id);
+          console.error("Built-in Git capability failed:", error instanceof MoguriError ? error.code : "git_capability");
+          this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: `${error instanceof MoguriError ? error.message :
+            "The original Git capability failed without verified completion."}${original ? ` Inspect original operation ${original.id}; never replay an unobserved write.` : ""}`,
+            isError: true, outcome: original?.dispatched ? "partial" : run.abort.signal.aborted ? "stopped" : "failed" } });
+        }
+        return;
+      }
       if (request.call.name === "project_work") {
         try {
           await this.assertCurrentTool(session, request.call);
@@ -4304,7 +4361,9 @@ export class ControlPlane extends EventEmitter {
         if (request.outcome === "completed" && !request.isError) run.hooks?.done.add(hook.id);
         run.hooks?.calls.delete(request.call.id);
       }
-      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
+      const source = publicToolResults(this.history, this.projection.operationEntries, this.profileId, session.id)
+        .find(({ event }) => event.step_id === request.stepId && event.payload.call.id === request.call.id)?.source;
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true, ...(source ? { source } : {}) } });
     }
   }
   private async waitForCoordinatedSession(run: Run, request: Extract<WorkerRequest, { kind: "delegate" }>) {

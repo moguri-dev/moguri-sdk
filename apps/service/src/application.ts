@@ -23,6 +23,9 @@ export class ApplicationRuntime {
   configuration(): ApplicationConfiguration {
     return structuredClone(this.state);
   }
+  receipt(envelope: CommandEnvelope): CommandResult | undefined {
+    return this.global.receipt(envelope.id, digest(JSON.stringify({ profileId: envelope.profileId, command: envelope.command })));
+  }
   dispatch(envelope: CommandEnvelope, command: ApplicationCommand): CommandResult {
     if (this.closed) throw new MoguriError("shutting_down", "Application maintenance is closing. No global preference was changed.", 503);
     const hash = digest(JSON.stringify({ profileId: envelope.profileId, command }));

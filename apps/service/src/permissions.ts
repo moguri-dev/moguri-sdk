@@ -8,7 +8,7 @@ import { validateRemoteTarget } from "./remote.ts";
 
 export interface Authorization { decision: "ask" | "allow" | "deny"; ruleId?: string; reason: string; actor?: "policy" }
 export const automaticNativeTools = new Set([
-  "read_file", "list_files", "find_files", "search_files", "diff_files", "edit_file", "write_file", "query_data",
+  "git_read", "read_file", "list_files", "find_files", "search_files", "diff_files", "edit_file", "write_file", "query_data",
   "sqlite_query", "sqlite_transaction", "inspect_document", "write_document", "edit_document", "discover_tools", "read_tool_result",
   "read_agent_terminal", "read_command_job", "list_documents", "read_document", "search_document", "query_state", "mutate_state",
   "session_context", "wait_session", "memory_search", "clock", "ask_user", "task_progress",
