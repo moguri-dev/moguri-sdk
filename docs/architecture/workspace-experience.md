@@ -129,7 +129,12 @@ OpenTUI's real committed renderables, frame counter and renderer-idle/output
 boundary, not a new terminal parser or a `setState` callback. Clipboard/export
 effects await their native acknowledgement. Editors open with their actual
 revision; archive/continuation choices stay pending until the actual user
-accepts or cancels them. Existing dirty-edit, question, terminal and settling
+accepts or cancels them. TUI continuation cancellation keeps input disabled until
+the exact terminal record and canonical restored/current draft arrive together.
+It updates the original editor revision before reopening the composer; repeated
+Enter/Escape cannot race a late restore or create another route. A transport
+failure remains explicit and does not invent restored input.
+Existing dirty-edit, question, terminal and settling
 operation guards remain in force. Direct click/Tab/key navigation remains
 direct. Service command results are separately retained and displayed, never
 inserted into model messages. Desktop announces the latest retained service-only
