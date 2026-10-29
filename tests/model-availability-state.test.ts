@@ -14,7 +14,7 @@ test("the 69-to-70 availability upgrade is atomic and never rewrites retained hi
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('native_web_policy_schema','chat_home_schema','model_preferences_schema'); PRAGMA user_version=69; CREATE TRIGGER generated_availability_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='model_preferences_schema' BEGIN SELECT RAISE(ABORT,'Generated availability migration interruption'); END;"); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema'); PRAGMA user_version=69; CREATE TRIGGER generated_availability_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='model_preferences_schema' BEGIN SELECT RAISE(ABORT,'Generated availability migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated availability migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -40,7 +40,7 @@ test("missing, corrupt and premature availability markers fail without repairing
     try {
       await fixture.service.close(); const raw = new DatabaseSync(fixture.service.store.path);
       let original;
-      try { raw.exec(sql); original = retainedCiphertextRows(raw); } finally { raw.close(); }
+      try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id='theme_catalog_schema'"); raw.exec(sql); original = retainedCiphertextRows(raw); } finally { raw.close(); }
       assert.throws(() => new EventStore(fixture.service.store.path, fixture.retentionKey), /model preference.*(marker|lineage)/i);
       const preserved = new DatabaseSync(fixture.service.store.path);
       try { assert.deepEqual(retainedCiphertextRows(preserved), original); } finally { preserved.close(); }
@@ -55,7 +55,7 @@ test("actual preference history cannot be relabelled as schema 69 by deleting it
     sdk.disconnect(); await fixture.service.close();
     const raw = new DatabaseSync(fixture.service.store.path);
     let original;
-    try { raw.exec("DELETE FROM retention_metadata WHERE id='model_preferences_schema'; PRAGMA user_version=69"); original = retainedCiphertextRows(raw); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','model_preferences_schema'); PRAGMA user_version=69"); original = retainedCiphertextRows(raw); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(fixture.service.store.path, fixture.retentionKey), /preference history cannot be relabelled/);
     const preserved = new DatabaseSync(fixture.service.store.path);
