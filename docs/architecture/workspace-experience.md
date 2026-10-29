@@ -62,6 +62,45 @@ need migration/restart/concurrency/cancellation tests and exact installed/native
 qualification. Protocol77 physical and standalone78 payload receipts do not
 qualify changed80 bytes.
 
+### Shared queued-command primitives
+
+The public intake is
+`sdk.commands.submit(sessionId, {client, expectedDraftRevision?, delivery?, held?})`.
+It uses the existing revision-bound `message.send` transaction, not a second
+queue. Actual-user slash input gains typed command metadata; worker-origin tasks,
+workflow prompts and model-produced text do not acquire that authority. The
+shared parser and lower-level `sdk.slash(...)` remain reusable; explicit direct
+SDK dispatch is not a substitute for chat intake.
+
+The service claims the exact next unheld command before a model turn, retaining
+`slash.command_recorded` ownership and encrypted input/result grants. Compiled
+shared SDK handlers execute against the actual profile controller, including
+`/model` and `/theme`, even when every text client disconnects. They do not enter
+model context or invent token charges. Captured Env/root identity is rechecked
+before operations and commits. Model/effort/theme preferences do not become
+filesystem authority. Failed or uncertain work holds later input instead of
+using an older model or replaying effects. User edits reparse exact queued
+command intent; genuinely ordinary text can become a new prompt only through
+that explicit edit.
+
+UI-only results remain retained and block later work until an actual compatible
+client acknowledges application. The API is
+`sdk.commands.attach(client, handlers, {canApply?, onError?})`, returning
+`{clientId, wake, dispose}`. Handlers are keyed by result kind or
+`client-view:NAME`, receive the original immutable-profile SDK, session,
+execution/input/result and AbortSignal, and return an explicit outcome.
+`commands.read`, `claim` and `complete` expose the same exact record. One client
+owns at most one UI claim; its revision and private claim token cannot be
+borrowed by a competing client. No handler means waiting, never raw model text,
+eager navigation or fabricated success.
+
+Stop/close, client detach and restart distinguish undispatched results from
+claimed or running unknown work. Terminal work is not replayed. A disconnected
+SDK drops late socket generations/invalidation frames instead of issuing new
+snapshot reads. Interactive continuation/editor/native UI acknowledgement,
+text-client wiring and the user-selected live-control exceptions are separate
+integration gates for this follow-up, not implied complete by these primitives.
+
 ### Navigation group actions
 
 The group action menu reuses the seven project icon colors and custom picker,

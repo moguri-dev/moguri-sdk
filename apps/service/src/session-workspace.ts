@@ -399,7 +399,8 @@ export class SessionWorkspace {
       case "queue.release": {
         const session = this.session(command.sessionId); this.revision(session.queueRevision, command.expectedRevision);
         if (!session.queue.some((item) => item.id === command.messageId && item.held)) throw new MoguriError("queue_claimed", "This held message was removed, released or already claimed.", 409);
-        this.host.validateAdmission(session, session.queue.find((item) => item.id === command.messageId)!.attachments);
+        const item = session.queue.find((item) => item.id === command.messageId)!;
+        if (!item.command) this.host.validateAdmission(session, item.attachments);
         const result = finish([this.event(session, { event_type: "queue.released", profile_id: this.snapshot().profileId, payload: { messageId: command.messageId } })]);
         this.host.wake(); return result;
       }

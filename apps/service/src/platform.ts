@@ -96,6 +96,7 @@ import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gatewa
 import { dashboardOverview } from "./dashboard.ts";
 import { homeChat, homeWorkspace } from "./chat-workspace.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
+import { isQueuedCommandCommand, isQueuedCommandQuery, type QueuedCommandQuery, type QueuedCommandResponse } from "../../../packages/protocol/src/queued-commands.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -112,6 +113,7 @@ function memoryArguments(tool: string, args: Record<string, unknown>) {
 export interface PlatformHost {
   snapshot(): Snapshot;
   events(): StoredEvent[];
+  commandQuery?(query: QueuedCommandQuery): QueuedCommandResponse;
   commit(events: EventInput[], forget?: ForgetRequest): void;
   finish: WorkspaceFinish;
   invalidateApprovals(sessionId?: string): void;
@@ -685,6 +687,10 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }));
   }
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
+    if (isQueuedCommandQuery(query)) {
+      if (!this.host.commandQuery) throw new MoguriError("command_query_unavailable", "This host has no exact queued-command result reader. No input or result was reconstructed.", 409);
+      return this.host.commandQuery(query);
+    }
     if (isPricingQuery(query)) return pricingCatalog(this.snapshot(), this.options.pricing?.now?.());
     if (isKanbanQuery(query)) return this.host.kanbanQuery(query);
     if (query.type === "dashboard.overview") return dashboardOverview(this.snapshot(), this.host.events(), this.budgets, query);
@@ -1102,6 +1108,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     return { id: request.id, token: lease.token, ...(request.streaming ? { streaming: true } : {}) };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (isQueuedCommandCommand(command)) throw new MoguriError("command_authority", "Queued command clients require their actual owning controller. No replacement profile authority was used.", 403);
     if (isPricingCommand(command)) {
       const revision = this.snapshot().providerPriceRevision;
       if (command.expectedRevision !== revision) throw new MoguriError("pricing_conflict", "Provider references changed. Reload before another exact refresh.", 409);

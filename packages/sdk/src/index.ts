@@ -5,7 +5,7 @@ import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, C
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
-import { listSlashCommands } from "./slash-catalog.ts";
+import { createCommandsApi } from "./commands.ts";
 import { responseText, type ActivityCursor } from "../../protocol/src/activity.ts";
 import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../protocol/src/knowledge.ts";
 import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../protocol/src/extensions.ts";
@@ -23,6 +23,7 @@ export * from "./brand.ts";
 export * from "./conversation.ts";
 export * from "./slash.ts";
 export * from "./slash-catalog.ts";
+export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
 export { DraftEditor } from "../../client/src/draft.ts";
 export type { DraftDictation } from "../../client/src/draft.ts";
@@ -33,7 +34,14 @@ export const attachmentStatus = (attachment: Attachment): string => attachment.k
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
-  readonly commands = { list: (sessionId: string, signal?: AbortSignal) => listSlashCommands(this, sessionId, signal) };
+  readonly commands = createCommandsApi(this, async (command, connection) => {
+    if (this.connection !== connection) throw new ClientError("command_connection_changed", "The original command connection changed. Its UI action was not acknowledged through a replacement service.");
+    const result = await this.request("/v1/commands", { id: crypto.randomUUID(), profileId: this.profileId, command });
+    if (!isRecord(result) || typeof result.id !== "string" || command.type === "slash.client.complete" && typeof result.revision !== "number") {
+      throw new ClientError("command_response", "The original client acknowledgement did not return a valid exact response.");
+    }
+    return { id: result.id, ...(typeof result.revision === "number" ? { revision: result.revision } : {}) };
+  });
   readonly browser = {
     state: (sessionId: string) => this.query({ type: "browser.state", sessionId }),
     host: {

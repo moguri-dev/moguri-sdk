@@ -1,30 +1,18 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { DashboardQuerySchema, ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, sessionPullRequestUrl, BUDGET_WARNING, type ArtifactExport, type ArtifactKind, type PlanBinding } from "../../protocol/src/index.ts";
+import { DashboardQuerySchema, ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, sessionPullRequestUrl, BUDGET_WARNING } from "../../protocol/src/index.ts";
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
 import { RememberApprovalSchema } from "../../protocol/src/permissions.ts";
 import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol/src/application-updates.ts";
-import { continueWorkInput, KanbanSourceSchema, kanbanPreferences, type ContinueWorkReview } from "../../protocol/src/kanban.ts";
+import { continueWorkInput, KanbanSourceSchema, kanbanPreferences } from "../../protocol/src/kanban.ts";
 import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
 import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } from "../../protocol/src/model.ts";
 import { themePalettes, type Appearance } from "../../protocol/src/preferences.ts";
+import { parseSlashInput, type SlashResult } from "../../protocol/src/queued-commands.ts";
 
-export type SessionPanel = "Terminal" | "Browser" | "Insights" | "Dashboard" | "PR" | "Code change" | "Work item" | "Changes" | "Files" | "Plan" | "Artifacts" | "Candidates" | "Side chat" | "Suggestions" | "Attention" | "Sandbox";
-export interface ArtifactEditorRequest { id: string | null; revision: number; kind: ArtifactKind; name: string; text: string; projectId: string | null; sessionId: string | null; status: "active" | "archived"; folderId?: string | null; workItemId?: string | null }
-export interface PlanEditorRequest extends Partial<PlanBinding> { sessionId: string; path: string; text: string; digest: string; env: "Local" | "Remote" | "Sandbox" }
-export type SlashResult =
-  | { kind: "ok"; message: string }
-  | { kind: "session"; sessionId: string; side: boolean }
-  | { kind: "panel"; panel: SessionPanel | "Settings" | "Models" | "Queue"; url?: string; path?: string; text?: string; allProjects?: boolean; planEditor?: PlanEditorRequest }
-  | { kind: "text"; text: string }
-  | { kind: "continue-work"; review: ContinueWorkReview; choices: ["kanban", "prompt"] }
-  | { kind: "copy"; text: string }
-  | { kind: "artifact-editor"; artifact: ArtifactEditorRequest }
-  | { kind: "profiles" }
-  | { kind: "profile"; profileId: string }
-  | { kind: "export"; document: ArtifactExport; path?: string };
+export type { SessionPanel, ArtifactEditorRequest, PlanEditorRequest, SlashResult } from "../../protocol/src/queued-commands.ts";
 export const slashCommands = [
   { name: "approve", description: "Approve the current action once or remember a named tool/command in its exact scope", argument: "[once|session|project|global] [exact|family|tool]" },
   { name: "folder-chat", description: "List project folders or create a Local chat with every explicitly captured member root", argument: "[FOLDER_ID]" },
@@ -137,11 +125,7 @@ export function parseAttachmentTrigger(text: string): { prefix: keyof typeof att
   return { prefix, query: match[2]!, start: text.length - match[2]!.length - 1 };
 }
 export function parseSlash(text: string): { name: string; argument: string } | null {
-  if (!text.startsWith("/")) return null;
-  const match = text.trim().match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
-  if (!match) return null;
-  const name = match[1]!;
-  return { name: name === "termnial" ? "terminal" : name === "metachat" ? "meta" : name, argument: match[2] ?? "" };
+  return parseSlashInput(text);
 }
 export const isSharedSlash = (name: string): boolean => slashCommands.some((command) => command.name === name || "aliases" in command && command.aliases.some((alias) => alias === name));
 export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: string, client: "desktop" | "tui" | "cli"): Promise<SlashResult> {

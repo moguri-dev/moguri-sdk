@@ -16,6 +16,7 @@ export class MoguriClient {
   private timer?: ReturnType<typeof setTimeout>;
   private reconnect?: ReturnType<typeof setTimeout>;
   private disposed = false;
+  private generation = 0;
   private refreshTask?: Promise<void>;
   private refreshAgain = false;
   private refreshError: unknown;
@@ -30,7 +31,9 @@ export class MoguriClient {
   private update(change: Partial<ClientState>): void { this.state = { ...this.state, ...change }; for (const listener of this.listeners) listener(); }
   async connect(): Promise<void> {
     this.disposed = false;
+    const generation = ++this.generation;
     await this.refresh();
+    if (this.disposed || generation !== this.generation) throw new ClientError("connection_cancelled", "This original client opening was cancelled. No replacement connection or input was used.");
     if (!this.state.snapshot && this.refreshError instanceof ClientError) throw this.refreshError;
     this.openSocket();
   }
@@ -86,15 +89,18 @@ export class MoguriClient {
     }
   }
   refresh(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     if (this.refreshTask) { this.refreshAgain = true; return this.refreshTask; }
     this.refreshTask = this.performRefresh().finally(() => { this.refreshTask = undefined; });
     return this.refreshTask;
   }
   private async performRefresh(): Promise<void> {
+    const generation = this.generation;
     try {
       do {
         this.refreshAgain = false;
         const snapshot = await this.request("/v1/snapshot");
+        if (this.disposed || generation !== this.generation) return;
         if (!isSnapshot(snapshot, this.profileId)) {
           throw new Error("The service protocol is incompatible. Update both clients.");
         }
@@ -102,14 +108,15 @@ export class MoguriClient {
         const sessions = new Set(snapshot.sessions.map((session) => session.id));
         this.update({ snapshot, error: null, events: this.state.events.filter((event) => (!event.project_id || projects.has(event.project_id)) && (!event.session_id || sessions.has(event.session_id))) });
         this.refreshError = undefined;
-      } while (this.refreshAgain && !this.disposed);
+      } while (this.refreshAgain && !this.disposed && generation === this.generation);
     } catch (error) {
+      if (this.disposed || generation !== this.generation) return;
       this.refreshError = error;
       this.update({ status: "disconnected", error: error instanceof Error ? error.message : "Service connection failed." });
     }
   }
   private scheduleRefresh(): void {
-    if (this.timer) return;
+    if (this.disposed || this.timer) return;
     this.timer = setTimeout(() => { this.timer = undefined; void this.refresh(); }, 40);
   }
   private openSocket(): void {
@@ -119,6 +126,7 @@ export class MoguriClient {
     this.socket = socket;
     socket.onopen = () => socket.send(JSON.stringify({ type: "authenticate", protocolVersion: PROTOCOL_VERSION, token: this.connection.token, after: this.after, profileId: this.profileId }));
     socket.onmessage = (frame) => {
+      if (this.disposed || this.socket !== socket) return;
       try {
         const message: unknown = JSON.parse(String(frame.data));
         if (!isRecord(message)) throw new Error("Invalid event frame.");
@@ -141,9 +149,9 @@ export class MoguriClient {
         socket.close();
       }
     };
-    socket.onerror = () => this.update({ error: "The event connection failed. Reconnecting; unsent edits are preserved." });
+    socket.onerror = () => { if (!this.disposed && this.socket === socket) this.update({ error: "The event connection failed. Reconnecting; unsent edits are preserved." }); };
     socket.onclose = () => {
-      if (this.disposed) return;
+      if (this.disposed || this.socket !== socket) return;
       this.update({ status: "disconnected" });
       this.reconnect = setTimeout(() => {
         void (async () => {
@@ -157,6 +165,7 @@ export class MoguriClient {
   }
   disconnect(): void {
     this.disposed = true;
+    this.generation++; this.refreshAgain = false;
     clearTimeout(this.timer);
     clearTimeout(this.reconnect);
     this.socket?.close();

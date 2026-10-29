@@ -29,6 +29,9 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, textFilePage } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
+import { QueuedCommands, type CommandEnvironment, type CommandOwner } from "./queued-commands.ts";
+import { isQueuedCommandCommand, parseSlashInput, type CommandBinding, type CommandClient } from "../../../packages/protocol/src/queued-commands.ts";
+import { sourceRootSync } from "./repository-source.ts";
 import { CopilotAdapter, KeyringCredentials, type ProviderAdapter, type PreparedModel } from "./provider.ts";
 import { validateTool, executeTool } from "./tools.ts";
 import { effectiveTools, repositoryTools } from "./tools.ts";
@@ -178,6 +181,7 @@ export class ControlPlane extends EventEmitter {
   readonly stateSql: SessionStateSql;
   readonly issueTools: IssueTools;
   readonly projectWork: ProjectWorkRuntime;
+  readonly queuedCommands: QueuedCommands;
   readonly generations: CandidateGenerations;
   readonly candidateCleanup: CandidateCleanupRuntime;
   readonly ownedRoles: OwnedRoles;
@@ -200,7 +204,7 @@ export class ControlPlane extends EventEmitter {
   private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
   private readonly mcpCatalogs = new Map<string, { digest: string; scopeDigest: string; helperDigest: string; serverId: string; tool: string }>();
   private readonly profileHooks?: ProfileHooks;
-  constructor(readonly store: EventStore, provider: ProviderAdapter | undefined = undefined, private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string; profileHooks?: ProfileHooks } = {}) {
+  constructor(readonly store: EventStore, provider: ProviderAdapter | undefined = undefined, private readonly workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url)), platformOptions: PlatformOptions & { stateDir?: string; profileHooks?: ProfileHooks } = {}, commandEnvironment?: () => Promise<CommandEnvironment>) {
     super();
     this.profileHooks = platformOptions.profileHooks;
     this.nativeDns = platformOptions.sandbox?.dns;
@@ -372,9 +376,16 @@ export class ControlPlane extends EventEmitter {
         .some((owned) => !owned.startsWith("remote/") && localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
       cloneRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).some((owned) => localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
       sharedGlobals: Boolean(this.profileHooks),
+      commandQuery: (query) => this.queuedCommands.query(query),
     }, platformOptions);
     this.stateSql = new SessionStateSql(store, { snapshot: () => this.snapshot(), scope: (session) => this.coordinationScope(session),
       commit: (events) => this.commit(events), progress: this.platform.progress, knowledge: this.platform.knowledge });
+    this.queuedCommands = new QueuedCommands(store, {
+      snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events) => this.commit(events),
+      binding: (session) => this.commandBinding(session), environment: commandEnvironment,
+      pause: (id) => this.paused.add(id), wake: () => this.wake(),
+      subscribe: (listener) => { this.on("change", listener); return () => { this.off("change", listener); }; },
+    });
     this.issueTools = new IssueTools(this.platform.github, this.platform.linear);
     this.projectWork = new ProjectWorkRuntime(this.store, this.platform, {
       snapshot: () => this.snapshot(), commit: (events) => this.commit(events), finish: (id, hash) => this.commandFinish(id, hash),
@@ -485,6 +496,8 @@ export class ControlPlane extends EventEmitter {
     };
   }
   async initialize(): Promise<void> {
+    const interruptedCommands = this.queuedCommands.recover();
+    if (interruptedCommands.length) this.commit(interruptedCommands);
     this.candidateCleanup.migrate();
     const legacyAccounting = this.platform.budgets.legacyEvents();
     if (legacyAccounting.length) this.commit(legacyAccounting);
@@ -698,9 +711,15 @@ export class ControlPlane extends EventEmitter {
     this.platform?.browser.synchronize();
     this.projectWork?.changed(appended);
   }
-  private commandFinish(id: string, commandDigest: string): WorkspaceFinish {
+  private commandFinish(id: string, commandDigest: string, owner?: CommandOwner): WorkspaceFinish {
     return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {
+      owner?.guard();
       if (!forget && events.some((event) => event.project_id && this.deletingProjects.has(event.project_id) || event.session_id && this.deletingSessions.has(event.session_id))) throw new MoguriError("workspace_removing", "This workspace is being removed. No late state was resurrected.", 409);
+      if (owner) {
+        const inserted = events.filter((event) => event.event_type === "queue.enqueued" && event.session_id === owner.sessionId);
+        const ids = inserted.flatMap((event) => event.event_type === "queue.enqueued" ? [event.payload.item.id] : []);
+        if (ids.length) events = [...events, this.event(this.session(owner.sessionId), "queue.reordered", { messageIds: [...ids, ...this.session(owner.sessionId).queue.map((item) => item.id)] })];
+      }
       this.commit(events, { id, digest: commandDigest, result }, forget);
       return result;
     }, { intent: { id, digest: commandDigest } });
@@ -865,6 +884,25 @@ export class ControlPlane extends EventEmitter {
   }
   private coordinationScope(session: Session): string {
     return frameDigest(["coordination-binding-v1", this.coordinationBinding(session)]);
+  }
+  private commandBinding(session: Session): CommandBinding {
+    const binding: CommandBinding = { profileId: this.profileId, sessionId: session.id, env: session.controls.env,
+      projectId: session.projectId, workspaceId: session.workspaceId, roots: [], remote: null };
+    if (session.controls.env === "Remote") {
+      const target = this.projection.settings.values.remote;
+      binding.remote = target ? { targetDigest: frameDigest(target),
+        root: session.projectId ? this.platform.sessions.projects.configuration(session.projectId).values.remotePath : null } : null;
+      return binding;
+    }
+    if (session.repositories) binding.roots = session.repositories.map((repository) => ({
+      projectId: repository.projectId, ...sourceRootSync(this.platform.managed.project(session, repository.projectId).path),
+    }));
+    else if (session.projectId) binding.roots = [{ projectId: session.projectId, ...sourceRootSync(this.platform.managed.project(session).path) }];
+    else if (session.controls.env === "Local" && (homeWorkspace(session) || homeChat(session))) {
+      const root = session.homeRoot ?? this.platform.sessions.homeRoot(); assertChatHome(root);
+      binding.roots = [{ projectId: null, ...root }];
+    }
+    return binding;
   }
   private coordinationBinding(session: Session): import("../../../packages/protocol/src/coordination.ts").CoordinationBinding {
     if (session.controls.env === "Sandbox") throw new MoguriError("coordination_env", "Live coordination needs separately qualified native ownership. Snapshot side chats remain available; no Local fallback.", 409);
@@ -2189,7 +2227,8 @@ export class ControlPlane extends EventEmitter {
     this.dispatching.set(commandId, { digest: hash, result });
     return result;
   }
-  dispatch(raw: unknown): Promise<CommandResult> {
+  dispatch(raw: unknown, owner?: CommandOwner): Promise<CommandResult> {
+    owner?.guard();
     const envelope = parse(CommandSchema, raw);
     if (envelope.profileId !== this.store.profileId) return Promise.reject(new MoguriError("profile_scope", "This command belongs to another profile. No Default fallback or cross-profile receipt was used.", 403));
     const hash = digest(JSON.stringify(envelope.command));
@@ -2198,11 +2237,12 @@ export class ControlPlane extends EventEmitter {
       if (pending.digest !== hash) return Promise.reject(new MoguriError("idempotency_conflict", "A command ID was reused with different arguments.", 409));
       return pending.result;
     }
-    const result = this.perform(envelope).finally(() => this.dispatching.delete(envelope.id));
+    const result = this.perform(envelope, owner).finally(() => this.dispatching.delete(envelope.id));
     this.dispatching.set(envelope.id, { digest: hash, result });
     return result;
   }
-  private async perform(raw: unknown): Promise<CommandResult> {
+  private async perform(raw: unknown, owner?: CommandOwner): Promise<CommandResult> {
+    owner?.guard();
     if (this.shuttingDown) throw new MoguriError("shutting_down", "Moguri is shutting down. The draft was not sent.", 503);
     const envelope = parse(CommandSchema, raw);
     if (envelope.profileId !== this.store.profileId) throw new MoguriError("profile_scope", "Choose the command's actual profile; no fallback is allowed.", 403);
@@ -2218,7 +2258,8 @@ export class ControlPlane extends EventEmitter {
       throw new MoguriError("candidate_cleanup_pending", "This session has an unfinished permanent deletion. Retry deletion or reconcile its exact cleanup; no new work was admitted.", 409);
     }
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
-    const finish = this.commandFinish(envelope.id, commandDigest);
+    const finish = this.commandFinish(envelope.id, commandDigest, owner);
+    if (isQueuedCommandCommand(command)) return this.queuedCommands.execute(command, finish);
     if (command.type === "session.home") {
       const session = this.session(command.sessionId);
       if (!homeChat(session) || session.controls.env !== "Local") throw new MoguriError("chat_home_scope", "Only an ordinary project-free Local chat can bind Home. No private role, project or other Env was changed.", 403);
@@ -2245,6 +2286,10 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "workflow.start") {
       const current = this.session(command.sessionId), text = `/${command.kind}${command.prompt ? ` ${command.prompt}` : ""}`;
       if (!command.prompt.isWellFormed()) throw new MoguriError("workflow_text", "Workflow prompts need lossless Unicode.");
+      if (owner) {
+        if (owner.sessionId !== current.id || owner.item.command?.name !== command.kind) throw new MoguriError("command_source", "This workflow does not belong to the exact queued command input.", 409);
+        return this.enqueuePrompt(current, { text, attachments: owner.item.attachments }, "queue", false, false, finish, command.kind);
+      }
       if (!current.projectId && !current.repositories && !command.prompt.trim() && !current.messages.length && !current.createdParentSessionId && !current.draft.attachments.length) throw new MoguriError("workflow_context", "Select a project or provide explicit code/context for this project-free workflow. No previous root was reused.");
       if (command.consumeDraft) {
         this.revision(current.draft.revision, command.consumeDraft.expectedRevision);
@@ -2423,7 +2468,7 @@ export class ControlPlane extends EventEmitter {
         if (session.queue.length && session.queue.every((item) => item.delivery === "steer") && !this.blocked(session)) {
           throw new MoguriError("unapplied_steer", "An unapplied steer belongs to its old turn. Explicitly queue it as a new turn or remove it.", 409);
         }
-        if (session.queue.some((item) => item.delivery !== "steer")) { this.assertOrdinaryTurn(session); this.available(session.controls, true, session); }
+        if (session.queue.find((item) => item.delivery !== "steer") && !session.queue.find((item) => item.delivery !== "steer")?.command) { this.assertOrdinaryTurn(session); this.available(session.controls, true, session); }
         this.paused.delete(session.id);
         finish([...session.queue.filter((item) => item.held && item.delivery !== "steer").map((item) => this.event(session, "queue.released", { messageId: item.id })), this.event(session, "session.resumed", {})]);
         this.pumpAll();
@@ -2463,6 +2508,9 @@ export class ControlPlane extends EventEmitter {
       case "message.send": {
         this.revision(session.draft.revision, command.expectedRevision);
         this.platform.inputs.assertDraftReady(session.id);
+        const slash = parseSlashInput(session.draft.text);
+        if (slash && !command.continueWorkChoice) return this.enqueueCommand(session, slash, command.client ?? "cli", command.delivery, Boolean(command.held), finish);
+        if (session.draft.text.startsWith("/") && !slash) throw new MoguriError("slash_input", "Choose a complete slash command. The original draft was preserved; no text was sent to a model.");
         const continuation = !command.held && command.delivery === "queue" && session.projectId ? continueWorkInput(session.draft.text) : null;
         if (command.continueWorkChoice && !continuation) throw new MoguriError("continue_work_choice_scope", "A continuation choice belongs only to this exact new project draft. Held, interrupted or unrelated prompts cannot acquire it.", 409);
         if (continuation) {
@@ -2497,9 +2545,16 @@ export class ControlPlane extends EventEmitter {
         if (command.type === "queue.edit") {
           const item = session.queue.find((item) => item.id === command.messageId)!;
           if (!command.text.trim() && !item.attachments.length) throw new MoguriError("empty_message", "Queued messages cannot be empty.");
+          const parsed = parseSlashInput(command.text);
+          if (command.text.startsWith("/") && !parsed) throw new MoguriError("slash_input", "Use a complete command name. The original queue item was preserved.");
+          if (parsed) {
+            if (item.delivery !== "queue") throw new MoguriError("slash_delivery", "Convert this old steer into an ordinary queued item before editing it into a command.", 409);
+            return finish([this.event(session, "queue.edited", { messageId: item.id, text: command.text, attachments: item.attachments,
+              command: this.queuedCommands.capture(session, parsed, item.command?.client ?? "cli") })]);
+          }
           const captured = this.platform.inputs.normalizePaste(command.text, item.attachments);
           return finish([this.event(session, "queue.edited", { messageId: command.messageId, text: captured.text,
-            ...(captured.attachments !== item.attachments ? { attachments: captured.attachments } : {}) })]);
+            ...(captured.attachments !== item.attachments ? { attachments: captured.attachments } : {}), ...(item.command ? { command: null } : {}) })]);
         }
         return finish([this.event(session, "queue.removed", { messageId: command.messageId })]);
       case "session.stop":
@@ -2553,6 +2608,19 @@ export class ControlPlane extends EventEmitter {
         } finally { if (run.approvalResponse === approval.id) run.approvalResponse = undefined; }
       }
     }
+  }
+  private enqueueCommand(session: Session, parsed: { name: string; argument: string }, client: CommandClient,
+    delivery: "queue" | "steer" | "interrupt", held: boolean, finish: WorkspaceFinish): CommandResult {
+    if (delivery !== "queue") throw new MoguriError("slash_delivery", "Slash commands use the ordered command queue. Steer/Interrupt text must remain an explicit prompt; nothing was sent.");
+    if (session.queue.length >= 100) throw new MoguriError("queue_limit", "The queue is limited to 100 unclaimed prompts or commands.");
+    this.attachments(session, session.draft.attachments);
+    const command = this.queuedCommands.capture(session, parsed, client);
+    const item = { id: randomUUID(), text: session.draft.text, attachments: session.draft.attachments, delivery: "queue" as const,
+      command, ...(held ? { held: true } : {}) };
+    const result = finish([this.event(session, "queue.enqueued", { item }), this.event(session, "draft.saved", { text: "", attachments: [] })], { id: item.id });
+    if (!held && session.queue.every((entry) => entry.held || entry.delivery === "steer")) this.paused.delete(session.id);
+    if (!held) this.pumpAll();
+    return result;
   }
   private enqueuePrompt(session: Session, input: { text: string; attachments: Session["draft"]["attachments"] }, delivery: "queue" | "steer" | "interrupt", held: boolean, consumeDraft: boolean, finish: WorkspaceFinish, workflow?: WorkflowKind): CommandResult {
     if (held && delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
@@ -2657,6 +2725,13 @@ export class ControlPlane extends EventEmitter {
     if (this.shuttingDown) return;
     this.settleHomeBackgroundWriters();
     for (let session of this.projection.sessions) {
+      const command = session.queue.find((item) => item.delivery !== "steer" && !item.held);
+      if (command?.command) {
+        if (!this.removingSession(session.id) && !session.turnId && !this.runs.has(session.id) && !this.nativeAdmissions.has(session.id) &&
+          session.status !== "archived" && !this.paused.has(session.id) && !this.queuedCommands.busy(session.id)) this.queuedCommands.pump(session, command);
+        continue;
+      }
+      if (this.queuedCommands.busy(session.id)) continue;
       if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.removingSession(session.id) || session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
       if (session.kind === "subagent" && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
@@ -4075,6 +4150,7 @@ export class ControlPlane extends EventEmitter {
     }
   }
   private stop(sessionId: string, holdQueue = true, includeCreatedChildren = true): void {
+    this.queuedCommands.cancel(sessionId);
     this.projectWork.stopOrigin(sessionId);
     try { this.decisions.cancelSession(sessionId); } catch (error) { console.error("Decision cancellation persistence failed; actual owned abort was still requested:", error instanceof MoguriError ? error.code : "decision_stop"); }
     if (includeCreatedChildren) for (const session of this.projection.sessions) if (session.createdParentSessionId === sessionId) this.stop(session.id);
@@ -4345,6 +4421,7 @@ export class ControlPlane extends EventEmitter {
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    const commands = this.queuedCommands.close();
     const candidateCleanup = this.candidateCleanup.close();
     const admissions = [...this.nativeAdmissions.values()];
     for (const admission of admissions) admission.abort.abort();
@@ -4353,7 +4430,7 @@ export class ControlPlane extends EventEmitter {
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
     const native = this.sandbox.close();
-    const local = await Promise.allSettled([candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.platform.close(options)]);
+    const local = await Promise.allSettled([commands, candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while ((this.runs.size || this.externalEffects.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);

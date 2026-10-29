@@ -65,6 +65,8 @@ export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
+export * from "./queued-commands.ts";
+import { CommandClientSchema, parseSlashInput, projectCommandExecution, type CommandExecution, type QueuedSlash } from "./queued-commands.ts";
 
 export const PROTOCOL_VERSION = 80;
 export const PROFILE_ID = "default";
@@ -93,6 +95,7 @@ export const CommandSchema = object({
       start: Type.Integer({ minimum: 0, maximum: MAX_TEXT }), end: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }),
     object({ type: Type.Literal("attachment.add"), ...sessionId, expectedRevision: revision, path: Type.String({ minLength: 1, maxLength: 4096 }) }),
     object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]), held: Type.Optional(Type.Boolean()),
+      client: Type.Optional(CommandClientSchema),
       continueWorkChoice: Type.Optional(Type.Union([Type.Literal("kanban"), Type.Literal("prompt")])) }),
     object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text }),
     object({ type: Type.Literal("queue.remove"), ...sessionId, messageId: id, expectedRevision: revision }),
@@ -110,7 +113,7 @@ export const CommandSchema = object({
 });
 export type CommandEnvelope = Static<typeof CommandSchema>;
 export type Command = CommandEnvelope["command"];
-export type CommandResult = { id?: string; revision?: number };
+export type CommandResult = { id?: string; revision?: number; commandClaim?: import("./queued-commands.ts").CommandClaim };
 
 export interface Project { id: string; name: string; path: string }
 export const ToolCallSchema = Type.Object({
@@ -177,6 +180,7 @@ export interface QueueItem {
   origin?: CoordinationTaskOrigin;
   workflow?: { kind: WorkflowKind };
   sidePromptOrigin?: { sessionId: string; commandDigest: string };
+  command?: QueuedSlash;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; stepId?: string; outcome: string; env?: Controls["env"] }
@@ -274,6 +278,7 @@ export interface Connection {
 }
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
+  "slash.command_recorded": { execution: CommandExecution };
   "project.added": { project: Project };
   "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; purpose?: "kanban"; projectFolderId?: string; repositories?: SessionRepository[]; homeRoot?: SessionHomeRoot; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; workItemUrl?: string | null; githubSource?: GithubSessionOrigin; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "session.home_bound": { root: SessionHomeRoot };
@@ -306,7 +311,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "draft.saved": { text: string; attachments: Attachment[] };
   "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
   "queue.enqueued": { item: QueueItem };
-  "queue.edited": { messageId: string; text: string; attachments?: Attachment[] };
+  "queue.edited": { messageId: string; text: string; attachments?: Attachment[]; command?: QueuedSlash | null };
   "queue.removed": { messageId: string };
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
@@ -429,7 +434,7 @@ export type StoredEvent = EventInput & {
 };
 export const eventTypes: readonly EventType[] = [
   "coordination.linked", "coordination.message", "coordination.delivered", "command.inspected", "process.ended",
-  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
@@ -475,6 +480,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const linearOperations = new Map<string, LinearOperation>();
   const dependencyRegistries = new Map<string, DependencyRegistry>();
   const jobs = new Map<string, CapabilityJob>();
+  const commandExecutions = new Map<string, CommandExecution>();
   const oauthAuthorizations = new Map<string, McpAuthorization>();
   const configurationProposals = new Map<string, ConfigurationProposal>();
   const attention = new Map<string, Attention>();
@@ -689,12 +695,37 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       for (const [id, save] of planSaves) if (save.sessionId === event.payload.deletedSessionId) planSaves.delete(id);
       for (const [id, call] of remoteMcpCalls) if (call.sessionId === event.payload.deletedSessionId) remoteMcpCalls.delete(id);
       for (const [id, workspace] of sandboxWorkspaces) if (workspace.sessionId === event.payload.deletedSessionId) sandboxWorkspaces.delete(id);
+      for (const [id, execution] of commandExecutions) if (execution.sessionId === event.payload.deletedSessionId) commandExecutions.delete(id);
     }
     if (event.event_type === "project.removed") {
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
       for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings, compactions, planSaves, remoteMcpCalls, sandboxWorkspaces]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const [id, execution] of commandExecutions) if (execution.projectId === event.payload.deletedProjectId) commandExecutions.delete(id);
+    }
+    if (event.event_type === "slash.command_recorded") {
+      const next = event.payload.execution, previous = commandExecutions.get(next.id), owner = sessions.get(next.sessionId);
+      if (!owner || next.profileId !== event.profile_id || next.sessionId !== event.session_id || next.projectId !== event.project_id) {
+        throw new MoguriError("command_history", "Queued command history is outside its original owning profile/session/project.", 409);
+      }
+      if (!previous) {
+        const head = owner.queue.find((item) => item.delivery !== "steer" && !item.held), parsed = head && parseSlashInput(head.text);
+        if (!head?.command || head.origin || head.workflow || head.sidePromptOrigin || head.mode || head.id !== next.queueItemId ||
+          head.command.actor !== "user" || head.command.name !== next.name || head.command.client !== next.client ||
+          head.command.bindingDigest !== next.bindingDigest || !parsed || parsed.name !== next.name || parsed.argument !== head.command.argument) {
+          throw new MoguriError("command_history", "Queued command claim lost its exact ordered user input. No model prompt or authority was substituted.", 409);
+        }
+        owner.queue = owner.queue.filter((item) => item.id !== head.id); owner.queueRevision++;
+      }
+      commandExecutions.set(next.id, projectCommandExecution(previous, next));
+      if (!owner.turnId) {
+        const blocked = blockedSessions.has(owner.id) || Boolean(owner.workspaceId ? blockedWorkspaces.has(owner.workspaceId) : owner.projectId && blockedProjects.has(owner.projectId));
+        if (next.status === "running") owner.status = "running";
+        else if (next.status === "completed") owner.status = blocked ? "waiting_input" : owner.queue.length ? "queued" : "idle";
+        else owner.status = "waiting_input";
+        if (next.diagnostic && next.status !== "completed") owner.lastError = next.diagnostic;
+      }
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -1242,7 +1273,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       case "queue.edited": {
         const item = session.queue.find((item) => item.id === event.payload.messageId);
-        if (item) { item.text = event.payload.text; delete item.origin; delete item.workflow; if (event.payload.attachments) item.attachments = event.payload.attachments; }
+        if (item) {
+          item.text = event.payload.text; delete item.origin; delete item.workflow; delete item.sidePromptOrigin;
+          if (event.payload.attachments) item.attachments = event.payload.attachments;
+          if (event.payload.command === null) delete item.command;
+          else if (event.payload.command !== undefined) item.command = structuredClone(event.payload.command);
+        }
         session.queueRevision++;
         break;
       }
@@ -1444,7 +1480,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     coordinationMessages: [...coordinationMessages.values()].filter((message) => sessions.has(message.toSessionId)),
     settings, lastModelSelection, chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
-    jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
+    jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()], projectWorkRuns: [...projectWorkRuns.values()],
     providerPriceCatalogs, providerPriceRevision,

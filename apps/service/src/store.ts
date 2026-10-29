@@ -56,6 +56,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "slash.command_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((value): value is string => value !== null);
     case "tool.completed": return input.payload.rawDigest ? [input.payload.rawDigest] : [];
     case "candidate.owner_bound": {
       const evidence = input.payload.owner.generationEvidence;
