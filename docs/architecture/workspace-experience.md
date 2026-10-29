@@ -1,5 +1,47 @@
 # Workspace experience and skill gateway
 
+## Follow-up interaction contract
+
+The owner requires ten visible project-free root sessions, five ordinary roots
+per project or captured project folder, and five children per session, with
+quiet Show more/less actions. Children do not consume their root quota. Search
+and selected-session reachability must remain useful; rendering limits never
+change the complete service-owned sibling order, root ownership or drag intent.
+Individual projects can collapse like folders without archiving or moving work.
+
+Copy-icon success needs an actual clipboard acknowledgement, a short visible
+check/Copied state and accessible status, not optimistic success or lost focus.
+Failures remain explicit. Policy hints may open the actual owning setting only
+when its target is known; this is navigation, never a permission grant.
+
+The user explicitly selected ordered slash-command queueing: execute commands
+when reached as commands, never as model prompt text. A second explicit choice
+exempts only live stop/approval controls and `/yolo`, not view-only navigation
+or theme changes. Click/Tab/key navigation remains direct. There is one shared
+SDK intake and one service queue with actual-user origin, captured scope,
+single execution ownership, result/ack and partial/no-replay recovery.
+`/yolo` chooses qualified Max when available or Autopilot and delegates session
+tool approvals; it never changes model/Env, promotes read-only scope or lifts
+hard policy/budget/native restrictions.
+
+Project-folder color/removal and grouped Sandbox execution must be typed,
+revision-bound service/SDK operations. Ungrouping moves navigation entries,
+not repositories or captured session roots. A Sandbox folder turn leases every
+actual captured root, uses only owned private copies and explicit repository
+tool selection, and retains exact cancellation, accounting, publication and VM
+absence. No common-parent/live-checkout mount or Local fallback is permitted.
+Hide Kanban is presentation, not a new GitHub metadata request or permission
+to replace a captured root/account/policy binding.
+
+Reuse React/Electron/OpenTUI, TypeBox, maintained pi-ai, existing Node/SQLite,
+clipboard bridge, inline icons, private stages and native protocol under their
+current licenses. No new library, renderer or agent loop is needed. Protocol
+79 is reserved for this slice with distinct new feature markers; model marker
+77 remains independent. Unsupported theme-bearing 78 and future 80 state must
+be refused before mutation. The independent themes implementation is not
+imported or stacked. New durable shapes need migration/restart/concurrency/
+cancellation tests and exact installed/native qualification.
+
 ## Change contract
 
 This slice simplifies the existing macOS alpha, not the wider release roadmap.
