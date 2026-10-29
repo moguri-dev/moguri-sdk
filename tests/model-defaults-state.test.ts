@@ -107,7 +107,7 @@ async function writePreContinuityState(service: Awaited<ReturnType<typeof setupF
     event.payload.selection?.preferredThinkingEffort !== undefined)) throw new Error("Generate actual pre-continuity controls, not relabelled model preferences.");
   const path = service.store.path; await service.close();
   const db = new DatabaseSync(path);
-  try { db.exec("PRAGMA user_version=76;"); }
+  try { db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; PRAGMA user_version=76; COMMIT;"); }
   finally { db.close(); }
 }
 
@@ -122,6 +122,7 @@ test("schema 76 upgrades model continuity without rewriting encrypted history, r
     store = new EventStore(path, fixture.retentionKey);
     assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(store.db.prepare("SELECT id,value FROM retention_metadata ORDER BY id").all(), metadata);
+    assert.equal(store.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()?.value, "1");
     assert.deepEqual(retainedCiphertextRows(store.db), before);
     const snapshot = projectEvents(store.events());
     assert.deepEqual(snapshot.sessions[0]?.controls.modelOptions, { thinkingEffort: "high" });
@@ -132,23 +133,22 @@ test("schema 76 upgrades model continuity without rewriting encrypted history, r
   } finally { sdk.disconnect(); store?.close(); await fixture.close(); }
 });
 
-test("interrupted continuity version advance preserves its old version and bytes before exact recovery", async (t) => {
+test("interrupted continuity marker insertion preserves its old version and bytes before exact recovery", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
   let store: EventStore | undefined;
   try {
     const before = retainedCiphertextRows(fixture.service.store.db);
     await writePreContinuityState(fixture.service);
-    const exec = DatabaseSync.prototype.exec;
-    const fault = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
-      if (/PRAGMA user_version=77/.test(sql)) throw new Error("Generated continuity version interruption");
-      return exec.call(this, sql);
-    });
-    try { assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated continuity version interruption/); }
-    finally { fault.mock.restore(); }
+    const raw = new DatabaseSync(path);
+    try { raw.exec("CREATE TRIGGER generated_continuity_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='model_selection_continuity_schema' BEGIN SELECT RAISE(ABORT,'Generated continuity marker interruption'); END"); }
+    finally { raw.close(); }
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated continuity marker interruption/);
     const failed = new DatabaseSync(path);
     try {
       assert.equal(failed.prepare("PRAGMA user_version").get()?.user_version, 76);
+      assert.equal(failed.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get(), undefined);
       assert.deepEqual(retainedCiphertextRows(failed), before);
+      failed.exec("DROP TRIGGER generated_continuity_migration_failure");
     } finally { failed.close(); }
     store = new EventStore(path, fixture.retentionKey);
     assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
@@ -164,8 +164,40 @@ test("actual retained effort preferences cannot be relabelled as pre-continuity 
       preferredThinkingEffort: "max", modelOptions: { thinkingEffort: "high" } });
     const before = retainedCiphertextRows(fixture.service.store.db);
     sdk.disconnect(); await fixture.service.close();
-    const db = new DatabaseSync(path); try { db.exec("PRAGMA user_version=76;"); } finally { db.close(); }
+    const db = new DatabaseSync(path); try { db.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; PRAGMA user_version=76;"); } finally { db.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /effort preference history cannot be relabelled/i);
     const failed = new DatabaseSync(path); try { assert.deepEqual(retainedCiphertextRows(failed), before); } finally { failed.close(); }
   } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("missing, corrupt or premature continuity markers are not repaired from a version number", async (t) => {
+  for (const sql of ["DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'",
+    "UPDATE retention_metadata SET value='0' WHERE id='model_selection_continuity_schema'", "PRAGMA user_version=76"]) await t.test(sql, async () => {
+    const fixture = await setupFixture(), path = fixture.service.store.path;
+    try {
+      const before = retainedCiphertextRows(fixture.service.store.db);
+      await fixture.service.close();
+      const raw = new DatabaseSync(path); try { raw.exec(sql); } finally { raw.close(); }
+      assert.throws(() => new EventStore(path, fixture.retentionKey), /model selection continuity schema marker/i);
+      const preserved = new DatabaseSync(path); try { assert.deepEqual(retainedCiphertextRows(preserved), before); } finally { preserved.close(); }
+    } finally { await fixture.close(); }
+  });
+});
+
+test("standalone protocol 77 refuses future state even with a distinct sibling feature marker", async () => {
+  const fixture = await setupFixture(), path = fixture.service.store.path;
+  try {
+    const before = retainedCiphertextRows(fixture.service.store.db);
+    await fixture.service.close();
+    const raw = new DatabaseSync(path);
+    try { raw.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; INSERT INTO retention_metadata(id,value) VALUES ('theme_catalog_schema','1'); PRAGMA user_version=78;"); }
+    finally { raw.close(); }
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /newer schema.*Upgrade Moguri/i);
+    const preserved = new DatabaseSync(path);
+    try {
+      assert.equal(preserved.prepare("PRAGMA user_version").get()?.user_version, 78);
+      assert.equal(preserved.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get(), undefined);
+      assert.deepEqual(retainedCiphertextRows(preserved), before);
+    } finally { preserved.close(); }
+  } finally { await fixture.close(); }
 });

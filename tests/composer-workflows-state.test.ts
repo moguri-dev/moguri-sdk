@@ -14,7 +14,7 @@ test("schema 67 composer upgrade is atomic and preserves existing ciphertext and
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema'); PRAGMA user_version=67; CREATE TRIGGER generated_composer_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='composer_workflows_schema' BEGIN SELECT RAISE(ABORT,'Generated composer migration interruption'); END;"); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema'); PRAGMA user_version=67; CREATE TRIGGER generated_composer_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='composer_workflows_schema' BEGIN SELECT RAISE(ABORT,'Generated composer migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated composer migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -33,7 +33,7 @@ test("composer marker corruption or premature older-lineage markers fail without
     const fixture = await setupFixture();
     try {
       await fixture.service.close(); const raw = new DatabaseSync(fixture.service.store.path);
-      try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('native_web_policy_schema','chat_home_schema','model_preferences_schema')"); raw.exec(sql); } finally { raw.close(); }
+      try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema')"); raw.exec(sql); } finally { raw.close(); }
       assert.throws(() => new EventStore(fixture.service.store.path, fixture.retentionKey), /composer workflow.*(marker|lineage)/i);
     } finally { await fixture.close(); }
   });

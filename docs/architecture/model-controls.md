@@ -255,10 +255,20 @@ notices; no new dependency, discovery request or inference is needed. The
 optional preference extends existing controls and remembered-model events.
 A metadata-only schema/protocol-77 upgrade retains legacy events,
 encrypted history, receipts and unknown accounting without rewriting them.
-Like the 74-76 metadata advances, it adds no retention table or lineage marker:
-the existing controls/event shapes gain only an optional non-authorizing field.
+It adds the explicit `model_selection_continuity_schema = '1'` feature marker,
+not a retention table or model call: the existing controls/event shapes gain
+only an optional non-authorizing field. A current missing/corrupt marker,
+premature marker or relabelled preference history fails without repair.
 Legacy controls acquire no invented preference or model call during migration,
 and future preference history cannot be relabelled as pre-77 data.
+Standalone protocol 77 still refuses future state, including numeric 78 with
+a distinct `theme_catalog_schema = '1'` marker. That independently developed
+themes lineage is not proof of model continuity. Only a later genuinely
+combined implementation may explicitly converge the known model-77-only and
+theme-78-only lineages, after checking their actual feature history, without
+lowering schema 78. No unmerged themes code or speculative forward reader is
+included here. The intermediate unmarked-77 development archive/evidence is
+retained separately, not accepted as that sibling lineage.
 
 The freshly repeated prerequisites pass before implementation: generated
 providers **1,070.74 ms** (cancellation **30.41 ms**), SQLite **63.02 ms**
@@ -300,6 +310,27 @@ OpenTUI keyboard/model-related flows pass **16/16** in **16,769.08 ms**.
 These generated passes are not paid-provider, microphone, notarization or new
 physical-native evidence. Protocol-77 package/native identities require their
 own retained qualification before delivery.
+
+After reserving the independent feature lineages, the marker-bearing runtime
+passes **143/143 shared-runtime cases** in **20,560.32 ms**. All generated
+state/recovery selectors plus tooling convergence pass **260 cases** in
+**90,085.17 ms**, with one explicit physical controller-loss skip requiring its
+own native receipts. Marker insertion/version advance roll back together;
+missing, corrupt and prematurely retained markers fail without repair.
+A synthetic future-78 fixture with only the distinct theme marker is refused
+without changing version, encrypted rows or creating a model marker. Existing
+legacy fixtures now omit the genuinely post-76 model marker before asserting
+their original older migration/lineage failures; their assertions are unchanged.
+
+The intermediate source `397f9ab0d742b9391850d3e536c2e59a30be0f9b`
+and its previously passing 57-case packaged cut remain under
+`release/qualification-history/protocol-77-before-feature-marker-763e16eeb5c2`.
+Its ZIP SHA-512 is
+`763e16eeb5c217e3c43b7671b8642b9d9e9f49bb56264888c26b3e7f080bfa882ea28687c8458aa43e30875a8ac061f5760747f06d658f9bc3babe550eb8b542`.
+That unpublished unmarked-77 state is not promoted into the final feature
+lineage or silently repaired. The marker-only host change preserves all six
+compiled native payload/dependency hashes; final host/package qualification
+still uses the marker-bearing source and retains its separate evidence.
 
 ## Cascading menus and complete slash discovery
 

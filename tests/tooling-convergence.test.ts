@@ -26,7 +26,7 @@ async function fixture(lineage: "main" | "tooling") {
   }
   store.db.prepare("DELETE FROM retention_metadata WHERE id=?").run(lineage === "main" ? tooling : candidate);
   store.db.prepare("DELETE FROM retention_metadata WHERE id=?").run(convergence);
-  store.db.exec("DELETE FROM retention_metadata WHERE id IN ('native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema','session_navigation_schema','workspace_experience_schema')");
+  store.db.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema','session_navigation_schema','workspace_experience_schema')");
   store.db.exec("PRAGMA user_version=57");
   const rows = retainedCiphertextRows(store.db); store.close();
   return { directory, path, key, rows, raw, snapshot, close: () => rm(directory, { recursive: true, force: true }) };

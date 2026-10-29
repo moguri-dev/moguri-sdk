@@ -128,6 +128,9 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version < 77 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()) {
+        throw new Error("Premature model selection continuity schema marker. State was preserved.");
+      }
       if (version < 70 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_preferences_schema'").get()) {
         throw new Error("Invalid pre-70 model preference lineage marker. State was preserved.");
       }
@@ -444,7 +447,12 @@ export class EventStore {
           event.event_type === "settings.updated" && (event.payload.settings.startup.global.preferredThinkingEffort !== undefined || event.payload.settings.startup.profile.preferredThinkingEffort !== undefined))) {
           throw new Error("Model effort preference history cannot be relabelled as pre-77 state. State was preserved.");
         }
-        this.db.exec("PRAGMA user_version=77;");
+        this.db.exec(`BEGIN IMMEDIATE;
+          INSERT INTO retention_metadata(id,value) VALUES ('model_selection_continuity_schema','1');
+          PRAGMA user_version=77; COMMIT;`);
+      }
+      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()?.value !== "1") {
+        throw new Error("Missing or invalid model selection continuity schema marker. State was preserved.");
       }
     } catch (error) { this.db.close(); throw error; }
   }
