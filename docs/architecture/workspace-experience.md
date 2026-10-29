@@ -36,11 +36,36 @@ to replace a captured root/account/policy binding.
 Reuse React/Electron/OpenTUI, TypeBox, maintained pi-ai, existing Node/SQLite,
 clipboard bridge, inline icons, private stages and native protocol under their
 current licenses. No new library, renderer or agent loop is needed. Protocol
-79 is reserved for this slice with distinct new feature markers; model marker
-77 remains independent. Unsupported theme-bearing 78 and future 80 state must
-be refused before mutation. The independent themes implementation is not
-imported or stacked. New durable shapes need migration/restart/concurrency/
-cancellation tests and exact installed/native qualification.
+79 uses distinct `queued_slash_schema='1'`, `project_folder_actions_schema='1'`
+and `sandbox_multi_root_schema='1'` markers; model marker 77 remains independent.
+The three additive markers commit together, after validating genuine
+predecessor history across every retained profile, without rewriting ciphertext,
+receipts or retention grants. Missing, invalid or premature markers are not
+repaired from a numeric version. Standalone 78, any `theme_catalog_schema`-bearing
+state and future 80 are refused before mutation. The independent themes
+implementation is not imported or stacked. New durable shapes need
+migration/restart/concurrency/cancellation tests and exact installed/native
+qualification.
+
+### Navigation group actions
+
+The group action menu reuses the seven project icon colors and custom picker,
+including keyboard selection, Escape and focus restoration. Optional folder
+colors use `project.folder_saved`. Renaming or ordering a group preserves its
+original color when no new color is supplied.
+
+`projects.ungroup(folderId, members, expectedRevision)` binds the exact folder
+revision and complete set of member project IDs/configuration revisions.
+Every member returns to the standalone list and `project.folder_removed`
+commits in the same event/receipt transaction. A stale, incomplete or duplicated
+member set fails without moving a subset. Persistence failure rolls back every
+member and the command receipt. Removal does not delete project files,
+artifacts, sessions, branches or worktrees. It cannot release an unsettled root.
+
+Captured folder chats retain their original repository identities and become
+reachable under Chats after their navigation folder disappears. A later
+membership change or removal never retargets those roots. Removed group IDs
+cannot be recreated through the update API; a new group receives a new ID.
 
 ## Change contract
 

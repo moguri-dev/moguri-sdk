@@ -565,7 +565,10 @@ export class MoguriSdk extends TransportClient {
     configure: (projectId: string, settings: ProjectSettings, expectedRevision: number) => this.command({ type: "project.settings", projectId, settings, expectedRevision }),
     organize: (projectId: string, presentation: { folderId: string | null; color: string; order: number }, expectedRevision: number) => this.command({ type: "project.organize", projectId, ...presentation, expectedRevision }),
     reorder: (folderId: string | null, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.reorder", folderId, projects }),
-    folder: (name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "project.folder", name, order, expectedRevision, ...(id ? { id } : {}) }),
+    folder: (name: string, order = 0, id?: string, expectedRevision = 0, color?: string) =>
+      this.command({ type: "project.folder", name, order, expectedRevision, ...(id ? { id } : {}), ...(color !== undefined ? { color } : {}) }),
+    ungroup: (folderId: string, projects: { projectId: string; revision: number }[], expectedRevision: number) =>
+      this.command({ type: "project.ungroup", folderId, projects, expectedRevision }),
     relocate: (projectId: string, path: string, expectedRevision: number) => this.command({ type: "project.relocate", projectId, path, expectedRevision }),
     remove: (projectId: string, confirm: true, expectedRevision: number, artifacts?: ProjectArtifactChoice) => this.command({ type: "project.remove", projectId, expectedRevision, confirm, ...(artifacts ? { artifacts } : {}) }),
     git: (projectId: string, diff = true) => this.query({ type: "project.git", projectId, diff }),

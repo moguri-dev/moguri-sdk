@@ -7,7 +7,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
-import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("detach opt-out survives service restart without crossing the immutable profile boundary", async () => {
   const fixture = await profileFixture();
@@ -64,6 +64,7 @@ test("schema-59 upgrade reattaches retained legacy consoles without creating or 
     const raw = new DatabaseSync(fixture.service.store.path);
     let retained: ReturnType<typeof retainedCiphertextRows>;
     try {
+      removePost77FixtureMarkers(raw, fixture.service.controller.events(0));
       raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_navigation_schema','session_github_workflows_schema','session_github_convergence_schema'); PRAGMA user_version=59; COMMIT;");
       retained = retainedCiphertextRows(raw);
     } finally { raw.close(); }

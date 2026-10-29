@@ -66,7 +66,7 @@ export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
 
-export const PROTOCOL_VERSION = 77;
+export const PROTOCOL_VERSION = 79;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -376,6 +376,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "project.relocated": { path: string; name: string };
   "project.configured": { configuration: ProjectConfiguration };
   "project.folder_saved": { folder: NavigationFolder };
+  "project.folder_removed": { folderId: string; expectedRevision: number };
   "session.group_saved": { group: SessionGroup };
   "artifact.saved": { artifact: LegacyRetainedArtifact };
   "artifact.revised": { artifact: LegacyVersionedArtifact };
@@ -436,7 +437,7 @@ export const eventTypes: readonly EventType[] = [
   "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "cache.prepared",
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
-  "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
+  "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "session.sandbox_bound", "sandbox.workspace_recorded", "sandbox.execution_recorded", "sandbox.frame_recorded", "sandbox.publication_recorded", "sandbox.setup_recorded",
@@ -703,6 +704,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "attention.acknowledged") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.acknowledged = true; }
     if (event.event_type === "attention.cleared") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.active = false; }
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
+    if (event.event_type === "project.folder_removed") {
+      const folder = projectFolders.get(event.payload.folderId);
+      if (!folder || folder.revision !== event.payload.expectedRevision || [...projectConfigurations.values()].some((configuration) => configuration.folderId === folder.id)) {
+        throw new Error("Invalid retained project-folder removal. Original state was preserved.");
+      }
+      projectFolders.delete(folder.id);
+    }
     if (event.event_type === "session.group_saved") sessionGroups.set(event.payload.group.id, { ...event.payload.group });
     if (event.event_type === "artifact.saved" || event.event_type === "artifact.revised") {
       const artifact = event.event_type === "artifact.saved" ? legacyArtifact(event.payload.artifact, event.id) : normalizeArtifact(structuredClone(event.payload.artifact));

@@ -74,7 +74,7 @@ export interface ProjectConfiguration { projectId: string; revision: number; fol
 export const defaultProjectConfiguration = (projectId: string): ProjectConfiguration => ({
   projectId, revision: 0, folderId: null, color: "#a8d7bc", order: 0, values: defaultProjectSettings(),
 });
-export interface NavigationFolder { id: string; name: string; order: number; revision: number }
+export interface NavigationFolder { id: string; name: string; order: number; revision: number; color?: string }
 export const SessionHomeRootSchema = object({
   root: Type.String({ minLength: 1, maxLength: 4096, pattern: "^/[^\\u0000\\r\\n]*$" }),
   device: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }), inode: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }),
@@ -138,9 +138,12 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("project.remove"), projectId: id, expectedRevision: revision, confirm: Type.Literal(true), artifacts: Type.Optional(ProjectArtifactChoiceSchema) }),
   object({ type: Type.Literal("project.defaults"), projectId: id, expectedRevision: revision, branch: Type.String({ minLength: 1, maxLength: 200 }), confirmPush: Type.Literal(true) }),
   object({ type: Type.Literal("project.mcp.import"), projectId: id, expectedRevision: revision, confirmReview: Type.Literal(true), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
-  object({ type: Type.Literal("project.folder"), id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision }),
+  object({ type: Type.Literal("project.folder"), id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision,
+    color: Type.Optional(Type.String({ pattern: "^#[a-fA-F0-9]{6}$" })) }),
   object({ type: Type.Literal("project.group"), name: Type.String({ minLength: 1, maxLength: 80 }),
     projects: Type.Array(object({ projectId: id, revision }), { minItems: 2, maxItems: 1000 }) }),
+  object({ type: Type.Literal("project.ungroup"), folderId: id, expectedRevision: revision,
+    projects: Type.Array(object({ projectId: id, revision }), { maxItems: 1000 }) }),
   object({ type: Type.Literal("session.group"), projectId: id, id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision }),
   object({ type: Type.Literal("session.browser"), sessionId: id, url: Type.String({ minLength: 1, maxLength: 2048 }) }),
   object({ type: Type.Literal("artifact.capture"), sessionId: id, path: Type.Optional(path) }),

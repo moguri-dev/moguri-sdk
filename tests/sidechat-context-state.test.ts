@@ -4,7 +4,7 @@ import test from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("schema 66 side-context upgrade rolls back atomically and preserves original history, encrypted grants and receipts", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
@@ -14,7 +14,7 @@ test("schema 66 side-context upgrade rolls back atomically and preserves origina
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema'); PRAGMA user_version=66; CREATE TRIGGER generated_side_schema_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='side_context_schema' BEGIN SELECT RAISE(ABORT,'Generated side migration interruption'); END;"); }
+    try { removePost77FixtureMarkers(raw, fixture.service.controller.events(0)); raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema'); PRAGMA user_version=66; CREATE TRIGGER generated_side_schema_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='side_context_schema' BEGIN SELECT RAISE(ABORT,'Generated side migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated side migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -39,7 +39,7 @@ test("current side-context provenance cannot be missing, corrupted or relabelled
     try {
       await fixture.service.close();
       const raw = new DatabaseSync(path); try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema')"); raw.exec(sql); } finally { raw.close(); }
-      assert.throws(() => new EventStore(path, fixture.retentionKey), /side context.*(marker|lineage)/i);
+      assert.throws(() => new EventStore(path, fixture.retentionKey), sql.startsWith("PRAGMA") ? /Premature workspace schema marker/i : /side context.*(marker|lineage)/i);
     } finally { await fixture.close(); }
   });
 });

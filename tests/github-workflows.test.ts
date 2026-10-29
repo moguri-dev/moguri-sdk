@@ -657,7 +657,7 @@ test("restart terminalizes dispatched and undispatched original jobs without rep
 test("schema40 upgrades to the current schema without deleting existing generated project state", async () => {
   const f = await generated({ persistent: true });
   try {
-    removePost44FixtureMarkers(f.store.db);
+    removePost44FixtureMarkers(f.store.db, f.store.events());
     f.store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('task_progress_schema','document_attachment_schema'); PRAGMA user_version=40; COMMIT;");
     const reopened = new EventStore(f.storePath, f.key);
     try {

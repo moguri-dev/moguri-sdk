@@ -10,6 +10,7 @@ import { defaultSandboxManagement, defaultSettings, PROTOCOL_VERSION, projectEve
 import { EventStore } from "../apps/service/src/store.ts";
 import { extractSandboxRelease, sandboxDistributionCacheKey, SENDBOX_023, SENDBOX_024 } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxRunConfiguration } from "../apps/service/src/sandbox-policy.ts";
+import { removePost77FixtureMarkers } from "./fixtures/legacy-state.ts";
 
 test("the producer cache binds the complete pinned release as well as worker inputs", () => {
   const payload = "1".repeat(64), current = sandboxDistributionCacheKey(payload, SENDBOX_024);
@@ -32,6 +33,7 @@ test("protocol-51 migration preserves encrypted settings and manual grants witho
     legacy.instructions = "Generated retained original instructions.";
     original.commit([{ event_type: "settings.updated", profile_id: "default", payload: { settings: legacy, revision: 4, permissionRevision: 3 } }]);
     const rows = original.db.prepare("SELECT seq,data FROM events ORDER BY seq").all();
+    removePost77FixtureMarkers(original.db, original.events());
     original.db.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema','session_navigation_schema','workspace_experience_schema','lean_tooling_schema','lean_tooling_convergence_schema','candidate_retention_schema','browser_control_schema','model_defaults_schema','managed_sandbox_schema','session_indicators_schema'); PRAGMA user_version=51;");
     original.close();
     const reopened = new EventStore(path, key);

@@ -7,7 +7,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION, projectEvents, type ChatWriter } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("the 71-to-72 Home marker migration rolls back atomically, preserves ciphertext and binds a legacy chat only on explicit use", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path, sessionId = "generated-legacy-home-chat";
@@ -20,7 +20,7 @@ test("the 71-to-72 Home marker migration rolls back atomically, preserves cipher
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema'); PRAGMA user_version=71; CREATE TRIGGER generated_home_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='chat_home_schema' BEGIN SELECT RAISE(ABORT,'Generated Home migration interruption'); END;"); }
+    try { removePost77FixtureMarkers(raw, fixture.service.controller.events(0)); raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema'); PRAGMA user_version=71; CREATE TRIGGER generated_home_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='chat_home_schema' BEGIN SELECT RAISE(ABORT,'Generated Home migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated Home migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -70,7 +70,8 @@ test("missing, corrupt or premature Home markers and genuine Home history cannot
           `DELETE FROM retention_metadata WHERE id='chat_home_schema'; ${change === "future-history" ? "PRAGMA user_version=71" : ""}`);
         original = retainedCiphertextRows(raw);
       } finally { raw.close(); }
-      assert.throws(() => new EventStore(fixture.service.store.path, fixture.retentionKey), /Home-backed chat (schema marker|history cannot be relabelled)/i);
+      assert.throws(() => new EventStore(fixture.service.store.path, fixture.retentionKey), change === "premature" || change === "future-history" ?
+        /Premature workspace schema marker/i : /Home-backed chat (schema marker|history cannot be relabelled)/i);
       const preserved = new DatabaseSync(fixture.service.store.path);
       try { assert.deepEqual(retainedCiphertextRows(preserved), original); } finally { preserved.close(); }
     } finally { sdk.disconnect(); await fixture.close(); }

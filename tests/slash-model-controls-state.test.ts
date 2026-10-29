@@ -4,7 +4,7 @@ import test from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("schema 68 tuning qualification upgrades only metadata, preserves encrypted state and recovers after an interrupted advance", async (t) => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
@@ -14,7 +14,7 @@ test("schema 68 tuning qualification upgrades only metadata, preserves encrypted
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema'); PRAGMA user_version=68"); } finally { raw.close(); }
+    try { removePost77FixtureMarkers(raw, fixture.service.controller.events(0)); raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema'); PRAGMA user_version=68"); } finally { raw.close(); }
     const exec = DatabaseSync.prototype.exec;
     const fault = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
       if (/PRAGMA user_version=69/.test(sql)) throw new Error("Generated model-tuning metadata interruption");

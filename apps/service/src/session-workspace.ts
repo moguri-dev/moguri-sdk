@@ -458,7 +458,9 @@ export class SessionWorkspace {
         if (command.id && !existing) throw new MoguriError("group_missing", "This group no longer exists.");
         this.revision(existing?.revision ?? 0, command.expectedRevision);
         if (!command.name.trim()) throw new MoguriError("group_name", "Give this group a non-empty name.");
-        const group = { id: existing?.id ?? randomUUID(), name: command.name.trim(), order: command.order, revision: existing ? existing.revision + 1 : 0 };
+        const color = command.type === "project.folder" ? command.color ?? existing?.color : existing?.color;
+        const group = { id: existing?.id ?? randomUUID(), name: command.name.trim(), order: command.order, revision: existing ? existing.revision + 1 : 0,
+          ...(color !== undefined ? { color: color.toLowerCase() } : {}) };
         if (command.type === "project.folder") return finish([{ event_type: "project.folder_saved", profile_id: this.snapshot().profileId, payload: { folder: group } }], { id: group.id, revision: group.revision });
         this.project(command.projectId);
         if (existing && "projectId" in existing && existing.projectId !== command.projectId) throw new MoguriError("session_group", "Session groups cannot cross projects.");
@@ -477,6 +479,23 @@ export class SessionWorkspace {
         return finish([{ event_type: "project.folder_saved", profile_id: this.snapshot().profileId, payload: { folder } },
           ...members.map((configuration, order): EventInput => ({ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: configuration.projectId,
             payload: { configuration: { ...configuration, folderId: folder.id, order, revision: configuration.revision + 1 } } }))], { id: folder.id, revision: 0 });
+      }
+      case "project.ungroup": {
+        const folder = this.snapshot().projectFolders.find((folder) => folder.id === command.folderId);
+        if (!folder) throw new MoguriError("group_missing", "This project group no longer exists.", 409);
+        this.revision(folder.revision, command.expectedRevision);
+        const members = this.snapshot().projects.map((project) => this.projects.configuration(project.id)).filter((configuration) => configuration.folderId === folder.id);
+        const expected = new Map(command.projects.map((project) => [project.projectId, project.revision]));
+        if (expected.size !== command.projects.length || expected.size !== members.length || members.some((member) => !expected.has(member.projectId))) {
+          throw new MoguriError("project_group_changed", "The group's exact members changed. Review the complete group before ungrouping; no subset was moved.", 409);
+        }
+        for (const member of members) this.revision(member.revision, expected.get(member.projectId)!);
+        const result = finish([...members.map((configuration): EventInput => ({ event_type: "project.configured", profile_id: this.snapshot().profileId,
+          project_id: configuration.projectId, payload: { configuration: { ...configuration, folderId: null, revision: configuration.revision + 1 } } })),
+          { event_type: "project.folder_removed", profile_id: this.snapshot().profileId, payload: { folderId: folder.id, expectedRevision: folder.revision } }],
+        { id: folder.id, revision: folder.revision + 1 });
+        for (const session of this.snapshot().sessions) if (session.projectId && expected.has(session.projectId)) this.host.invalidate(session.id);
+        return result;
       }
       case "session.browser": {
         const session = this.session(command.sessionId);

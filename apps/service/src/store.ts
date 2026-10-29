@@ -4,6 +4,7 @@ import * as vec from "sqlite-vec";
 import { attachmentDigests, eventTypes, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -128,6 +129,31 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
+      if (version === 78 || retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='theme_catalog_schema'").get()) {
+        throw new Error("Unsupported standalone protocol-78/theme catalog lineage. This build cannot apply a themes migration. Original state was preserved.");
+      }
+      if (retentionTable) for (const id of workspaceSchemaMarkers) {
+        const row = this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id);
+        if (version < 79 && row) throw new Error(`Premature workspace schema marker ${id}. Original state was preserved.`);
+        if (version === 79 && row?.value !== "1") throw new Error(`Missing or invalid workspace schema marker ${id}. Original state was preserved.`);
+      }
+      if (version >= 4 && version < 79) {
+        const grouped = new Set<string>();
+        const events = this.readEvents(0, true);
+        const futureHistory = events.some((event) => {
+          const owner = `${event.profile_id}/${event.session_id}`;
+          if (event.event_type === "session.created" && event.payload.repositories?.length) grouped.add(owner);
+          return event.event_type.startsWith("command.") || event.event_type === "project.folder_removed" ||
+            event.event_type === "project.folder_saved" && event.payload.folder.color !== undefined ||
+            (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && Object.hasOwn(event.payload.item, "command") ||
+            (event.event_type === "session.created" || event.event_type === "session.configured") && grouped.has(owner) && event.payload.controls.env === "Sandbox" ||
+            event.event_type === "sandbox.workspace_recorded" && Object.hasOwn(event.payload.workspace, "repositories") ||
+            event.event_type === "sandbox.execution_recorded" && Object.hasOwn(event.payload.execution, "repositories");
+        });
+        const retiredFuture = this.db.prepare(`SELECT 1 FROM events WHERE json_extract(data,'$.event_type') LIKE 'command.%'
+          OR json_extract(data,'$.event_type')='project.folder_removed' LIMIT 1`).get();
+        if (futureHistory || retiredFuture) throw new Error("Workspace interaction history cannot be relabelled as pre-79 state. Original state was preserved.");
+      }
       if (version < 77 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()) {
         throw new Error("Premature model selection continuity schema marker. State was preserved.");
       }
@@ -441,7 +467,7 @@ export class EventStore {
       if (version < 75) this.db.exec("PRAGMA user_version=75;");
       if (version < 76) this.db.exec("PRAGMA user_version=76;");
       if (version < 77) {
-        if (this.events().some((event) =>
+        if (this.readEvents(0, true).some((event) =>
           (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.preferredThinkingEffort !== undefined ||
           event.event_type === "model.selection_remembered" && event.payload.selection?.preferredThinkingEffort !== undefined ||
           event.event_type === "settings.updated" && (event.payload.settings.startup.global.preferredThinkingEffort !== undefined || event.payload.settings.startup.profile.preferredThinkingEffort !== undefined))) {
@@ -453,6 +479,13 @@ export class EventStore {
       }
       if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()?.value !== "1") {
         throw new Error("Missing or invalid model selection continuity schema marker. State was preserved.");
+      }
+      if (version < 79) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of workspaceSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=79; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
     } catch (error) { this.db.close(); throw error; }
   }
@@ -742,11 +775,12 @@ export class EventStore {
     }
     return { ...event, seq } as StoredEvent;
   }
-  events(after = 0): StoredEvent[] {
+  events(after = 0): StoredEvent[] { return this.readEvents(after, false); }
+  private readEvents(after: number, allProfiles: boolean): StoredEvent[] {
     return this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after).flatMap((row) => {
       const event: unknown = JSON.parse(String(row.data));
       const data = this.validEvent(event, Number(row.seq));
-      if (data.profile_id !== this.profileId) return [];
+      if (!allProfiles && data.profile_id !== this.profileId) return [];
       const scope = scopeFor(data, data.artifact_id ?? null);
       const key = this.key(scope, false);
       if (!key) return [];

@@ -9,6 +9,8 @@ import { DatabaseSync } from "node:sqlite";
 import { startService } from "../apps/service/src/server.ts";
 import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY } from "./fixture.ts";
+import { EventStore } from "../apps/service/src/store.ts";
+import { removePost77FixtureMarkers } from "./fixtures/legacy-state.ts";
 
 for (const schema of ["current", "automatic-61"] as const) test(`actual ${schema} controller SIGKILL during gate or selected-response approval never replays paid calls or proposed tools`, { skip: process.platform !== "darwin", timeout: 35_000 }, async (t) => {
   for (const phase of ["gate", "selected"] as const) {
@@ -40,6 +42,8 @@ for (const schema of ["current", "automatic-61"] as const) test(`actual ${schema
       assert.ok(basename(directory).startsWith("moguri-generated-"));
       const exited = once(child, "exit"); child.kill("SIGKILL"); await exited;
       if (schema === "automatic-61") {
+        const source = new EventStore(join(directory, "state", "state.sqlite"), GENERATED_RETENTION_KEY);
+        try { removePost77FixtureMarkers(source.db, source.events()); } finally { source.close(); }
         const raw = new DatabaseSync(join(directory, "state", "state.sqlite"));
         try {
           raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema'); PRAGMA user_version=61; COMMIT");

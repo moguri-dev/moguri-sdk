@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { MoguriSdk, PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema 54 upgrades model defaults atomically without rewriting ciphertext, receipts or existing defaults", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -107,7 +107,7 @@ async function writePreContinuityState(service: Awaited<ReturnType<typeof setupF
     event.payload.selection?.preferredThinkingEffort !== undefined)) throw new Error("Generate actual pre-continuity controls, not relabelled model preferences.");
   const path = service.store.path; await service.close();
   const db = new DatabaseSync(path);
-  try { db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; PRAGMA user_version=76; COMMIT;"); }
+  try { removePost77FixtureMarkers(db, events); db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; PRAGMA user_version=76; COMMIT;"); }
   finally { db.close(); }
 }
 
@@ -165,7 +165,7 @@ test("actual retained effort preferences cannot be relabelled as pre-continuity 
     const before = retainedCiphertextRows(fixture.service.store.db);
     sdk.disconnect(); await fixture.service.close();
     const db = new DatabaseSync(path); try { db.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; PRAGMA user_version=76;"); } finally { db.close(); }
-    assert.throws(() => new EventStore(path, fixture.retentionKey), /effort preference history cannot be relabelled/i);
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Premature workspace schema marker/i);
     const failed = new DatabaseSync(path); try { assert.deepEqual(retainedCiphertextRows(failed), before); } finally { failed.close(); }
   } finally { sdk.disconnect(); await fixture.close(); }
 });
@@ -178,13 +178,13 @@ test("missing, corrupt or premature continuity markers are not repaired from a v
       const before = retainedCiphertextRows(fixture.service.store.db);
       await fixture.service.close();
       const raw = new DatabaseSync(path); try { raw.exec(sql); } finally { raw.close(); }
-      assert.throws(() => new EventStore(path, fixture.retentionKey), /model selection continuity schema marker/i);
+      assert.throws(() => new EventStore(path, fixture.retentionKey), sql.startsWith("PRAGMA") ? /Premature workspace schema marker/i : /model selection continuity schema marker/i);
       const preserved = new DatabaseSync(path); try { assert.deepEqual(retainedCiphertextRows(preserved), before); } finally { preserved.close(); }
     } finally { await fixture.close(); }
   });
 });
 
-test("standalone protocol 77 refuses future state even with a distinct sibling feature marker", async () => {
+test("the standalone build refuses a theme-bearing numeric downgrade without repairing either feature lineage", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
   try {
     const before = retainedCiphertextRows(fixture.service.store.db);
@@ -192,7 +192,7 @@ test("standalone protocol 77 refuses future state even with a distinct sibling f
     const raw = new DatabaseSync(path);
     try { raw.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; INSERT INTO retention_metadata(id,value) VALUES ('theme_catalog_schema','1'); PRAGMA user_version=78;"); }
     finally { raw.close(); }
-    assert.throws(() => new EventStore(path, fixture.retentionKey), /newer schema.*Upgrade Moguri/i);
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Unsupported standalone protocol-78\/theme catalog lineage/i);
     const preserved = new DatabaseSync(path);
     try {
       assert.equal(preserved.prepare("PRAGMA user_version").get()?.user_version, 78);

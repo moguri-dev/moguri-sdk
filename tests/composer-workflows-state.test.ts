@@ -4,7 +4,7 @@ import test from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("schema 67 composer upgrade is atomic and preserves existing ciphertext and receipts after an interrupted marker append", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
@@ -14,7 +14,7 @@ test("schema 67 composer upgrade is atomic and preserves existing ciphertext and
     const original = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema'); PRAGMA user_version=67; CREATE TRIGGER generated_composer_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='composer_workflows_schema' BEGIN SELECT RAISE(ABORT,'Generated composer migration interruption'); END;"); }
+    try { removePost77FixtureMarkers(raw, fixture.service.controller.events(0)); raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema'); PRAGMA user_version=67; CREATE TRIGGER generated_composer_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='composer_workflows_schema' BEGIN SELECT RAISE(ABORT,'Generated composer migration interruption'); END;"); }
     finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated composer migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -34,7 +34,7 @@ test("composer marker corruption or premature older-lineage markers fail without
     try {
       await fixture.service.close(); const raw = new DatabaseSync(fixture.service.store.path);
       try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema')"); raw.exec(sql); } finally { raw.close(); }
-      assert.throws(() => new EventStore(fixture.service.store.path, fixture.retentionKey), /composer workflow.*(marker|lineage)/i);
+      assert.throws(() => new EventStore(fixture.service.store.path, fixture.retentionKey), sql.startsWith("PRAGMA") ? /Premature workspace schema marker/i : /composer workflow.*(marker|lineage)/i);
     } finally { await fixture.close(); }
   });
 });
