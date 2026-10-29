@@ -31,7 +31,7 @@ export const slashCommands = [
   { name: "resume", description: "Resume reviewed undispatched work without replaying a terminal command" },
   { name: "quit", description: "Save drafts and leave a compatible TUI when this ordered action is reached" },
   { name: "approve", description: "Approve the current action once or remember a named tool/command in its exact scope", argument: "[once|session|project|global] [exact|family|tool]" },
-  { name: "folder-chat", description: "List project folders or create a Local chat with every explicitly captured member root", argument: "[FOLDER_ID]" },
+  { name: "folder-chat", description: "List folders or create a Local/managed Sandbox chat with every exact captured member", argument: "[FOLDER_ID [Local|Sandbox]]" },
   { name: "folder-group", description: "Atomically name a navigation folder containing exact existing projects; no files are moved", argument: '{"name":"Folder","projectIds":["ID","ID"]}' },
   { name: "approvals", description: "Inspect or revoke this profile's remembered approvals", argument: "[revoke ID]" },
   { name: "work-item", description: "Pick a project Kanban card or GitHub issue", argument: "[kanban|CARD_ID|clear]" },
@@ -213,14 +213,15 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "text", text: JSON.stringify(await sdk.projects.group(input.name, projects), null, 2) };
     }
     case "folder-chat": {
-      const snapshot = sdk.getState().snapshot!, id = command.argument.trim();
+      const snapshot = sdk.getState().snapshot!, [id, env = "Local", extra] = command.argument.trim().split(/\s+/);
       if (!id) return { kind: "text", text: JSON.stringify(snapshot.projectFolders.map((folder) => ({ ...folder,
         projects: snapshot.projectConfigurations.filter((configuration) => configuration.folderId === folder.id)
           .sort((a, b) => a.order - b.order).map((configuration) => ({ id: configuration.projectId,
             name: snapshot.projects.find((project) => project.id === configuration.projectId)?.name })) })), null, 2) };
       const folder = snapshot.projectFolders.find((folder) => folder.id === id);
       if (!folder) throw new ClientError("project_folder", "Choose an exact folder ID from /folder-chat. No previous project or first repository was substituted.");
-      const result = await sdk.sessions.createFolder(folder.id, `${folder.name} chat`, { env: "Local" });
+      if (extra || env !== "Local" && env !== "Sandbox") throw new ClientError("project_folder_env", "Use /folder-chat FOLDER_ID [Local|Sandbox]. Remote groups are not qualified and cannot fall back.");
+      const result = await sdk.sessions.createFolder(folder.id, `${folder.name} chat`, { env });
       return { kind: "session", sessionId: result.id!, side: false };
     }
     case "prices": {
@@ -875,12 +876,17 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       }
       if (action === "publish-preview" && id) {
         const requested = command.argument.slice(action.length).trim().slice(id.length).trim();
-        const input = parse(SandboxQuerySchema, { type: "sandbox.publication.preview", executionId: id, paths: JSON.parse(requested) });
+        const value: unknown = JSON.parse(requested);
+        if (!Array.isArray(value) && (!isRecord(value) || Object.keys(value).some((key) => key !== "paths" && key !== "repository"))) {
+          throw new ClientError("sandbox_command", "Use an exact paths array, or {paths,repository} for one original captured group member.");
+        }
+        const input = parse(SandboxQuerySchema, { type: "sandbox.publication.preview", executionId: id, ...(Array.isArray(value) ? { paths: value } : value) });
         const result = await sdk.query(input);
         if (result.type !== "sandbox.publication.preview") throw new ClientError("sandbox_command", "Native publication preview changed its requested response type.");
         const execution = (await sdk.sandbox.execution(id)).execution;
         return text({ ...result, confirmCommand: `/sandbox publish ${JSON.stringify({ executionId: id, paths: result.preview.document.patch.edits.map((edit) => edit.path),
-          expectedDigest: result.preview.digest, expectedRevision: execution.revision })} confirm-publish` });
+          expectedDigest: result.preview.digest, expectedRevision: execution.revision,
+          ...(result.preview.document.version === 2 ? { repository: result.preview.document.repositoryId } : {}) })} confirm-publish` });
       }
       throw new ClientError("sandbox_command", "Use /sandbox status; probe confirm-native; preview PATHS_JSON; prepare REVIEW_JSON confirm-stage; execution/result/publication ID; stop/reconcile ID confirm-stop|confirm-inspect; or publish-preview ID PATHS_JSON and publish REVIEW_JSON confirm-publish. No Local fallback or automatic acceptance.");
     }

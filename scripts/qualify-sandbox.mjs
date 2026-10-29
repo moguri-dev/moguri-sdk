@@ -44,7 +44,8 @@ const report = { format: "moguri-sandbox-qualification", version: 1, status: "RU
   qualification: "Exact development artifacts only; generated model accounting is not live billing, model quality, notarization or Linux release acceptance.",
   gates: {} };
 for (const path of ["scripts/qualify-sandbox.mjs", "scripts/worker-image/qualification-network.mjs", "apps/service/src/native-evidence.ts",
-  "tests/fixtures/native-api.ts", "tests/fixtures/native-target.ts", "tests/fixtures/native-provider.mjs", "tests/fixture.ts"]) {
+  "tests/fixtures/native-api.ts", "tests/fixtures/native-target.ts", "tests/fixtures/native-provider.mjs", "tests/fixtures/native-group-provider.mjs",
+  "tests/sandbox-managed-groups.test.ts", "tests/fixture.ts"]) {
   report.source.harness[path] = hash(await readFile(path));
 }
 const owned = [];
@@ -308,7 +309,35 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
     report.workerState = { directory: fixture.root, executionId: retained?.id ?? null, generatedOnly: true };
   }
 });
-await gate("teardown", ["installedRuntime"], async () => {
+await gate("groupedWorkspace", ["installedRuntime", "providerScope"], async () => {
+  const installation = join(directory, "group-installation.json"), output = join(directory, "group-result.json");
+  await write("group-installation.json", { executable: configuration.executable, bundle: configuration.bundlePath, key: configuration.trustRootPath,
+    version: configuration.qualification.release, ...configuration.qualification });
+  const child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", "tests/sandbox-managed-groups.test.ts"], {
+    cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: installation, MOGURI_NATIVE_WORKLOAD: resolve(values.workload),
+      MOGURI_NATIVE_GROUP_REPORT: output, MOGURI_NATIVE_GROUP_PROVIDER: values.provider },
+    encoding: "utf8", timeout: 150_000, maxBuffer: 8 * 1024 * 1024,
+  });
+  await writeFile(join(directory, "group-test.log"), child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
+  for (const [key, count] of [["tests", 1], ["pass", 1], ["fail", 0], ["skipped", 0]]) {
+    assert.match(child.stdout, new RegExp(`# ${key} ${count}(?:\\r?\\n|$)`), "Actual group execution cannot be substituted by a skipped/generated-only case.");
+  }
+  const result = JSON.parse(await readFile(output, "utf8")), execution = result.execution;
+  assert.equal(result.status, "PASS"); assert.equal(result.ownedGuestAbsent, true);
+  assert.equal(execution.workerDigest, configuration.qualification.workerDigest); assert.equal(execution.image, configuration.image);
+  const owner = { name: execution.launchName, sessionId: execution.nativeSessionId, workspace: execution.stage.workspace,
+    image: execution.image, command: { program: execution.command[0], arguments: execution.command.slice(1) }, createdAfter: execution.createdAfter };
+  owned.push(owner);
+  const network = await readNativeNetwork({ ...nativeInput(owner), planDigest: execution.planDigest, signerFingerprint: execution.signerFingerprint });
+  const meta = activeMeta(network, execution.networkScope.allowedDomains, Date.parse(execution.createdAt));
+  await write("group-effective-network.json", network); assert.deepEqual(ownedGuests(owner), []);
+  return { executionId: execution.id, nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest, signerFingerprint: execution.signerFingerprint,
+    repositories: execution.repositories, approvedTools: result.approvedTools, totals: result.totals, eventsSha256: hash(JSON.stringify(result.events)),
+    resultSha256: hash(JSON.stringify(result.result)), directory: result.directory, explicitPublications: result.explicitPublications.map((record) =>
+      ({ id: record.id, repositoryId: record.repositoryId, status: record.status, acceptance: record.acceptance })),
+    scope: execution.networkScope, metaSha256: meta.published_scope.sha256, sourceCopiesVerified: true, ownedGuestAbsent: true };
+});
+await gate("teardown", ["installedRuntime", "groupedWorkspace"], async () => {
   const remaining = [];
   for (const owner of owned) {
     assert.match(owner.sessionId ?? "", /^[a-f0-9]{32}$/, "Original guest identity is unconfirmed; a name or absent CLI is not exact teardown evidence.");

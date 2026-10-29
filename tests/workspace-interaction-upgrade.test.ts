@@ -5,8 +5,9 @@ import test from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION, defaultSettings, projectEvents } from "../packages/protocol/src/index.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
-import { setupFixture } from "./fixture.ts";
-import { assertPreContinuityHistory, assertPreThemeHistory, removePost77FixtureMarkers, removeWorkspaceFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { setupFixture, waitFor } from "./fixture.ts";
+import { assertPreCombinedHistory, assertPreContinuityHistory, assertPreThemeHistory, removePost77FixtureMarkers, removeWorkspaceFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { nativeGroupPublicationFixture } from "./fixtures/native-publication.ts";
 import type { StoredEvent } from "../packages/protocol/src/index.ts";
 
 const markers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
@@ -18,18 +19,43 @@ function metadata(db: DatabaseSync) {
     markers: db.prepare("SELECT id,value FROM retention_metadata ORDER BY id").all(), rows: retainedCiphertextRows(db) };
 }
 function genuinePredecessor(db: DatabaseSync, version: 76 | 77 | 78 | 79, events: readonly StoredEvent[]) {
+  assertPreCombinedHistory(events);
   if (version < 78) removePost77FixtureMarkers(db, events);
   if (version === 78) removeWorkspaceFixtureMarkers(db, events);
   if (version === 76 || version === 78) {
     assertPreContinuityHistory(events);
     db.prepare("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'").run();
   }
+
   if (version === 79) {
     assertPreThemeHistory(events);
     db.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','theme_model_workspace_convergence_schema')");
   }
   db.exec(`PRAGMA user_version=${version}`);
 }
+
+for (const kind of ["queue", "native-group"] as const) test(`actual combined80 ${kind} history cannot be relabelled as standalone79 by erasing convergence`, async () => {
+  const groupedFixture = kind === "native-group" ? await nativeGroupPublicationFixture() : null, fixture = groupedFixture ?? await setupFixture();
+  try {
+    if (kind === "queue") {
+      const sdk = await new MoguriSdk(fixture.service.connection).ready();
+      try {
+        await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "/theme ocean dark", attachments: [] });
+        await sdk.command({ type: "message.send", sessionId: fixture.sessionId, expectedRevision: 1, delivery: "queue", client: "cli" });
+        await waitFor(() => fixture.service.controller.snapshot().commandExecutions.some((execution) => execution.status === "completed"));
+      } finally { sdk.disconnect(); }
+    }
+    groupedFixture?.sdk.disconnect();
+    const events = fixture.service.store.events(); assert.throws(() => assertPreCombinedHistory(events), /genuine pre-combined80/);
+    await fixture.service.close();
+    const raw = new DatabaseSync(pathFor(fixture));
+    raw.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','theme_model_workspace_convergence_schema'); PRAGMA user_version=79");
+    const before = metadata(raw); raw.close();
+    assert.throws(() => new EventStore(pathFor(fixture), fixture.retentionKey), /combined80.*runtime history/i);
+    const preserved = new DatabaseSync(pathFor(fixture));
+    try { assert.deepEqual(metadata(preserved), before); } finally { preserved.close(); }
+  } finally { await fixture.close(); }
+});
 
 for (const version of [76, 77, 78, 79] as const) test(`genuine schema ${version} converges to actual combined80 without changing retained ciphertext or receipts`, async () => {
   const fixture = await setupFixture();

@@ -165,7 +165,7 @@ export interface PlatformHost {
   sandboxStatus(): SandboxReadiness;
   sandboxQuery(query: SandboxQuery): Promise<SandboxResponse>;
   sandboxCommand(command: SandboxCommand, finish: WorkspaceFinish): Promise<CommandResult>;
-  nativeRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
+  nativeRead(session: Session, query: WorkspaceReadQuery, repository?: string): Promise<WorkspaceReadResult>;
   repositoryContext(session: Session): Promise<string>;
   remoteRead: SessionWorkspaceHost["remoteRead"];
   remotePlanBinding: SessionWorkspaceHost["remotePlanBinding"];

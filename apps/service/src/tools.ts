@@ -71,10 +71,11 @@ function repositoryParameters(parameters: Tool["parameters"]): Tool["parameters"
   return { ...parameters, properties: { ...parameters.properties, repository: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) } };
 }
 export const tools: Tool[] = toolDefinitions.map((tool) => repositoryTools.has(tool.name) ? { ...tool, parameters: repositoryParameters(tool.parameters) } : tool);
-export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; workspace?: boolean; multiRepository?: boolean; metachat?: boolean; env?: Controls["env"]; pasteFiles?: boolean; documents?: boolean; coordinator?: boolean } = { project: true }): Tool[] {
+export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: SessionMode = "agent", folders?: FolderPolicy, scope: { project: boolean; workspace?: boolean; multiRepository?: boolean; restrictedRepositories?: boolean; metachat?: boolean; env?: Controls["env"]; pasteFiles?: boolean; documents?: boolean; coordinator?: boolean } = { project: true }): Tool[] {
   if (readOnly) return [];
   return tools.filter((tool) => tool.name !== "memory_search" || settings.memory.enabled)
     .filter((tool) => !scope.multiRepository || (!workspaceTools.has(tool.name) || repositoryTools.has(tool.name)) && !["mcp_gateway", "run_subagent", "session_control", "wait_session"].includes(tool.name))
+    .filter((tool) => !scope.restrictedRepositories || tool.name !== "run_command")
     .filter((tool) => tool.name !== "fetch_page" || scope.env === "Sandbox")
     .filter((tool) => !["command_job", "create_issue", "project_work"].includes(tool.name) || scope.env === "Local")
     .filter((tool) => tool.name !== "diff_files" || scope.env !== "Sandbox")

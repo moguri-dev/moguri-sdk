@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { projectIdentifier } from "../../../packages/protocol/src/sessions.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { browserUrl, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
-import { basename, dirname, isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
@@ -28,7 +28,7 @@ import {
   type SessionChildrenAction, type SessionChildrenReview, sessionChildBindings, sessionSubtree,
   parseSlashApproval,
 } from "../../../packages/protocol/src/index.ts";
-import { readProjectFile, textFilePage } from "./files.ts";
+import { readProjectFile, scopedPath, textFilePage } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
 import { QueuedCommands, type CommandEnvironment, type CommandOwner } from "./queued-commands.ts";
 import { isQueuedCommandCommand, parseSlashInput, type CommandBinding, type CommandClient, type LiveSlashControl } from "../../../packages/protocol/src/queued-commands.ts";
@@ -353,7 +353,7 @@ export class ControlPlane extends EventEmitter {
       sandboxStatus: () => ({ ...this.sandbox.readiness, configured: Boolean(this.projection.settings.values.sandbox.qualification) }),
       sandboxQuery: (query) => this.sandboxQuery(query),
       sandboxCommand: (command, finish) => this.sandboxCommand(command, finish),
-      nativeRead: (session, query) => this.nativeRead(session, query),
+      nativeRead: (session, query, repository) => this.nativeRead(session, query, repository),
       repositoryContext: (session) => this.repositoryContext(session),
       remoteRead: (session, query) => this.remoteRead(session, query),
       remoteMcpScope: (session) => this.remoteMcpScope(session),
@@ -397,7 +397,7 @@ export class ControlPlane extends EventEmitter {
       closing: (sessionId, projectId) => this.shuttingDown || this.deletingSessions.has(sessionId) || this.deletingProjects.has(projectId),
     });
     this.sandboxWorkspaces = new SandboxWorkspaces(store, platformOptions.stateDir ?? dirname(store.path), this.sandbox, {
-      snapshot: () => this.snapshot(), project: (session) => this.platform.managed.project(session),
+      snapshot: () => this.snapshot(), project: (session, repository) => this.platform.managed.project(session, repository),
       settings: (projectId) => ({ revision: projectId ? this.platform.sessions.projects.configuration(projectId).revision : 0, values: this.platform.sessions.projects.values(projectId) }),
       commit: (events) => this.commit(events), closing: (session) => this.deletingSessions.has(session.id) || this.deletingProjects.has(session.projectId ?? ""),
     });
@@ -742,7 +742,8 @@ export class ControlPlane extends EventEmitter {
     const roots = [...this.runs.values()].filter((run) => {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
       return session && session.id !== exceptSessionId && !run.yieldedTo && (!homeChat(session) || Boolean(run.chatWriterId)) &&
-        (Boolean(run.planSave) || session.kind === "agent" && (session.mode === "agent" || reserved.has(session.id)));
+        (Boolean(session.repositories && session.controls.env === "Sandbox") || Boolean(run.planSave) ||
+          session.kind === "agent" && (session.mode === "agent" || reserved.has(session.id)));
     }).flatMap((run) => {
       if (!run.executionId) return run.roots ?? (run.root ? [run.root] : []);
       const execution = this.projection.executions.find((value) => value.id === run.executionId);
@@ -756,8 +757,8 @@ export class ControlPlane extends EventEmitter {
             job.parentTurnId === writer.turnId && job.commandJob?.root === writer.root.root && ["running", "waiting_input"].includes(job.status))))) continue;
       roots.push(writer.root.root);
     }
-    for (const session of this.projection.sessions) if (session.id !== exceptSessionId && session.repositories && session.kind === "agent" &&
-      (this.projection.blockedSessions.includes(session.id) || session.turnId && !this.runs.has(session.id) && session.mode === "agent")) {
+    for (const session of this.projection.sessions) if (session.id !== exceptSessionId && session.repositories && (session.kind === "agent" || session.controls.env === "Sandbox") &&
+      (this.projection.blockedSessions.includes(session.id) || session.turnId && !this.runs.has(session.id) && (session.mode === "agent" || session.controls.env === "Sandbox"))) {
       roots.push(...session.repositories.map((repository) => repository.root.root));
     }
     for (const run of this.externalRuns.values()) {
@@ -771,6 +772,9 @@ export class ControlPlane extends EventEmitter {
       roots.push(job.commandJob.root);
     }
     roots.push(...this.platform.engagement.writeRoots());
+    for (const publication of this.projection.sandboxPublications ?? []) if (publication.status === "publishing" && publication.jobId !== exceptJobId && publication.repositories) {
+      roots.push(...publication.repositories.map((repository) => repository.root.root));
+    }
     for (const job of this.projection.jobs) if (job.id !== exceptJobId && job.projectClone && ["running", "waiting_input"].includes(job.status)) {
       const path = job.projectClone.path;
       roots.push(...job.projectClone.leaseRoots, ...this.projection.projects.map((project) => project.path).filter((root) => localRootsOverlap(root, path)),
@@ -806,14 +810,26 @@ export class ControlPlane extends EventEmitter {
   }
   private async repositoryContext(session: Session): Promise<string> {
     if (session.repositories) {
-      if (session.controls.env !== "Local") throw new MoguriError("repository_env", "Folder sessions currently require Local execution. No alternative root or transport was used.", 409);
+      if (!["Local", "Sandbox"].includes(session.controls.env)) throw new MoguriError("repository_env", "Captured groups have no qualified SSH context transport. No alternate root or Env was used.", 409);
       await this.platform.managed.assert(session);
+      const workspace = session.controls.env === "Sandbox" ? await this.sandboxWorkspaces.assert(session) : null, run = this.runs.get(session.id);
       const repositories = await Promise.all(session.repositories.map(async (binding) => {
         const project = this.platform.managed.project(session, binding.projectId);
-        return { repository: binding.projectId, name: binding.name, root: binding.root.root, instructions: await this.platform.sessions.projects.context(project) };
+        if (!workspace) return { repository: binding.projectId, name: binding.name, root: binding.root.root, instructions: await this.platform.sessions.projects.context(project) };
+        const selected = workspace.repositories?.find((entry) => entry.projectId === binding.projectId);
+        if (!selected) throw new MoguriError("sandbox_repository_scope", "The private context stage lost an original captured member. No Local root was read.", 409);
+        const settings = this.platform.sessions.projects.values(project.id);
+        const result = run?.sandboxExecutionId ? await this.sandbox.connection(run.sandboxExecutionId).query({ type: "context", settings, repository: binding.projectId }, run.abort.signal) : null;
+        if (result && result.type !== "context") throw new MoguriError("sandbox_context", "Native repository context changed response type. No source-root fallback.", 409);
+        return { repository: binding.projectId, name: binding.name, root: selected.guestRoot,
+          instructions: result?.text ?? await readRepositoryContext(join(workspace.stage.workspace, selected.directory), settings) };
       }));
       await this.platform.managed.assert(session);
-      return `\n<reviewed-multi-repository-scope>\nThe actual user selected this exact Local root set. Every workspace tool must explicitly select repository by the listed ID or captured name. There is no common-parent/default checkout. Respect each repository's instructions and hard restrictions; grouping grants no other roots. Project-specific MCP, hooks, background jobs and repository publication are not qualified on this multi-root transport.\n${JSON.stringify(repositories).replaceAll("<", "\\u003c")}\n</reviewed-multi-repository-scope>`;
+      if (workspace) {
+        const current = await this.sandboxWorkspaces.assert(this.session(session.id));
+        if (current.id !== workspace.id || current.revision !== workspace.revision) throw new MoguriError("sandbox_context", "The exact private group changed during context capture. No text was substituted.", 409);
+      }
+      return `\n<reviewed-multi-repository-scope>\nThe actual user selected this exact ${workspace ? "SendBox private-copy" : "Local"} root set. Every workspace tool must explicitly select repository by the listed ID or captured name. There is no common-parent/default checkout. Respect each repository's instructions and hard restrictions; grouping grants no other roots. Project-specific MCP, hooks and background jobs remain unavailable. ${workspace ? "Source publication requires a separate actual-user review of one exact captured repository. Shell execution stays unavailable if any member has folder restrictions." : "Repository publication is not qualified on this multi-root transport."}\n${JSON.stringify(repositories).replaceAll("<", "\\u003c")}\n</reviewed-multi-repository-scope>`;
     }
     if (!session.projectId) {
       if (!homeWorkspace(session)) return "";
@@ -950,14 +966,18 @@ export class ControlPlane extends EventEmitter {
     if (query.type === "sandbox.execution") return { type: query.type, execution };
     return { type: query.type, result: execution.resultDigest ? sandboxResult(this.store.blob(execution.resultDigest)) : null };
   }
-  private async nativeRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult> {
-    if (!session.projectId || session.controls.env !== "Sandbox") throw new MoguriError("sandbox_workspace", "Native filesystem reads need an explicitly project-bound Sandbox stage. No project-free or Local root was inferred.", 409);
+  private async nativeRead(session: Session, query: WorkspaceReadQuery, repository?: string): Promise<WorkspaceReadResult> {
+    if ((!session.projectId && !session.repositories) || session.controls.env !== "Sandbox") throw new MoguriError("sandbox_workspace", "Native filesystem reads need an explicitly project/group-bound Sandbox stage. No project-free or Local root was inferred.", 409);
     if (query.type === "session.git") throw new MoguriError("sandbox_git", "The reviewed native text stage is not a Git checkout. Inspect its native retained changes/publication review, not the Local source Git state.", 409);
-    const workspace = await this.sandboxWorkspaces.assert(session), configuration = this.platform.sessions.projects.configuration(session.projectId);
-    const result = await readWorkspace(workspace.stage.workspace, { query, policy: { deniedFolders: configuration.values.deniedFolders,
+    const workspace = await this.sandboxWorkspaces.assert(session), project = this.platform.managed.project(session, repository), configuration = this.platform.sessions.projects.configuration(project.id);
+    const selected = session.repositories ? workspace.repositories?.find((entry) => entry.projectId === project.id) : null;
+    if (session.repositories && !selected) throw new MoguriError("sandbox_repository_scope", "Select an original captured native repository. No default or Local file root was read.", 409);
+    const root = selected ? await scopedPath(workspace.stage.workspace, selected.directory) : workspace.stage.workspace;
+    const result = await readWorkspace(root, { query, policy: { deniedFolders: configuration.values.deniedFolders,
       planPath: configuration.values.planPath, upstream: configuration.values.repo.upstream } }, AbortSignal.timeout(15_000));
     const current = await this.sandboxWorkspaces.assert(this.session(session.id));
-    if (current.id !== workspace.id || current.revision !== workspace.revision) throw new MoguriError("sandbox_workspace", "Native file scope changed during inspection. No previous or source root was substituted.", 409);
+    if (current.id !== workspace.id || current.revision !== workspace.revision ||
+      JSON.stringify(this.platform.sessions.projects.configuration(project.id).values) !== JSON.stringify(configuration.values)) throw new MoguriError("sandbox_workspace", "Native file scope or policy changed during inspection. No previous or source root was substituted.", 409);
     return result;
   }
   private async sandboxCommand(command: SandboxCommand, finish: WorkspaceFinish): Promise<CommandResult> {
@@ -1031,8 +1051,9 @@ export class ControlPlane extends EventEmitter {
   }
   private async captureNativeExecution(execution: SandboxExecution) {
     const document = this.sandboxWorkspaces.document(execution), source = document.source;
-    const captured = await captureSandboxResult(execution, await this.sandbox.key(execution.id), source?.files.map((file) => file.path) ?? [],
-      document.version === 2 ? new Map(source?.files.map((file) => [file.path, file.digest]) ?? []) : undefined);
+    const files = document.version === 3 ? document.repositories.flatMap((repository) => repository.source.files.map((file) => ({ ...file, path: `${repository.directory}/${file.path}` }))) : source?.files ?? [];
+    const captured = await captureSandboxResult(execution, await this.sandbox.key(execution.id), files.map((file) => file.path),
+      document.version !== 1 ? new Map(files.map((file) => [file.path, file.digest])) : undefined);
     const current = this.sandboxExecution(execution.id);
     if (current.lastSequence !== execution.lastSequence) throw new MoguriError("sandbox_cursor", "The native durable cursor changed during retained snapshot inspection. No frame or effect was replayed.", 409);
     return { events: [...this.nativeReceiptEvents(current, captured.frames), ...(captured.result.rollback === "confirmed" ? this.sandboxWorkspaces.invalidate(current.workspaceId,
@@ -1309,13 +1330,30 @@ export class ControlPlane extends EventEmitter {
   private prepareWebAccess(session: Session, call: ToolCall): WebAccess | undefined {
     return toolWebTarget(call) ? approvedWebAccess(this.projection.settings.values, call, this.permissionContext(session, call)) : undefined;
   }
+  private restrictedRepositories(session: Session): boolean {
+    return Boolean(session.repositories?.some((binding) => {
+      const policy = folderPolicy(this.platform.sessions.projects.values(binding.projectId));
+      return policy.denied.length || policy.readOnly.length;
+    }));
+  }
   private toolScope(session: Session, call: ToolCall) {
-    if (session.repositories && session.controls.env !== "Local") throw new MoguriError("repository_env", "Multi-repository tools currently require their original Local scope.", 409);
+    if (session.repositories && !["Local", "Sandbox"].includes(session.controls.env)) throw new MoguriError("repository_env", "Captured groups have no qualified SSH tool transport. No alternate root or Env was used.", 409);
+    if (session.repositories && call.name === "run_command" && this.restrictedRepositories(session)) throw new MoguriError("folder_containment", "At least one captured repository has folder restrictions. A shell could cross member directories, so group shell execution stays unavailable.", 403);
     const workspace = repositoryTools.has(call.name) && !(call.name === "read_file" && typeof call.arguments.path === "string" && isPasteFilePath(call.arguments.path));
     const project = session.repositories ? workspace ? this.platform.managed.project(session, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined) : undefined :
       session.projectId ? this.platform.managed.project(session, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined) : undefined;
     const native = this.runs.get(session.id)?.sandboxExecutionId;
-    const root = native ? this.sandboxExecution(native).root : session.controls.env === "Remote" ? this.remoteWorkspace(session) :
+    const execution = native ? this.sandboxExecution(native) : null;
+    let nativeRoot = execution?.root ?? null;
+    if (session.repositories && session.controls.env === "Sandbox") {
+      if (!execution?.repositories) throw new MoguriError("sandbox_repository_scope", "This tool has no original native group execution. No Local member or first root was used.", 409);
+      if (workspace) {
+        const selected = execution.repositories.find((binding) => binding.projectId === project?.id);
+        if (!selected) throw new MoguriError("sandbox_repository_scope", "The explicitly selected original repository is absent from this native execution.", 409);
+        nativeRoot = selected.guestRoot;
+      }
+    }
+    const root = native ? nativeRoot : session.controls.env === "Remote" ? this.remoteWorkspace(session) :
       project?.path ?? (homeWorkspace(session) ? homeDirectoryTool(call) ? assertChatHome(session.homeRoot!) : session.homeRoot!.root : null);
     return { project, root, settings: this.platform.sessions.projects.values(project?.id ?? null) };
   }
@@ -1823,7 +1861,7 @@ export class ControlPlane extends EventEmitter {
     const draft = this.platform.inputs.normalizePaste(session.draft.text, session.draft.attachments, false);
     if (draft.text || draft.attachments.length) messages.push(this.contextItem(draft));
     const settings = this.platform.sessions.projects.values(project?.id);
-    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project || session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: draft.attachments.some((item) => item.kind === "paste_file") || this.hasPasteFiles(session), documents: draft.attachments.some((item) => item.kind === "document") || this.hasDocuments(session) });
+    const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project || session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), restrictedRepositories: this.restrictedRepositories(session), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: draft.attachments.some((item) => item.kind === "paste_file") || this.hasPasteFiles(session), documents: draft.attachments.some((item) => item.kind === "document") || this.hasDocuments(session) });
     const systemPrompt = await this.platform.effectivePrompt(session);
     const windows = model && !model.synthetic ? modelContextWindows(model) : null;
     return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools: tools.length ? catalogForModel(tools, []) : [] }), contextWindow: model ? session.controls.modelOptions?.contextWindow ?? windows?.values[0] ?? null : null, modelMaximum: model?.contextWindow ?? null, source: "estimated" as const, windows };
@@ -1831,7 +1869,7 @@ export class ControlPlane extends EventEmitter {
   private nativeCatalog(session: Session) {
     const configuration = this.platform.sessions.projects.values(session.projectId);
     return effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode,
-      folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env,
+      folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), restrictedRepositories: this.restrictedRepositories(session), metachat: session.kind === "metachat", env: session.controls.env,
         pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session) });
   }
   private toolingQuery(query: ToolingQuery): ToolingResponse | Promise<ToolingResponse> {
@@ -2227,7 +2265,8 @@ export class ControlPlane extends EventEmitter {
   }
   private available(controls: Controls, requireModel = true, session?: Session): void {
     if (session?.repositories) {
-      if (controls.env !== "Local") throw new MoguriError("repository_env", "Multi-repository sessions currently support Local only. No Remote/Sandbox or base-checkout fallback.", 409);
+      if (!["Local", "Sandbox"].includes(controls.env)) throw new MoguriError("repository_env", "Captured groups have no qualified Remote transport. No SSH, first-root or base-checkout fallback.", 409);
+      if (controls.env === "Sandbox" && !this.sandboxWorkspaces.automatic()) throw new MoguriError("sandbox_group_setup", "Enable reviewed managed automatic private workspaces before selecting Sandbox for a captured group.", 409);
       for (const repository of session.repositories) this.platform.managed.project(session, repository.projectId);
     }
     if (session?.workspaceId) {
@@ -2467,7 +2506,8 @@ export class ControlPlane extends EventEmitter {
         if (command.overrides?.modelId) this.available(startup.controls, false);
         let repositories: import("../../../packages/protocol/src/sessions.ts").SessionRepository[] | undefined;
         if (command.projectFolderId) {
-          if (projectId || command.workspaceId || !command.folderProjects?.length || startup.controls.env !== "Local") throw new MoguriError("repository_scope", "A folder session requires the exact reviewed member set and explicitly selected Local execution, never a single/base/Remote checkout.", 409);
+          if (projectId || command.workspaceId || !command.folderProjects?.length || !["Local", "Sandbox"].includes(startup.controls.env)) throw new MoguriError("repository_scope", "A folder session requires the exact reviewed member set and a qualified Local or managed Sandbox boundary, never a single/base/Remote checkout.", 409);
+          if (startup.controls.env === "Sandbox" && !this.sandboxWorkspaces.automatic()) throw new MoguriError("sandbox_group_setup", "Enable reviewed managed automatic private workspaces for this native group first.", 409);
           const folderId = command.projectFolderId, expected = command.folderProjects;
           const folder = this.projection.projectFolders.find((folder) => folder.id === folderId);
           if (!folder) throw new MoguriError("project_folder", "The selected folder is no longer in this profile.", 404);
@@ -2702,7 +2742,7 @@ export class ControlPlane extends EventEmitter {
         const mode = run.yieldedTo || session.pendingMode === "read-only" ? "read-only" : session.mode;
         const hook = run.hooks?.calls.get(approval.call.id);
         if (command.allow && hook) this.platform.extensions.assertHook(session, hook);
-        if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session), coordinator: Boolean(run.yieldedTo && session.mode === "agent" && session.pendingMode !== "read-only") }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
+        if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), restrictedRepositories: this.restrictedRepositories(session), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session), coordinator: Boolean(run.yieldedTo && session.mode === "agent" && session.pendingMode !== "read-only") }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
         run.approvalResponse = approval.id;
         try {
           if (command.allow) {
@@ -2993,7 +3033,8 @@ export class ControlPlane extends EventEmitter {
             launchName: `mg-${id.replaceAll("-", "").slice(0, 20)}`, command: this.sandbox.workerArgv(), createdAt: new Date().toISOString(),
             createdAfter: Math.floor(Date.now() / 1000) - 2, createdBefore: Math.ceil(Date.now() / 1000) + 120,
             nativeSessionId: null, planDigest: null, signerFingerprint: null, status: "launching", cancellation: "none", cleanup: "pending",
-            diagnostic: null, lastSequence: 0, workerPid: null, cliExitCode: null, resultDigest: null, revision: 0 };
+            diagnostic: null, lastSequence: 0, workerPid: null, cliExitCode: null, resultDigest: null, revision: 0,
+            ...(workspace.repositories ? { repositories: workspace.repositories } : {}) };
           if (nativeAdmission!.scope) nativeExecution.networkScope = nativeAdmission!.scope;
           const artifact = this.platform.artifacts.nativeExecution(current, id, workspace.inputDigest);
           this.commit([{ event_type: "artifact.revised", profile_id: this.profileId, project_id: current.projectId, payload: { artifact } }, this.sandboxEvent(nativeExecution)]);
@@ -3115,6 +3156,12 @@ export class ControlPlane extends EventEmitter {
       }
   }
   private otherWriter(session: Session): boolean {
+    if (session.repositories && session.controls.env === "Sandbox") {
+      const roots = this.platform.managed.roots(session), busy = this.ownedWriteRoots(session.id);
+      if (roots.some((root) => busy.some((held) => !held.startsWith("remote/") && localRootsOverlap(held, root)) ||
+        this.profileHooks?.foreignRootBusy(this.profileId, root, true)) ||
+        session.repositories.some((repository) => this.platform.artifacts.isBusy(repository.projectId))) return true;
+    }
     if (session.controls.env === "Sandbox") {
       if (this.sandboxWorkspaces.automatic()) {
         const root = (this.projection.sandboxWorkspaces ?? []).find((workspace) => workspace.id === session.sandboxWorkspaceId)?.stage?.workspace;
@@ -3770,7 +3817,7 @@ export class ControlPlane extends EventEmitter {
         const project = this.projection.projects.find((project) => project.id === current.projectId);
         const projectSettings = this.platform.sessions.projects.values(project?.id);
         const effectiveMode = run.yieldedTo ? "read-only" : current.mode;
-        const solverTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", effectiveMode, folderPolicy(projectSettings), { project: Boolean(project || current.repositories), workspace: homeWorkspace(current), multiRepository: Boolean(current.repositories), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current), coordinator: Boolean(run.yieldedTo && current.mode === "agent" && current.pendingMode !== "read-only") });
+        const solverTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", effectiveMode, folderPolicy(projectSettings), { project: Boolean(project || current.repositories), workspace: homeWorkspace(current), multiRepository: Boolean(current.repositories), restrictedRepositories: this.restrictedRepositories(current), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current), coordinator: Boolean(run.yieldedTo && current.mode === "agent" && current.pendingMode !== "read-only") });
         const selectedTools = (request.loadedTools ?? []).filter((name) => solverTools.some((tool) => tool.name === name));
         const solverInterface = solverTools.length ? catalogForModel(solverTools, selectedTools) : [];
         let tools = phase === "router" || kupoPhase === "gate" || kupoPhase === "critic" ? [] : solverInterface;

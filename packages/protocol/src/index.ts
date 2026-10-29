@@ -44,7 +44,7 @@ import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord
 import { CandidateGenerationRecordSchema, projectCandidateGeneration, type CandidateGenerationRecord } from "./candidate-generations.ts";
 import { projectCandidateOwners, projectCandidateCleanup, type CandidateOwner, type CandidateCleanup } from "./candidate-retention.ts";
 import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedger, successfulRoleEntry, type RoleSequenceRecord } from "./role-sequences.ts";
-import { projectSandboxPublication, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
+import { projectSandboxPublication, sandboxRepositories, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
 import type { SandboxSetupOperation } from "./sandbox-management.ts";
 import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger, type CompoundWorkflow } from "./compound.ts";
 import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
@@ -924,7 +924,18 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
     }
     if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
-    if (event.event_type === "sandbox.workspace_recorded") sandboxWorkspaces.set(event.payload.workspace.id, structuredClone(event.payload.workspace));
+    if (event.event_type === "sandbox.workspace_recorded") {
+      const workspace = event.payload.workspace, previous = sandboxWorkspaces.get(workspace.id);
+      if (workspace.repositories) {
+        const repositories = sandboxRepositories(workspace.repositories), session = sessions.get(workspace.sessionId);
+        if (workspace.projectId !== null || workspace.sourceWorkspaceId !== null || workspace.sourceRoot !== null || workspace.sourceHead !== null ||
+          !session?.repositories || JSON.stringify(session.repositories) !== JSON.stringify(repositories.map(({ projectId, name, root }) => ({ projectId, name, root })))) {
+          throw new MoguriError("sandbox_repository_history", "A composite workspace lost its exact root-less captured session scope.", 409);
+        }
+      }
+      if (previous && Boolean(previous.repositories) !== Boolean(workspace.repositories)) throw new MoguriError("sandbox_repository_history", "Legacy and composite workspace authority cannot be relabelled.", 409);
+      sandboxWorkspaces.set(workspace.id, structuredClone(workspace));
+    }
     if (event.event_type === "sandbox.publication_recorded") {
       const publication = projectSandboxPublication(sandboxPublications.get(event.payload.publication.id), event.payload.publication);
       if (publication.profileId !== profileId || event.artifact_id !== publication.id) throw new MoguriError("sandbox_publication_corrupt", "Native publication lost its exact independent profile/report authority.", 409);
@@ -935,6 +946,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "sandbox.execution_recorded") {
       if (event.payload.execution.profileId !== event.profile_id) throw new Error("Native execution cannot cross its retained profile authority.");
+      const next = event.payload.execution, previous = sandboxExecutions.get(next.id);
+      if (next.repositories) {
+        sandboxRepositories(next.repositories);
+        if (next.projectId !== null || next.sourceWorkspaceId !== null || next.sourceRoot !== null || next.root !== null) throw new MoguriError("sandbox_repository_history", "Composite execution cannot acquire an implicit first/default project root.", 409);
+      }
+      if (previous && JSON.stringify(previous.repositories) !== JSON.stringify(next.repositories)) throw new MoguriError("sandbox_repository_history", "An original execution's captured native mapping cannot be replaced or added later.", 409);
       sandboxExecutions.set(event.payload.execution.id, structuredClone(event.payload.execution));
     }
     if (event.event_type === "sandbox.frame_recorded") {

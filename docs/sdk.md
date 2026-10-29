@@ -126,7 +126,7 @@ member IDs/revisions and canonical path/device/inode identities. Its
 `repositories`. Null without those explicit fields remains project-free;
 ordinary Local chats may separately retain `homeRoot`, never a synthetic project.
 
-The Local filesystem/command tools require an explicit `repository` ID or
+Local and qualified managed Sandbox filesystem/command tools require an explicit `repository` ID or
 captured name for folder sessions. `workspaces.files(sessionId, path, repository)`,
 `file(sessionId, path, repository)` and `git(sessionId, diff, repository)` resolve the
 same bound root; `terminal.open` requires a captured member's exact root.
@@ -137,10 +137,14 @@ quarantine, including across profiles. Per-member folder restrictions and
 project-scoped approval grants bind the actual selected repository.
 
 CLI/TUI/desktop share `/folder-group {"name":"Folder","projectIds":["ID","ID"]}`
-and `/folder-chat [FOLDER_ID]`; `/folder-chat` without an argument lists visible folders. The latter
-explicitly creates a Local folder chat, still subject to hard allowed-env
-policy. Per-project GitHub/plan, MCP, memory, hooks, background/publication and
-managed-worktree surfaces are not implicitly combined.
+and `/folder-chat [FOLDER_ID] [Local|Sandbox]`; without an argument it lists
+visible folders. Env defaults to Local; explicit Sandbox requires a ready
+reviewed native runtime and managed automatic workspaces. Hard allowed-env
+policy still applies, with no fallback. Each member gets a private copy and
+tools keep explicit selection; any member's folder restrictions block all group
+shells. Per-project GitHub/plan, MCP, memory, hooks, background and managed-worktree
+surfaces are not implicitly combined. Group source publication separately chooses
+one original member; native user consoles and SSH groups remain unqualified.
 
 `sessions.side(parentId)` atomically opens the original side conversation or
 creates one with inherited controls and captured full parent context. It never
@@ -843,10 +847,10 @@ excluded, protected, binary and oversized paths remain disclosed, not truncated.
 it cannot cancel a later turn merely sharing a session. Native project-file
 capture reads the actual private stage, never the Local source checkout.
 
-`sandbox.publicationPreview(executionId, paths)` reviews up to 20 selected
+`sandbox.publicationPreview(executionId, paths, repository?)` reviews up to 20 selected
 text outputs with a 32-KiB patch and 64-KiB complete document against original
 Local source bases. Its `limits` exposes both exact byte boundaries. Separately confirmed
-`sandbox.publish(executionId, paths, preview.digest, execution.revision)` starts
+`sandbox.publish(executionId, paths, preview.digest, execution.revision, repository?)` starts
 an independently owned user copy job. Inspect it with
 `sandbox.publication(id)`/`sandbox.waitPublication(id)`; stop its actual job
 with `jobs.cancel(jobId)`. This is explicit user text publication, not a Local
@@ -857,6 +861,11 @@ replayed. Publication snapshots survive original session/report deletion.
 There is no implicit commit, branch, source deletion or binary/deleted-file
 publication. Native console/MCP/memory/subagent/evolution and plan-write
 transports remain unqualified rather than falling back to Local.
+For captured groups, `repository` is mandatory and chooses an exact original
+ID or unique captured name, never a first member. Paths stay member-relative.
+Every original root/policy/HEAD/file set is rechecked and leased. Version-3
+input and version-2 result/publication records preserve the map; original v1/v2
+single-root inputs and v1 results/publications are not reinterpreted.
 
 CLI `sandbox preview/prepare PATHS.json --session ID` reads an explicit bounded
 JSON path array. Preparation needs its exact `--digest`, session `--revision`
@@ -867,6 +876,10 @@ original copy job's stop. `publication`, `publication-stop` and
 `publication-wait` inspect/cancel that retained owner. Shared CLI/TUI/desktop
 `/sandbox` commands print exact `confirm-stage`/`confirm-publish` commands after
 preview. No text prefix or model answer is treated as confirmation.
+Group CLI publication adds `--repository ID` to preview and publish. Shared
+`/sandbox publish-preview RUN_ID {"paths":["file"],"repository":"ID"}` includes
+that exact original ID in its generated confirm command; the legacy paths-array
+syntax remains valid for single-project results.
 
 This is an alpha API. Qualified **0.29.0-alpha.1 uses protocol 35**. Qualified
 **0.28.0-alpha.1 uses protocol 34**; the frozen qualified

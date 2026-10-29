@@ -5,7 +5,7 @@ import { ArtifactKindSchema, type ArtifactExport, type ArtifactKind } from "./ar
 import type { PlanBinding } from "./plan-saves.ts";
 import { ContinueWorkReviewSchema, type ContinueWorkReview } from "./kanban.ts";
 import { GithubItemSchema, GithubProjectResponseSchema, GithubRepositorySchema, GithubScopeSchema } from "./github-workflows.ts";
-import type { QueueItem } from "./index.ts";
+import type { QueueItem, StoredEvent } from "./index.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -139,6 +139,19 @@ export function parseSlashInput(text: string): { name: string; argument: string 
   return { name: name === "termnial" ? "terminal" : name === "metachat" ? "meta" : name, argument: match[2] ?? "" };
 }
 export const terminalCommandExecution = (status: CommandExecution["status"]) => ["completed", "failed", "cancelled", "partial"].includes(status);
+export function hasCombinedWorkspaceHistory(events: readonly StoredEvent[]): boolean {
+  const grouped = new Set<string>();
+  return events.some((event) => {
+    const owner = `${event.profile_id}/${event.session_id}`;
+    if (event.event_type === "session.created" && event.payload.repositories?.length) grouped.add(owner);
+    return event.event_type.startsWith("slash.") || event.event_type === "draft.saved" && event.payload.source !== undefined ||
+      (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && Object.hasOwn(event.payload.item, "command") ||
+      (event.event_type === "session.created" || event.event_type === "session.configured") && grouped.has(owner) && event.payload.controls.env === "Sandbox" ||
+      event.event_type === "sandbox.workspace_recorded" && Object.hasOwn(event.payload.workspace, "repositories") ||
+      event.event_type === "sandbox.execution_recorded" && Object.hasOwn(event.payload.execution, "repositories") ||
+      event.event_type === "sandbox.publication_recorded" && event.payload.publication.version === 2;
+  });
+}
 export function projectCommandExecution(previous: CommandExecution | undefined, next: CommandExecution): CommandExecution {
   const immutable = (entry: CommandExecution) => [entry.version, entry.id, entry.profileId, entry.sessionId, entry.projectId,
     entry.queueItemId, entry.name, entry.client, entry.actor, entry.bindingDigest, entry.inputDigest, entry.createdAt];

@@ -37,6 +37,7 @@ export interface NativeLaunch {
   id: string; stage: NativeStage; config: SandboxConfiguration; launchName: string; createdAfter: number; createdBefore: number;
   root: string | null;
   providerProbe?: boolean;
+  repositories?: SandboxExecution["repositories"];
 }
 interface NativeResult { exitCode: number; clean: boolean; status: BridgeStatus | null; failure: string | null }
 const nativeBootstrapSchema = Type.Object({
@@ -315,6 +316,7 @@ class NativeWorker implements NativeConnection {
           if (!this.probe) this.privateControl = new PrivateControl(this.spec.id, Buffer.from(key, "hex"), "controller");
           wire.send({ action: this.probe ? "probe" : "start", protocol: PROTOCOL_VERSION, workerDigest: config.qualification.workerDigest,
             stateDir: `/workspace/.moguri/execution/${this.spec.id}`, root: this.spec.root,
+            ...(this.spec.repositories ? { nativeRepositories: this.spec.repositories.map((entry) => ({ projectId: entry.projectId, name: entry.name, root: entry.guestRoot })) } : {}),
             ...(this.probe ? this.spec.providerProbe ? { nativeNetworkProbe: true } : {} :
               { runId: this.spec.id, key, after: 0, journal: true, sealed: true }) });
           return;
@@ -326,6 +328,9 @@ class NativeWorker implements NativeConnection {
             !native || native.bridgeDigest !== config.qualification.bridgeDigest || native.uid === 0 || native.noNewPrivs !== 1 || native.seccomp !== 2 ||
             !/^0+$/.test(native.capabilities) || !native.enforcedProxy || message.kind === "ready" && message.status.runId !== this.spec.id ||
             this.probe && this.spec.providerProbe && (!native.networkProbe || native.networkProbe.url !== "https://api.githubcopilot.com" || native.networkProbe.status >= 500)) stopped("Actual guest runtime/build/process controls or explicitly reviewed cold provider networking differ from the exact native review.");
+          if (JSON.stringify(native?.repositories) !== JSON.stringify(this.spec.repositories?.map((entry) => ({ projectId: entry.projectId, name: entry.name, root: entry.guestRoot })))) {
+            stopped("Actual native repository roots differ from the exact captured group mapping. No first/default root or model credential was admitted.");
+          }
           clearTimeout(this.deadline);
           this.ready = true; this.resolveVerified(info);
           if (message.kind === "ready") { this.status = message.status; await this.changed({ status: "running", workerPid: message.status.workerPid }); }

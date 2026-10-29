@@ -130,7 +130,7 @@ test("named grouping is atomic and a folder session edits and runs commands only
     assert.equal(source.sourceRef.repository, first);
     assert.match(source.sourceRef.expectedDigest, /^[a-f0-9]{64}$/);
     assert.equal(fixture.requests.length, 4);
-    await assert.rejects(() => sdk.sessions.configure(created.id!, { ...session().controls, env: "Remote" }, session().revision), /Local|multi-repositor/i);
+    await assert.rejects(() => sdk.sessions.configure(created.id!, { ...session().controls, env: "Remote" }, session().revision), { code: "repository_env" });
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
@@ -298,6 +298,8 @@ test("fresh member folder restrictions apply only to that selected repository, i
     await mkdir(join(group.path, "restricted")); await mkdir(join(fixture.project, "restricted"));
     const configuration = (await sdk.projects.configuration(group.second)).configuration;
     await sdk.projects.configure(group.second, { ...configuration.values, readOnlyFolders: ["restricted"] }, configuration.revision);
+    assert.equal((await sdk.tools.catalog(created.id!, "run_command")).tools.some((tool) => tool.name === "run_command"), false,
+      "A shell in the unrestricted member could otherwise cross into the restricted member.");
     const tool = (await sdk.tools.catalog(created.id!, "write_file")).tools.find((tool) => tool.name === "write_file")!;
     const args = { path: "restricted/generated.txt", text: "Generated selected-repository policy check.", expectedDigest: "absent" };
     await assert.rejects(() => sdk.tools.execute(created.id!, tool.name, { ...args, repository: group.second }, tool.schemaDigest), /read.only/i);
@@ -306,6 +308,25 @@ test("fresh member folder restrictions apply only to that selected repository, i
     assert.equal(await readFile(join(fixture.project, args.path), "utf8"), args.text);
     await assert.rejects(() => readFile(join(group.path, args.path)), { code: "ENOENT" });
     assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("even read-only captured Sandbox preparation leases every original root without granting a tool or model call", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const group = await groupForFixture(fixture, sdk), created = await sdk.sessions.createFolder(group.folderId), side = await sdk.sessions.side(created.id!);
+    const session = fixture.service.controller.snapshot().sessions.find((session) => session.id === side.id)!;
+    assert.equal(session.mode, "read-only");
+    const controls = { ...session.controls, env: "Sandbox" as const }, item = { id: "generated-private-copy-input", text: "Generated preparation ownership only.", attachments: [], delivery: "queue" as const };
+    fixture.service.store.commit([
+      { event_type: "session.configured", profile_id: "default", session_id: session.id, payload: { controls } },
+      { event_type: "queue.enqueued", profile_id: "default", session_id: session.id, payload: { item } },
+      { event_type: "turn.started", profile_id: "default", session_id: session.id, turn_id: "generated-private-copy-turn",
+        payload: { item, controls, policyRevision: fixture.service.controller.snapshot().policy.revision } },
+    ]);
+    fixture.service.controller.refreshProfile();
+    assert.ok(session.repositories!.every((repository) => fixture.service.controller.ownedLocalRoots().includes(repository.root.root)));
+    assert.equal(fixture.requests.length, 0); assert.equal(fixture.service.controller.snapshot().sandboxExecutions!.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

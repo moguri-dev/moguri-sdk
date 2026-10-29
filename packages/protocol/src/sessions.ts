@@ -89,12 +89,8 @@ export const ChatWriterSchema = object({
   inspection: Type.Optional(object({ sessionId: id, actor: Type.Literal("user") })),
 });
 export type ChatWriter = Static<typeof ChatWriterSchema>;
-export const SessionRepositorySchema = object({
-  projectId: id, name: Type.String({ minLength: 1, maxLength: 128 }),
-  root: object({ root: path, device: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }), inode: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }) }),
-});
-export const SessionRepositoriesSchema = Type.Array(SessionRepositorySchema, { minItems: 1, maxItems: 1000 });
-export type SessionRepository = Static<typeof SessionRepositorySchema>;
+export { SessionRepositorySchema, SessionRepositoriesSchema } from "./repository-roots.ts";
+export type { SessionRepository } from "./repository-roots.ts";
 export interface SessionGroup extends NavigationFolder { projectId: string }
 export const ProjectCloneIntentSchema = object({
   version: Type.Literal(1), projectId: id, repository: Type.String({ minLength: 1, maxLength: 2048 }), path, parent: path,

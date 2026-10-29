@@ -872,9 +872,9 @@ export class MoguriSdk extends TransportClient {
     result: (executionId: string) => this.query({ type: "sandbox.result", executionId }),
     reconcile: (executionId: string) => this.command({ type: "sandbox.reconcile", executionId, confirm: true }),
     stop: (executionId: string) => this.command({ type: "sandbox.stop", executionId }),
-    publicationPreview: (executionId: string, paths: string[]) => this.query({ type: "sandbox.publication.preview", executionId, paths }),
-    publish: (executionId: string, paths: string[], expectedDigest: string, expectedRevision: number) =>
-      this.command({ type: "sandbox.publish", executionId, paths, expectedDigest, expectedRevision, confirm: true }),
+    publicationPreview: (executionId: string, paths: string[], repository?: string) => this.query({ type: "sandbox.publication.preview", executionId, paths, ...(repository ? { repository } : {}) }),
+    publish: (executionId: string, paths: string[], expectedDigest: string, expectedRevision: number, repository?: string) =>
+      this.command({ type: "sandbox.publish", executionId, paths, expectedDigest, expectedRevision, confirm: true, ...(repository ? { repository } : {}) }),
     publication: (publicationId: string) => this.query({ type: "sandbox.publication", publicationId }),
     waitPublication: async (publicationId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Extract<PlatformResponse, { type: "sandbox.publication" }>> => {
       const before = await this.sandbox.publication(publicationId);

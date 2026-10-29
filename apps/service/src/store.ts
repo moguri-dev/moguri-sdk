@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import * as vec from "sqlite-vec";
-import { attachmentDigests, eventTypes, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { attachmentDigests, eventTypes, hasCombinedWorkspaceHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
@@ -493,21 +493,12 @@ export class EventStore {
       event.payload.settings.appearance?.palette !== undefined && !["moguri", "ocean", "orchid", "custom"].includes(event.payload.settings.appearance.palette))) {
       throw new Error("New theme history cannot be relabelled without its original catalogue marker. Original state was preserved.");
     }
+    const retiredCombined = this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') LIKE 'slash.%' LIMIT 1").get();
+    if (hasCombinedWorkspaceHistory(events) || retiredCombined) throw new Error("Combined80 queued/native group runtime history cannot be relabelled as a standalone predecessor. Original state was preserved.");
     if (version >= 79) return;
-    const grouped = new Set<string>();
-    const futureHistory = events.some((event) => {
-      const owner = `${event.profile_id}/${event.session_id}`;
-      if (event.event_type === "session.created" && event.payload.repositories?.length) grouped.add(owner);
-      return event.event_type.startsWith("slash.") || event.event_type === "project.folder_removed" ||
-        event.event_type === "draft.saved" && event.payload.source !== undefined ||
-        event.event_type === "project.folder_saved" && event.payload.folder.color !== undefined ||
-        (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && Object.hasOwn(event.payload.item, "command") ||
-        (event.event_type === "session.created" || event.event_type === "session.configured") && grouped.has(owner) && event.payload.controls.env === "Sandbox" ||
-        event.event_type === "sandbox.workspace_recorded" && Object.hasOwn(event.payload.workspace, "repositories") ||
-        event.event_type === "sandbox.execution_recorded" && Object.hasOwn(event.payload.execution, "repositories");
-    });
-    const retiredFuture = this.db.prepare(`SELECT 1 FROM events WHERE json_extract(data,'$.event_type') LIKE 'slash.%'
-      OR json_extract(data,'$.event_type')='project.folder_removed' LIMIT 1`).get();
+    const futureHistory = events.some((event) => event.event_type === "project.folder_removed" ||
+      event.event_type === "project.folder_saved" && event.payload.folder.color !== undefined);
+    const retiredFuture = this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='project.folder_removed' LIMIT 1").get();
     if (futureHistory || retiredFuture) throw new Error("Workspace interaction history cannot be relabelled as pre-79 state. Original state was preserved.");
   }
   private migrateWorkflowFeatures(version: number): void {

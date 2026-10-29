@@ -57,7 +57,11 @@ thinking intent and hard policy remain untouched.
 Missing, corrupt or premature feature/convergence markers, unmarked77,
 unknown78, falsely combined79 and future81 are refused, not repaired from a
 number. Ordinary historical `command.inspected` events remain valid older
-history; new slash intent uses a separate namespace. New durable shapes still
+history; new slash intent uses a separate namespace. Inspection of actual
+standalone79 confirms its markers reserved queued/grouped-native shapes, not a
+working queue or version-3/v2 native records. Definite combined80 runtime history
+and retained slash tombstones cannot be relabeled as genuine79 by erasing
+theme/convergence markers. New durable shapes still
 need migration/restart/concurrency/cancellation tests and exact installed/native
 qualification. Protocol77 physical and standalone78 payload receipts do not
 qualify changed80 bytes.
@@ -111,6 +115,10 @@ SDK drops late socket generations/invalidation frames instead of issuing new
 snapshot reads. `commands.detachAll()` awaits owned view-client teardown;
 intentional profile/quit handoffs can finish their original acknowledgement,
 never through a replacement service connection.
+Actual controller-SIGKILL coverage retains running/claimed work as partial and
+holds later input. Undispatched UI results can be delivered once after restart,
+but the saved queue still needs explicit Resume. A lost completion acknowledgement
+cannot reapply an already committed view, even after restart.
 
 Desktop acknowledges an actually rendered source-bound surface. TUI uses
 OpenTUI's real committed renderables, frame counter and renderer-idle/output

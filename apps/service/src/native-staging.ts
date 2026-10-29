@@ -130,11 +130,45 @@ async function write(path: string, text: string | Uint8Array, mode: number) {
   try { await file.writeFile(text, typeof text === "string" ? "utf8" : undefined); await file.sync(); } finally { await file.close(); }
 }
 const overlaps = (parent: string, child: string) => { const path = relative(parent, child); return !isAbsolute(path) && path !== ".." && !path.startsWith("../"); };
+export interface NativeRepositorySource { projectId: string; directory: string; source: NativeSource }
+export function nativeRepositoryDirectory(projectId: string): string {
+  if (!projectId || projectId.length > 128 || !projectId.isWellFormed() || /[\0\r\n]/.test(projectId)) invalid("Native repository mapping needs its exact captured project ID.");
+  return `repositories/${digest(`moguri-native-repository-v1\0${projectId}`)}`;
+}
+export function nativeCompositeDigest(repositories: readonly NativeRepositorySource[]): string {
+  if (!repositories.length || repositories.length > 1000) invalid("Native group mapping needs one complete bounded captured repository set.");
+  const ids = new Set<string>(), directories = new Set<string>();
+  let files = 0, bytes = 0;
+  for (const repository of repositories) {
+    if (repository.directory !== nativeRepositoryDirectory(repository.projectId)) invalid("Native repository directory mapping changed.");
+    if (ids.has(repository.projectId) || directories.has(repository.directory)) invalid("Native group mapping contains duplicate repositories.");
+    ids.add(repository.projectId); directories.add(repository.directory); validateSource(repository.source);
+    files += repository.source.files.length; bytes += repository.source.files.reduce((sum, file) => sum + file.bytes, 0);
+    if (files > NATIVE_TREE_MAX_FILES || bytes > NATIVE_TREE_MAX_BYTES) invalid("Native group aggregate exceeds the complete 20,000-file/256-MiB boundary. No member or subset was silently omitted.");
+  }
+  for (const [index, repository] of repositories.entries()) for (const other of repositories.slice(index + 1)) {
+    if (equalIdentity(repository.source.identity, other.source.identity) || overlaps(repository.source.root, other.source.root) || overlaps(other.source.root, repository.source.root)) {
+      invalid("Captured native group roots overlap or alias the same original directory.");
+    }
+  }
+  return digest(`moguri-native-group-v1\0${JSON.stringify([...repositories].sort((a, b) => a.projectId.localeCompare(b.projectId))
+    .map(({ projectId, directory, source }) => ({ projectId, directory, sourceDigest: source.digest })))}`);
+}
 export async function materializeNativeStage(parent: string, requestedOwner: NativeStageOwner, requestedSource: NativeSource, signal: AbortSignal, progress?: (copied: number, total: number) => void): Promise<NativeStage> {
   signal.throwIfAborted(); const owner = structuredClone(requestedOwner), source = structuredClone(requestedSource); validateSource(source);
-  const ownership = marker(owner, source.digest); await directory(parent, true);
-  if (overlaps(source.root, parent) || overlaps(parent, source.root)) invalid("Native staging must be separate from the source checkout.");
-  await assertNativeSource(source, signal);
+  return materializeSources(parent, owner, [{ source, directory: "" }], source.digest, signal, progress);
+}
+export async function materializeNativeGroup(parent: string, requestedOwner: NativeStageOwner, requested: readonly NativeRepositorySource[], signal: AbortSignal, progress?: (copied: number, total: number) => void): Promise<NativeStage> {
+  signal.throwIfAborted(); const owner = structuredClone(requestedOwner), repositories = structuredClone(requested);
+  return materializeSources(parent, owner, repositories, nativeCompositeDigest(repositories), signal, progress);
+}
+async function materializeSources(parent: string, owner: NativeStageOwner, sources: readonly { source: NativeSource; directory: string }[], capturedDigest: string,
+  signal: AbortSignal, progress?: (copied: number, total: number) => void): Promise<NativeStage> {
+  const ownership = marker(owner, capturedDigest); await directory(parent, true);
+  for (const { source } of sources) {
+    if (overlaps(source.root, parent) || overlaps(parent, source.root)) invalid("Native staging must be separate from the source checkout for every captured repository.");
+    await assertNativeSource(source, signal);
+  }
   let stageParent = parent;
   for (const part of ["native-stages", owner.profileId]) {
     stageParent = join(stageParent, part);
@@ -148,19 +182,26 @@ export async function materializeNativeStage(parent: string, requestedOwner: Nat
     await write(join(path, "owner.json"), JSON.stringify(ownership), 0o600);
     await mkdir(workspace, { mode: 0o700 });
     let copied = 0;
-    for (const file of source.files) {
-      signal.throwIfAborted();
-      const target = join(workspace, file.path);
-      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-      await scopedPath(workspace, file.path, true);
-      const content = file.text ?? await readRegularFile(await scopedPath(source.root, file.path), file.bytes);
-      const bytes = typeof content === "string" ? Buffer.from(content) : content;
-      if (bytes.length !== file.bytes || createHash("sha256").update(bytes).digest("hex") !== file.digest) invalid("The native source changed during copying.");
-      await write(target, content, 0o600 | (file.mode & 0o100));
-      progress?.(++copied, source.files.length);
+    const total = sources.reduce((sum, entry) => sum + entry.source.files.length, 0);
+    for (const { source, directory } of sources) {
+      if (directory) {
+        await mkdir(join(workspace, directory), { recursive: true, mode: 0o700 });
+        await scopedPath(workspace, directory);
+      }
+      for (const file of source.files) {
+        signal.throwIfAborted();
+        const path = directory ? `${directory}/${file.path}` : file.path, target = join(workspace, path);
+        await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+        await scopedPath(workspace, path, true);
+        const content = file.text ?? await readRegularFile(await scopedPath(source.root, file.path), file.bytes);
+        const bytes = typeof content === "string" ? Buffer.from(content) : content;
+        if (bytes.length !== file.bytes || createHash("sha256").update(bytes).digest("hex") !== file.digest) invalid("The native source changed during copying.");
+        await write(target, content, 0o600 | (file.mode & 0o100));
+        progress?.(++copied, total);
+      }
     }
-    await assertNativeSource(source, signal);
-    return { ...owner, parent, directory: path, workspace, sourceDigest: source.digest, identity: captured, workspaceIdentity: await directory(workspace, true) };
+    for (const { source } of sources) await assertNativeSource(source, signal);
+    return { ...owner, parent, directory: path, workspace, sourceDigest: capturedDigest, identity: captured, workspaceIdentity: await directory(workspace, true) };
   } catch (error) {
     throw new MoguriError("native_stage_partial", `Native staging is partial at its owned path ${path}. The source was not written and no retry is assumed. ${error instanceof Error ? error.message : "Inspect the owned staging root."}`, 409);
   }

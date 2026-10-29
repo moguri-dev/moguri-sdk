@@ -24,7 +24,7 @@ interface Host {
   wake(): void;
   writeBusy(projectId: string, workspaceId: string): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
-  nativeRead?(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
+  nativeRead?(session: Session, query: WorkspaceReadQuery, repository?: string): Promise<WorkspaceReadResult>;
   job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (text: string) => void) => Promise<unknown>, start: (job: CapabilityJob) => void, settled: () => void, workspaceId: string): string;
 }
 export class ManagedWorkspaces {
@@ -181,11 +181,11 @@ export class ManagedWorkspaces {
     }
     if (query.type === "workspace.inspect") return { type: query.type, inspection: await this.inspect(query.workspaceId) };
     const session = this.session(query.sessionId);
-    if ((session.repositories || query.repository) && session.controls.env !== "Local") throw new MoguriError("repository_env", "Explicit multi-repository selection is currently Local-only. No execution transport or root was substituted.", 409);
+    if ((session.repositories || query.repository) && !["Local", "Sandbox"].includes(session.controls.env)) throw new MoguriError("repository_env", "Explicit captured repository selection has no qualified SSH transport. No alternate root or Env was substituted.", 409);
     if (session.controls.env === "Sandbox") {
       if (!this.host.nativeRead) throw new MoguriError("sandbox_workspace", "This service has no qualified native file broker. No Local source root was read.", 409);
       const request: WorkspaceReadQuery = query.type === "session.git" ? { type: query.type, diff: query.diff } : { type: query.type, path: query.path };
-      const result = await this.host.nativeRead(session, request);
+      const result = await this.host.nativeRead(session, request, query.repository);
       if (result.type !== query.type) throw new MoguriError("sandbox_workspace", "Native file response changed its exact requested type. No fallback.", 409);
       return result;
     }

@@ -43,7 +43,7 @@ export interface SessionWorkspaceHost {
   rootBusy(projectId: string, workspaceId: string | null): boolean;
   localRootBusy(root: string, ownerSessionId?: string): boolean;
   remoteRead(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
-  nativeRead?(session: Session, query: WorkspaceReadQuery): Promise<WorkspaceReadResult>;
+  nativeRead?(session: Session, query: WorkspaceReadQuery, repository?: string): Promise<WorkspaceReadResult>;
   remotePlanBinding(session: Session): PlanBinding;
   remoteConsoles?: RemoteConsoles;
 }
