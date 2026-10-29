@@ -332,6 +332,39 @@ lineage or silently repaired. The marker-only host change preserves all six
 compiled native payload/dependency hashes; final host/package qualification
 still uses the marker-bearing source and retains its separate evidence.
 
+### Final marker-bearing protocol-77 qualification
+
+The final host/package source is
+`c78994612260fa413a613a1f117569cae03b0167`. Its actual delivered app passes
+**57/57 desktop flows in 2.1 minutes**, including effort restoration/default
+reset, re-selection after disable/re-enable, all four decorative icon paths,
+inactive Kupo choices and the earlier dictation/tooltip/scroll fixes.
+The packed external SDK type-checks the new field/helpers and passes actual
+SDK/CLI/TUI preference/restart/reselection probes plus all 12 installed worker
+continuation probes, with zero root/consumer npm vulnerabilities.
+The actual packaged Node/service proves `model_selection_continuity_schema`
+is **`'1'`**, rather than assuming it from numeric 77.
+
+The [fresh physical qualification](sendbox-0.2.4-qualification.md#protocol-77-model-controls-follow-up)
+passes all six exact-artifact gates in **16,343.68 ms**, using immutable image
+`docker.io/library/moguri-worker@sha256:f4834d0b70f247f18128701adae006a5384f72890b990c9ea441ee003e2f7f85`.
+Its current archive identities, full CNAME/effective shared-cloud scope,
+three generated 126-token model calls, strict user tool actors and exact
+original VM absence are retained separately from the protocol-76 run.
+
+The verified labelled combined installer is
+`release/Moguri-0.30.0-alpha.1-model-continuity-77-macos-arm64.dmg`,
+**794,168,142 bytes**, SHA-256
+`fca71bc20793bc0ae1d1728606fab6ab50f50342385ac7fb91f12278b5b8c325`.
+The **779,920,147-byte ZIP** passes actual update staging in
+**110,249.11 ms**; read-only DMG identity/layout and exact application bytes
+also pass. This remains an ad-hoc-signed, non-notarized development app.
+Earlier labelled installers/archives remain untouched. No personal app,
+browser, microphone, OS authorization, speech weights or paid inference is
+used or implied. The older physical workload/controller-loss fixture skips,
+remaining issue #35 matrix, independent themes PR and full-milestone gates
+are not completed by these passes.
+
 ## Cascading menus and complete slash discovery
 
 The owner supplies reference screenshots for a compact Model/Effort/Context

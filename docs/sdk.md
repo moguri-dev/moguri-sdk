@@ -2099,6 +2099,10 @@ reselect; drafts, held queues, actual admitted accounting and retained effort
 remain independent. Registry availability and the shared
 `routingModelReady`/`routingWorkingWindow` capability checks keep unavailable
 models out of actual Kupo admissions.
+Protocol 77 requires the explicit `model_selection_continuity_schema = '1'`
+store marker; missing/corrupt or prematurely retained provenance is not repaired
+from a numeric version. Standalone 77 still refuses future state. A separate
+themes marker is not evidence that the model migration ran.
 `sessions.context(sessionId)` reads an estimate including saved draft,
 instructions, tools and conversation without calling a model. The normalized
 provider payload stays service-side.

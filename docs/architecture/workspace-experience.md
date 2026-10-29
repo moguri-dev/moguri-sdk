@@ -202,6 +202,10 @@ labelled installers and evidence remain untouched. This is still an ad-hoc
 signed, non-notarized development build, not a new native qualification.
 Existing FFI/chunk/optional `.icon`, scoped consumer postinstall and deprecated
 transitive-package notices remain explicit and non-blocking. CI is unchanged.
+The later [shared model-continuity slice](model-controls.md#final-marker-bearing-protocol-77-qualification)
+supplies the current combined protocol-77 installer and its newly qualified
+worker image. The earlier renderer-only measurements and archives above remain
+their original protocol-76 cuts, not relabelled current-native evidence.
 
 ## Visual direction
 

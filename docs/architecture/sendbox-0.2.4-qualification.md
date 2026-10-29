@@ -3,6 +3,9 @@
 This is the native-qualification slice of issue #35, not its wider loss/recovery
 hardening or Milestone 1 acceptance. Historical 0.2.3 receipts and archives remain
 unchanged. A current generated pass must never be reported as a physical run.
+The [protocol-77 model-controls follow-up](#protocol-77-model-controls-follow-up)
+records the latest exact image/host/package cut. The protocol-76 measurements
+below remain the original evidence, not relabelled qualification for new bytes.
 
 ## Change contract
 
@@ -309,3 +312,124 @@ No user-action blocker remained for this run. A fresh machine still needs the
 user to enable the matching bundled setup, personally approve any required
 versioned OS installation, and start Apple Containerization. The harness must
 retain an explicit unqualified failure/skip if those prerequisites are absent.
+
+## Protocol-77 model-controls follow-up
+
+The user-requested shared model-continuity change requires a new worker/protocol
+cut, unlike the earlier renderer-only repairs. Functional source
+`397f9ab0d742b9391850d3e536c2e59a30be0f9b` adds the optional preference and
+selection rules; `f6b17103c0ab298634749cd1d0d4fc4df87af924` binds them to
+`model_selection_continuity_schema = '1'`. The final measured host/verification
+source is **`c78994612260fa413a613a1f117569cae03b0167`**, with clean tracked
+source and compiled inputs, on **2026-10-29 at 00:50:55.197Z**.
+The standalone 77 reader rejects future schema 78 even with a distinct theme
+marker. No unmerged themes code or speculative convergence is included.
+
+Moguri remains **0.30.0-alpha.1**; service/SDK/worker protocol is **77**.
+The host remains **macOS 26.6 / 25G72 arm64**, Apple Containerization
+CLI/daemon **0.10.0** at
+`6bdb647b69671c037e2188558ed2e5ba49af2e1a`. Host/guest Node is **26.12.0**;
+the actual non-root guest reports **UID 501**, Linux **6.18.5** and enforced
+proxy use. The original verified root-owned SendBox **0.2.4** installation
+was reused, without installation, administrator approval, personal credentials,
+paid inference, source-checkout mounting or another user's VM/image cleanup.
+
+| Exact identity | Value |
+| --- | --- |
+| Immutable image | `docker.io/library/moguri-worker@sha256:f4834d0b70f247f18128701adae006a5384f72890b990c9ea441ee003e2f7f85` |
+| Worker SHA-256 | `b4e0ac5bddad08bccb07dc8a9144a30066457467ed0aa3e67f2f87908351b2f6` |
+| Bridge SHA-256 | `ea8c49c7f2f236575be1972c3a60a2ebef845e8e03b51a4fdd2bc31ebe81a7c5` |
+| Distribution digest | `5ac5556805148eca106f7b2177ab4e3d1354eea4700532d19c632300224fd8e2` |
+| Complete payload digest | `76c6d1e288c7f0ae838ee296c488867faf18b74d06651fe7d5d599bee704df1d` |
+| Public vendor archive SHA-256 | `94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31` |
+| Host SHA-256 | `cfa71d5db3ec747ab785c86c6d79dce174893955066ff80ecf6eab827afd2e73` |
+| Signed guest manifest SHA-256 | `afdf6182b6935322454ccc4d0f8426fafadcc1dbe27a35c88963646e1b34b91d` |
+| Guest key SHA-256 | `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88` |
+| Trust identity | `external-release-root`, original sequence/floor **8** |
+
+The no-cache image build passes in **40,940.47 ms**, including the exact locked
+inputs, Linux native PTY and a zero-vulnerability image audit. The 443,965,440-byte
+OCI archive SHA-512 is
+`fe33755a6890fc9823e57f9b9cbdb757901cb01815f8848fbe8bee7e392f30dd27ff6a24668e3dbcc4825f59a6f241197a6bae65dbd74ad9e1ebc4a6a1c49a1f`.
+The 16,589,228-byte no-script root-owned installer SHA-512 is
+`ca487eb5fe8b07a6fae521163c736ed4280f58880a8923e03be2b15823a1a76433228f0ceb363f50fd036934d7a9a6872fea1404c1db7562b3f7326bb7bebced`.
+The marker-only host change was verified against all six original image-input
+hashes; neither the image nor the earlier protocol-76 evidence was relabelled.
+
+| Final physical gate | Result | Elapsed |
+| --- | --- | --- |
+| Exact artifacts/public attestation | PASS | 5,883.42 ms |
+| Installed signed runtime and trust | PASS | 396.97 ms |
+| Prepared provider/CNAME scope | PASS | 274.59 ms |
+| Cold guest effective egress | PASS | 4,443.84 ms |
+| Actual guest model/tool/accounting frames | PASS | 5,221.98 ms |
+| Exact original VM absence | PASS | 73.87 ms |
+
+Total **16,343.68 ms**. The first request in the fresh guest was the anonymous
+selected-provider `https://api.individual.githubcopilot.com/models` metadata
+GET, returning **HTTP 400 in 552.71 ms**, without warm-up/retry. Prepared and
+actual connected aliases remain `api.githubcopilot.com` and
+`glb-db52c2cf8be544.github.com`. The signed effective Meta report contains
+**244 domain patterns, 5,897 IPv4 CIDRs and 1,534 IPv6 CIDRs**, with scope digest
+`867a9a7203bad7d64ceb4006cea69b2057fc0b84bc4f35f51bc4cf2e4faa5264`.
+This is the actual **shared-cloud delegation**, not exact-host-only egress.
+The same bounded positive/negative domain, proxy/CIDR and direct-wire controls
+pass; no wildcard or unrelated credential was added.
+
+The owned service/SDK guest exchange records **three generated solver starts
+and completions, 126 reported fixture tokens, two strict user-actor tool
+decisions, zero unknown total-token calls and zero held capacity**. Actual
+input/output totals are 90/36. The separate API-equivalent estimate is
+USD 0.000162; provider-reported/billed USD remain null and all three cache
+observations remain unknown, not zero. Exact private output/source-preservation
+and compiled-CLI readiness checks pass. All **three original owned VMs** are
+absent without corrective cleanup; shared images remain untouched.
+
+Exact evidence remains under `.native/qualification/current-sendbox-X0ryrs`,
+with the generated control-plane state separately retained at
+`.native/qualification/native-service-DKno6C`.
+
+| Retained file | SHA-256 |
+| --- | --- |
+| `qualification.json` | `8d7b83f3d47a9a8558d0b484dea1cab1a22507ff3bf064bb19b214ed2d2a4356` |
+| `effective-network.json` | `8cec60de5de749b5e389f09c68ca677ad5255ca58ef0abc6c49210c8dcc2a31b` |
+| `worker-effective-network.json` | `b6b56a79f7f946f458ad3ff06d6f47fbc0757425d0eac3c2a7172d1538c3ab3b` |
+| `worker-events.json` | `634bc917fffcdd4192218121a3a19fbd06774117eddca9619fd7b936d786754e` |
+| `worker-result.json` | `329dfdc3960486c7fa0dad36d7d97da2c870ec207a8747e1e3b15b73672c8b48` |
+| `worker-accounting.json` | `ff6e9716cef01ec182bdcfef85a7f18e16545207e2ec4aabcf73ba9614106493` |
+
+The final actual packaged app passes **57/57 desktop flows in 2.1 minutes**,
+including the new model behavior, preserved dictation/tooltips/Settings scroll,
+current guest approvals and exact source publication. The actual packaged
+Node/service reports protocol **77**, SendBox **0.2.4** and model-selection
+schema **1**; its exact distribution/BOM check passes in **4,641.47 ms**.
+The verifier first rejects the same-protocol intermediate app lacking that
+marker, so a numeric version alone is not passing evidence.
+Fresh external SDK installation/types/entrypoints, preference restoration,
+restart/reselection and 12 installed worker probes pass with zero consumer
+and root npm vulnerabilities.
+
+The final **779,920,147-byte ZIP** passes the actual production updater in
+**110,249.11 ms**. The read-only DMG preserves its exact signed application,
+layout and identity, without opening Finder or the personal app.
+The labelled **794,168,142-byte** combined development installer is
+`release/Moguri-0.30.0-alpha.1-model-continuity-77-macos-arm64.dmg`, SHA-256
+`fca71bc20793bc0ae1d1728606fab6ab50f50342385ac7fb91f12278b5b8c325`.
+ZIP SHA-512:
+`c3006f5014e7993c60c37faf312c4df7dcc6064f6bc0e62d89a38887fab3f6bd68c3c7bbc3827e45f4a02cef58678b40fe056080af44d062ebdff09e319945ba`.
+Application-tree SHA-512:
+`b729a248d5efe0be9da4cdec0717f75cf48a0f276a9d09bfd77ad9856d5a19d7090495d7d7e29ead1b21c34276fb3c7b4d0b48113f4f20e8495dc00d58ae0930`.
+The preceding Settings-scroll archive remains under
+`release/qualification-history/pre-model-continuity-842d8ef5dded`;
+the intermediate unmarked-77 archive is separately preserved under
+`release/qualification-history/protocol-77-before-feature-marker-763e16eeb5c2`.
+Earlier labelled installers, historical SendBox 0.2.3 receipts and protocol-76
+receipts remain unchanged.
+
+There is no new user-action blocker on this host. All original remaining gates
+above remain open: no hourly/24-hour soak or Meta outage matrix, IPv6 wire or
+exhaustive destination qualification, personal login/paid inference/billing/
+model quality, real-microphone accuracy, release notarization, non-macOS host
+release or full #35/#17 acceptance is claimed. Development signing stays
+ad-hoc and CI stays main-push-only. Existing FFI/chunk/optional `.icon` and
+scoped consumer-install/deprecation notices remain visible, not vulnerabilities.
