@@ -132,7 +132,11 @@ revision; archive/continuation choices stay pending until the actual user
 accepts or cancels them. Existing dirty-edit, question, terminal and settling
 operation guards remain in force. Direct click/Tab/key navigation remains
 direct. Service command results are separately retained and displayed, never
-inserted into model messages. TUI `/commands` opens keyboard-readable original
+inserted into model messages. Desktop announces the latest retained service-only
+confirmation or failure in its owning conversation without opening a modal or
+moving focus. Original inputs and complete responses stay in command history;
+switching source aborts the old read rather than surfacing another session's
+late response. TUI `/commands` opens keyboard-readable original
 history. Late text replies cannot undo Escape or a newer navigation; collapsed
 conversation references do not duplicate old response bodies as fresh output.
 
