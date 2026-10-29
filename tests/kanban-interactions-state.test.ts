@@ -39,7 +39,7 @@ test("current interaction metadata cannot be silently repaired or relabelled as 
     try {
       await fixture.service.close(); const raw = new DatabaseSync(path);
       let before: ReturnType<typeof retainedCiphertextRows>;
-      try { if (change.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema')"); raw.exec(change); before = retainedCiphertextRows(raw); } finally { raw.close(); }
+      try { raw.exec(change); before = retainedCiphertextRows(raw); } finally { raw.close(); }
       assert.throws(() => new EventStore(path, fixture.retentionKey), change.startsWith("PRAGMA") ? /Premature workspace schema marker/ : /Kanban interactions.*(marker|lineage)/);
       const preserved = new DatabaseSync(path);
       try { assert.deepEqual(retainedCiphertextRows(preserved), before); } finally { preserved.close(); }

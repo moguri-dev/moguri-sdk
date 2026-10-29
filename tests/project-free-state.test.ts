@@ -64,7 +64,6 @@ test("missing, corrupt or premature Home markers and genuine Home history cannot
       const raw = new DatabaseSync(fixture.service.store.path);
       let original;
       try {
-        if (change === "premature" || change === "future-history") raw.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'");
         raw.exec(change === "corrupt" ? "UPDATE retention_metadata SET value='0' WHERE id='chat_home_schema'" :
           change === "premature" ? "PRAGMA user_version=71" :
           `DELETE FROM retention_metadata WHERE id='chat_home_schema'; ${change === "future-history" ? "PRAGMA user_version=71" : ""}`);

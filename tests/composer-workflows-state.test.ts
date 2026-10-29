@@ -33,7 +33,7 @@ test("composer marker corruption or premature older-lineage markers fail without
     const fixture = await setupFixture();
     try {
       await fixture.service.close(); const raw = new DatabaseSync(fixture.service.store.path);
-      try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema')"); raw.exec(sql); } finally { raw.close(); }
+      try { raw.exec(sql); } finally { raw.close(); }
       assert.throws(() => new EventStore(fixture.service.store.path, fixture.retentionKey), sql.startsWith("PRAGMA") ? /Premature workspace schema marker/i : /composer workflow.*(marker|lineage)/i);
     } finally { await fixture.close(); }
   });

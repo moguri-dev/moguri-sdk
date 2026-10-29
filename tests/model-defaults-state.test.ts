@@ -190,9 +190,9 @@ test("the standalone build refuses a theme-bearing numeric downgrade without rep
     const before = retainedCiphertextRows(fixture.service.store.db);
     await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; INSERT INTO retention_metadata(id,value) VALUES ('theme_catalog_schema','1'); PRAGMA user_version=78;"); }
+    try { raw.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; PRAGMA user_version=78;"); }
     finally { raw.close(); }
-    assert.throws(() => new EventStore(path, fixture.retentionKey), /Unsupported standalone protocol-78\/theme catalog lineage/i);
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Premature workspace schema marker/i);
     const preserved = new DatabaseSync(path);
     try {
       assert.equal(preserved.prepare("PRAGMA user_version").get()?.user_version, 78);

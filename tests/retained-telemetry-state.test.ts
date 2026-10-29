@@ -38,7 +38,7 @@ test("current telemetry provenance cannot be missing, corrupt or relabelled as o
     const fixture = await setupFixture(), path = fixture.service.store.path;
     try {
       await fixture.service.close();
-      const raw = new DatabaseSync(path); try { if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema')"); raw.exec(sql); } finally { raw.close(); }
+      const raw = new DatabaseSync(path); try { raw.exec(sql); } finally { raw.close(); }
       assert.throws(() => new EventStore(path, fixture.retentionKey), sql.startsWith("PRAGMA") ? /Premature workspace schema marker/i : /retained telemetry.*(marker|lineage)/i);
     } finally { await fixture.close(); }
   });

@@ -146,7 +146,7 @@ test("a matching work item's current PR observation supersedes old session metad
 
 test("all status hues meet non-text contrast for named, extreme custom and hover/selected backgrounds", () => {
   const backgrounds = new Set<string>();
-  for (const palette of ["moguri", "ocean", "orchid"] as const) for (const theme of ["dark", "light"] as const) {
+  for (const palette of ["moguri", "ocean", "orchid", "rose", "terminal", "aubergine", "ember", "monochrome", "vaporwave", "crystal"] as const) for (const theme of ["dark", "light"] as const) {
     const colors = appearanceColors({ theme, palette }, theme);
     for (const background of [colors.sidebar, colors.hover, colors.selected]) backgrounds.add(background);
   }

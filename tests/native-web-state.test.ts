@@ -42,7 +42,6 @@ test("missing, corrupt, premature and relabelled website rules fail closed witho
       const raw = new DatabaseSync(fixture.service.store.path);
       let original;
       try {
-        if (change === "premature" || change === "future-history") raw.exec("DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'");
         raw.exec(change === "corrupt" ? "UPDATE retention_metadata SET value='0' WHERE id='native_web_policy_schema'" :
           change === "premature" ? "PRAGMA user_version=72" :
           `DELETE FROM retention_metadata WHERE id='native_web_policy_schema'; ${change === "future-history" ? "PRAGMA user_version=72" : ""}`);

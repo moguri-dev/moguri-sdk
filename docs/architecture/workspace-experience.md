@@ -17,9 +17,12 @@ when its target is known; this is navigation, never a permission grant.
 The user explicitly selected ordered slash-command queueing: execute commands
 when reached as commands, never as model prompt text. A second explicit choice
 exempts only live stop/approval controls and `/yolo`, not view-only navigation
-or theme changes. Click/Tab/key navigation remains direct. There is one shared
-SDK intake and one service queue with actual-user origin, captured scope,
+or theme changes. Click/Tab/key navigation remains direct. The required shared
+SDK intake and service queue bind actual-user origin, captured scope,
 single execution ownership, result/ack and partial/no-replay recovery.
+The user also selected service-capable command execution after a client closes;
+only actual UI-only actions wait for a compatible client. This is not permission
+to replay an uncertain or already dispatched command.
 `/yolo` chooses qualified Max when available or Autopilot and delegates session
 tool approvals; it never changes model/Env, promotes read-only scope or lifts
 hard policy/budget/native restrictions.
@@ -36,16 +39,28 @@ to replace a captured root/account/policy binding.
 Reuse React/Electron/OpenTUI, TypeBox, maintained pi-ai, existing Node/SQLite,
 clipboard bridge, inline icons, private stages and native protocol under their
 current licenses. No new library, renderer or agent loop is needed. Protocol
-79 uses distinct `queued_slash_schema='1'`, `project_folder_actions_schema='1'`
-and `sandbox_multi_root_schema='1'` markers; model marker 77 remains independent.
-The three additive markers commit together, after validating genuine
-predecessor history across every retained profile, without rewriting ciphertext,
-receipts or retention grants. Missing, invalid or premature markers are not
-repaired from a numeric version. Standalone 78, any `theme_catalog_schema`-bearing
-state and future 80 are refused before mutation. The independent themes
-implementation is not imported or stacked. New durable shapes need
-migration/restart/concurrency/cancellation tests and exact installed/native
-qualification.
+Standalone79 used distinct `queued_slash_schema='1'`,
+`project_folder_actions_schema='1'` and `sandbox_multi_root_schema='1'` markers,
+alongside the independent model77 marker. Its source and generated payloads
+remain preserved; its rejection of themes78 was correct for that source.
+
+Themes/TUI landed first as main `8eca0de`. The user then authorized merging that
+actual baseline into this branch, without a rebase, stack or PR merge. Actual
+combined source now uses protocol80 and additionally requires genuine
+`theme_catalog_schema='1'` and
+`theme_model_workspace_convergence_schema='1'`. Exact genuine76, model77,
+theme78 and workspace79 histories gain only their validated missing features,
+in one marker/version transaction. All retained profiles are checked before
+mutation. Existing ciphertext, receipts, grants, palette/custom choices,
+thinking intent and hard policy remain untouched.
+
+Missing, corrupt or premature feature/convergence markers, unmarked77,
+unknown78, falsely combined79 and future81 are refused, not repaired from a
+number. Ordinary historical `command.inspected` events remain valid older
+history; new slash intent uses a separate namespace. New durable shapes still
+need migration/restart/concurrency/cancellation tests and exact installed/native
+qualification. Protocol77 physical and standalone78 payload receipts do not
+qualify changed80 bytes.
 
 ### Navigation group actions
 

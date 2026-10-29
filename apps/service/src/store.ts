@@ -5,6 +5,7 @@ import { attachmentDigests, eventTypes, isRecord, MoguriError, PROFILE_ID, PROTO
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
+const combinedSchemaMarkers = ["model_selection_continuity_schema", "theme_catalog_schema", ...workspaceSchemaMarkers, "theme_model_workspace_convergence_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -129,34 +130,7 @@ export class EventStore {
       const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version);
       if (version > PROTOCOL_VERSION) throw new Error("This state uses a newer schema. Upgrade Moguri; do not delete your data.");
       const retentionTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='retention_metadata'").get();
-      if (version === 78 || retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='theme_catalog_schema'").get()) {
-        throw new Error("Unsupported standalone protocol-78/theme catalog lineage. This build cannot apply a themes migration. Original state was preserved.");
-      }
-      if (retentionTable) for (const id of workspaceSchemaMarkers) {
-        const row = this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id);
-        if (version < 79 && row) throw new Error(`Premature workspace schema marker ${id}. Original state was preserved.`);
-        if (version === 79 && row?.value !== "1") throw new Error(`Missing or invalid workspace schema marker ${id}. Original state was preserved.`);
-      }
-      if (version >= 4 && version < 79) {
-        const grouped = new Set<string>();
-        const events = this.readEvents(0, true);
-        const futureHistory = events.some((event) => {
-          const owner = `${event.profile_id}/${event.session_id}`;
-          if (event.event_type === "session.created" && event.payload.repositories?.length) grouped.add(owner);
-          return event.event_type.startsWith("command.") || event.event_type === "project.folder_removed" ||
-            event.event_type === "project.folder_saved" && event.payload.folder.color !== undefined ||
-            (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && Object.hasOwn(event.payload.item, "command") ||
-            (event.event_type === "session.created" || event.event_type === "session.configured") && grouped.has(owner) && event.payload.controls.env === "Sandbox" ||
-            event.event_type === "sandbox.workspace_recorded" && Object.hasOwn(event.payload.workspace, "repositories") ||
-            event.event_type === "sandbox.execution_recorded" && Object.hasOwn(event.payload.execution, "repositories");
-        });
-        const retiredFuture = this.db.prepare(`SELECT 1 FROM events WHERE json_extract(data,'$.event_type') LIKE 'command.%'
-          OR json_extract(data,'$.event_type')='project.folder_removed' LIMIT 1`).get();
-        if (futureHistory || retiredFuture) throw new Error("Workspace interaction history cannot be relabelled as pre-79 state. Original state was preserved.");
-      }
-      if (version < 77 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()) {
-        throw new Error("Premature model selection continuity schema marker. State was preserved.");
-      }
+      this.validateInteractionLineage(version, Boolean(retentionTable));
       if (version < 70 && retentionTable && this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_preferences_schema'").get()) {
         throw new Error("Invalid pre-70 model preference lineage marker. State was preserved.");
       }
@@ -466,28 +440,71 @@ export class EventStore {
       if (version < 74) this.db.exec("PRAGMA user_version=74;");
       if (version < 75) this.db.exec("PRAGMA user_version=75;");
       if (version < 76) this.db.exec("PRAGMA user_version=76;");
-      if (version < 77) {
-        if (this.readEvents(0, true).some((event) =>
-          (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.preferredThinkingEffort !== undefined ||
-          event.event_type === "model.selection_remembered" && event.payload.selection?.preferredThinkingEffort !== undefined ||
-          event.event_type === "settings.updated" && (event.payload.settings.startup.global.preferredThinkingEffort !== undefined || event.payload.settings.startup.profile.preferredThinkingEffort !== undefined))) {
-          throw new Error("Model effort preference history cannot be relabelled as pre-77 state. State was preserved.");
-        }
-        this.db.exec(`BEGIN IMMEDIATE;
-          INSERT INTO retention_metadata(id,value) VALUES ('model_selection_continuity_schema','1');
-          PRAGMA user_version=77; COMMIT;`);
-      }
-      if (this.db.prepare("SELECT value FROM retention_metadata WHERE id='model_selection_continuity_schema'").get()?.value !== "1") {
-        throw new Error("Missing or invalid model selection continuity schema marker. State was preserved.");
-      }
-      if (version < 79) {
+      if (version < 80) {
         this.db.exec("BEGIN IMMEDIATE");
         try {
-          for (const id of workspaceSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
-          this.db.exec("PRAGMA user_version=79; COMMIT;");
+          for (const id of combinedSchemaMarkers) if (!this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)) {
+            this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          }
+          this.db.exec("PRAGMA user_version=80; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
     } catch (error) { this.db.close(); throw error; }
+  }
+  private validateInteractionLineage(version: number, hasMetadata: boolean): void {
+    const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
+    const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
+    const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");
+    for (const id of workspaceSchemaMarkers) {
+      if (version < 79 && marker(id) !== undefined) throw new Error(`Premature workspace schema marker ${id}. Original state was preserved.`);
+      if (version >= 79) require(id, "workspace");
+    }
+    if (version < 80 && convergence !== undefined) throw new Error("Premature combined theme/model/workspace schema marker. Original state was preserved.");
+    if (version < 77 && model !== undefined) throw new Error("Premature model selection continuity schema marker. Original state was preserved.");
+    if (version < 78 && theme !== undefined) throw new Error("Premature theme catalogue schema marker. Original state was preserved.");
+    if (version === 77) require("model_selection_continuity_schema", "model selection continuity");
+    if (version === 78) {
+      require("theme_catalog_schema", "theme catalogue");
+      if (model !== undefined) throw new Error("Invalid standalone theme-78 lineage: a model marker is not part of that source. Original state was preserved.");
+    }
+    if (version === 79) {
+      require("model_selection_continuity_schema", "model selection continuity");
+      if (theme !== undefined) throw new Error("Invalid standalone workspace-79 lineage: its source did not support themes. Original state was preserved.");
+    }
+    if (version >= 80) {
+      require("model_selection_continuity_schema", "model selection continuity");
+      require("theme_catalog_schema", "theme catalogue");
+      require("theme_model_workspace_convergence_schema", "combined theme/model/workspace");
+    }
+    if (version < 4 || version >= 80) return;
+    const events = this.readEvents(0, true);
+    if (model === undefined && events.some((event) =>
+      (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.preferredThinkingEffort !== undefined ||
+      event.event_type === "model.selection_remembered" && event.payload.selection?.preferredThinkingEffort !== undefined ||
+      event.event_type === "settings.updated" && (event.payload.settings.startup?.global?.preferredThinkingEffort !== undefined || event.payload.settings.startup?.profile?.preferredThinkingEffort !== undefined) ||
+      event.event_type === "project.configured" && event.payload.configuration.values?.defaults?.preferredThinkingEffort !== undefined ||
+      event.event_type === "global.controls_changed" && event.payload.values.preferredThinkingEffort !== undefined)) {
+      throw new Error("Model effort preference history cannot be relabelled without its original continuity marker. Original state was preserved.");
+    }
+    if (theme === undefined && events.some((event) => event.event_type === "settings.updated" &&
+      event.payload.settings.appearance?.palette !== undefined && !["moguri", "ocean", "orchid", "custom"].includes(event.payload.settings.appearance.palette))) {
+      throw new Error("New theme history cannot be relabelled without its original catalogue marker. Original state was preserved.");
+    }
+    if (version >= 79) return;
+    const grouped = new Set<string>();
+    const futureHistory = events.some((event) => {
+      const owner = `${event.profile_id}/${event.session_id}`;
+      if (event.event_type === "session.created" && event.payload.repositories?.length) grouped.add(owner);
+      return event.event_type.startsWith("slash.") || event.event_type === "project.folder_removed" ||
+        event.event_type === "project.folder_saved" && event.payload.folder.color !== undefined ||
+        (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && Object.hasOwn(event.payload.item, "command") ||
+        (event.event_type === "session.created" || event.event_type === "session.configured") && grouped.has(owner) && event.payload.controls.env === "Sandbox" ||
+        event.event_type === "sandbox.workspace_recorded" && Object.hasOwn(event.payload.workspace, "repositories") ||
+        event.event_type === "sandbox.execution_recorded" && Object.hasOwn(event.payload.execution, "repositories");
+    });
+    const retiredFuture = this.db.prepare(`SELECT 1 FROM events WHERE json_extract(data,'$.event_type') LIKE 'slash.%'
+      OR json_extract(data,'$.event_type')='project.folder_removed' LIMIT 1`).get();
+    if (futureHistory || retiredFuture) throw new Error("Workspace interaction history cannot be relabelled as pre-79 state. Original state was preserved.");
   }
   private migrateWorkflowFeatures(version: number): void {
     const marker = (id: string) => this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value;

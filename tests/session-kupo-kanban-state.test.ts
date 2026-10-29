@@ -120,7 +120,6 @@ test("current convergence markers cannot be silently repaired or relabelled as e
       const raw = new DatabaseSync(path);
       let rows: ReturnType<typeof retainedCiphertextRows>;
       try {
-        if (sql.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema')");
         raw.exec(sql); rows = retainedCiphertextRows(raw);
       } finally { raw.close(); }
       assert.throws(() => new EventStore(path, fixture.retentionKey), sql.startsWith("PRAGMA") ? /Premature workspace schema marker/ : /session\/Kupo\/Kanban.*(marker|lineage)|pre-63/);
