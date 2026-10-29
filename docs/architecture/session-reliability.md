@@ -36,6 +36,9 @@ service-owned; a shorter generic transport timer is not a capability failure.
 An uncertain mutation is inspected by its exact original command identity,
 never resent. A retained receipt is acknowledged as committed; pending and
 unknown outcomes remain distinguishable and preserve local drafts.
+An explicit service error stays an error, even if an earlier intake receipt
+exists. Only a missing/malformed transport acknowledgement is recovered from
+that receipt; a failed stop journal or rollback cannot become success.
 
 The Electron custom-protocol proxy shares that read deadline and explicitly
 forwards the read-only original-command receipt route. A transient initial

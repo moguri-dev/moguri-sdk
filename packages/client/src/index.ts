@@ -101,7 +101,7 @@ export class MoguriClient {
       result = await this.request("/v1/commands", envelope, undefined, connection);
       if (!isRecord(result)) throw new Error("Invalid command response.");
     } catch (error) {
-      if (error instanceof ClientError && !["internal_error", "request_failed"].includes(error.code)) { await this.synchronizeCommand(); throw error; }
+      if (error instanceof ClientError && error.code !== "request_failed") { await this.synchronizeCommand(); throw error; }
       let receipt: Awaited<ReturnType<MoguriClient["readReceipt"]>> | undefined;
       try {
         const current = this.connection;

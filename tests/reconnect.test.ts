@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { startService } from "../apps/service/src/server.ts";
 import { ClientError, MoguriClient } from "../packages/client/src/index.ts";
 import { readConnection } from "../packages/client/src/node.ts";
+import type { Command } from "../packages/protocol/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 
@@ -122,7 +123,7 @@ test("a late original snapshot cannot overwrite the restarted connection's newer
   } finally { release.resolve(); await pending; t.mock.restoreAll(); client.disconnect(); await restarted?.close(); await f.close(); }
 });
 
-test("an internal response failure after commit returns only the verified original receipt, not a second mutation", async (t) => {
+test("an explicit service failure after commit remains an error while the exact retained receipt is independently inspectable", async (t) => {
   const f = await setupFixture(), client = new MoguriClient(f.service.connection), dispatch = f.service.controller.dispatch.bind(f.service.controller);
   try {
     await client.connect(); await waitFor(() => client.getState().status === "connected");
@@ -130,8 +131,13 @@ test("an internal response failure after commit returns only the verified origin
     t.mock.method(f.service.controller, "dispatch", async (...args: Parameters<typeof dispatch>) => {
       writes++; await dispatch(...args); throw new Error("Generated failure after retaining the exact original acknowledgement.");
     });
-    const result = await client.command({ type: "draft.save", sessionId: f.sessionId, expectedRevision: 0, text: "Generated canonical committed edit.", attachments: [] }, "generated-internal-acknowledgement");
-    assert.equal(result.revision, 1); assert.equal(writes, 1);
+    const command: Command = { type: "draft.save", sessionId: f.sessionId, expectedRevision: 0, text: "Generated canonical committed edit.", attachments: [] };
+    await assert.rejects(() => client.command(command, "generated-internal-acknowledgement"),
+      (error: unknown) => error instanceof ClientError && error.code === "internal_error" && error.status === 500);
+    const receipt = await client.commandReceipt(command, "generated-internal-acknowledgement");
+    assert.equal(receipt.status, "committed");
+    if (receipt.status !== "committed") throw new Error("Generated original receipt was not retained.");
+    assert.equal(receipt.result.revision, 1); assert.equal(writes, 1);
     assert.equal(f.session().draft.text, "Generated canonical committed edit.");
   } finally { t.mock.restoreAll(); client.disconnect(); await f.close(); }
 });
