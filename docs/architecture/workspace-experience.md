@@ -67,6 +67,28 @@ reachable under Chats after their navigation folder disappears. A later
 membership change or removal never retargets those roots. Removed group IDs
 cannot be recreated through the update API; a new group receives a new ID.
 
+### Policy explanations
+
+Known execution, tool, profile/global budget, Kupo and decision-configuration
+gates can offer a link to their actual Settings section. Targets are structured
+UI destinations, never guessed from provider error text. Opening a setting does
+not approve work, modify policy, clear accounting, probe an execution host or
+grant tools. An unqualified transport still stays blocked.
+
+Plain help remains a text tooltip. A hint containing an action is instead a
+labelled nonmodal explanation dialog, with a real button, keyboard entry,
+Tab/Shift+Tab exit, Escape and focus restoration. Pointer activation clears
+keyboard-only pinning even when Chromium retains `:focus-visible` from an
+earlier keyboard interaction; leaving the trigger/popup does not leave a
+clicked icon's hint stuck on screen. Mouse dismissal never blurs the actual
+control.
+
+Navigation uses the existing unsaved-edit and terminal-owner guards and focuses
+the exact policy heading after the correct section renders. The Start dialog
+can close through that same accepted navigation without starting a clone or
+login. Dirty model/budget/configuration edits suppress the link and explain
+what must be saved or reloaded, rather than losing a hidden draft.
+
 ## Change contract
 
 This slice simplifies the existing macOS alpha, not the wider release roadmap.
