@@ -1,11 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MoguriSdk, resolveControls } from "../packages/sdk/src/index.ts";
+import { MoguriSdk, resolveControls, selectModelControls, supportedThinkingEffort, type ThinkingEffort } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { join } from "node:path";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+
+test("thinking fallback follows supported effort order, not provider list order, and retains preference without adjustable thinking", () => {
+  const cases: Array<{ preferred: ThinkingEffort; supported: ThinkingEffort[]; actual: ThinkingEffort | undefined }> = [
+    { preferred: "max", supported: ["high", "low", "medium"], actual: "high" },
+    { preferred: "high", supported: ["low", "xhigh", "medium"], actual: "xhigh" },
+    { preferred: "medium", supported: ["max", "high"], actual: "high" },
+    { preferred: "high", supported: ["high", "max"], actual: "high" },
+    { preferred: "off", supported: ["medium", "low"], actual: "low" },
+    { preferred: "max", supported: [], actual: undefined },
+  ];
+  for (const entry of cases) assert.equal(supportedThinkingEffort(entry.preferred, entry.supported), entry.actual);
+  const controls = resolveControls([], { settingsRevision: 0, projectRevision: null }).controls;
+  const unadjustable = selectModelControls({ ...controls, modelOptions: { thinkingEffort: "max" } }, { id: "generated-no-effort", thinkingLevels: [] });
+  assert.equal(unadjustable.modelOptions, undefined); assert.equal(unadjustable.preferredThinkingEffort, "max");
+  const synthetic = selectModelControls(unadjustable, { id: "kupo", synthetic: true });
+  assert.equal(synthetic.modelOptions, undefined); assert.equal(synthetic.preferredThinkingEffort, "max");
+  const restored = selectModelControls(synthetic, { id: "generated-restored-max", thinkingLevels: ["high", "max"] });
+  assert.deepEqual(restored.modelOptions, { thinkingEffort: "max" }); assert.equal(restored.preferredThinkingEffort, undefined);
+});
 
 test("last explicit model/effort is a fallback, while explicit defaults and non-model controls retain precedence", () => {
   const recent = { modelId: "generated-model", thinkingEffort: "high" as const };
@@ -35,6 +54,102 @@ test("new independent sessions remember the selected model and effort, not its w
     assert.equal(session.projectId, null); assert.equal(session.draft.text, "");
     assert.equal(fixture.session().draft.text, "Generated unsent source draft.");
     assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("model switches keep a preferred Max effort, use High when bounded there, and restore Max without selecting another model", async () => {
+  const fixture = await setupFixture({ reasoning: true, contextWindow: 32768 });
+  const original = fixture.provider.state.models[0]!;
+  const maximum = { ...original, thinkingLevels: ["low", "medium", "high", "max"] as const };
+  const limited = { ...original, id: "generated-high-only-model", apiModelId: "generated-high-only-model",
+    name: "Generated High-limited model", thinkingLevels: ["low", "high"] as const };
+  fixture.provider.state.models = [{ ...maximum, thinkingLevels: [...maximum.thinkingLevels] }, { ...limited, thinkingLevels: [...limited.thinkingLevels] }];
+  fixture.provider.onChange();
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
+    await sdk.sessions.modelOptions(fixture.sessionId, { thinkingEffort: "max", contextWindow: 16384 }, undefined, true);
+    await sdk.sessions.selectModel(fixture.sessionId, limited.id);
+    assert.equal(fixture.session().controls.modelId, limited.id);
+    assert.deepEqual(fixture.session().controls.modelOptions, { thinkingEffort: "high" });
+    await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
+    assert.equal(fixture.session().controls.modelId, fixture.modelId);
+    assert.deepEqual(fixture.session().controls.modelOptions, { thinkingEffort: "max" });
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("the control plane preserves effort for a raw model change instead of depending on client-side fallback", async () => {
+  const fixture = await setupFixture({ reasoning: true }), original = fixture.provider.state.models[0]!;
+  const higher = { ...original, id: "generated-higher-effort", apiModelId: "generated-higher-effort",
+    thinkingLevels: ["low", "xhigh"] as const };
+  fixture.provider.state.models.push({ ...higher, thinkingLevels: [...higher.thinkingLevels] }); fixture.provider.onChange();
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await sdk.refresh();
+    await sdk.sessions.modelOptions(fixture.sessionId, { thinkingEffort: "high" }, undefined, true);
+    const { modelOptions: _, ...controls } = fixture.session().controls;
+    await sdk.command({ type: "session.configure", sessionId: fixture.sessionId, expectedRevision: fixture.session().revision,
+      controls: { ...controls, modelId: higher.id }, rememberModelSelection: true });
+    assert.equal(fixture.session().controls.modelId, higher.id);
+    assert.deepEqual(fixture.session().controls.modelOptions, { thinkingEffort: "xhigh" });
+    await sdk.slash(fixture.sessionId, `/model ${fixture.modelId}`);
+    assert.deepEqual(fixture.session().controls.modelOptions, { thinkingEffort: "high" });
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("a thinking preference survives context edits and a real service restart while explicit Model default clears it", async () => {
+  const fixture = await setupFixture({ reasoning: true, contextWindow: 32768 }), original = fixture.provider.state.models[0]!;
+  const maximum = { ...original, id: "generated-restart-max", apiModelId: "generated-restart-max", thinkingLevels: ["high", "max"] as const };
+  fixture.provider.state.models.push({ ...maximum, thinkingLevels: [...maximum.thinkingLevels] }); fixture.provider.onChange();
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  let restarted: Awaited<ReturnType<typeof startService>> | undefined, peer: MoguriSdk | undefined;
+  try {
+    await sdk.sessions.selectModel(fixture.sessionId, maximum.id);
+    await sdk.sessions.modelOptions(fixture.sessionId, { thinkingEffort: "max" }, undefined, true);
+    const limited = fixture.provider.state.models.find((model) => model.id === fixture.modelId)!;
+    limited.thinkingLevels = ["low", "high"]; fixture.provider.onChange(); await sdk.refresh();
+    await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
+    await sdk.sessions.modelOptions(fixture.sessionId, { contextWindow: 16384, thinkingEffort: "high" });
+    assert.equal(fixture.session().controls.preferredThinkingEffort, "max");
+    const expected = structuredClone(fixture.session().controls);
+    sdk.disconnect(); await fixture.service.close();
+    restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    peer = await new MoguriSdk(restarted.connection).ready();
+    const current = () => peer!.getState().snapshot!.sessions.find((session) => session.id === fixture.sessionId)!;
+    assert.deepEqual(current().controls, expected);
+    await peer.sessions.selectModel(fixture.sessionId, maximum.id);
+    assert.deepEqual(current().controls.modelOptions, { thinkingEffort: "max" });
+    await peer.slash(fixture.sessionId, "/thinking default");
+    await peer.sessions.selectModel(fixture.sessionId, fixture.modelId);
+    assert.equal(current().controls.modelOptions, undefined); assert.equal(current().controls.preferredThinkingEffort, undefined);
+    assert.equal(fixture.requests.length, 0);
+  } finally { peer?.disconnect(); sdk.disconnect(); await restarted?.close(); await fixture.close(); }
+});
+
+test("a default preference without an actual effort survives inheritance for a model without adjustable thinking", () => {
+  const inherited = resolveControls([], { settingsRevision: 0, projectRevision: null },
+    { modelId: "generated-provider-controlled", preferredThinkingEffort: "max" });
+  assert.equal(inherited.controls.modelId, "generated-provider-controlled");
+  assert.equal(inherited.controls.preferredThinkingEffort, "max");
+  assert.equal(inherited.controls.modelOptions, undefined);
+});
+
+test("an explicit tuning reset clears a retained preference even on a model with no adjustable effort", async () => {
+  const fixture = await setupFixture({ reasoning: true }), original = fixture.provider.state.models[0]!;
+  const controlled = { ...original, id: "generated-provider-effort", apiModelId: "generated-provider-effort", thinkingLevels: [] };
+  fixture.provider.state.models.push(controlled); fixture.provider.onChange();
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await sdk.refresh();
+    await sdk.sessions.modelOptions(fixture.sessionId, { thinkingEffort: "high" }, undefined, true);
+    await sdk.sessions.selectModel(fixture.sessionId, controlled.id);
+    assert.equal(fixture.session().controls.preferredThinkingEffort, "high");
+    await sdk.slash(fixture.sessionId, "/model-settings reset");
+    assert.equal(fixture.session().controls.preferredThinkingEffort, undefined);
+    await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
+    assert.equal(fixture.session().controls.modelOptions, undefined); assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
@@ -92,7 +207,7 @@ test("only explicit model/effort selections are remembered; inheritance, window/
     await sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, autonomy: "Guided" });
     assert.deepEqual(sdk.getState().snapshot!.lastModelSelection, { modelId: fixture.modelId, thinkingEffort: "low" });
     await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
-    assert.deepEqual(sdk.getState().snapshot!.lastModelSelection, { modelId: fixture.modelId });
+    assert.deepEqual(sdk.getState().snapshot!.lastModelSelection, { modelId: fixture.modelId, thinkingEffort: "high" });
     await sdk.sessions.selectModel(fixture.sessionId, null);
     assert.equal(sdk.getState().snapshot!.lastModelSelection, null);
     assert.equal(fixture.requests.length, 0);

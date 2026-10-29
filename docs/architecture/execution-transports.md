@@ -7,6 +7,13 @@ separation, not SendBox process isolation.
 
 ## Qualification before capability
 
+The [exact current 0.2.4/protocol-76 qualification](sendbox-0.2.4-qualification.md)
+records physical macOS guest/worker execution, cold selected-provider access,
+authenticated effective Meta scope, generated service/SDK/CLI/TUI/packaged
+desktop checks, accounting and exact VM absence. It does not close the wider
+failure/recovery or Env/control matrix. The 0.2.3/protocol-37 descriptions below
+retain their original historical boundary, not the current release identity.
+
 The user explicitly resumed Sandbox implementation after correcting the pause.
 The next native integration reuses the qualified 0.2.3 CLI, Node/Node-PTY (MIT),
 SendBox (Apache-2.0), existing worker/foreground bridge and the all-role ledger.

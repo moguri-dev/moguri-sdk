@@ -126,7 +126,7 @@ member IDs/revisions and canonical path/device/inode identities. Its
 `repositories`. Null without those explicit fields remains project-free;
 ordinary Local chats may separately retain `homeRoot`, never a synthetic project.
 
-The Local filesystem/command tools require an explicit `repository` ID or
+Local and qualified managed Sandbox filesystem/command tools require an explicit `repository` ID or
 captured name for folder sessions. `workspaces.files(sessionId, path, repository)`,
 `file(sessionId, path, repository)` and `git(sessionId, diff, repository)` resolve the
 same bound root; `terminal.open` requires a captured member's exact root.
@@ -137,10 +137,14 @@ quarantine, including across profiles. Per-member folder restrictions and
 project-scoped approval grants bind the actual selected repository.
 
 CLI/TUI/desktop share `/folder-group {"name":"Folder","projectIds":["ID","ID"]}`
-and `/folder-chat [FOLDER_ID]`; `/folder-chat` without an argument lists visible folders. The latter
-explicitly creates a Local folder chat, still subject to hard allowed-env
-policy. Per-project GitHub/plan, MCP, memory, hooks, background/publication and
-managed-worktree surfaces are not implicitly combined.
+and `/folder-chat [FOLDER_ID] [Local|Sandbox]`; without an argument it lists
+visible folders. Env defaults to Local; explicit Sandbox requires a ready
+reviewed native runtime and managed automatic workspaces. Hard allowed-env
+policy still applies, with no fallback. Each member gets a private copy and
+tools keep explicit selection; any member's folder restrictions block all group
+shells. Per-project GitHub/plan, MCP, memory, hooks, background and managed-worktree
+surfaces are not implicitly combined. Group source publication separately chooses
+one original member; native user consoles and SSH groups remain unqualified.
 
 `sessions.side(parentId)` atomically opens the original side conversation or
 creates one with inherited controls and captured full parent context. It never
@@ -175,6 +179,10 @@ Installed and configured skills share the same bounded selection path.
 Desktop dictation uses `voice.startCapture(sessionId, id?, { streaming: true })`,
 ordered `appendCapture(..., sequence, pcmBytes)`, volatile
 `readCapture(...): { text, revision }`, then `finishCapture(..., finalSequence)`.
+The microphone button toggles record/confirm on separate clicks; only the held
+voice shortcut uses release-to-finish. Renderer gesture ownership prevents an
+old shortcut release from finishing a newer click-owned capture. Legacy
+`voice.pushToTalk` settings remain readable without controlling the button.
 Finish acknowledges flush intent; await the original job separately for the
 exact completed transcript. Frames are mono 16-kHz PCM16, bounded per frame and
 capture, authenticated with the transient original nonce, never journaled.
@@ -839,10 +847,10 @@ excluded, protected, binary and oversized paths remain disclosed, not truncated.
 it cannot cancel a later turn merely sharing a session. Native project-file
 capture reads the actual private stage, never the Local source checkout.
 
-`sandbox.publicationPreview(executionId, paths)` reviews up to 20 selected
+`sandbox.publicationPreview(executionId, paths, repository?)` reviews up to 20 selected
 text outputs with a 32-KiB patch and 64-KiB complete document against original
 Local source bases. Its `limits` exposes both exact byte boundaries. Separately confirmed
-`sandbox.publish(executionId, paths, preview.digest, execution.revision)` starts
+`sandbox.publish(executionId, paths, preview.digest, execution.revision, repository?)` starts
 an independently owned user copy job. Inspect it with
 `sandbox.publication(id)`/`sandbox.waitPublication(id)`; stop its actual job
 with `jobs.cancel(jobId)`. This is explicit user text publication, not a Local
@@ -853,6 +861,11 @@ replayed. Publication snapshots survive original session/report deletion.
 There is no implicit commit, branch, source deletion or binary/deleted-file
 publication. Native console/MCP/memory/subagent/evolution and plan-write
 transports remain unqualified rather than falling back to Local.
+For captured groups, `repository` is mandatory and chooses an exact original
+ID or unique captured name, never a first member. Paths stay member-relative.
+Every original root/policy/HEAD/file set is rechecked and leased. Version-3
+input and version-2 result/publication records preserve the map; original v1/v2
+single-root inputs and v1 results/publications are not reinterpreted.
 
 CLI `sandbox preview/prepare PATHS.json --session ID` reads an explicit bounded
 JSON path array. Preparation needs its exact `--digest`, session `--revision`
@@ -863,6 +876,10 @@ original copy job's stop. `publication`, `publication-stop` and
 `publication-wait` inspect/cancel that retained owner. Shared CLI/TUI/desktop
 `/sandbox` commands print exact `confirm-stage`/`confirm-publish` commands after
 preview. No text prefix or model answer is treated as confirmation.
+Group CLI publication adds `--repository ID` to preview and publish. Shared
+`/sandbox publish-preview RUN_ID {"paths":["file"],"repository":"ID"}` includes
+that exact original ID in its generated confirm command; the legacy paths-array
+syntax remains valid for single-project results.
 
 This is an alpha API. Qualified **0.29.0-alpha.1 uses protocol 35**. Qualified
 **0.28.0-alpha.1 uses protocol 34**; the frozen qualified
@@ -1082,6 +1099,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `sessions` | Revisioned controls/modelOptions, local context preview, rename/mode/pin/unread/group/attach/delete, explicit side/agent children and work-item/verified-PR context. Side sessions cannot acquire write authority. |
 | `projects` | Configuration, ordered folders/color, atomic reorder, relocation/removal, scoped Git/source reads, reviewed MCP imports and explicit default-file publication. |
 | `prompts` / `DraftEditor` | Copy queued/sent text, revisioned editing and explicit held release. `send("queue", true)` returns the admitted queue ID without starting work. |
+| `commands` | Service-owned slash intake through `submit`; archived `restore` preserves its saved draft. `read/claim/choose/complete` bind original input, root and private client ownership. `attach` supplies real UI handlers; `detachAll` awaits teardown without replay. |
 | `plans` | Digest-checked Local/Remote plan read/save and independent snapshots. Remote writes require the reviewed binding and an owned no-model operation; actual saves/info/exact-stop expose partial/recovery outcomes without replay. |
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
@@ -1099,7 +1117,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `routing` | Automatic configured-model policy, service-owned `capabilities(env?)`, exact policy/configure CAS and ordinary routing/selected-response history. Explicit Single and reviewed worktree Compound policies remain available. Finite automatic budgets, images and synthetic tuning stay blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
-| `slash` / `slashCommands` | One browser-safe shared dispatcher/catalogue. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
+| `slash` / `slashCommands` | One browser-safe low-level dispatcher/catalogue. Frontend text uses `commands.submit`, not eager `slash` dispatch. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared read acknowledgement only; questions/approvals remain unresolved until an actual answer/decision. |
@@ -1317,9 +1335,17 @@ profile/project/session model settings still win, and existing chats are not
 rewritten.
 
 `sessions.selectModel(sessionId, modelId, revision?)` records an explicit choice
-and clears old model-specific options. `sessions.modelOptions` records actual
+and clears the old working-window override. Since protocol 77 it preserves the
+thinking preference, uses an exact/next-higher supported effort or the highest
+supported effort if none is higher, and never changes the requested model.
+Optional `controls.preferredThinkingEffort` retains the original effort only
+when it differs from the actual `modelOptions.thinkingEffort`; switching back
+to a supporting model restores it. Kupo and provider-controlled models keep
+that informational preference without receiving a fixed-model override.
+`sessions.modelOptions` records actual
 effort changes; its optional fourth `true` also marks an explicit same-value
-effort selection. `sessions.configure` normally remembers model/effort deltas;
+effort selection and replaces any retained preference. An explicit default or
+`/model-settings reset` clears it. `sessions.configure` normally remembers model/effort deltas;
 its fourth `false` performs configuration without recording a new selection.
 Raw `session.configure` commands opt in with `rememberModelSelection: true`.
 Window-only/autonomy/env changes, session creation and model/role calls do not
@@ -1327,7 +1353,8 @@ become selections.
 Resetting tuning on a session with no selected model also preserves the
 remembered choice; `sessions.selectModel(sessionId, null)` explicitly clears it.
 
-`snapshot.lastModelSelection` contains only the profile's model/effort pair.
+`snapshot.lastModelSelection` contains the profile's model/effort pair and its
+optional retained effort preference, never a provider payload.
 The independent profile event survives source-session/project deletion and
 restart. Startup provenance labels the fallback `last-used`. Working-window
 settings are not copied from the source session; explicit model-option defaults
@@ -1649,14 +1676,16 @@ try {
   editor.edit("Review the generated change.");
   const held = await editor.send("queue", true); // No model call, even when idle.
   console.log(held.id);
+  editor.edit("/read-only");
+  await editor.submit((expectedDraftRevision) =>
+    sdk.commands.submit(sessionId, { client: "cli", expectedDraftRevision }));
 } finally {
   editor.dispose();
 }
-await sdk.slash(sessionId, "/read-only", "cli");
 const side = await sdk.sessions.spawn(sessionId, "side");
 const plan = await sdk.plans.read(sessionId);
 // A read-only session cannot save a plan or promote a question-only child.
-// Native panel/copy results from slash() must be handled by the client binding.
+// Actual UI results require a compatible commands.attach handler and acknowledgement.
 ```
 
 Release a held prompt with `prompts.release(sessionId, messageId,
@@ -1664,6 +1693,25 @@ observedQueueRevision)` only after explicit user admission. A selected available
 model, ready environment and policy are required then, not when holding text.
 `/run ID` uses this same operation. Returning to agent mode is a safe-boundary
 request; immediate restriction and model-declared tools are service-enforced.
+
+`DraftEditor.submit(intake)` fences its original acknowledgement and buffers
+later input. Only canonical queued-command draft provenance may merge an owned
+delayed context capture; foreign draft edits still require explicit conflict
+resolution. Submission, context capture and clipboard success are not inferred
+from matching text. A lost acknowledgement never triggers a paid retry.
+
+`commands.attach(client, handlers, {canApply?, onError?})` returns
+`{clientId, wake, dispose}`. Handlers receive the original SDK/session, execution,
+input/result, private claim and AbortSignal. They return an explicit completed,
+cancelled, failed or partial outcome after actual application. A set-state
+callback or printed unavailable action is not successful native UI delivery.
+`commands.choose(clientId, claim, choice)` atomically binds an actual original
+queued continuation choice and its admission; it never consumes a newer draft.
+Only cancelled, non-mutating continuation reviews may request `restoreInput`,
+and restoration requires an unchanged empty original composer. UI instances
+should await their attachment disposal, or `commands.detachAll()`, before
+closing their test/runtime resources. Service-capable commands do not depend on
+these clients remaining connected.
 
 Project settings use `projects.configuration` and
 `projects.configure(projectId, settings, observedRevision)`.
@@ -2089,6 +2137,21 @@ stop before inference without silently dropping or compacting history.
 Use the selected `provider.models[].thinkingLevels`, not a hardcoded effort
 list. A transport may have reasoning but not expose configurable effort;
 unsupported options fail explicitly. Omitting effort uses the model default.
+`supportedThinkingEffort(preferred, supported)` and
+`selectModelControls(controls, model)` are shared browser-safe selection helpers.
+Fallback applies to an explicit model switch, not an unsupported same-model
+effort request or permission to substitute a provider. The control plane
+revalidates the resulting actual option before persistence/admission.
+Disabling a selected model/provider atomically clears affected session
+selections through existing `session.configured` events. Re-enable does not
+reselect; drafts, held queues, actual admitted accounting and retained effort
+remain independent. Registry availability and the shared
+`routingModelReady`/`routingWorkingWindow` capability checks keep unavailable
+models out of actual Kupo admissions.
+Protocol 77 requires the explicit `model_selection_continuity_schema = '1'`
+store marker; missing/corrupt or prematurely retained provenance is not repaired
+from a numeric version. Standalone 77 still refuses future state. A separate
+themes marker is not evidence that the model migration ran.
 `sessions.context(sessionId)` reads an estimate including saved draft,
 instructions, tools and conversation without calling a model. The normalized
 provider payload stays service-side.

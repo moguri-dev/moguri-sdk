@@ -169,6 +169,27 @@ test("context/effort settings share the SDK, remain independent of autonomy and 
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("a retained Max preference sends only the High effort supported by the selected actual worker model", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+  const fixture = await setupFixture({ reasoning: true, responseMode: "text", maxOutputTokens: 128 });
+  const original = fixture.provider.state.models[0]!;
+  original.thinkingLevels = ["low", "high"];
+  const maximum = { ...original, id: "generated-max-preference-source", apiModelId: "generated-max-preference-source", thinkingLevels: ["high", "max"] as const };
+  fixture.provider.state.models.push({ ...maximum, thinkingLevels: [...maximum.thinkingLevels] }); fixture.provider.onChange();
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await sdk.sessions.selectModel(fixture.sessionId, maximum.id);
+    await sdk.sessions.modelOptions(fixture.sessionId, { thinkingEffort: "max" }, undefined, true);
+    await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
+    assert.equal(fixture.session().controls.preferredThinkingEffort, "max");
+    await fixture.send("Generated bounded effort fallback request.");
+    assert.equal((await fixture.terminal()).status, "completed");
+    assert.equal(fixture.requests.length, 1); assert.equal(fixture.requests[0]?.reasoning_effort, "high");
+    assert.equal(fixture.session().usage[0]?.thinkingEffort, "high");
+    assert.equal(fixture.service.controller.snapshot().budgetEntries[0]?.status, "settled");
+    assert.equal(fixture.session().controls.preferredThinkingEffort, "max");
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
 test("overfull working context stops before any model call and preserves the full admitted prompt", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
   const fixture = await setupFixture({ contextWindow: 16384 });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();

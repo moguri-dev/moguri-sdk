@@ -17,6 +17,8 @@ import { acknowledgeMovedDatabase, storedStorageOptions, type StorageOptions } f
 import { claimStoreIdentity, readDefaultStateLocation, readStateLocation } from "../../../packages/client/src/state-location.ts";
 import { runtimeBuildVersion, type UpdateOptions } from "./updates.ts";
 import { pinnedInstalledApplication } from "./bundle-tree.ts";
+import type { CommandEnvironment, CommandOwner } from "./queued-commands.ts";
+import type { CommandEnvelope, CommandResult, PlatformQuery, PlatformResponse } from "../../../packages/protocol/src/index.ts";
 
 const authenticateSchema = Type.Object({
   type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -72,6 +74,8 @@ export async function startService(options: ServiceOptions) {
   let application: ApplicationRuntime | undefined;
   let releaseIdentity: (() => Promise<void>) | undefined;
   const connectionPath = join(options.stateDir, "connection.json");
+  const commandEnvironment = Promise.withResolvers<CommandEnvironment>();
+  void commandEnvironment.promise.catch(() => console.error("The original queued-command service environment could not initialize."));
   try {
     const dbPath = join(options.stateDir, "state.sqlite");
     const dbFile = await open(dbPath, "a", 0o600);
@@ -125,7 +129,7 @@ export async function startService(options: ServiceOptions) {
           ...platform, stateDir, profileHooks,
           cache: { ...platform?.cache, cacheDirectory: platform?.cache?.cacheDirectory ?? join(resourceBase, "dependency-cache") },
           speech: { ...platform?.speech, modelDirectory: platform?.speech?.modelDirectory ?? (officialSpeech ? join(resourceBase, "speech-models") : undefined) },
-        });
+        }, () => commandEnvironment.promise);
       },
       changed,
     });
@@ -139,6 +143,32 @@ export async function startService(options: ServiceOptions) {
     });
     const rootApplication = application;
     await rootApplication.updates.initialize();
+    const executeCommand = async (envelope: CommandEnvelope, owner?: CommandOwner): Promise<CommandResult> => {
+      if (owner && owner.profileId !== envelope.profileId) throw new MoguriError("command_profile", "The queued command cannot change its immutable owning profile.", 403);
+      owner?.guard();
+      if (isApplicationCommand(envelope.command)) {
+        if (!rootProfiles.catalog().profiles.some((profile) => profile.id === envelope.profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before changing application configuration.", 404);
+        return rootApplication.dispatch(envelope, envelope.command);
+      }
+      if (isProfileCommand(envelope.command)) return rootProfiles.dispatch(envelope, envelope.command);
+      return (await rootProfiles.control(envelope.profileId)).dispatch(envelope, owner);
+    };
+    const executeQuery = async (profileId: string, query: PlatformQuery, signal: AbortSignal, owner?: CommandOwner): Promise<PlatformResponse> => {
+      if (owner && owner.profileId !== profileId) throw new MoguriError("command_profile", "The queued read cannot inherit another profile.", 403);
+      owner?.guard(); signal.throwIfAborted();
+      let result: PlatformResponse;
+      if (isApplicationQuery(query)) {
+        if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before reading application configuration.", 404);
+        result = isUpdateQuery(query) ? await rootApplication.updateQuery(query) :
+          query.type === "application.storage.status" ? { type: query.type, storage: rootApplication.storage.status() } :
+          query.type === "application.storage.preview" ? { type: query.type, review: await rootApplication.storage.preview(query.path) } :
+          { type: query.type, configuration: rootApplication.configuration() };
+      } else if (isProfileQuery(query)) {
+        if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "This profile is missing/unready. No registry fallback was used.", 404);
+        result = { type: query.type, catalog: rootProfiles.catalog() };
+      } else result = await (await rootProfiles.control(profileId)).platform.query(query, signal);
+      signal.throwIfAborted(); owner?.guard(); return result;
+    };
     const token = randomBytes(32).toString("hex");
     let closeRuntime!: (options?: RuntimeCloseOptions, preserveInstaller?: boolean) => Promise<void>;
     let lifecycle: { action: "stop" | "restart"; status: "stopping" | "unconfirmed"; diagnostic: string | null } | null = null;
@@ -228,15 +258,8 @@ export async function startService(options: ServiceOptions) {
         }
         if (request.url === "/v1/query") {
           const query = parse(QuerySchema, body);
-          if (isApplicationQuery(query)) {
-            if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before reading application configuration.", 404);
-            response.end(JSON.stringify(isUpdateQuery(query) ? await rootApplication.updateQuery(query) : query.type === "application.storage.status" ? { type: query.type, storage: rootApplication.storage.status() } :
-              query.type === "application.storage.preview" ? { type: query.type, review: await rootApplication.storage.preview(query.path) } :
-              { type: query.type, configuration: rootApplication.configuration() })); return;
-          }
-          if (isProfileQuery(query)) {
-            if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "This profile is missing/unready. No registry fallback was used.", 404);
-            response.end(JSON.stringify({ type: query.type, catalog: rootProfiles.catalog() })); return;
+          if (isApplicationQuery(query) || isProfileQuery(query)) {
+            response.end(JSON.stringify(await executeQuery(profileId, query, new AbortController().signal))); return;
           }
           const abort = new AbortController();
           const requestId = request.headers["x-moguri-query-id"];
@@ -252,20 +275,15 @@ export async function startService(options: ServiceOptions) {
           const disconnected = () => { if (!response.writableEnded) abort.abort(queryCancelled()); };
           response.once("close", disconnected);
           try {
-            const scoped = await rootProfiles.control(profileId);
             abort.signal.throwIfAborted();
-            const result = await scoped.platform.query(query, abort.signal);
+            const result = await executeQuery(profileId, query, abort.signal);
             if (!response.destroyed) response.end(JSON.stringify(result));
           } finally { response.off("close", disconnected); if (key) activeQueries.delete(key); }
           return;
         }
         const command = parse(CommandSchema, body);
         if (command.profileId !== profileId) throw new MoguriError("profile_scope", "Request scope and command profile differ. No foreign receipt or effect was used.", 403);
-        if (isApplicationCommand(command.command)) {
-          if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before changing application configuration.", 404);
-          response.end(JSON.stringify(rootApplication.dispatch(command, command.command))); return;
-        }
-        response.end(JSON.stringify(isProfileCommand(command.command) ? await rootProfiles.dispatch(command, command.command) : await (await rootProfiles.control(profileId)).dispatch(command)));
+        response.end(JSON.stringify(await executeCommand(command)));
       };
       void handle().catch((error: unknown) => {
         const known = error instanceof MoguriError;
@@ -308,6 +326,7 @@ export async function startService(options: ServiceOptions) {
     if (!address || typeof address === "string") throw new Error("Loopback binding failed.");
     expectedHost = `127.0.0.1:${address.port}`;
     const connection: Connection = { protocolVersion: PROTOCOL_VERSION, baseUrl: `http://${expectedHost}`, wsUrl: `ws://${expectedHost}/v1/events`, token, pid: process.pid };
+    commandEnvironment.resolve({ connection, command: executeCommand, query: (profileId, query, owner, signal) => executeQuery(profileId, query, signal, owner) });
     const pendingConnection = join(options.stateDir, `connection-${process.pid}.tmp`);
     await writePrivate(pendingConnection, JSON.stringify(connection));
     await rename(pendingConnection, connectionPath);
@@ -341,6 +360,7 @@ export async function startService(options: ServiceOptions) {
       close: closeRuntime,
     };
   } catch (error) {
+    commandEnvironment.reject(error);
     const nativeClosing = application?.close(), ownersClosing = profiles ? profiles.close() : controller?.close();
     await Promise.all([nativeClosing, ownersClosing]);
     store?.close();

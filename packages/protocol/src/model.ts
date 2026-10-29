@@ -25,6 +25,12 @@ export const ThinkingEffortSchema = Type.Union([
   Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max"),
 ]);
 export type ThinkingEffort = Static<typeof ThinkingEffortSchema>;
+export function supportedThinkingEffort(preferred: ThinkingEffort, supported: readonly ThinkingEffort[]): ThinkingEffort | undefined {
+  const order: readonly ThinkingEffort[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  return supported.includes(preferred) ? preferred :
+    order.slice(order.indexOf(preferred) + 1).find((effort) => supported.includes(effort)) ??
+    [...order].reverse().find((effort) => supported.includes(effort));
+}
 export const ModelOptionsSchema = Type.Object({
   contextWindow: Type.Optional(Type.Integer({ minimum: 8192, maximum: 10_000_000 })),
   thinkingEffort: Type.Optional(ThinkingEffortSchema),
@@ -33,10 +39,12 @@ export type ModelOptions = Static<typeof ModelOptionsSchema>;
 export const ModelSelectionSchema = Type.Object({
   modelId: Type.String({ minLength: 1, maxLength: 128 }),
   thinkingEffort: Type.Optional(ThinkingEffortSchema),
+  preferredThinkingEffort: Type.Optional(ThinkingEffortSchema),
 }, { additionalProperties: false });
 export type ModelSelection = Static<typeof ModelSelectionSchema>;
-export function modelSelection(controls: { modelId: string | null; modelOptions?: ModelOptions }): ModelSelection | null {
+export function modelSelection(controls: { modelId: string | null; modelOptions?: ModelOptions; preferredThinkingEffort?: ThinkingEffort }): ModelSelection | null {
   return controls.modelId === null ? null : { modelId: controls.modelId,
+    ...(controls.preferredThinkingEffort !== undefined ? { preferredThinkingEffort: controls.preferredThinkingEffort } : {}),
     ...(controls.modelOptions?.thinkingEffort !== undefined ? { thinkingEffort: controls.modelOptions.thinkingEffort } : {}) };
 }
 export const ModelStreamObservationSchema = Type.Object({

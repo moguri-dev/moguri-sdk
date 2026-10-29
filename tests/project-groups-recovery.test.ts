@@ -8,6 +8,32 @@ import { startService } from "../apps/service/src/server.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 
+test("restart preserves group colors and removal tombstones without losing a removed group's exact captured roots", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  let restarted: Awaited<ReturnType<typeof startService>> | undefined, client: MoguriSdk | undefined;
+  try {
+    const path = join(fixture.directory, "generated-ungrouped-member"); await mkdir(path);
+    const first = fixture.session().projectId!, second = (await sdk.projects.add(path)).id!;
+    const group = await sdk.projects.group("Generated removable group", [{ projectId: first, revision: 0 }, { projectId: second, revision: 0 }]);
+    const created = await sdk.sessions.createFolder(group.id!, "Generated retained removed-group chat");
+    const original = fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)!;
+    await sdk.projects.folder("Generated retained palette", 1, undefined, 0, "#1F72A3");
+    await sdk.projects.ungroup(group.id!, [{ projectId: first, revision: 1 }, { projectId: second, revision: 1 }], 0);
+    const folders = fixture.service.controller.snapshot().projectFolders;
+    sdk.disconnect(); await fixture.service.close();
+    restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    client = await new MoguriSdk(restarted.connection).ready();
+    assert.deepEqual(client.getState().snapshot!.projectFolders, folders);
+    assert.equal(folders[0]?.color, "#1f72a3");
+    const retained = client.getState().snapshot!.sessions.find((session) => session.id === original.id)!;
+    assert.deepEqual(retained.repositories, original.repositories); assert.equal(retained.projectFolderId, original.projectFolderId);
+    assert.ok((await client.workspaces.files(retained.id, ".", first)).entries.includes("fixture.txt"));
+    assert.deepEqual((await client.workspaces.files(retained.id, ".", second)).entries, []);
+    await assert.rejects(() => client!.projects.folder("Must stay removed", 0, group.id, 0), { code: "group_missing" });
+    assert.equal(fixture.requests.length, 0);
+  } finally { client?.disconnect(); sdk.disconnect(); await restarted?.close(); await fixture.close(); }
+});
+
 test("a folder writer blocks the same actual repository in another profile without sharing private sessions or model context", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await profileFixture();
   try {

@@ -48,6 +48,18 @@ async function runtimeInfo(init: BridgeInit): Promise<BridgeInfo> {
       noNewPrivs: Number(field("NoNewPrivs")), seccomp: Number(field("Seccomp")), capabilities: field("CapEff") ?? "",
       enforcedProxy: process.env.NODE_USE_ENV_PROXY === "1" && Boolean(process.env.HTTPS_PROXY && process.env.ALL_PROXY) };
   }
+  if (init.nativeRepositories) {
+    if (!native || init.action !== "start" || init.root !== null ||
+      new Set(init.nativeRepositories.map((entry) => entry.projectId)).size !== init.nativeRepositories.length ||
+      new Set(init.nativeRepositories.map((entry) => entry.root)).size !== init.nativeRepositories.length) {
+      throw new MoguriError("native_repository_scope", "Captured native repository mapping requires one exact root-less foreground guest. No SSH or default-root substitution.");
+    }
+    native.repositories = [];
+    for (const repository of init.nativeRepositories) {
+      if (await realpath(repository.root) !== repository.root || !(await lstat(repository.root)).isDirectory()) throw new MoguriError("native_repository_scope", "A captured guest repository is unavailable or aliased. No root was replaced.");
+      native.repositories.push({ ...repository });
+    }
+  }
   return { protocol: PROTOCOL_VERSION, workerDigest, nodeVersion: process.versions.node, platform: process.platform, root, ...(native ? { native } : {}),
     ...(init.action === "probe" ? native ? {
       terminalDiagnostic: "Sandbox user consoles have no qualified transport. Native agent identity is separate; no account shell or Local terminal was selected.",

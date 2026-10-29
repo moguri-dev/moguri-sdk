@@ -42,6 +42,14 @@ process.once("message", (raw: unknown) => {
           query: connection.query.bind(connection) };
       };
     }
+    if (raw.holdQueuedFile === true) {
+      const query = service.controller.platform.managed.query.bind(service.controller.platform.managed); let held = false;
+      service.controller.platform.managed.query = async (...args) => {
+        const command = service.controller.snapshot().commandExecutions.find((entry) => entry.status === "running" && entry.name === "file");
+        if (command && args[0].type === "session.file" && !held) { held = true; process.send?.({ kind: "held-queued-command", executionId: command.id }); await new Promise<void>(() => {}); }
+        return query(...args);
+      };
+    }
     if (raw.holdNativePublication === "before" || raw.holdNativePublication === "after-first") {
       const assert = service.controller.platform.managed.assert.bind(service.controller.platform.managed); let held = false;
       service.controller.platform.managed.assert = async (...args) => {

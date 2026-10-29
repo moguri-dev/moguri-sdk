@@ -180,6 +180,12 @@ export const GithubSourceBindingSchema = object({
   root: GithubReviewDocumentSchema.properties.root, configurationRevision: count, policyRevision: count, permissionRevision: count,
 });
 export type GithubSourceBinding = Static<typeof GithubSourceBindingSchema>;
+export const GithubProjectResponseSchema = object({
+  type: Type.Literal("github.project"), boundary: Type.Literal("controller-gh-account-not-ssh"), account, accountId: id,
+  repository, defaultBranch: ref, branch: Type.String({ maxLength: 4096 }), url: Type.String({ maxLength: 2048 }),
+  binding: GithubSourceBindingSchema, warning: Type.String({ maxLength: 8192 }),
+  remote: object({ name: Type.String({ maxLength: 100 }), fetchUrl: Type.String({ maxLength: 4096 }), pushUrls: Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 100 }) }),
+});
 export const GithubSessionOriginSchema = object({
   version: Type.Literal(1), source: GithubWorkSourceSchema,
   accountId: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" }), binding: GithubSourceBindingSchema, digest: hash,
@@ -245,9 +251,7 @@ export type GithubOperationResult = Static<typeof GithubOperationResultSchema>;
 export type GithubResponse =
   | { type: "github.repositories"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string;
       source: "account" | "public"; repositories: GithubRepository[]; page: number; nextPage: number | null; warning: string }
-  | { type: "github.project"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string;
-      repository: string; defaultBranch: string; branch: string; url: string; binding: GithubSourceBinding; warning: string;
-      remote: { name: string; fetchUrl: string; pushUrls: string[] } }
+  | Static<typeof GithubProjectResponseSchema>
   | { type: "github.branch"; branch: string; sha: string; accountId: string; binding: GithubSourceBinding }
   | { type: "github.source"; source: GithubWorkSource; accountId: string; binding: GithubSourceBinding; item: GithubItem; digest: string; warning: string }
   | { type: "github.preview"; preview: GithubPreview }

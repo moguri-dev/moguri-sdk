@@ -33,6 +33,8 @@ to that exact composer/profile/session and must not overwrite concurrent edits,
 duplicate a final buffer or submit a turn. Cancellation settles owned capture
 and keeps already inserted text visible; audio remains private and temporary.
 No cloud recognizer, implicit model download or personal recording is allowed.
+The microphone button instead always toggles record/confirm on separate clicks;
+it is not push-to-talk, regardless of an older saved button preference.
 
 Autopilot tools still obey hard denials, read-only scopes and environment
 policy. Actual user selection/defaults must propagate automatic approval
@@ -112,10 +114,105 @@ the terminal job event arrives before the HTTP reply. There is no Insert step
 or automatic prompt submission for live desktop dictation. Legacy SDK batch
 uploads and explicitly reviewed file/native transcripts remain separate.
 
+### Two-click microphone and gesture-owned push-to-talk
+
+The owner requires separate desktop controls: click the microphone to record,
+click again to confirm; hold the configured voice shortcut (Control+Space by
+default) and release to finish. Space/Enter activation of the focused native
+button also toggles, not hold/release. Repeated Enter cannot repeatedly toggle
+the microphone, and pointer release outside the control cannot commit a clip.
+
+The old optional button PTT mode could finalize a click before an utterance was
+captured, producing early-capture or genuine empty-recognition errors. A
+generated hidden-browser regression reproduces that first-click failure with
+the saved legacy flag enabled. The renderer no longer reads that flag or offers
+its checkbox. Existing `voice.pushToTalk` values remain in the typed settings
+and survive save/reopen, avoiding a destructive compatibility change.
+
+Each held shortcut owns one transient gesture identity. Only its original
+capture may be finished or cancelled by that release/effect cleanup. It cannot
+take over an already running click recording, or stop a newer clip after the
+user explicitly stopped/discarded the earlier one. Click-toggle reads the
+controller's current state rather than a stale render. Early release still
+prevents late microphone startup; profile/blur/sleep cancellation and the
+original nonce/session authority remain intact.
+
+The pinned native server's PCM16 and final-before-commit contract was checked
+against the existing 0.2.0 source. The transport, native runtime/model, SDK API,
+durable events/settings shape and protocol 76 are unchanged. No cloud/backend
+fallback, weights download or fabricated replacement for an empty transcript
+is introduced. Genuine empty results still report their error while preserving
+the draft. This repair changes renderer activation/ownership, not ASR accuracy.
+
+Generated qualification includes a real 48-kHz oscillator entering the browser
+capture graph, normalized nonzero PCM16 with at least 16,000 samples delivered
+before the second click, one final commit, preserved draft text and zero model
+turns. It also covers stale release/cancellation, focused-button keys, exact
+device selection, custom shortcut save, delayed admission, cold listener
+readiness, partial text and final acknowledgement. No personal microphone or
+real speech weights are used.
+
+#### Two-click repair qualification
+
+Source `c3cb044411973990fd47976ebd1f21fe33725108` passes the generated checks below.
+The red regressions first reproduced a click ending under the old held-button
+preference and a stale shortcut ending/cancelling a newer recording. The native
+PCM16/final-before-commit implementation was verified at pinned source
+`47f43763bb40ec463150dd8d9a788c54f3728bdb`; no speculative recognizer-format
+change or suppression of `speech_empty` was used.
+
+Before the repair, `npm run spike` repeated its six executable foundation
+primitives: providers **1,119.47 ms** (31.25 ms cancellation), SQLite
+**69.64 ms** (append p95 0.0552 ms), known-group PTY **159.96 ms**
+(151.95 ms cancellation, zero observed children), OpenTUI **1,029.46 ms**,
+hidden Electron **754.93 ms** (252.29 ms startup, 445.92 MiB), and bounded
+filesystem/Git **88.16 ms**. Its generic initial-checkpoint unavailable
+diagnostics remain distinct from current feature/native evidence.
+
+| Surface | Result |
+| --- | --- |
+| Speech/capture/PCM/draft/host/restart and legacy-preference regressions | 71 passed, zero failures/skips; 10,959.21 ms |
+| Source hidden dictation/settings/side-composer flows | 14/14 passed, 28.7 s |
+| Actual rebuilt packaged dictation/settings plus native setup/publication | 19/19 passed, 1.1 min |
+| Packed external SDK install/types/entrypoints and installed workers | Pass, including generated speech probes and 12 owned-worker cases |
+| Exact packaged Node/service native distribution check | Pass, 1,095.04 ms |
+| Final production ZIP staging and read-only DMG identity/layout | Pass; 779,906,467-byte ZIP staged in 118,715.47 ms |
+| Strict types, production build and source/independent-consumer npm audits | Pass, zero npm vulnerabilities |
+
+The test includes at least one second of actual nonzero, browser-normalized PCM
+before the second click. Ctrl+Space during click recording and an older held
+gesture's later release cannot commit that clip. Normal button Space/Enter,
+custom and unassigned shortcuts, interrupted capture and genuinely empty
+recognition are exercised without a chat/model turn.
+
+The qualified protocol-76 native payload remains byte-identical: worker
+`946c9778d9cd37cb9b684be72aaa09648bd3cc255a334895606f8c43c9195a81`,
+bridge
+`c21994ac933b9a071d02f426aae3f57c693a645fa8f1490273f7aa891c85a54c`,
+image
+`docker.io/library/moguri-worker@sha256:9e8092cca9654fb198b01e1378de7e7f238703d5645bde713a380f098fb68b2d`.
+No new guest qualification is inferred from generated speech, and no existing
+healthy service needs a new API or schema for this renderer repair.
+
+The labelled **794,198,526-byte** development installer is
+`release/Moguri-0.30.0-alpha.1-dictation-controls-macos-arm64.dmg`,
+SHA-256
+`e0da754db00a1ce4638dc50151ec6689550b75f7f0b844e9db5d4d2d1ab8b51b`.
+The new ZIP SHA-512 is
+`c884fb15ab9b882212aaca4b30c2e8f8984454b527d982ab7a45f0a5e052aa43cd85d5c5542ce9efe78c778ad5b413b89a46e31552ebf7caa7667dad2b43720e`.
+The previous native-qualification desktop archives remain in
+`release/qualification-history/pre-dictation-controls-0cb60151cb8e`.
+The app remains ad-hoc signed, not notarized or uploaded. Generated input and a
+generated recognizer qualify activation, capture and ownership, not actual ASR
+accuracy on the user's microphone. No personal app, Finder or microphone was
+opened. Existing FFI/chunk/optional `.icon` and consumer deprecation notices
+remain separate from vulnerabilities.
+
 ### Native listener readiness and capture finalization
 
-The microphone remains a microphone while recording, including Ctrl+Space and
-configured pointer/keyboard push-to-talk. Its pressed/recording state reflects
+The microphone remains a microphone while recording, including Ctrl+Space.
+The protocol-71 optional button-hold behavior is historical and is superseded
+by the two-click repair above. Its pressed/recording state reflects
 the owning capture; the icon does not disappear into a stop-square glyph.
 Release still flushes the same bounded input, never another capture or a chat
 submission.

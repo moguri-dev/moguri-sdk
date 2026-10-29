@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  compareIssues, defaultBoard, githubIssuePhase, githubManagedIssue, githubSyncSettings, issuePosition, MoguriError, type BoardConfig, type CommandResult, type EventInput, type GithubBoardSource,
+  compareIssues, defaultBoard, githubIssuePhase, githubManagedIssue, githubSyncSettings, issuePosition, kanbanPreferences, MoguriError, type BoardConfig, type CommandResult, type EventInput, type GithubBoardSource,
   type IssueBoard, type LocalIssue, type Project, type Snapshot, type WorkspaceCommand, type WorkspaceQuery, type WorkspaceResponse,
 } from "../../../packages/protocol/src/index.ts";
 import { DependencyCache, type DependencyCacheOptions } from "./dependency-cache.ts";
@@ -23,6 +23,16 @@ interface WorkspaceHost {
   onLinearBoardChanged?(projectId: string): void;
   githubProject?(projectId: string, signal: AbortSignal, source?: GithubBoardSource): Promise<Extract<import("../../../packages/protocol/src/github-workflows.ts").GithubResponse, { type: "github.project" }>>;
 }
+function boardObservationPolicy(board: BoardConfig) {
+  return { columns: board.columns.map(({ id, name }) => ({ id, name })), mergedColumnId: board.mergedColumnId,
+    autoRefreshPrs: board.autoRefreshPrs, githubAccess: board.githubAccess,
+    linear: { enabled: board.linear.enabled, teamId: board.linear.teamId }, githubSync: githubSyncSettings(board) };
+}
+const boardObservationSignature = (board: IssueBoard) => digest(JSON.stringify({ policy: boardObservationPolicy(board), source: board.githubSource ?? null }));
+const boardPresentationOnly = (previous: IssueBoard, next: BoardConfig) => {
+  const binding = (board: BoardConfig) => JSON.stringify({ policy: boardObservationPolicy(board), kanban: { ...kanbanPreferences(board), visible: false } });
+  return binding(previous) === binding(next);
+};
 export class WorkspaceRuntime {
   readonly cache: DependencyCache;
   readonly integrations: ProjectIntegrations;
@@ -158,17 +168,17 @@ export class WorkspaceRuntime {
           signal.throwIfAborted();
           const latest = this.host.snapshot().issues.find((current) => current.id === issue.id);
           const currentBoard = this.board(projectId);
-          if (!latest || latest.revision !== issue.revision || currentBoard.revision !== board.revision || latest.pullRequest?.url !== link.url) { skipped++; continue; }
+          if (!latest || latest.revision !== issue.revision || boardObservationSignature(currentBoard) !== boardObservationSignature(board) || latest.pullRequest?.url !== link.url) { skipped++; continue; }
           observedLinks.set(issue.id, link);
           linkRevisions.set(issue.id, issue.revision);
           observed++; progress(`Observed ${observed} linked PRs; ${skipped} concurrent edits preserved.`);
         }
         signal.throwIfAborted();
         const currentBoard = this.board(projectId);
-        if (currentBoard.revision !== board.revision || this.host.closing(projectId)) throw new MoguriError("github_sync_changed", "Board configuration or ownership changed during synchronization. No stale observation was applied.", 409);
+        if (boardObservationSignature(currentBoard) !== boardObservationSignature(board) || this.host.closing(projectId)) throw new MoguriError("github_sync_changed", "Board configuration or ownership changed during synchronization. No stale observation was applied.", 409);
         if (github.source) await this.currentGithubSource(board, signal);
         await this.host.assertRoot?.(projectId, undefined, signal);
-        if (this.board(projectId).revision !== board.revision || this.host.closing(projectId) || this.host.project(projectId).path !== project.path ||
+        if (boardObservationSignature(this.board(projectId)) !== boardObservationSignature(board) || this.host.closing(projectId) || this.host.project(projectId).path !== project.path ||
           JSON.stringify(sourceRootSync(project.path)) !== JSON.stringify(originalRoot)) {
           throw new MoguriError("github_sync_changed", "The exact board/root changed before observation commit. Original cards were preserved.", 409);
         }
@@ -255,8 +265,9 @@ export class WorkspaceRuntime {
         }
         if (this.host.snapshot().issues.some((issue) => issue.projectId === board.projectId && !ids.includes(issue.phaseId))) throw new MoguriError("board_occupied", "Move all tickets, including archived ones, before removing an occupied phase.", 409);
         if (config.linear.enabled && !/^[A-Za-z0-9-]{1,128}$/.test(config.linear.teamId)) throw new MoguriError("linear_team", "Choose the exact Linear team UUID before enabling import.");
+        const presentationOnly = boardPresentationOnly(board, config);
         let githubSource = board.githubSource;
-        if (config.autoRefreshPrs && githubSyncSettings(config).importIssues) {
+        if (!presentationOnly && config.autoRefreshPrs && githubSyncSettings(config).importIssues) {
           if (!this.host.githubProject) throw new MoguriError("github_sync_unavailable", "This host has no qualified repository/account source reader. No fallback was used.", 409);
           if (config.githubAccess !== "gh-cli") throw new MoguriError("github_sync_auth", "Repository issue import needs your explicitly selected signed-in GitHub CLI account. No public fallback is used.", 403);
           const signal = AbortSignal.timeout(60000);
@@ -273,13 +284,15 @@ export class WorkspaceRuntime {
           githubSource = captured;
           if (this.board(board.projectId).revision !== command.expectedRevision || this.host.closing(board.projectId)) throw new MoguriError("board_conflict", "This board changed while reviewing its exact GitHub source. Your settings were not overwritten.", 409);
         }
-        this.linear.get(board.projectId)?.abort();
-        this.prAborts.get(board.projectId)?.abort();
-        this.integrations.invalidateLinearProject(board.projectId);
-        this.host.onLinearBoardChanged?.(board.projectId);
+        if (!presentationOnly) {
+          this.linear.get(board.projectId)?.abort();
+          this.prAborts.get(board.projectId)?.abort();
+          this.integrations.invalidateLinearProject(board.projectId);
+          this.host.onLinearBoardChanged?.(board.projectId);
+        }
         const result = finish([{ event_type: "board.saved", profile_id: this.host.snapshot().profileId, project_id: board.projectId,
           payload: { board: { ...config, projectId: board.projectId, revision: board.revision + 1, ...(githubSource ? { githubSource } : {}) } } }], { revision: board.revision + 1 });
-        if (config.autoRefreshPrs && githubSyncSettings(config).importIssues) queueMicrotask(() => this.refresh(board.projectId, false));
+        if (!presentationOnly && config.autoRefreshPrs && githubSyncSettings(config).importIssues) queueMicrotask(() => this.refresh(board.projectId, false));
         return result;
       }
       case "issue.create": {

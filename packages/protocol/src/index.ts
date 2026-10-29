@@ -31,6 +31,8 @@ import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import { BudgetPlanSchema, projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 import type { RoutingTurn, RoutingPlan, KupoResponsePhase, KupoObservation } from "./routing.ts";
+export { routingModelReady, routingWorkingWindow } from "./routing.ts";
+export type { BoundedRoutingModel } from "./routing.ts";
 import type { ContextCompaction } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
@@ -42,7 +44,7 @@ import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord
 import { CandidateGenerationRecordSchema, projectCandidateGeneration, type CandidateGenerationRecord } from "./candidate-generations.ts";
 import { projectCandidateOwners, projectCandidateCleanup, type CandidateOwner, type CandidateCleanup } from "./candidate-retention.ts";
 import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedger, successfulRoleEntry, type RoleSequenceRecord } from "./role-sequences.ts";
-import { projectSandboxPublication, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
+import { projectSandboxPublication, sandboxRepositories, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
 import type { SandboxSetupOperation } from "./sandbox-management.ts";
 import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger, type CompoundWorkflow } from "./compound.ts";
 import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
@@ -63,8 +65,10 @@ export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
 export * from "./shortcuts.ts";
+export * from "./queued-commands.ts";
+import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
 
-export const PROTOCOL_VERSION = 78;
+export const PROTOCOL_VERSION = 80;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -83,6 +87,7 @@ export const CommandSchema = object({
       folderProjects: Type.Optional(Type.Array(object({ projectId: id, revision: Type.Integer({ minimum: 0 }) }), { minItems: 1, maxItems: 1000 })),
       title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
+    object({ type: Type.Literal("session.yolo"), ...sessionId, expectedRevision: revision }),
     object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema) }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
     object({ type: Type.Literal("session.resume"), ...sessionId }),
@@ -91,6 +96,7 @@ export const CommandSchema = object({
       start: Type.Integer({ minimum: 0, maximum: MAX_TEXT }), end: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }),
     object({ type: Type.Literal("attachment.add"), ...sessionId, expectedRevision: revision, path: Type.String({ minLength: 1, maxLength: 4096 }) }),
     object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]), held: Type.Optional(Type.Boolean()),
+      client: Type.Optional(CommandClientSchema),
       continueWorkChoice: Type.Optional(Type.Union([Type.Literal("kanban"), Type.Literal("prompt")])) }),
     object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text }),
     object({ type: Type.Literal("queue.remove"), ...sessionId, messageId: id, expectedRevision: revision }),
@@ -108,7 +114,7 @@ export const CommandSchema = object({
 });
 export type CommandEnvelope = Static<typeof CommandSchema>;
 export type Command = CommandEnvelope["command"];
-export type CommandResult = { id?: string; revision?: number };
+export type CommandResult = { id?: string; revision?: number; commandClaim?: import("./queued-commands.ts").CommandClaim };
 
 export interface Project { id: string; name: string; path: string }
 export const ToolCallSchema = Type.Object({
@@ -175,6 +181,7 @@ export interface QueueItem {
   origin?: CoordinationTaskOrigin;
   workflow?: { kind: WorkflowKind };
   sidePromptOrigin?: { sessionId: string; commandDigest: string };
+  command?: QueuedSlash;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; stepId?: string; outcome: string; env?: Controls["env"] }
@@ -190,7 +197,7 @@ export interface Session {
   revision: number;
   status: SessionStatus;
   beforeArchive?: SessionStatus;
-  draft: { revision: number; text: string; attachments: Attachment[] };
+  draft: { revision: number; text: string; attachments: Attachment[]; source?: CommandDraftSource };
   queue: QueueItem[];
   queueRevision: number;
   messages: PublicMessage[];
@@ -272,6 +279,9 @@ export interface Connection {
 }
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
+  "slash.command_recorded": { execution: CommandExecution };
+  "slash.live_recorded": { control: LiveSlashControl };
+  "slash.continuation_chosen": { choice: QueuedContinuationChoice };
   "project.added": { project: Project };
   "session.created": { title: string; controls: Controls; defaults?: DefaultsSnapshot; parentSessionId?: string; coordinationParentId?: string; parentSnapshotDigest?: string; readOnly?: boolean; contextDigest?: string; inheritedImages?: boolean; pasteFiles?: Extract<Attachment, { kind: "paste_file" }>[]; documents?: Extract<Attachment, { kind: "document" }>[]; kind?: SessionKind; purpose?: "kanban"; projectFolderId?: string; repositories?: SessionRepository[]; homeRoot?: SessionHomeRoot; mode?: SessionMode; prUrl?: string | null; workItemId?: string | null; workItemUrl?: string | null; githubSource?: GithubSessionOrigin; suggestionSources?: SuggestionSource[]; workspaceId?: string | null };
   "session.home_bound": { root: SessionHomeRoot };
@@ -301,10 +311,10 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "session.restored": Record<string, never>;
   "session.resumed": Record<string, never>;
   "session.blocked": { diagnostic: string };
-  "draft.saved": { text: string; attachments: Attachment[] };
+  "draft.saved": { text: string; attachments: Attachment[]; source?: CommandDraftSource };
   "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
   "queue.enqueued": { item: QueueItem };
-  "queue.edited": { messageId: string; text: string; attachments?: Attachment[] };
+  "queue.edited": { messageId: string; text: string; attachments?: Attachment[]; command?: QueuedSlash | null };
   "queue.removed": { messageId: string };
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
@@ -374,6 +384,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "project.relocated": { path: string; name: string };
   "project.configured": { configuration: ProjectConfiguration };
   "project.folder_saved": { folder: NavigationFolder };
+  "project.folder_removed": { folderId: string; expectedRevision: number };
   "session.group_saved": { group: SessionGroup };
   "artifact.saved": { artifact: LegacyRetainedArtifact };
   "artifact.revised": { artifact: LegacyVersionedArtifact };
@@ -426,7 +437,7 @@ export type StoredEvent = EventInput & {
 };
 export const eventTypes: readonly EventType[] = [
   "coordination.linked", "coordination.message", "coordination.delivered", "command.inspected", "process.ended",
-  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
@@ -434,7 +445,7 @@ export const eventTypes: readonly EventType[] = [
   "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "cache.prepared",
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
-  "project.relocated", "project.configured", "project.folder_saved", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
+  "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "session.sandbox_bound", "sandbox.workspace_recorded", "sandbox.execution_recorded", "sandbox.frame_recorded", "sandbox.publication_recorded", "sandbox.setup_recorded",
@@ -472,6 +483,9 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const linearOperations = new Map<string, LinearOperation>();
   const dependencyRegistries = new Map<string, DependencyRegistry>();
   const jobs = new Map<string, CapabilityJob>();
+  const commandExecutions = new Map<string, CommandExecution>();
+  const liveControls = new Map<string, { sessionId: string; control: LiveSlashControl }>();
+  const continuationChoices = new Set<string>();
   const oauthAuthorizations = new Map<string, McpAuthorization>();
   const configurationProposals = new Map<string, ConfigurationProposal>();
   const attention = new Map<string, Attention>();
@@ -543,7 +557,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         event.payload.sourceProjectId !== null && typeof event.payload.sourceProjectId !== "string" ||
         !source && !retainedSource || source && source.projectId !== event.payload.sourceProjectId ||
         selection !== null && !Value.Check(ModelSelectionSchema, selection) ||
-        source && (selection?.modelId !== actual?.modelId || selection?.thinkingEffort !== actual?.thinkingEffort)) {
+        source && (selection?.modelId !== actual?.modelId || selection?.thinkingEffort !== actual?.thinkingEffort ||
+          selection?.preferredThinkingEffort !== actual?.preferredThinkingEffort)) {
         throw new MoguriError("model_preference_corrupt", "Remembered model selection lost its exact profile/user/source controls. No inferred choice or model fallback was used.", 409);
       }
       lastModelSelection = selection ? structuredClone(selection) : null;
@@ -685,12 +700,54 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       for (const [id, save] of planSaves) if (save.sessionId === event.payload.deletedSessionId) planSaves.delete(id);
       for (const [id, call] of remoteMcpCalls) if (call.sessionId === event.payload.deletedSessionId) remoteMcpCalls.delete(id);
       for (const [id, workspace] of sandboxWorkspaces) if (workspace.sessionId === event.payload.deletedSessionId) sandboxWorkspaces.delete(id);
+      for (const [id, execution] of commandExecutions) if (execution.sessionId === event.payload.deletedSessionId) commandExecutions.delete(id);
     }
     if (event.event_type === "project.removed") {
       projects.delete(event.payload.deletedProjectId);
       projectConfigurations.delete(event.payload.deletedProjectId);
       for (const [id, session] of sessions) if (session.projectId === event.payload.deletedProjectId) sessions.delete(id);
       for (const map of [boards, issues, dependencyCaches, sessionGroups, artifacts, terminals, configurationProposals, attention, oauthAuthorizations, executions, managedWorkspaces, changeSets, questions, routings, compactions, planSaves, remoteMcpCalls, sandboxWorkspaces]) for (const [id, value] of map) if (value.projectId === event.payload.deletedProjectId) map.delete(id);
+      for (const [id, execution] of commandExecutions) if (execution.projectId === event.payload.deletedProjectId) commandExecutions.delete(id);
+    }
+    if (event.event_type === "slash.live_recorded") {
+      const control = event.payload.control, previous = liveControls.get(control.id);
+      if (!Value.Check(LiveSlashControlSchema, control) || !event.session_id || !sessions.has(event.session_id) ||
+        control.phase === "intent" && previous || control.phase !== "intent" && (!previous || previous.sessionId !== event.session_id ||
+          previous.control.phase !== "intent" || JSON.stringify([previous.control.action, previous.control.actor, previous.control.inputDigest, previous.control.targetTurnId, previous.control.approvalId]) !==
+          JSON.stringify([control.action, control.actor, control.inputDigest, control.targetTurnId, control.approvalId]))) {
+        throw new MoguriError("live_control_history", "Live control history lost its original actual-user intent or completion target. Nothing was replayed.", 409);
+      }
+      liveControls.set(control.id, { sessionId: event.session_id, control: structuredClone(control) });
+    }
+    if (event.event_type === "slash.continuation_chosen") {
+      const choice = event.payload.choice, execution = commandExecutions.get(choice.executionId);
+      if (!Value.Check(QueuedContinuationChoiceSchema, choice) || !execution || execution.name !== "continue-work" || execution.status !== "claimed" ||
+        execution.stopRequested || execution.inputDigest !== choice.inputDigest || execution.bindingDigest !== choice.bindingDigest ||
+        execution.profileId !== event.profile_id || execution.projectId !== event.project_id || execution.sessionId !== event.session_id ||
+        !execution.projectId || !sessions.has(execution.sessionId) || continuationChoices.has(execution.id)) {
+        throw new MoguriError("command_choice_history", "Queued continuation lost its exact original user, claim or input. No choice or delegation was reconstructed.", 409);
+      }
+      continuationChoices.add(execution.id);
+    }
+    if (event.event_type === "slash.command_recorded") {
+      const next = event.payload.execution, previous = commandExecutions.get(next.id), owner = sessions.get(next.sessionId);
+      if (!owner || next.profileId !== event.profile_id || next.sessionId !== event.session_id || next.projectId !== event.project_id) {
+        throw new MoguriError("command_history", "Queued command history is outside its original owning profile/session/project.", 409);
+      }
+      if (!previous) {
+        const head = owner.queue.find((item) => item.delivery !== "steer" && !item.held), parsed = head && parseSlashInput(head.text);
+        if (!head?.command || head.origin || head.workflow || head.sidePromptOrigin || head.mode || head.id !== next.queueItemId ||
+          head.command.actor !== "user" || head.command.name !== next.name || head.command.client !== next.client ||
+          head.command.bindingDigest !== next.bindingDigest || !parsed || parsed.name !== next.name || parsed.argument !== head.command.argument) {
+          throw new MoguriError("command_history", "Queued command claim lost its exact ordered user input. No model prompt or authority was substituted.", 409);
+        }
+        owner.queue = owner.queue.filter((item) => item.id !== head.id); owner.queueRevision++;
+      }
+      commandExecutions.set(next.id, projectCommandExecution(previous, next));
+      if (!owner.turnId && ["failed", "partial", "cancelled"].includes(next.status)) {
+        owner.status = "waiting_input";
+        if (next.diagnostic) owner.lastError = next.diagnostic;
+      }
     }
     if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
@@ -700,6 +757,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "attention.acknowledged") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.acknowledged = true; }
     if (event.event_type === "attention.cleared") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.active = false; }
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
+    if (event.event_type === "project.folder_removed") {
+      const folder = projectFolders.get(event.payload.folderId);
+      if (!folder || folder.revision !== event.payload.expectedRevision || [...projectConfigurations.values()].some((configuration) => configuration.folderId === folder.id)) {
+        throw new Error("Invalid retained project-folder removal. Original state was preserved.");
+      }
+      projectFolders.delete(folder.id);
+    }
     if (event.event_type === "session.group_saved") sessionGroups.set(event.payload.group.id, { ...event.payload.group });
     if (event.event_type === "artifact.saved" || event.event_type === "artifact.revised") {
       const artifact = event.event_type === "artifact.saved" ? legacyArtifact(event.payload.artifact, event.id) : normalizeArtifact(structuredClone(event.payload.artifact));
@@ -860,7 +924,18 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
     }
     if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
-    if (event.event_type === "sandbox.workspace_recorded") sandboxWorkspaces.set(event.payload.workspace.id, structuredClone(event.payload.workspace));
+    if (event.event_type === "sandbox.workspace_recorded") {
+      const workspace = event.payload.workspace, previous = sandboxWorkspaces.get(workspace.id);
+      if (workspace.repositories) {
+        const repositories = sandboxRepositories(workspace.repositories), session = sessions.get(workspace.sessionId);
+        if (workspace.projectId !== null || workspace.sourceWorkspaceId !== null || workspace.sourceRoot !== null || workspace.sourceHead !== null ||
+          !session?.repositories || JSON.stringify(session.repositories) !== JSON.stringify(repositories.map(({ projectId, name, root }) => ({ projectId, name, root })))) {
+          throw new MoguriError("sandbox_repository_history", "A composite workspace lost its exact root-less captured session scope.", 409);
+        }
+      }
+      if (previous && Boolean(previous.repositories) !== Boolean(workspace.repositories)) throw new MoguriError("sandbox_repository_history", "Legacy and composite workspace authority cannot be relabelled.", 409);
+      sandboxWorkspaces.set(workspace.id, structuredClone(workspace));
+    }
     if (event.event_type === "sandbox.publication_recorded") {
       const publication = projectSandboxPublication(sandboxPublications.get(event.payload.publication.id), event.payload.publication);
       if (publication.profileId !== profileId || event.artifact_id !== publication.id) throw new MoguriError("sandbox_publication_corrupt", "Native publication lost its exact independent profile/report authority.", 409);
@@ -871,6 +946,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "sandbox.execution_recorded") {
       if (event.payload.execution.profileId !== event.profile_id) throw new Error("Native execution cannot cross its retained profile authority.");
+      const next = event.payload.execution, previous = sandboxExecutions.get(next.id);
+      if (next.repositories) {
+        sandboxRepositories(next.repositories);
+        if (next.projectId !== null || next.sourceWorkspaceId !== null || next.sourceRoot !== null || next.root !== null) throw new MoguriError("sandbox_repository_history", "Composite execution cannot acquire an implicit first/default project root.", 409);
+      }
+      if (previous && JSON.stringify(previous.repositories) !== JSON.stringify(next.repositories)) throw new MoguriError("sandbox_repository_history", "An original execution's captured native mapping cannot be replaced or added later.", 409);
       sandboxExecutions.set(event.payload.execution.id, structuredClone(event.payload.execution));
     }
     if (event.event_type === "sandbox.frame_recorded") {
@@ -1222,16 +1303,28 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "context.changed": session.activeCompactionId = event.payload.activeCompactionId; session.revision++; break;
       case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
-      case "session.resumed": session.status = session.queue.length ? "queued" : "idle"; session.lastError = null; break;
+      case "session.resumed": session.status = session.queue.some((item) => !item.command) ? "queued" : "idle"; session.lastError = null; break;
       case "session.blocked": session.status = "waiting_input"; session.lastError = event.payload.diagnostic; break;
-      case "draft.saved": session.draft = { ...event.payload, revision: session.draft.revision + 1 }; break;
+      case "draft.saved": {
+        const source = event.payload.source, owner = source ? commandExecutions.get(source.executionId) : undefined;
+        if (source && (!Value.Check(CommandDraftSourceSchema, source) || !owner || owner.status !== "running" || owner.stopRequested ||
+          owner.profileId !== event.profile_id || owner.sessionId !== session.id || owner.queueItemId !== source.inputId)) {
+          throw new MoguriError("command_draft_history", "Draft provenance lost its exact original user-command owner. No current draft or source was inferred.", 409);
+        }
+        session.draft = { ...event.payload, revision: session.draft.revision + 1 }; break;
+      }
       case "queue.enqueued":
         session.queue.push(structuredClone(event.payload.item)); session.queueRevision++;
-        if (!session.turnId) session.status = "queued";
+        if (!session.turnId && !event.payload.item.command) session.status = "queued";
         break;
       case "queue.edited": {
         const item = session.queue.find((item) => item.id === event.payload.messageId);
-        if (item) { item.text = event.payload.text; delete item.origin; delete item.workflow; if (event.payload.attachments) item.attachments = event.payload.attachments; }
+        if (item) {
+          item.text = event.payload.text; delete item.origin; delete item.workflow; delete item.sidePromptOrigin;
+          if (event.payload.attachments) item.attachments = event.payload.attachments;
+          if (event.payload.command === null) delete item.command;
+          else if (event.payload.command !== undefined) item.command = structuredClone(event.payload.command);
+        }
         session.queueRevision++;
         break;
       }
@@ -1433,7 +1526,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     coordinationMessages: [...coordinationMessages.values()].filter((message) => sessions.has(message.toSessionId)),
     settings, lastModelSelection, chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
-    jobs: [...jobs.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
+    jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()], projectWorkRuns: [...projectWorkRuns.values()],
     providerPriceCatalogs, providerPriceRevision,

@@ -1,7 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { MoguriError, parse, SandboxResultSchema, type SandboxExecution, type SandboxResult } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, parse, sandboxRepositories, SandboxResultSchema, type SandboxExecution, type SandboxResult } from "../../../packages/protocol/src/index.ts";
 import { isProtectedProjectPath } from "./files.ts";
 import { readNativeCompletion } from "./native-evidence.ts";
 import { decodeExecutionFrame, decodeExecutionStatus } from "./execution-journal.ts";
@@ -12,10 +12,12 @@ import { MAX_WORKER_FRAME } from "./worker-wire.ts";
 
 export function sandboxResult(text: string): SandboxResult {
   const result = parse(SandboxResultSchema, JSON.parse(text)), names = new Set<string>();
+  const repositories = result.version === 2 ? sandboxRepositories(result.repositories) : null;
   let total = 0;
   for (const file of result.files) {
     const name = file.path.normalize("NFC").toLowerCase();
-    if (names.has(name) || isProtectedProjectPath(file.path) || file.path.startsWith("/") || /[\\\0]/.test(file.path) ||
+    if (names.has(name) || repositories && !repositories.some((entry) => file.path.startsWith(`${entry.directory}/`)) ||
+      isProtectedProjectPath(file.path) || file.path.startsWith("/") || /[\\\0]/.test(file.path) ||
       file.path.split("/").some((part) => !part || part === "." || part === "..") ||
       file.text.includes("\0") || !file.text.isWellFormed() || file.bytes !== Buffer.byteLength(file.text) || file.digest !== digest(file.text)) {
       throw new MoguriError("sandbox_result", "Retained native output path, bytes or content digest changed. No output was published.", 409);
@@ -36,6 +38,9 @@ export async function captureSandboxResult(execution: SandboxExecution, key: Buf
   for (const entry of evidence.entries) {
     if (entry.kind.type === "directory") continue;
     if (isProtectedProjectPath(entry.path)) { exclude(entry.path, "Protected runtime, credentials or control state is not a client output file."); continue; }
+    if (execution.repositories && !execution.repositories.some((repository) => entry.path.startsWith(`${repository.directory}/`))) {
+      exclude(entry.path, "Outside the exact captured repository directories. Original native bytes remain retained, not assigned to a first/default project."); continue;
+    }
     if (originalDigests && entry.kind.type === "regular" && originalDigests.get(entry.path) === entry.kind.content_hash) continue;
     if (!["regular", "hardlink"].includes(String(entry.kind.type))) { exclude(entry.path, "Only bounded regular text outputs can be retained or published."); continue; }
     if (typeof entry.kind.size !== "number" || entry.kind.size > 128 * 1024 || files.length >= 200 || total + entry.kind.size > 2 * 1024 * 1024) {
@@ -53,6 +58,7 @@ export async function captureSandboxResult(execution: SandboxExecution, key: Buf
     const directory = `.moguri/execution/${execution.id}`, saved = decodeExecutionStatus(key, (await evidence.read(`${directory}/status.json`, 64 * 1024)).content);
     if (saved.status.runId !== execution.id || saved.info.workerDigest !== execution.workerDigest || saved.info.root !== execution.root ||
       saved.info.native?.bridgeDigest !== execution.config.qualification?.bridgeDigest ||
+      JSON.stringify(saved.info.native?.repositories) !== JSON.stringify(execution.repositories?.map((entry) => ({ projectId: entry.projectId, name: entry.name, root: entry.guestRoot }))) ||
       cursor < saved.status.acknowledged || cursor > saved.status.sequence) throw new MoguriError("sandbox_journal", "Native after-state journal changed its exact run/build/root or durable cursor.", 409);
     let size = 0;
     while (cursor < saved.status.sequence && frames.length < 128) {
@@ -71,7 +77,8 @@ export async function captureSandboxResult(execution: SandboxExecution, key: Buf
   }
   const deleted = sourcePaths.filter((path) => !paths.has(path));
   for (const path of deleted.slice(200)) exclude(path, "Additional deleted paths remain in the signed native snapshot, outside the bounded text-publication descriptor.");
-  const result = sandboxResult(JSON.stringify({ format: "moguri-native-result", version: 1, executionId: execution.id, workspaceId: execution.workspaceId,
+  const result = sandboxResult(JSON.stringify({ format: "moguri-native-result", version: execution.repositories ? 2 : 1,
+    ...(execution.repositories ? { repositories: execution.repositories } : {}), executionId: execution.id, workspaceId: execution.workspaceId,
     inputDigest: execution.inputDigest, nativeSessionId: execution.nativeSessionId, planDigest: evidence.planDigest, signerFingerprint: evidence.signerFingerprint,
     auditDigest: evidence.auditDigest, beforeId: evidence.beforeId, afterId: evidence.afterId, afterBinding: evidence.afterBinding, rollback: evidence.rollback, exitCode: evidence.exitCode,
     files, excluded, excludedCount, deletedPaths: deleted.slice(0, 200), journal }));

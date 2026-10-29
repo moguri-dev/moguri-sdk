@@ -1,0 +1,203 @@
+import { ClientError } from "../../client/src/index.ts";
+import { ControlsSchema, IssueInputSchema, isRecord, parse, type CommandClient, type Session, type SettingsSection, type SlashResult } from "../../protocol/src/index.ts";
+import type { MoguriSdk } from "./index.ts";
+
+export const sessionSlashCommands = [
+  { name: "commands", description: "Read original queued-command outcomes without replay", argument: "[read EXECUTION_ID]" },
+  { name: "config", description: "Review exact pending configuration proposals", argument: "[list|review ID|apply ID SHA acknowledge-risk|reject ID SHA]" },
+  { name: "notifications", description: "Read this profile's notification settings and actual attention" },
+  { name: "issues", description: "Open this project's local Kanban" },
+  { name: "issue", description: "Create or manage an exact local card", argument: "new|edit ID|create KIND TITLE|move ID PHASE|archive ID|restore ID" },
+  { name: "board", description: "Read, refresh or edit this project's board", argument: "[edit|refresh]" },
+  { name: "project-settings", description: "Read or edit this project's actual configuration", argument: "[edit]" },
+  { name: "project-sources", description: "Read this project's reviewed source configuration" },
+  { name: "porto", description: "Read this project's configured Porto boundary" },
+  { name: "prompt", description: "Review or reset the shared system prompt", argument: "[view|reset|edit]" },
+  { name: "plugins", description: "Import an explicit plugin disabled", argument: "import ABSOLUTE_PATH" },
+  { name: "capabilities", description: "Read this project's registry and pending proposals" },
+  { name: "proposal", description: "Read or decide an exact reviewed proposal", argument: "view ID|approve ID SHA|reject ID SHA" },
+  { name: "mcp", description: "Read scoped MCP state or invoke an exact reviewed tool", argument: "servers|tools SERVER QUERY|auth SERVER|login SERVER|cancel ID|clear-oauth SERVER|token SERVER|call SERVER TOOL SHA JSON" },
+  { name: "scripts", description: "Read this session's builtin tool catalogue" },
+  { name: "result", description: "Read an exact original retained MCP result", argument: "RESULT_ID" },
+  { name: "subagent", description: "Request a separately metered tool-less child within existing policy", argument: "PROMPT" },
+  { name: "dictate", description: "Inspect or control this session's local speech runtime", argument: "status|download accept-license|record|stop|file PATH|insert" },
+  { name: "local-models", description: "Inspect configured endpoints or explicitly refresh discovery", argument: "[refresh]" },
+  { name: "model-token", description: "Open masked credential input, never a composer credential", argument: "ENDPOINT_ID" },
+  { name: "remote-model-token", description: "Open masked input for a configured SSH model", argument: "ENDPOINT_ID" },
+  { name: "defaults", description: "Read actual model/control defaults and their sources" },
+  { name: "steer", description: "Queue an exact original follow-up when reached; never bypass earlier work", argument: "TEXT" },
+  { name: "interrupt", description: "Queue an exact follow-up; typed text never interrupts an earlier turn eagerly", argument: "TEXT" },
+  { name: "env", description: "Select an available execution boundary without fallback", argument: "Local|Sandbox|Remote" },
+  { name: "autonomy", description: "Select qualified session autonomy within hard policy", argument: "Manual|Guided|Autopilot|Autopilot Max" },
+  { name: "attach", description: "Capture an explicitly selected project file into the composer", argument: "PROJECT_PATH" },
+  { name: "detach", description: "Remove an exact attachment from this composer's current context", argument: "PATH_OR_ID" },
+  { name: "archive", description: "Review archiving this actual session and its children" },
+  { name: "restore", description: "Restore this actual archived session" },
+  { name: "remove", description: "Remove an exact undispatched queue item", argument: "ITEM_ID" },
+  { name: "queue-turn", description: "Convert an undispatched steer into a new queued turn", argument: "ITEM_ID" },
+  { name: "edit", description: "Replace one exact undispatched input", argument: "ITEM_ID TEXT" },
+  { name: "reorder", description: "Reorder the complete current undispatched queue", argument: "ITEM_ID..." },
+  { name: "policy", description: "Explicitly change global new-turn Env policy", argument: "all|protected" },
+  { name: "trace", description: "Open this client's actual received event stream" },
+  { name: "details", description: "Toggle this client's full message detail view" },
+  { name: "reload-draft", description: "Reload the actual saved draft without overwriting newer command input" },
+  { name: "keep-draft", description: "Resolve a local draft conflict through its actual editor" },
+] as const;
+const json = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+
+export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { name: string; argument: string }, client: CommandClient): Promise<SlashResult | null> {
+  const { name, argument } = command, snapshot = sdk.getState().snapshot!;
+  const project = () => {
+    if (!session.projectId) throw new ClientError("project_required", "Choose this session's actual project. No previous project or root was adopted.");
+    return session.projectId;
+  };
+  const view = (): SlashResult => {
+    if (client !== "tui" && ["cache", "linear", "mcp", "model-token", "remote-model-token"].includes(name)) {
+      throw new ClientError("credential_view", "Use this client's dedicated credential settings or the native TUI masked dialog. No credential was requested through a composer.");
+    }
+    return { kind: "client-view", name, argument };
+  };
+  const ok = (message: string): SlashResult => ({ kind: "ok", message });
+  switch (name) {
+    case "commands":
+      if (!argument) return client === "tui" ? view() : json(snapshot.commandExecutions.filter((entry) => entry.sessionId === session.id));
+      if (/^read\s+\S+$/.test(argument)) {
+        const result = await sdk.commands.read(argument.replace(/^read\s+/, ""));
+        if (result.execution.sessionId !== session.id) throw new ClientError("command_scope", "Choose a command from this exact session's retained history.");
+        return json(result);
+      }
+      throw new ClientError("command_read", "Use /commands or /commands read EXECUTION_ID. Inspection never replays input or approves a tool.");
+    case "issues": case "trace": case "details": case "archive": case "reload-draft": case "keep-draft":
+      if (argument) throw new ClientError("slash_arguments", `Use /${name} without arguments.`);
+      return view();
+    case "issue": {
+      const [action, id, value] = argument.split(/\s+/), projectId = project();
+      if (action === "new" && !id || action === "edit" && id && !value) return view();
+      if (action === "create" && ["feature", "bug", "misc"].includes(id ?? "")) {
+        const title = argument.split(/\s+/).slice(2).join(" "), { board } = await sdk.issues.board(projectId);
+        return json(await sdk.issues.create(projectId, { title, body: "", kind: parse(IssueInputSchema.properties.kind, id), phaseId: board.columns[0]!.id, pullRequestUrl: null }));
+      }
+      const issue = snapshot.issues.find((issue) => issue.id === id && issue.projectId === projectId);
+      if (!issue) throw new ClientError("issue_missing", "Choose an exact card from this project's board.");
+      if (action === "move" && value) return json(await sdk.issues.move(issue.id, value, issue.revision));
+      if ((action === "archive" || action === "restore") && !value) return json(await sdk.issues.archive(issue.id, action === "archive", issue.revision));
+      throw new ClientError("issue_input", "Use /issue new, edit ID, create feature|bug|misc TITLE, move ID PHASE, archive ID or restore ID.");
+    }
+    case "board":
+      project();
+      if (argument === "edit") return view();
+      if (argument === "refresh") return json(await sdk.issues.refresh(project()));
+      if (argument) throw new ClientError("board_input", "Use /board, /board edit or /board refresh.");
+      return json(await sdk.issues.board(project()));
+    case "settings":
+      if (!argument) return { kind: "panel", panel: "Settings" };
+      if (argument === "edit") return view();
+      if (argument.startsWith("reset ")) {
+        const section = argument.slice(6);
+        if (section !== "all" && !Object.hasOwn(snapshot.settings.values, section)) throw new ClientError("settings_section", "Choose all or an existing shared settings section.");
+        await sdk.settings.reset(section as SettingsSection | "all", snapshot.settings.revision);
+        return ok("Shared settings reset through the actual profile.");
+      }
+      throw new ClientError("settings_input", "Use /settings, /settings edit or /settings reset SECTION.");
+    case "project-settings":
+      project();
+      if (argument === "edit") return view();
+      if (argument) throw new ClientError("project_settings_input", "Use /project-settings or /project-settings edit.");
+      return json(await sdk.projects.configuration(project()));
+    case "project-sources": return json(await sdk.projects.sources(project()));
+    case "porto": return json(await sdk.projects.porto(project()));
+    case "prompt":
+      if (argument === "view") return json(await sdk.prompt.preview(session.id));
+      if (argument === "reset") { await sdk.prompt.reset(snapshot.settings.revision); return ok("Shared system prompt reset."); }
+      if (!argument || argument === "edit") return view();
+      throw new ClientError("prompt_input", "Use /prompt view, /prompt reset or /prompt edit.");
+    case "config": {
+      const [action, id, hash, consent, extra] = argument.split(/\s+/);
+      if (!argument || action === "list" && !id) return json(snapshot.configurationProposals.filter((proposal) => (proposal.projectId === session.projectId || proposal.sessionId === session.id) && proposal.status === "pending"));
+      if (action === "review" && id && !hash) return json(await sdk.configuration.review(id));
+      if ((action === "apply" || action === "reject") && id && hash && !extra && (action === "apply" ? consent === "acknowledge-risk" : !consent)) {
+        await sdk.configuration.decide(id, action === "apply", hash, action === "apply"); return ok("Exact reviewed configuration decision recorded.");
+      }
+      throw new ClientError("configuration_input", "Use /config list, review ID, apply ID SHA256 acknowledge-risk or reject ID SHA256.");
+    }
+    case "notifications": return json({ settings: snapshot.settings.values.notifications, active: snapshot.attention.filter((entry) => entry.active), note: "Read acknowledgement never answers or approves." });
+    case "plugins":
+      if (!argument.startsWith("import ")) throw new ClientError("plugin_input", "Use /plugins import ABSOLUTE_PATH. Imports remain disabled.");
+      return json(await sdk.capabilities.importPlugin(project(), argument.slice(7)));
+    case "capabilities": return json({ registry: snapshot.registry.filter((entry) => entry.projectId === session.projectId), proposals: snapshot.proposals.filter((entry) => entry.projectId === session.projectId) });
+    case "proposal": {
+      const [action, id, hash, extra] = argument.split(/\s+/);
+      if (action === "view" && id && !hash) return json(await sdk.capabilities.proposal(id));
+      if ((action === "approve" || action === "reject") && id && hash && !extra) return json(await sdk.capabilities.decide(id, action === "approve", hash));
+      throw new ClientError("proposal_input", "Use /proposal view ID, then approve|reject ID SHA256 after exact source review.");
+    }
+    case "cache": if (argument.startsWith("token ")) return view(); return null;
+    case "linear": if (argument === "token") return view(); return null;
+    case "mcp": {
+      const [action, id = "builtin", ...rest] = argument.split(/\s+/);
+      if (action === "servers") return json(await sdk.mcp.servers(session.id));
+      if (action === "tools") return json(await sdk.mcp.tools(id, rest.join(" "), 0, session.id));
+      if (action === "auth") return json(await sdk.mcp.auth(id, session.id));
+      if (action === "login") { const created = await sdk.mcp.oauthBegin(id, session.id); return json(await sdk.mcp.oauthStatus(created.id!)); }
+      if (action === "cancel") return json(await sdk.mcp.oauthCancel(id));
+      if (action === "clear-oauth") return json(await sdk.mcp.oauthClear(id, session.id));
+      if (action === "token" && id !== "builtin" && !rest.length) return view();
+      if (action === "call" && rest.length >= 3) {
+        const [tool, hash, ...jsonText] = rest, args: unknown = JSON.parse(jsonText.join(" "));
+        if (!isRecord(args)) throw new ClientError("mcp_arguments", "Exact MCP arguments must be a JSON object.");
+        return json(await sdk.mcp.call(session.id, id, tool!, args, hash!));
+      }
+      throw new ClientError("mcp_input", "Use /mcp servers, tools SERVER QUERY, auth SERVER, login SERVER, token SERVER or call SERVER TOOL SHA256 JSON. Never put credentials in command text.");
+    }
+    case "scripts": return json(await sdk.mcp.tools("builtin", "", 0, session.id));
+    case "result": return json(await sdk.mcp.readResult(argument));
+    case "subagent": return json(await sdk.subagents.run(session.id, argument));
+    case "dictate": {
+      if (argument === "status") return json(await sdk.voice.status());
+      if (argument === "download accept-license") return json(await sdk.voice.download(true));
+      if (argument === "record") return json(await sdk.voice.record(session.id));
+      const job = snapshot.jobs.findLast((job) => job.sessionId === session.id && job.kind === "voice.record" && job.status === "running");
+      if (argument === "stop" && job) return json(await sdk.voice.stop(job.id));
+      if (argument.startsWith("file ")) return json(await sdk.voice.transcribe(session.id, argument.slice(5)));
+      const transcript = snapshot.jobs.findLast((job) => job.sessionId === session.id && job.status === "completed" && job.resultDigest && job.kind.startsWith("voice."));
+      if (argument === "insert" && transcript) return json(await sdk.voice.insert(session.id, transcript.id, session.draft.revision));
+      throw new ClientError("dictation_input", "Use /dictate status, download accept-license, record, stop, file PATH or insert. Nothing was recorded or downloaded implicitly.");
+    }
+    case "local-models":
+      if (argument === "refresh") { await sdk.models.refresh(); return json(sdk.getState().snapshot?.provider); }
+      if (argument) throw new ClientError("model_discovery_input", "Use /local-models or /local-models refresh.");
+      return json({ endpoints: snapshot.settings.values.localModels, connections: snapshot.provider.connections, guidance: "Configure exact URLs and model limits in settings. Discovery never scans or infers." });
+    case "model-token": case "remote-model-token":
+      if (!argument || /\s/.test(argument)) throw new ClientError("model_token_input", `Use /${name} ENDPOINT_ID. Never put credentials in the composer.`);
+      return view();
+    case "defaults": return json({ global: snapshot.settings.values.startup.global, profile: snapshot.settings.values.startup.profile,
+      project: session.projectId ? snapshot.projectConfigurations.find((configuration) => configuration.projectId === session.projectId)?.values.defaults ?? {} : {},
+      current: session.controls, sources: session.defaults });
+    case "steer": case "interrupt":
+      if (!argument.trim()) throw new ClientError("followup_input", `Use /${name} TEXT. No empty or replacement prompt was sent.`);
+      await sdk.command({ type: "slash.prompt.enqueue", sessionId: session.id });
+      return ok("The exact original follow-up joined this session's queue ahead of later input. No earlier turn was interrupted or steered eagerly.");
+    case "env": await sdk.sessions.env(session.id, parse(ControlsSchema.properties.env, argument)); return ok(`Session Env set to ${argument}. No fallback was used.`);
+    case "autonomy": await sdk.sessions.autonomy(session.id, parse(ControlsSchema.properties.autonomy, argument)); return ok(`Session autonomy set to ${argument}. Hard policy is unchanged.`);
+    case "attach": return json(await sdk.command({ type: "attachment.add", sessionId: session.id, path: argument, expectedRevision: session.draft.revision }));
+    case "detach": {
+      const attachments = session.draft.attachments.filter((entry) => entry.path !== argument && entry.id !== argument);
+      if (attachments.length === session.draft.attachments.length) throw new ClientError("attachment_missing", "Choose an exact current attachment path or ID.");
+      return json(await sdk.command({ type: "draft.save", sessionId: session.id, text: session.draft.text, attachments, expectedRevision: session.draft.revision }));
+    }
+    case "restore": return json(await sdk.command({ type: "session.restore", sessionId: session.id }));
+    case "remove": return json(await sdk.command({ type: "queue.remove", sessionId: session.id, messageId: argument, expectedRevision: session.queueRevision }));
+    case "queue-turn": return json(await sdk.command({ type: "queue.make-turn", sessionId: session.id, messageId: argument, expectedRevision: session.queueRevision }));
+    case "edit": {
+      const separator = argument.indexOf(" ");
+      if (separator < 0) throw new ClientError("queue_edit", "Use /edit ITEM_ID replacement text.");
+      return json(await sdk.command({ type: "queue.edit", sessionId: session.id, messageId: argument.slice(0, separator), text: argument.slice(separator + 1), expectedRevision: session.queueRevision }));
+    }
+    case "reorder": return json(await sdk.command({ type: "queue.reorder", sessionId: session.id, messageIds: argument.split(/\s+/), expectedRevision: session.queueRevision }));
+    case "policy":
+      if (argument !== "all" && argument !== "protected") throw new ClientError("env_policy", "Use /policy all or /policy protected. Existing turns are not rewritten.");
+      await sdk.command({ type: "policy.set", allowedEnvs: argument === "all" ? ["Local", "Sandbox", "Remote"] : ["Sandbox", "Remote"] });
+      return ok("Global new-turn Env policy saved. Existing running turns retain their captured boundary.");
+    default: return null;
+  }
+}

@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { EventStore } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("schema 63 upgrades Kanban interactions atomically, retaining exact ciphertext, receipts and reopening after interruption", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
@@ -14,7 +14,8 @@ test("schema 63 upgrades Kanban interactions atomically, retaining exact ciphert
     await fixture.service.close();
     const raw = new DatabaseSync(path);
     try {
-      raw.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema'); PRAGMA user_version=63; CREATE TRIGGER generated_kanban_interactions_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='kanban_interactions_schema' BEGIN SELECT RAISE(ABORT,'Generated interaction migration interruption'); END;");
+      removePost77FixtureMarkers(raw, fixture.service.controller.events(0));
+      raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema'); PRAGMA user_version=63; CREATE TRIGGER generated_kanban_interactions_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='kanban_interactions_schema' BEGIN SELECT RAISE(ABORT,'Generated interaction migration interruption'); END;");
     } finally { raw.close(); }
     assert.throws(() => new EventStore(path, fixture.retentionKey), /Generated interaction migration interruption/);
     const interrupted = new DatabaseSync(path);
@@ -38,8 +39,8 @@ test("current interaction metadata cannot be silently repaired or relabelled as 
     try {
       await fixture.service.close(); const raw = new DatabaseSync(path);
       let before: ReturnType<typeof retainedCiphertextRows>;
-      try { if (change.startsWith("PRAGMA")) raw.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema')"); raw.exec(change); before = retainedCiphertextRows(raw); } finally { raw.close(); }
-      assert.throws(() => new EventStore(path, fixture.retentionKey), /Kanban interactions.*(marker|lineage)/);
+      try { raw.exec(change); before = retainedCiphertextRows(raw); } finally { raw.close(); }
+      assert.throws(() => new EventStore(path, fixture.retentionKey), change.startsWith("PRAGMA") ? /Premature workspace schema marker/ : /Kanban interactions.*(marker|lineage)/);
       const preserved = new DatabaseSync(path);
       try { assert.deepEqual(retainedCiphertextRows(preserved), before); } finally { preserved.close(); }
     } finally { await fixture.close(); }

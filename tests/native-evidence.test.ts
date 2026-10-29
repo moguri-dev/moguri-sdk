@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readNativeBoundary, readNativeCompletion, readNativeRollback } from "../apps/service/src/native-evidence.ts";
+import { readNativeBoundary, readNativeCompletion, readNativeNetwork, readNativeRollback } from "../apps/service/src/native-evidence.ts";
 
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const ordered = (values: Record<string, string>) => Object.keys(values).sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)))
@@ -79,6 +79,51 @@ test("native launch identity can bind a live owned VM before an audit or final r
     assert.equal(result.image, fixture.input.image); assert.equal(result.signerFingerprint, fixture.identity.fingerprint);
     await assert.rejects(() => readNativeBoundary({ ...fixture.input, workspace: join(fixture.directory, "foreign-root") }), /another workspace/);
   } finally { await fixture.close(); }
+});
+
+test("effective native network evidence binds the actual report bytes to the original signed audit and boundary", async () => {
+  const fixture = await evidenceFixture();
+  try {
+    const report = {
+      schema_version: 1,
+      gateways: { workload: { configured_policy: { allowed_domains: ["github.com"] },
+        github_meta: { source: "https://api.github.com/meta", state: "fresh", grants_active: true,
+          published_scope: { sha256: "5".repeat(64), domains: ["*.generated.test"], networks: ["203.0.113.0/24", "2001:db8::/32"] } } } },
+    };
+    const raw = JSON.stringify(report);
+    await writeFile(join(fixture.root, "network-egress-report.json"), raw, { mode: 0o600 });
+    await fixture.writeAudit([...fixture.events, { action: "network_egress_report_persisted", subject: `sha256:${hash(raw)}`,
+      result: "success", metadata: { file: "network-egress-report.json" } }]);
+    const result = await readNativeNetwork(fixture.input);
+    assert.deepEqual(result.report, report);
+    assert.equal(result.reportDigest, hash(raw));
+    assert.equal(result.signerFingerprint, fixture.identity.fingerprint);
+    assert.equal(result.sessionId, fixture.input.sessionId);
+  } finally { await fixture.close(); }
+});
+
+test("native network evidence rejects missing, duplicate, altered, foreign, malformed and aliased publications", async () => {
+  for (const mutation of ["missing", "duplicate", "altered", "foreign", "gateway", "version", "oversized", "alias"] as const) {
+    const fixture = await evidenceFixture();
+    try {
+      const path = join(fixture.root, "network-egress-report.json");
+      const raw = JSON.stringify({ schema_version: mutation === "version" ? 2 : 1, gateways: {
+        [mutation === "gateway" ? "invented" : "workload"]: { configured_policy: {},
+          github_meta: mutation === "oversized" ? { oversized: "x".repeat(4 * 1024 * 1024) } : {} },
+      } });
+      await writeFile(path, raw, { mode: 0o600 });
+      const publication = { action: "network_egress_report_persisted", subject: `sha256:${hash(raw)}`,
+        result: "success", metadata: { file: "network-egress-report.json" } };
+      await fixture.writeAudit([...fixture.events, ...(mutation === "missing" ? [] : [publication]),
+        ...(mutation === "duplicate" ? [publication] : [])], mutation === "foreign");
+      if (mutation === "altered") await writeFile(path, `${raw} `);
+      if (mutation === "alias") {
+        const target = join(fixture.directory, "generated-network-target.json");
+        await writeFile(target, raw, { mode: 0o600 }); await rm(path); await symlink(target, path);
+      }
+      await assert.rejects(() => readNativeNetwork(fixture.input), /signed publication|signed audit|foreign|gateway|alias|bounded/);
+    } finally { await fixture.close(); }
+  }
 });
 
 test("general native completion verifies successful exit and retained after-state without inventing rollback", async () => {

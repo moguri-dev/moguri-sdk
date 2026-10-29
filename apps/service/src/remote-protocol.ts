@@ -44,11 +44,15 @@ const catalog = Type.Object({
   url: Type.String({ maxLength: 4096 }), key: Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]),
   headers: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Union([Type.String({ maxLength: 32768 }), Type.Null()]), { maxProperties: 32 })),
 }, { additionalProperties: false });
+export const NativeRepositoryRootsSchema = Type.Array(Type.Object({
+  projectId: Type.String({ minLength: 1, maxLength: 128 }), name: Type.String({ minLength: 1, maxLength: 128 }),
+  root: Type.String({ pattern: "^/workspace/repositories/[a-f0-9]{64}$" }),
+}, { additionalProperties: false }), { minItems: 1, maxItems: 1000 });
 export const ForegroundQuerySchema = Type.Object({
   kind: Type.Literal("query"), requestId: Type.String({ minLength: 1, maxLength: 128 }),
   query: Type.Union([
     Type.Object({ type: Type.Literal("catalog"), catalog }, { additionalProperties: false }),
-    Type.Object({ type: Type.Literal("context"), settings: ProjectSettingsSchema }, { additionalProperties: false }),
+    Type.Object({ type: Type.Literal("context"), settings: ProjectSettingsSchema, repository: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) }, { additionalProperties: false }),
   ]),
 }, { additionalProperties: false });
 export type ForegroundQuery = Static<typeof ForegroundQuerySchema>;
@@ -60,6 +64,7 @@ export const BridgeInitSchema = Type.Object({
   journal: Type.Optional(Type.Literal(true)),
   sealed: Type.Optional(Type.Literal(true)),
   nativeNetworkProbe: Type.Optional(Type.Literal(true)),
+  nativeRepositories: Type.Optional(NativeRepositoryRootsSchema),
   catalog: Type.Optional(catalog),
   context: Type.Optional(ProjectSettingsSchema),
   workspace: Type.Optional(WorkspaceReadRequestSchema),
@@ -70,6 +75,7 @@ export const BridgeInitSchema = Type.Object({
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,
   native: Type.Optional(Type.Object({ bridgeDigest: hash, uid: Type.Integer({ minimum: 0 }), noNewPrivs: Type.Integer({ minimum: 0 }), seccomp: Type.Integer({ minimum: 0 }),
     capabilities: Type.String({ pattern: "^[a-fA-F0-9]{1,64}$" }), enforcedProxy: Type.Boolean(),
+    repositories: Type.Optional(NativeRepositoryRootsSchema),
     networkProbe: Type.Optional(Type.Object({ url: Type.Literal("https://api.githubcopilot.com"), status: Type.Integer({ minimum: 100, maximum: 599 }) }, { additionalProperties: false })) }, { additionalProperties: false })),
   terminalBuild: Type.Optional(RemoteTerminalBuildSchema), terminalDiagnostic: Type.Optional(Type.String({ maxLength: 4096 })) }, { additionalProperties: false });
 const SavedBridgeInfoSchema = Type.Object({

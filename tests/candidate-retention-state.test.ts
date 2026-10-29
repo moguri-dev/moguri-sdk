@@ -12,7 +12,7 @@ import {
 import { EventStore } from "../apps/service/src/store.ts";
 import { ControlPlane } from "../apps/service/src/controller.ts";
 import { fixtureProvider } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { legacyCandidateJournal } from "./fixtures/legacy-candidate-journal.ts";
 
 const at = "2026-01-01T00:00:00.000Z", projectId = "generated-project", sessionId = "generated-origin";
@@ -74,7 +74,8 @@ function seedGeneration(store: EventStore) {
   return { id, resultDigest, inputDigest, entry };
 }
 function downgrade(store: EventStore): void {
-  store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema','session_navigation_schema','workspace_experience_schema','candidate_retention_schema','lean_tooling_schema','lean_tooling_convergence_schema'); PRAGMA user_version=56; COMMIT;");
+  removePost77FixtureMarkers(store.db, store.events());
+  store.db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema','session_navigation_schema','workspace_experience_schema','candidate_retention_schema','lean_tooling_schema','lean_tooling_convergence_schema'); PRAGMA user_version=56; COMMIT;");
 }
 
 test("schema-56 rollback preserves ciphertext, keys and accounting; successful replay binds original provenance, never the latest link or an unknown owner", async () => {

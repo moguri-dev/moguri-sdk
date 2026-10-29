@@ -13,7 +13,8 @@ import { assertFolderName, folderPolicy } from "./project-policy.ts";
 import { sourceRoot, sourceRootSync } from "./repository-source.ts";
 import { authorizeTool } from "./permissions.ts";
 import { sandboxResult } from "./sandbox-results.ts";
-import { nativeWorkspaceDocument } from "./sandbox-workspaces.ts";
+import { nativeWorkspaceDocument, nativeWorkspaceRepositories } from "./sandbox-workspaces.ts";
+import { captureNativeTree, nativeCompositeDigest, NATIVE_TREE_MAX_BYTES, NATIVE_TREE_MAX_FILES, type NativeSourceFile } from "./native-staging.ts";
 import { digest, type EventStore } from "./store.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 
@@ -37,7 +38,11 @@ export class SandboxPublications {
     const value = parse(SandboxPublicationDocumentSchema, JSON.parse(this.store.blob(record.documentDigest)));
     candidatePatch(value.patch);
     if (value.executionId !== record.executionId || value.inputDigest !== record.inputDigest || value.resultDigest !== record.resultDigest || value.root !== record.root ||
-      value.projectId !== record.projectId || value.workspaceId !== record.workspaceId || JSON.stringify(value.patch.edits.map((edit) => edit.path)) !== JSON.stringify(record.paths)) throw new MoguriError("sandbox_publication", "Native publication lost its original exact document/root. No file effect was replayed.", 409);
+      value.version !== record.version || value.projectId !== record.projectId || value.workspaceId !== record.workspaceId ||
+      JSON.stringify(value.patch.edits.map((edit) => edit.path)) !== JSON.stringify(record.paths) ||
+      (value.version === 2 ? value.repositoryId !== record.repositoryId || JSON.stringify(value.repositories) !== JSON.stringify(record.repositories) : record.repositoryId !== undefined || record.repositories !== undefined)) {
+      throw new MoguriError("sandbox_publication", "Native publication lost its original exact document/root. No file effect was replayed.", 409);
+    }
     return value;
   }
   private event(publication: SandboxPublication): EventInput {
@@ -55,35 +60,100 @@ export class SandboxPublications {
     return record.jobId !== jobId || record.status !== "publishing" || record.stopRequested ? [] :
       [this.event({ ...record, revision: record.revision + 1, updatedAt: new Date().toISOString(), stopRequested: true })];
   }
-  private async preview(executionId: string, requested: string[], signal: AbortSignal, exceptJobId?: string, retained?: SandboxExecution) {
+  private async groupBases(execution: SandboxExecution, input: Extract<ReturnType<typeof nativeWorkspaceDocument>, { version: 3 }>, signal: AbortSignal, exceptJobId?: string) {
+    const records = (this.host.snapshot().sandboxPublications ?? []).filter((record) => record.executionId === execution.id &&
+      (record.status === "completed" || record.status === "publishing" && record.jobId === exceptJobId));
+    const members = [];
+    for (const repository of input.repositories) {
+      signal.throwIfAborted();
+      const projectId = repository.binding.projectId, project = this.host.root(projectId, null), configuration = this.host.settings(projectId), identity = await sourceRoot(project.path);
+      if (project.path !== repository.binding.root.root || identity.device !== repository.binding.root.device || identity.inode !== repository.binding.root.inode ||
+        JSON.stringify(folderPolicy(configuration.values)) !== JSON.stringify(repository.source.policy)) {
+        throw new MoguriError("sandbox_publication_stale", "An original group root or folder policy changed. No captured member or base was replaced.", 409);
+      }
+      const expected = new Map<string, NativeSourceFile>(repository.source.files.map((file) => [file.path, file]));
+      for (const record of records.filter((record) => record.projectId === projectId)) {
+        if (!this.host.snapshot().artifacts.some((artifact) => artifact.id === record.id)) throw new MoguriError("sandbox_publication_receipt", "A prior group publication report is no longer retained. Missing evidence cannot authorize a different source base.", 409);
+        const document = this.document(record);
+        if (document.version !== 2 || document.repositoryId !== projectId || JSON.stringify(document.repositories) !== JSON.stringify(execution.repositories) ||
+          document.inputDigest !== execution.inputDigest || document.resultDigest !== execution.resultDigest) throw new MoguriError("sandbox_publication_receipt", "Prior accepted group bytes lost their exact native source lineage. No new base was inferred.", 409);
+        if (record.status === "completed") {
+          if (!record.operationDigest) throw new MoguriError("sandbox_publication_receipt", "Completed publication has no original verified copied-byte receipt.", 409);
+          const result = parse(SandboxPublicationResultSchema, JSON.parse(this.store.blob(record.operationDigest)));
+          if (result.publicationId !== record.id || result.root !== document.root || JSON.stringify(result.files) !== JSON.stringify(document.patch.edits.map((edit) =>
+            ({ path: edit.path, digest: digest(edit.text), bytes: Buffer.byteLength(edit.text) })))) throw new MoguriError("sandbox_publication_receipt", "The actual copied bytes disagree with the original user acceptance.", 409);
+        }
+        for (const edit of document.patch.edits.filter((edit) => record.status === "completed" || record.publishedPaths.includes(edit.path))) {
+          expected.set(edit.path, { path: edit.path, text: null, digest: digest(edit.text), bytes: Buffer.byteLength(edit.text), mode: expected.get(edit.path)?.mode ?? 0o600 });
+        }
+      }
+      const actual = await captureNativeTree(project.path, repository.source.policy, signal);
+      if (actual.files.length !== expected.size || actual.files.some((file) => {
+        const before = expected.get(file.path); return !before || before.digest !== file.digest || before.bytes !== file.bytes || before.mode !== file.mode;
+      }) || ((await optionalGitBinding(project.path, signal))?.head ?? null) !== repository.sourceHead) {
+        throw new MoguriError("sandbox_publication_base", "A complete original group source changed outside verified user-publication receipts. No partial tree, reset or rebase was substituted.", 409);
+      }
+      members.push({ projectId, identity, configuration, expected });
+    }
+    return members;
+  }
+  private async preview(executionId: string, requested: string[], signal: AbortSignal, exceptJobId?: string, retained?: SandboxExecution, repository?: string) {
     const snapshot = this.host.snapshot(), execution = retained ?? (snapshot.sandboxExecutions ?? []).find((value) => value.id === executionId);
-    if (!execution || execution.profileId !== snapshot.profileId || !execution.projectId || execution.sourceWorkspaceId === undefined ||
-      !execution.sourceRoot || !execution.resultDigest || execution.cleanup !== "owned-guest-stopped" ||
+    if (!execution || execution.profileId !== snapshot.profileId || !execution.repositories && (!execution.projectId || !execution.sourceRoot) ||
+      execution.sourceWorkspaceId === undefined || !execution.resultDigest || execution.cleanup !== "owned-guest-stopped" ||
       execution.inspectionIntent?.status === "running") throw new MoguriError("sandbox_publication", "Select an independently retained, project-bound native result with verified original VM absence. No source or previous root was inferred.", 409);
-    if (this.host.closing(execution.projectId)) throw new MoguriError("project_removing", "This source project is being removed. No publication was admitted.", 409);
     const input = nativeWorkspaceDocument(this.store.blob(execution.inputDigest)), result = sandboxResult(this.store.blob(execution.resultDigest));
-    if (!input.source || input.source.root !== execution.sourceRoot || (input.version === 2 ? input.workingSource.digest : input.source.digest) !== execution.stage.sourceDigest ||
+    const group = execution.repositories;
+    const selected = group?.filter((entry) => entry.projectId === repository || entry.name === repository);
+    if (group && (!repository || selected?.length !== 1)) throw new MoguriError("sandbox_repository_required", "Choose one exact original captured repository by ID or unique captured name before publication. No first/default root was used.", 409);
+    const member = selected?.[0], original = input.version === 3 ? input.repositories.find((entry) => entry.binding.projectId === member?.projectId) : null;
+    const source = input.version === 3 ? original?.source : input.source, sourceHead = input.version === 3 ? original?.sourceHead : input.sourceHead;
+    const stageDigest = input.version === 3 ? nativeCompositeDigest(input.repositories.map((entry) =>
+      ({ projectId: entry.binding.projectId, directory: entry.directory, source: entry.workingSource }))) : input.version === 2 ? input.workingSource.digest : input.source?.digest;
+    if (!source || (group ? input.version !== 3 || result.version !== 2 || !member || !original ||
+      execution.projectId !== null || execution.sourceRoot !== null || execution.root !== null || execution.sourceWorkspaceId !== null ||
+      JSON.stringify(result.repositories) !== JSON.stringify(group) || JSON.stringify(nativeWorkspaceRepositories(input)) !== JSON.stringify(group) :
+      input.version === 3 || result.version !== 1 || source.root !== execution.sourceRoot) || stageDigest !== execution.stage.sourceDigest ||
       result.executionId !== execution.id || result.inputDigest !== execution.inputDigest || result.planDigest !== execution.planDigest ||
       result.nativeSessionId !== execution.nativeSessionId || result.signerFingerprint !== execution.signerFingerprint) throw new MoguriError("sandbox_publication", "Native original source and retained after-state disagree. No output was substituted.", 409);
-    const projectId = execution.projectId, workspaceId = execution.sourceWorkspaceId, project = this.host.root(projectId, workspaceId);
+    const projectId = member?.projectId ?? execution.projectId, workspaceId = group ? null : execution.sourceWorkspaceId;
+    if (!projectId) throw new MoguriError("sandbox_repository_scope", "The original publication project is unavailable. No replacement was selected.", 409);
+    if (!group && repository && repository !== projectId) throw new MoguriError("sandbox_repository_scope", "This selector is not the original single-project result.", 409);
+    const members = input.version === 3 ? await this.groupBases(execution, input, signal, exceptJobId) : null, project = this.host.root(projectId, workspaceId);
+    if ((group ?? []).some((entry) => this.host.closing(entry.projectId)) || this.host.closing(projectId)) throw new MoguriError("project_removing", "An original source project is being removed. No publication was admitted.", 409);
     const identity = await sourceRoot(project.path), configuration = this.host.settings(projectId), policy = folderPolicy(configuration.values);
-    if (project.path !== input.source.root || identity.device !== input.source.identity.device || identity.inode !== input.source.identity.inode) throw new MoguriError("sandbox_publication", "The exact original Local source directory was moved or replaced. No base checkout fallback.", 409);
+    if (project.path !== source.root || identity.device !== source.identity.device || identity.inode !== source.identity.inode) throw new MoguriError("sandbox_publication", "The exact original Local source directory was moved or replaced. No base checkout fallback.", 409);
+    const expected = members?.find((entry) => entry.projectId === projectId)?.expected;
     const patch = candidatePatch({ kind: "patch", summary: `Reviewed native output ${execution.id}`, edits: [...requested].sort().map((path) => {
-      const output = result.files.find((file) => file.path === path);
+      const output = result.files.find((file) => file.path === (member ? `${member.directory}/${path}` : path));
       if (!output) throw new MoguriError("sandbox_publication_file", "Select exact retained UTF-8 output files. Deleted, protected, excluded or oversized paths are not silently published.", 409);
-      return { path, text: output.text, baseDigest: input.source!.files.find((file) => file.path === path)?.digest ?? "absent" };
+      return { path, text: output.text, baseDigest: (expected ? expected.get(path)?.digest : source.files.find((file) => file.path === path)?.digest) ?? "absent" };
     }) });
+    if (members) {
+      let files = 0, bytes = 0;
+      for (const entry of members) {
+        const after = new Map(entry.expected);
+        if (entry.projectId === projectId) for (const edit of patch.edits) after.set(edit.path, { path: edit.path, text: null,
+          digest: digest(edit.text), bytes: Buffer.byteLength(edit.text), mode: after.get(edit.path)?.mode ?? 0o600 });
+        files += after.size; bytes += [...after.values()].reduce((sum, file) => sum + file.bytes, 0);
+      }
+      if (files > NATIVE_TREE_MAX_FILES || bytes > NATIVE_TREE_MAX_BYTES) throw new MoguriError("sandbox_publication_limit", "The complete accepted group would exceed its native source boundary. No file was copied or subset silently selected.", 409);
+    }
     const git = await optionalGitBinding(project.path, signal);
-    if ((git?.head ?? null) !== input.sourceHead) throw new MoguriError("sandbox_publication_base", "The original source HEAD changed. Preserve these outputs and review a new base explicitly; no rebase or reset was performed.", 409);
-    const authorityDigest = digest(JSON.stringify({ profileId: snapshot.profileId, projectId, workspaceId, policyRevision: snapshot.policy.revision,
-      permissionRevision: snapshot.settings.permissionRevision, projectRevision: configuration.revision, resultDigest: execution.resultDigest, identity, git }));
-    const document = parse(SandboxPublicationDocumentSchema, { format: "moguri-native-publication", version: 1, executionId, inputDigest: execution.inputDigest,
+    if ((git?.head ?? null) !== sourceHead) throw new MoguriError("sandbox_publication_base", "The original source HEAD changed. Preserve these outputs and review a new base explicitly; no rebase or reset was performed.", 409);
+    const authorityDigest = digest(JSON.stringify(members ? { profileId: snapshot.profileId, projectId, workspaceId, policyRevision: snapshot.policy.revision,
+      permissionRevision: snapshot.settings.permissionRevision, resultDigest: execution.resultDigest, identity, git,
+      members: members.map((entry) => ({ projectId: entry.projectId, identity: entry.identity, settings: entry.configuration.values })) } :
+      { profileId: snapshot.profileId, projectId, workspaceId, policyRevision: snapshot.policy.revision,
+        permissionRevision: snapshot.settings.permissionRevision, projectRevision: configuration.revision, resultDigest: execution.resultDigest, identity, git }));
+    const document = parse(SandboxPublicationDocumentSchema, { format: "moguri-native-publication", version: group ? 2 : 1,
+      ...(group ? { repositories: group, repositoryId: projectId } : {}), executionId, inputDigest: execution.inputDigest,
       resultDigest: execution.resultDigest, projectId, workspaceId, ...identity, git, authorityDigest, patch });
     const current = () => {
       signal.throwIfAborted();
       const state = this.host.snapshot(), root = this.host.root(projectId, workspaceId), actual = sourceRootSync(root.path);
       if (this.host.closing(projectId) || state.policy.revision !== snapshot.policy.revision || state.settings.permissionRevision !== snapshot.settings.permissionRevision ||
-        this.host.settings(projectId).revision !== configuration.revision || root.path !== document.root || actual.device !== document.device || actual.inode !== document.inode ||
+        (!members && this.host.settings(projectId).revision !== configuration.revision) || root.path !== document.root || actual.device !== document.device || actual.inode !== document.inode ||
         (!retained && (state.sandboxExecutions ?? []).find((value) => value.id === executionId)?.resultDigest !== document.resultDigest) ||
         this.host.rootBusy(document.root, exceptJobId) ||
         (workspaceId ? state.blockedWorkspaces.includes(workspaceId) : state.blockedProjects.includes(projectId)) ||
@@ -91,6 +161,14 @@ export class SandboxPublications {
           (terminal.binding?.root === document.root || terminal.projectId === projectId && terminal.workspaceId === workspaceId) &&
           !["closed", "failed", "acknowledged"].includes(terminal.status))) {
         throw new MoguriError("sandbox_publication_stale", "Native result, exact source root, policy or writer ownership changed. No stale publication was authorized.", 409);
+      }
+      for (const member of members ?? []) {
+        const project = this.host.root(member.projectId, null), actual = sourceRootSync(project.path);
+        if (this.host.closing(member.projectId) || JSON.stringify(this.host.settings(member.projectId).values) !== JSON.stringify(member.configuration.values) ||
+          project.path !== member.identity.root || actual.device !== member.identity.device || actual.inode !== member.identity.inode ||
+          this.host.rootBusy(project.path, exceptJobId) || state.blockedProjects.includes(member.projectId)) {
+          throw new MoguriError("sandbox_publication_stale", "A captured group source/policy/writer changed during exact publication. No replacement root was used.", 409);
+        }
       }
       for (const edit of patch.edits) {
         assertFolderName(edit.path, true, policy);
@@ -101,6 +179,7 @@ export class SandboxPublications {
     };
     const assert = async () => {
       current(); await this.host.assertRoot(projectId, workspaceId);
+      if (input.version === 3) await this.groupBases(execution, input, signal, exceptJobId);
       if (JSON.stringify(await optionalGitBinding(document.root, signal)) !== JSON.stringify(document.git)) throw new MoguriError("sandbox_publication_base", "Source branch, HEAD or repository identity changed. No Git intent was altered.", 409);
       for (const edit of patch.edits) { await inspectProjectDirectory(document.root, edit.path); assertFolderName(edit.path, true, policy); }
       current();
@@ -108,13 +187,13 @@ export class SandboxPublications {
     await assert(); await candidateBases(document.root, patch); await assert();
     const text = JSON.stringify(document);
     if (Buffer.byteLength(text) > 64 * 1024) throw new MoguriError("sandbox_publication_limit", "Review at most 20 selected outputs, a 32-KiB patch and 64-KiB complete document per native publication. Nothing was truncated.", 409);
-    const preview: SandboxPublicationPreview = { document, digest: digest(`moguri-native-publication-v1\0${text}`),
+    const preview: SandboxPublicationPreview = { document, digest: digest(`moguri-native-publication-v${document.version}\0${text}`),
       limits: { files: 20, patchBytes: MAX_CANDIDATE_PATCH_BYTES, documentBytes: 64 * 1024 },
       diagnostic: "Actual-user publication copies only these exact retained bytes to their original Local bases. It never executes code, stages files, changes HEAD/index or treats model provenance as acceptance." };
     return { preview, text, current, assert, execution };
   }
   async query(query: Extract<SandboxQuery, { type: "sandbox.publication" | "sandbox.publication.preview" }>): Promise<SandboxResponse> {
-    if (query.type === "sandbox.publication.preview") return { type: query.type, preview: (await this.preview(query.executionId, query.paths, AbortSignal.timeout(15_000))).preview };
+    if (query.type === "sandbox.publication.preview") return { type: query.type, preview: (await this.preview(query.executionId, query.paths, AbortSignal.timeout(15_000), undefined, undefined, query.repository)).preview };
     const publication = this.record(query.publicationId);
     return { type: query.type, publication, document: this.document(publication), job: this.host.snapshot().jobs.find((job) => job.id === publication.jobId) ?? null,
       operation: publication.operationDigest ? parse(SandboxPublicationResultSchema, JSON.parse(this.store.blob(publication.operationDigest))) : null };
@@ -126,12 +205,12 @@ export class SandboxPublications {
       if (prior.commandDigest !== finish.intent.digest) throw new MoguriError("idempotency_conflict", "The original native publication command changed.", 409);
       return finish([], { id: prior.id, revision: prior.revision });
     }
-    const prepared = await this.preview(command.executionId, command.paths, AbortSignal.timeout(15_000));
+    const prepared = await this.preview(command.executionId, command.paths, AbortSignal.timeout(15_000), undefined, undefined, command.repository);
     if (prepared.preview.digest !== command.expectedDigest || prepared.execution.revision !== command.expectedRevision) throw new MoguriError("sandbox_publication_stale", "Review the exact current native result and original source bases. No filesystem job was started.", 409);
     const id = randomUUID(), document = prepared.preview.document, now = new Date().toISOString();
     let response: CommandResult | undefined;
     this.host.job(document.projectId, document.workspaceId, async (signal, progress, jobId) => {
-      const context = await this.preview(command.executionId, command.paths, signal, jobId, prepared.execution);
+      const context = await this.preview(command.executionId, command.paths, signal, jobId, prepared.execution, command.repository);
       if (context.preview.digest !== command.expectedDigest) throw new MoguriError("sandbox_publication_stale", "Publication scope changed after admission; no stale bytes were copied.", 409);
       for (const edit of document.patch.edits) {
         await context.assert(); await candidateBases(document.root, { ...document.patch, edits: [edit] }); context.current();
@@ -148,7 +227,9 @@ export class SandboxPublications {
       return { format: "moguri-native-publication-result", version: 1, publicationId: id, root: document.root,
         files: document.patch.edits.map((edit) => ({ path: edit.path, digest: digest(edit.text), bytes: Buffer.byteLength(edit.text) })) };
     }, (job) => {
-      const publication: SandboxPublication = { version: 1, id, profileId: this.host.snapshot().profileId, projectId: document.projectId, workspaceId: document.workspaceId,
+      const publication: SandboxPublication = { version: document.version,
+        ...(document.version === 2 ? { repositories: document.repositories, repositoryId: document.repositoryId } : {}),
+        id, profileId: this.host.snapshot().profileId, projectId: document.projectId, workspaceId: document.workspaceId,
         executionId: document.executionId, sourceSessionId: prepared.execution.sessionId, root: document.root, inputDigest: document.inputDigest,
         resultDigest: document.resultDigest, documentDigest: this.store.putBlob(prepared.text), paths: document.patch.edits.map((edit) => edit.path),
         revision: 0, createdAt: now, updatedAt: now, jobId: job.id, commandId: finish.intent!.id, commandDigest: finish.intent!.digest,

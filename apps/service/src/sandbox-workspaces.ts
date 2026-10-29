@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import {
-  MoguriError, parse, type EventInput, type Project, type ProjectSettings, type SandboxCommand, type SandboxWorkspace,
-  type SandboxWorkspacePreview, type Session, type Snapshot,
+  MoguriError, parse, SessionRepositorySchema, sandboxRepositories, type EventInput, type Project, type ProjectSettings, type SandboxCommand, type SandboxWorkspace,
+  type SandboxRepository, type SandboxWorkspacePreview, type Session, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 import { captureNativeSource, captureNativeTree, materializeNativeStage, inspectNativeStage, assertNativeWorkspaceIdentity,
   NATIVE_TREE_MAX_FILES, NATIVE_TREE_MAX_BYTES, NATIVE_TREE_FILE_BYTES, type NativeSource } from "./native-staging.ts";
+import { materializeNativeGroup, nativeCompositeDigest, nativeRepositoryDirectory } from "./native-staging.ts";
 import { optionalGitBinding } from "./project-git.ts";
 import { folderPolicy, matchesFolder, type FolderPolicy } from "./project-policy.ts";
 import { digest, type EventStore } from "./store.ts";
@@ -46,16 +47,44 @@ const AutomaticInputSchema = Type.Object({
   authorityDigest: hash, sourceHead: Type.Union([Type.String(), Type.Null()]),
   previousExecutionId: Type.Union([Type.String(), Type.Null()]),
 }, { additionalProperties: false });
-const InputSchema = Type.Union([ReviewedInputSchema, AutomaticInputSchema]);
+const GroupInputSchema = Type.Object({
+  format: Type.Literal("moguri-native-workspace"), version: Type.Literal(3), sessionId: Type.String(),
+  source: Type.Null(), sourceHead: Type.Null(), authorityDigest: hash, previousExecutionId: Type.Union([Type.String(), Type.Null()]),
+  repositories: Type.Array(Type.Object({ binding: SessionRepositorySchema, directory: path, source: TreeSourceSchema,
+    workingSource: TreeSourceSchema, sourceHead: Type.Union([Type.String({ pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" }), Type.Null()]) },
+  { additionalProperties: false }), { minItems: 1, maxItems: 1000 }),
+}, { additionalProperties: false });
+const InputSchema = Type.Union([ReviewedInputSchema, AutomaticInputSchema, GroupInputSchema]);
+type StaticGroupRepository = Static<typeof GroupInputSchema>["repositories"][number];
 interface Host {
-  snapshot(): Snapshot; project(session: Session): Project;
+  snapshot(): Pick<Snapshot, "profileId" | "sessions" | "settings" | "policy" | "sandboxWorkspaces" | "sandboxExecutions">; project(session: Session, repository?: string): Project;
   settings(projectId: string | null): { revision: number; values: ProjectSettings };
   commit(events: EventInput[]): void; closing(session: Session): boolean;
 }
-export function nativeWorkspaceDocument(text: string) { return parse(InputSchema, JSON.parse(text)); }
+export function nativeWorkspaceDocument(text: string) {
+  const document = parse(InputSchema, JSON.parse(text));
+  if (document.version === 3) {
+    for (const repository of document.repositories) if (repository.source.root !== repository.binding.root.root ||
+      repository.source.identity.device !== repository.binding.root.device || repository.source.identity.inode !== repository.binding.root.inode) {
+      throw new MoguriError("sandbox_repository_history", "Composite input lost an original captured source identity. No member was substituted.", 409);
+    }
+    nativeCompositeDigest(document.repositories.map((repository) => ({ projectId: repository.binding.projectId, directory: repository.directory, source: repository.source })));
+    nativeCompositeDigest(document.repositories.map((repository) => ({ projectId: repository.binding.projectId, directory: repository.directory, source: repository.workingSource })));
+  }
+  return document;
+}
+export function nativeWorkspaceRepositories(input: ReturnType<typeof nativeWorkspaceDocument>): SandboxRepository[] | undefined {
+  return input.version === 3 ? input.repositories.map((repository) => ({ ...repository.binding, directory: repository.directory,
+    guestRoot: `/workspace/${repository.directory}`, sourceHead: repository.sourceHead })) : undefined;
+}
+export function assertNativeGroupRestorePaths(repositories: readonly SandboxRepository[], paths: readonly string[]): void {
+  if (paths.some((path) => !isProtectedProjectPath(path) && !repositories.some((repository) => path.startsWith(`${repository.directory}/`)))) {
+    throw new MoguriError("sandbox_repository_history", "Original native work has files outside its captured repository directories. Inspect the retained signed snapshot before explicitly starting a new session; no replacement guest or partial restoration was admitted.", 409);
+  }
+}
 export class SandboxWorkspaces {
   private active = new Map<string, { abort: AbortController; task: Promise<unknown> }>();
-  constructor(private readonly store: EventStore, private readonly stateDir: string, private readonly native: SandboxRuntime, private readonly host: Host) {}
+  constructor(private readonly store: EventStore, private readonly stateDir: string, private readonly native: Pick<SandboxRuntime, "assertReady">, private readonly host: Host) {}
   get busy(): boolean { return this.active.size > 0; }
   owns(sessionId: string): boolean { return this.active.has(sessionId); }
   automatic(): boolean {
@@ -70,6 +99,12 @@ export class SandboxWorkspaces {
   private authority(session: Session): string {
     const snapshot = this.host.snapshot(), settings = this.host.settings(session.projectId);
     if (session.controls.env !== "Sandbox" || !snapshot.policy.allowedEnvs.includes("Sandbox") || this.host.closing(session)) throw new MoguriError("sandbox_scope", "Explicitly select an allowed Sandbox environment and an existing owned source scope. No Local or previous-root fallback.", 409);
+    if (session.repositories) {
+      const repositories = session.repositories.map((binding) => ({ binding, root: this.host.project(session, binding.projectId).path,
+        settings: this.host.settings(binding.projectId).values }));
+      return frameDigest({ profileId: snapshot.profileId, sessionId: session.id, repositories, policyRevision: snapshot.policy.revision,
+        permissionRevision: snapshot.settings.permissionRevision, native: this.native.assertReady() });
+    }
     const project = session.projectId ? this.host.project(session) : null;
     return frameDigest({ profileId: snapshot.profileId, sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId,
       root: project?.path ?? null, policyRevision: snapshot.policy.revision,
@@ -78,6 +113,7 @@ export class SandboxWorkspaces {
   }
   async preview(sessionId: string, paths: string[], signal: AbortSignal = AbortSignal.timeout(15_000)) {
     const session = this.session(sessionId), authorityDigest = this.authority(session), config = this.native.assertReady();
+    if (session.repositories) throw new MoguriError("sandbox_group_setup", "Captured groups require reviewed managed automatic workspaces for their complete root set. A single-project text review cannot stand in for the group.", 409);
     if (session.turnId || this.active.has(session.id)) throw new MoguriError("sandbox_busy", "Stop/wait for the current owned turn or staging preparation before reviewing a new root.", 409);
     if (!session.projectId && paths.length) throw new MoguriError("project_required", "Project-free Sandbox chats have an empty private workspace. No host root was inferred.", 409);
     const selected = [...paths].sort(), project = session.projectId ? this.host.project(session) : null, policy = folderPolicy(this.host.settings(session.projectId).values);
@@ -141,12 +177,108 @@ export class SandboxWorkspaces {
   }
   async prepareAutomatic(sessionId: string, turnId: string, requested: AbortSignal) {
     const session = this.session(sessionId);
-    if (!this.automatic()) return this.assert(session);
+    if (!this.automatic()) {
+      if (session.repositories) throw new MoguriError("sandbox_group_setup", "Enable reviewed managed automatic workspaces for this captured group. No first-root or empty stage was used.", 409);
+      return this.assert(session);
+    }
     if (this.active.has(sessionId)) throw new MoguriError("sandbox_busy", "This session already owns native workspace preparation.", 409);
     const abort = new AbortController(), signal = AbortSignal.any([requested, abort.signal]);
-    const task = this.prepareAutomaticOnce(session, turnId, signal).finally(() => this.active.delete(sessionId));
+    const task = (session.repositories ? this.prepareGroupOnce(session, turnId, signal) : this.prepareAutomaticOnce(session, turnId, signal)).finally(() => this.active.delete(sessionId));
     this.active.set(sessionId, { abort, task });
     return task;
+  }
+  private groupBindings(session: Session, heads: ReadonlyMap<string, string | null> = new Map()): SandboxRepository[] {
+    if (!session.repositories) throw new MoguriError("sandbox_repository_scope", "This native group has no original captured repository set.", 409);
+    return sandboxRepositories(session.repositories.map((binding) => {
+      this.host.project(session, binding.projectId);
+      const directory = nativeRepositoryDirectory(binding.projectId);
+      return { ...binding, directory, guestRoot: `/workspace/${directory}`, sourceHead: heads.get(binding.projectId) ?? null };
+    }));
+  }
+  private sameGroup(session: Session, repositories: SandboxRepository[] | undefined): boolean {
+    return Boolean(session.repositories && repositories && JSON.stringify(session.repositories) === JSON.stringify(
+      sandboxRepositories(repositories).map(({ projectId, name, root }) => ({ projectId, name, root }))));
+  }
+  private async prepareGroupOnce(session: Session, turnId: string, signal: AbortSignal) {
+    const authorityDigest = this.authority(session), config = this.native.assertReady(), bindings = this.groupBindings(session);
+    const current = () => {
+      signal.throwIfAborted();
+      const actual = this.session(session.id);
+      if (actual.turnId !== turnId || !this.automatic() || this.authority(actual) !== authorityDigest || !this.sameGroup(actual, bindings)) {
+        throw new MoguriError("sandbox_stale", "The captured group, actual source/policy or owned turn changed before native admission. No first-root or Local fallback.", 409);
+      }
+      return actual;
+    };
+    current();
+    const previous = (this.host.snapshot().sandboxWorkspaces ?? []).find((workspace) => workspace.id === session.sandboxWorkspaceId);
+    if (previous && !this.sameGroup(session, previous.repositories)) throw new MoguriError("sandbox_repository_scope", "The retained private stage belongs to another original root set. No legacy or empty workspace was relabelled.", 409);
+    if (previous?.stage && previous.status === "ready" && previous.authorityDigest === authorityDigest) {
+      try { await inspectNativeStage(previous.stage); current(); return { ...previous, stage: previous.stage }; }
+      catch (error) { if (!(error instanceof MoguriError && error.code === "native_stage")) throw error; }
+    }
+    const last = (this.host.snapshot().sandboxExecutions ?? []).filter((execution) => execution.workspaceId === previous?.id).at(-1);
+    if (last && (last.cleanup !== "owned-guest-stopped" || !last.resultDigest || !last.nativeSessionId || !last.planDigest || !last.signerFingerprint ||
+      !this.sameGroup(session, last.repositories))) throw new MoguriError("sandbox_workspace", "Original group work or exact VM cleanup is unconfirmed. Its retained files/holds cannot authorize a replacement copy or guest.", 409);
+    const original = last ? this.document(last) : null;
+    if (original && (original.version !== 3 || JSON.stringify(original.repositories.map(({ binding }) => binding)) !== JSON.stringify(session.repositories))) {
+      throw new MoguriError("sandbox_repository_history", "Retained group input has no exact version-3 source lineage. No v1/v2 receipt was reinterpreted.", 409);
+    }
+    const id = randomUUID(), workspace: SandboxWorkspace = { id, sessionId: session.id, projectId: null, sourceWorkspaceId: null,
+      sourceRoot: null, sourceHead: null, repositories: bindings, stage: null, authorityDigest, configDigest: frameDigest(config),
+      revision: 0, createdAt: new Date().toISOString(), commandId: turnId,
+      commandDigest: frameDigest(["moguri-native-group-automatic-v1", this.host.snapshot().profileId, session.id, turnId, authorityDigest]),
+      preparation: { version: 1, kind: "automatic", turnId }, status: "preparing", diagnostic: null,
+      inputDigest: this.store.putBlob(JSON.stringify({ format: "moguri-native-preparation-intent", version: 2, sessionId: session.id, turnId,
+        repositories: bindings, previousExecutionId: last?.id ?? null, authorityDigest })) };
+    this.host.commit([this.event(workspace)]);
+    try {
+      const policies = new Map(bindings.map((binding) => [binding.projectId, folderPolicy(this.host.settings(binding.projectId).values)]));
+      const policyFor = (id: string) => {
+        const policy = policies.get(id);
+        if (!policy) throw new MoguriError("sandbox_repository_scope", "An original group member lost its captured folder policy.", 409);
+        return policy;
+      };
+      const aggregatePolicy: FolderPolicy = {
+        denied: bindings.flatMap((binding) => policyFor(binding.projectId).denied.map((path) => `${binding.directory}/${path}`)),
+        readOnly: bindings.flatMap((binding) => policyFor(binding.projectId).readOnly.map((path) => `${binding.directory}/${path}`)),
+      };
+      const retained = last ? await this.restoreAfter(last, id, aggregatePolicy, signal) : null;
+      const repositories: StaticGroupRepository[] = [];
+      for (const binding of bindings) {
+        current();
+        const policy = policyFor(binding.projectId);
+        const before = original?.version === 3 ? original.repositories.find((entry) => entry.binding.projectId === binding.projectId) : undefined;
+        if (original && !before) throw new MoguriError("sandbox_repository_history", "Retained group work omitted an original member. No subset was restored.", 409);
+        const source = before?.source ?? parse(TreeSourceSchema, await captureNativeTree(binding.root.root, policy, signal));
+        const sourceHead = before ? before.sourceHead : (await optionalGitBinding(binding.root.root, signal))?.head ?? null;
+        let workingSource = source;
+        if (retained) {
+          const root = join(retained.root, binding.directory);
+          await mkdir(root, { recursive: true, mode: 0o700 });
+          workingSource = parse(TreeSourceSchema, await captureNativeTree(await realpath(root), policy, signal));
+        }
+        repositories.push({ binding: { projectId: binding.projectId, name: binding.name, root: binding.root }, directory: binding.directory, source, workingSource, sourceHead });
+      }
+      const input = parse(GroupInputSchema, { format: "moguri-native-workspace", version: 3, sessionId: session.id, source: null, sourceHead: null,
+        repositories, authorityDigest, previousExecutionId: last?.id ?? null });
+      const parent = join(this.stateDir, "native-stage-root"); await mkdir(parent, { recursive: true, mode: 0o700 });
+      const stage = await materializeNativeGroup(await realpath(parent), { profileId: this.host.snapshot().profileId, sessionId: session.id, turnId: id },
+        repositories.map((entry) => ({ projectId: entry.binding.projectId, directory: entry.directory, source: entry.workingSource })), signal);
+      current();
+      if (!last) for (const repository of repositories) if (((await optionalGitBinding(repository.source.root, signal))?.head ?? null) !== repository.sourceHead) {
+        throw new MoguriError("sandbox_stale", "A captured source HEAD changed during complete group copying. The private stage remains partial, not a mixed base.", 409);
+      }
+      current();
+      const ready: SandboxWorkspace = { ...workspace, stage, repositories: this.groupBindings(session, new Map(repositories.map((entry) => [entry.binding.projectId, entry.sourceHead]))),
+        inputDigest: this.store.putBlob(JSON.stringify(input)), status: "ready", revision: 1 };
+      this.host.commit([this.event(ready), { event_type: "session.sandbox_bound", profile_id: this.host.snapshot().profileId, session_id: session.id, payload: { workspaceId: ready.id } }]);
+      return { ...ready, stage };
+    } catch (error) {
+      this.host.commit([this.event({ ...workspace, status: "partial", revision: 1, diagnostic: signal.aborted ?
+        "Original group copying stopped before worker/model admission. Every source and the partial owned stage were preserved." :
+        error instanceof MoguriError ? error.message : "Complete captured-group staging failed. No source was written, member omitted or preparation replayed." })]);
+      throw error;
+    }
   }
   private async prepareAutomaticOnce(session: Session, turnId: string, signal: AbortSignal) {
     const authorityDigest = this.authority(session), config = this.native.assertReady();
@@ -223,6 +355,8 @@ export class SandboxWorkspaces {
       workspace: execution.stage.workspace, image: execution.image, command: { program: execution.command[0]!, arguments: execution.command.slice(1) },
       createdAfter: execution.createdAfter, createdBefore: execution.createdBefore, planDigest: execution.planDigest!, signerFingerprint: execution.signerFingerprint! });
     signal.throwIfAborted();
+    if (execution.repositories) assertNativeGroupRestorePaths(execution.repositories,
+      evidence.entries.filter((entry) => entry.kind.type !== "directory").map((entry) => entry.path));
     const root = join(this.stateDir, "native-inputs", id); await mkdir(root, { recursive: true, mode: 0o700 });
     const entries = evidence.entries.filter((entry) => entry.kind.type !== "directory" && !isProtectedProjectPath(entry.path) &&
       !matchesFolder(entry.path, policy.denied) && !ignoredPath(root, join(root, entry.path), false, []))
@@ -245,6 +379,9 @@ export class SandboxWorkspaces {
     const workspace = (this.host.snapshot().sandboxWorkspaces ?? []).find((value) => value.id === session.sandboxWorkspaceId);
     if (!workspace?.stage || workspace.sessionId !== session.id || workspace.projectId !== session.projectId || workspace.sourceWorkspaceId !== session.workspaceId ||
       workspace.status !== "ready" || workspace.authorityDigest !== this.authority(session)) throw new MoguriError("sandbox_workspace", "Review and prepare this session's exact native workspace first. No source checkout or previous stage was substituted.", 409);
+    if (session.repositories ? !this.sameGroup(session, workspace.repositories) : workspace.repositories !== undefined) {
+      throw new MoguriError("sandbox_repository_scope", "The private workspace lost its exact original single/group scope. No root mapping was relabelled.", 409);
+    }
     assertNativeWorkspaceIdentity(workspace.stage);
     return { ...workspace, stage: workspace.stage };
   }
@@ -253,6 +390,9 @@ export class SandboxWorkspaces {
     await inspectNativeStage(workspace.stage);
     const current = this.current(this.session(session.id));
     if (current.id !== workspace.id || current.revision !== workspace.revision) throw new MoguriError("sandbox_workspace", "Native workspace changed during identity verification. No root fallback.", 409);
+    if (JSON.stringify(nativeWorkspaceRepositories(this.document(current))) !== JSON.stringify(current.repositories)) {
+      throw new MoguriError("sandbox_repository_history", "The private workspace map no longer matches its complete original input. No alternate guest directory or source was selected.", 409);
+    }
     return current;
   }
   document(workspace: Pick<SandboxWorkspace, "inputDigest">) {

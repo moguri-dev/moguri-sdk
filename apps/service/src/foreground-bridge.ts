@@ -71,8 +71,15 @@ export function foregroundWorker(workerPath: string, init: BridgeInit, info: Bri
         queryIds.add(raw.requestId);
         void (async () => {
           try {
+            let root = info.root;
+            if (raw.query.type === "context" && (info.native?.repositories || raw.query.repository)) {
+              const repository = raw.query.repository, selected = info.native?.repositories?.filter((entry) => entry.projectId === repository);
+              const member = selected?.length === 1 ? selected[0] : undefined;
+              if (!repository || !member) throw new Error("Select the exact captured native repository; no default root is available.");
+              root = member.root;
+            }
             const result = raw.query.type === "catalog" ? await workerCatalog(raw.query.catalog, abort.signal) :
-              info.root ? { type: "context" as const, text: await repositoryContext(info.root, raw.query.settings) } : null;
+              root ? { type: "context" as const, text: await repositoryContext(root, raw.query.settings) } : null;
             abort.signal.throwIfAborted();
             if (!result) throw new Error("No filesystem root was approved for repository context.");
             wire.send({ kind: "query-result", runId: init.runId, requestId: raw.requestId, result });

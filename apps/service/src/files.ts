@@ -90,9 +90,10 @@ export async function writeProjectBytes(root: string, input: string, bytes: Buff
   await checkBase();
   const temporary = join(dirname(path), `.moguri-write-${randomUUID()}`);
   const metadata = await stat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
-  const file = await open(temporary, "wx", metadata ? metadata.mode & 0o777 : 0o600);
+  const mode = metadata ? metadata.mode & 0o777 : 0o600, file = await open(temporary, "wx", mode);
   try {
     await file.writeFile(bytes);
+    await file.chmod(mode);
     await file.sync();
     await file.close();
     await scopedPath(root, input, true);

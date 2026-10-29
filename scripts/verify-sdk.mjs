@@ -60,6 +60,7 @@ try {
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
+    ${installedProtocol >= 77 ? 'import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -77,6 +78,12 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 77 ? `
+      const boundedPreference:Controls=selectModelControls({...factoryControls(),modelOptions:{thinkingEffort:"max"}},{id:"generated-high-only",thinkingLevels:["high"]});
+      const preferred:ModelSelection={modelId:"generated-high-only",thinkingEffort:"high",preferredThinkingEffort:"max"};
+      void boundedPreference.preferredThinkingEffort;void preferred;void supportedThinkingEffort("high",["max"]);
+      void routingModelReady;void routingWorkingWindow;
+      ` : ""}
       ${installedProtocol >= 76 ? `
       const reviewedChildren:SessionChildrenReview={action:"detach",expected:[{sessionId:"generated-child",parentSessionId:"generated-parent"}]};void reviewedChildren;
       const deleteWithReview=(view:MoguriSdk,id:string,review:SessionChildrenReview)=>view.sessions.delete(id,true,0,review);void deleteWithReview;
@@ -114,7 +121,14 @@ try {
       await sdk.issues.reorder("generated-card","review",null,[{issueId:"generated-card",phaseId:"backlog",order:1}],0);
       await sdk.kanban.choose({profileId:sdk.profileId,sessionId:"generated-session",expectedRevision:0,text:"continue work"},"prompt");
       const continued=await sdk.slash("generated-session","/continue-work","cli");
-      if(continued.kind==="continue-work"){void continued.review.expectedRevision;void continued.choices;}
+      if(continued.kind==="continue-work"){${installedProtocol >= 80 ? 'if("expectedRevision" in continued.review)void continued.review.expectedRevision;else void continued.review.command.executionId;' : "void continued.review.expectedRevision;"}void continued.choices;}
+      ` : ""}
+      ${installedProtocol >= 80 ? `
+      const queued=await sdk.commands.read("generated-command");void queued.item.command?.bindingDigest;
+      const commandClient=await sdk.commands.attach("cli",{panel:async context=>{context.signal.throwIfAborted();void context.claim.token;return {outcome:"completed"};}});
+      await commandClient.dispose();
+      const nativeReview=await sdk.sandbox.publicationPreview("generated-execution",["generated.txt"],"generated-repository");
+      await sdk.sandbox.publish("generated-execution",["generated.txt"],nativeReview.preview.digest,0,"generated-repository");
       ` : ""}
       ${installedProtocol >= 61 ? `
       await sdk.approvals.respond("generated-session","generated-approval",true,{scope:"project",match:"family"});
@@ -1300,8 +1314,9 @@ try {
       const installedRouting=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"slash","/kupo status","--session",routed.id,"--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
       assert.equal(JSON.parse(JSON.parse(installedRouting.stdout).text).policy.enabled,true);assert.equal(generatedRequests.length,4);
       await beta.refresh();
-      await beta.command({type:"draft.save",sessionId:routed.id,expectedRevision:0,text:"Generated installed Single task.",attachments:[]});
-      await beta.command({type:"message.send",sessionId:routed.id,expectedRevision:1,delivery:"queue"});
+      const routedDraftRevision=beta.getState().snapshot.sessions.find(value=>value.id===routed.id).draft.revision;
+      await beta.command({type:"draft.save",sessionId:routed.id,expectedRevision:routedDraftRevision,text:"Generated installed Single task.",attachments:[]});
+      await beta.command({type:"message.send",sessionId:routed.id,expectedRevision:routedDraftRevision+1,delivery:"queue"});
       for(let n=0;n<400&&!["completed","partial","failed","stopped"].includes(beta.getState().snapshot.sessions.find(value=>value.id===routed.id).status);n++)await new Promise(resolve=>setTimeout(resolve,20));
       const routedSession=beta.getState().snapshot.sessions.find(value=>value.id===routed.id);
       assert.equal(routedSession.status,"completed");assert.equal(routedSession.controls.modelId,KUPO_MODEL_ID);
@@ -1711,7 +1726,16 @@ try {
     }
     console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/CLI/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
-  execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
+  try {
+    execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
+  } catch (error) {
+    const root = resolve(".native/qualification"); await mkdir(root, { recursive: true, mode: 0o700 });
+    const retained = await mkdtemp(join(root, "sdk-failure-"));
+    await writeFile(join(retained, "smoke.mjs"), await readFile(join(consumer, "smoke.mjs")), { flag: "wx", mode: 0o600 });
+    await writeFile(join(retained, "consumer.ts"), await readFile(join(consumer, "consumer.ts")), { flag: "wx", mode: 0o600 });
+    console.error("Generated packed-consumer failure sources retained:", retained);
+    throw error;
+  }
   if (installedProtocol >= 44) {
     const { qualifyWorkspaceEntry } = await import("./qualify-workspace-entry.mjs");
     console.log(await qualifyWorkspaceEntry({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-entry") }));

@@ -95,6 +95,11 @@ or dynamic effective-scope qualification.
 
 #### Default-update qualification
 
+The later [exact 0.2.4 qualification](sendbox-0.2.4-qualification.md) records
+the current protocol-76 artifact, physical guest/network and generated
+service-led model/tool/accounting gates. It does not relabel the historical
+measurements below or close the wider cancellation/recovery and milestone work.
+
 Source `10f7708` passes the release-specific SDK, state, review, archive-safety
 and generated network gates, including explicit old-version preservation and
 the version-bound Meta warning. The source and compiled inputs remain unchanged
@@ -178,6 +183,104 @@ cleanup window and preserves the source state; an abort request is not completio
 Changing root, policy, settings, mode or ownership while copying cannot admit a
 stale stage. Restart retains partial intent and holds queued prompts without
 replaying copying, model calls or effects. No model budget is consumed by setup.
+
+## Captured project-group extension contract
+
+The user-requested extension uses the already captured `Session.repositories`,
+not current folder membership, a first project or a common parent. Local remains
+the default; Sandbox is an independent explicit Env choice. Remote group
+execution and Sandbox user consoles remain unqualified. Group colors,
+navigation order and ungrouping cannot retarget or invalidate captured roots.
+
+Reuse TypeBox/React/OpenTUI and Node filesystem/crypto under their existing
+licenses, and SendBox under Apache-2.0. No new dependency, provider adapter,
+terminal renderer or permission source is required.
+
+The additive protocol80 shape has an explicit version-3 native input document:
+every member binds its project ID/captured name, canonical source identity,
+source HEAD, execution-relevant settings/policy and a collision-safe private
+directory. Version-1 reviewed and version-2 automatic documents keep their
+original meaning and digests. Workspace/execution records expose the exact
+member map; group results/publication documents use distinct version-2 shapes.
+Both `sandbox_multi_root_schema='1'` and genuine combined80 convergence are
+required, not inferred from a higher numeric version. Actual standalone79
+reserved the group marker but had no native group mapping or queued runtime.
+Those version-3/version-2/maps and slash intent are therefore refused in a
+fabricated predecessor, even if its theme/convergence markers were erased.
+No old receipt or payload is relabeled or used to qualify new bytes.
+
+Preparation leases every actual captured source and copies into one
+Moguri-owned composite stage, never a live source mount. Reject overlapping
+roots, aliases, changed devices/inodes, incomplete capture and aggregate limit
+overflow before worker/model admission. Apply the existing complete
+20,000-file/256-MiB tree boundary across the group, not once per member.
+Tool calls must select an exact original repository ID or captured unique name.
+Read/write policies remain per member; shell execution is unavailable across
+the group if any member has folder restrictions that the shell cannot enforce.
+Grouping never grants project MCP/hooks/background jobs or broader networking.
+
+Retained work and rollback recovery preserve every original member snapshot
+and complete private after-state. Unassigned unprotected files outside the
+captured map block replacement; the signed originals remain inspectable rather
+than silently dropping those files into no member. No changed root, policy, cancellation,
+missing receipt or controller restart can replay preparation or substitute a
+fresh checkout. Unknown VM cleanup/accounting remains quarantined. Every
+model/tool frame uses the existing worker, actual tool authorization and
+all-role ledger; selected-provider/CNAME and GitHub Meta scope stays unchanged.
+Native authorization, pending approvals and explicit automatic delegation use
+the broker-selected member's guest root, not the group's intentionally null
+logical root. A root-less group never becomes a project-free workspace or a
+Local permission fallback.
+
+Publication explicitly chooses one captured repository and exact retained paths.
+It binds that member's original Local root and bases, revalidates the complete
+captured root/policy set and leases all publication roots. Actual user acceptance
+is separate from model provenance. Copies retain existing partial/no-replay
+attempt records and never stage files or change source Git HEAD/index.
+Files outside captured member directories are not silently publishable.
+Sequential member publications can advance bases only through independently
+retained, completed actual-user copied-byte receipts. A deleted report or a
+partial attempt is not a new base. Source modes are preserved exactly despite
+the process creation mask; neither a text acceptance nor the helper's temporary
+file may change a source's mode.
+
+Desktop exposes **New Sandbox chat** in the project-group menu and an independent
+Env selection. The result panel requires choosing an original repository before
+selecting member-relative paths. Changing that selection revokes the old review.
+CLI/TUI use `/folder-chat FOLDER_ID Sandbox`; omit Env to preserve Local.
+SDK publication calls take the original repository ID as an optional final
+argument, mandatory for groups. CLI publication adds `--repository ID`; shared
+`/sandbox publish-preview RUN_ID {"paths":["file"],"repository":"ID"}` returns an
+exact selector-bound confirm command. Native user consoles, SSH groups, native
+Git/plan-write, project MCP/hooks/background transports remain blocked.
+
+### Fresh prerequisites before group integration
+
+Source `f89669d1f54e0f2697a27af7c0d255602bc586cf`, macOS 26.6 arm64,
+hardware virtualization available (`kern.hv_support=1`). npm spikes use pinned
+Node 26.12.0; the separately observed host `node` is 26.11.1.
+
+| Generated prerequisite | Actual result |
+| --- | --- |
+| Foundation transport/cancellation | PASS, 6 intercepted requests / 32.63 ms cancellation |
+| SQLite WAL/crash projection | PASS, 1,000 events / 0.0658 ms append p95 / 0.4953 ms rebuild |
+| Owned PTY group stop | PASS, 152.91 ms / zero known survivors |
+| OpenTUI and hidden Electron | PASS, 18.11 ms/update; 181.82 ms cold start / 8.24 ms scroll frame |
+| Bounded filesystem/Git baseline | PASS, 2,000 files / 0.867 ms search / 6.667 ms Git status |
+| Verified native package-manager reuse | PASS, 558 generated bytes / 554.97 ms; tampering refused, no lifecycle scripts |
+| Final group/current80 guest, network, worker and installer | NOT YET QUALIFIED at this prerequisite cut |
+
+The generic foundation script still reports its historical live-provider,
+Rust/Linux, notarization, initial native/quality/decision/SSH and first-checkpoint
+gates as unavailable/FAIL. Those rows are not new physical probes of the
+separately installed 0.2.4 runtime and cannot qualify or disqualify changed80
+artifacts by assumption. Exact final native and client artifacts require their
+own retained PASS/FAIL/SKIP evidence.
+
+The [final combined80 qualification](sendbox-0.2.4-qualification.md#protocol-80-combined-follow-up)
+records all seven actual artifact/network/worker/group/teardown gates as PASS,
+with exact current image, trust, installer and raw-receipt identities. The
+prerequisite table above remains its original earlier cut, not relabelled data.
 
 ## Provider and tool networking
 

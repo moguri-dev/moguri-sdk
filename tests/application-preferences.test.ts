@@ -34,7 +34,7 @@ test("schema-49 root configuration and profile identities upgrade without adding
   try {
     const configuration = (await fixture.sdk.application.status()).configuration;
     await fixture.sdk.application.configure({ menuBar: false, automaticUpdates: false }, configuration.revision);
-    assert.throws(() => removePost44FixtureMarkers(fixture.service.store.db), /genuine pre-settings/);
+    assert.throws(() => removePost44FixtureMarkers(fixture.service.store.db, fixture.service.store.events()), /genuine pre-settings/);
     assert.equal(fixture.service.store.db.prepare("SELECT value FROM retention_metadata WHERE id='theme_catalog_schema'").get()?.value, "1");
     const history = fixture.service.store.events().map((event) => [event.id, event.seq]);
     fixture.sdk.disconnect(); await writeLegacyState(fixture.service, 49);

@@ -20,6 +20,79 @@ async function sendTo(sdk: MoguriSdk, sessionId: string, text: string) {
   try { editor.edit(text); await editor.send("queue"); } finally { editor.dispose(); }
 }
 
+test("group color and exact ungrouping preserve every project, file and already captured session root", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const group = await groupForFixture(fixture, sdk), created = await sdk.sessions.createFolder(group.folderId);
+    const before = fixture.service.controller.snapshot(), folder = before.projectFolders.find((folder) => folder.id === group.folderId)!;
+    const captured = before.sessions.find((session) => session.id === created.id)!.repositories;
+    const members = before.projectConfigurations.filter((entry) => entry.folderId === folder.id).map(({ projectId, revision }) => ({ projectId, revision }));
+    await sdk.projects.folder(folder.name, folder.order, folder.id, folder.revision, "#6366F1");
+    const colored = fixture.service.controller.snapshot().projectFolders.find((entry) => entry.id === folder.id)!;
+    assert.equal(colored.color, "#6366f1"); assert.equal(colored.revision, folder.revision + 1);
+    await sdk.projects.folder(colored.name, colored.order, colored.id, colored.revision);
+    const retainedColor = fixture.service.controller.snapshot().projectFolders.find((entry) => entry.id === folder.id)!;
+    assert.equal(retainedColor.color, colored.color);
+    assert.deepEqual(fixture.service.controller.snapshot().projectConfigurations, before.projectConfigurations);
+    await assert.rejects(() => sdk.projects.ungroup(folder.id, members, folder.revision), { code: "revision_conflict" });
+    await assert.rejects(() => sdk.projects.ungroup(folder.id, members.slice(0, 1), retainedColor.revision), { code: "project_group_changed" });
+    await sdk.projects.ungroup(folder.id, members, retainedColor.revision);
+    const after = fixture.service.controller.snapshot();
+    assert.equal(after.projectFolders.some((entry) => entry.id === folder.id), false);
+    for (const member of members) {
+      const current = after.projectConfigurations.find((entry) => entry.projectId === member.projectId)!;
+      assert.equal(current.folderId, null); assert.equal(current.revision, member.revision + 1);
+      assert.ok(after.projects.some((project) => project.id === member.projectId));
+    }
+    assert.deepEqual(after.sessions.find((session) => session.id === created.id)!.repositories, captured);
+    assert.ok((await sdk.workspaces.files(created.id!, ".", group.first)).entries.includes("fixture.txt"));
+    assert.deepEqual((await sdk.workspaces.files(created.id!, ".", group.second)).entries, []);
+    assert.throws(() => sdk.sessions.createFolder(folder.id), { code: "project_folder" });
+    await assert.rejects(() => sdk.projects.folder("No resurrection", 0, folder.id, 0), { code: "group_missing" });
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("ungrouping refuses concurrent membership and persistence failure without moving a subset or consuming its command receipt", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const group = await groupForFixture(fixture, sdk), before = fixture.service.controller.snapshot();
+    const folder = before.projectFolders.find((entry) => entry.id === group.folderId)!;
+    const members = before.projectConfigurations.filter((entry) => entry.folderId === folder.id).map(({ projectId, revision }) => ({ projectId, revision }));
+    const first = before.projectConfigurations.find((entry) => entry.projectId === group.first)!;
+    await sdk.projects.organize(group.first, { folderId: first.folderId, color: "#3b82f6", order: first.order }, first.revision);
+    await assert.rejects(() => sdk.projects.ungroup(folder.id, members, folder.revision), { code: "revision_conflict" });
+    const current = fixture.service.controller.snapshot(), commandId = "generated-atomic-folder-removal";
+    const exact = current.projectConfigurations.filter((entry) => entry.folderId === folder.id).map(({ projectId, revision }) => ({ projectId, revision }));
+    fixture.service.store.db.exec(`CREATE TRIGGER generated_folder_remove_failure BEFORE INSERT ON events
+      WHEN json_extract(NEW.data,'$.event_type')='project.folder_removed' BEGIN SELECT RAISE(ABORT,'generated persistence failure'); END;`);
+    const command = { type: "project.ungroup" as const, folderId: folder.id, expectedRevision: folder.revision, projects: exact };
+    await assert.rejects(() => sdk.command(command, commandId), /persist|failed|database/i);
+    assert.deepEqual(fixture.service.controller.snapshot().projectFolders, current.projectFolders);
+    assert.deepEqual(fixture.service.controller.snapshot().projectConfigurations, current.projectConfigurations);
+    fixture.service.store.db.exec("DROP TRIGGER generated_folder_remove_failure");
+    await sdk.command(command, commandId);
+    assert.equal(fixture.service.controller.snapshot().projectFolders.some((entry) => entry.id === folder.id), false);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("ungrouping navigation cannot release a captured session's unconfirmed all-root ownership", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const group = await groupForFixture(fixture, sdk), created = await sdk.sessions.createFolder(group.folderId);
+    fixture.service.store.commit([{ event_type: "turn.finished", profile_id: sdk.profileId, session_id: created.id!, turn_id: "generated-unconfirmed-ungroup-turn",
+      payload: { outcome: "partial", diagnostic: "Generated original unconfirmed group work." } }]);
+    fixture.service.controller.refreshProfile(); await sdk.refresh();
+    const roots = fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)!.repositories!;
+    await sdk.projects.ungroup(group.folderId, [{ projectId: group.first, revision: 1 }, { projectId: group.second, revision: 1 }], 0);
+    assert.ok(roots.every((repository) => fixture.service.controller.ownedLocalRoots().includes(repository.root.root)));
+    await assert.rejects(() => sdk.sessions.delete(created.id!, true), /inspect|unconfirmed|root/i);
+    await assert.rejects(() => sdk.projects.remove(group.second, true, 2), /folder session|captured|group/i);
+    assert.deepEqual(fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)!.repositories, roots);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
 test("named grouping is atomic and a folder session edits and runs commands only in explicitly selected captured roots", { skip: process.platform !== "darwin" }, async () => {
   let first = "", second = "";
   const fixture = await setupFixture({ respond: (_request, index) => {
@@ -57,7 +130,7 @@ test("named grouping is atomic and a folder session edits and runs commands only
     assert.equal(source.sourceRef.repository, first);
     assert.match(source.sourceRef.expectedDigest, /^[a-f0-9]{64}$/);
     assert.equal(fixture.requests.length, 4);
-    await assert.rejects(() => sdk.sessions.configure(created.id!, { ...session().controls, env: "Remote" }, session().revision), /Local|multi-repositor/i);
+    await assert.rejects(() => sdk.sessions.configure(created.id!, { ...session().controls, env: "Remote" }, session().revision), { code: "repository_env" });
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
@@ -225,6 +298,8 @@ test("fresh member folder restrictions apply only to that selected repository, i
     await mkdir(join(group.path, "restricted")); await mkdir(join(fixture.project, "restricted"));
     const configuration = (await sdk.projects.configuration(group.second)).configuration;
     await sdk.projects.configure(group.second, { ...configuration.values, readOnlyFolders: ["restricted"] }, configuration.revision);
+    assert.equal((await sdk.tools.catalog(created.id!, "run_command")).tools.some((tool) => tool.name === "run_command"), false,
+      "A shell in the unrestricted member could otherwise cross into the restricted member.");
     const tool = (await sdk.tools.catalog(created.id!, "write_file")).tools.find((tool) => tool.name === "write_file")!;
     const args = { path: "restricted/generated.txt", text: "Generated selected-repository policy check.", expectedDigest: "absent" };
     await assert.rejects(() => sdk.tools.execute(created.id!, tool.name, { ...args, repository: group.second }, tool.schemaDigest), /read.only/i);
@@ -233,6 +308,25 @@ test("fresh member folder restrictions apply only to that selected repository, i
     assert.equal(await readFile(join(fixture.project, args.path), "utf8"), args.text);
     await assert.rejects(() => readFile(join(group.path, args.path)), { code: "ENOENT" });
     assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("even read-only captured Sandbox preparation leases every original root without granting a tool or model call", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const group = await groupForFixture(fixture, sdk), created = await sdk.sessions.createFolder(group.folderId), side = await sdk.sessions.side(created.id!);
+    const session = fixture.service.controller.snapshot().sessions.find((session) => session.id === side.id)!;
+    assert.equal(session.mode, "read-only");
+    const controls = { ...session.controls, env: "Sandbox" as const }, item = { id: "generated-private-copy-input", text: "Generated preparation ownership only.", attachments: [], delivery: "queue" as const };
+    fixture.service.store.commit([
+      { event_type: "session.configured", profile_id: "default", session_id: session.id, payload: { controls } },
+      { event_type: "queue.enqueued", profile_id: "default", session_id: session.id, payload: { item } },
+      { event_type: "turn.started", profile_id: "default", session_id: session.id, turn_id: "generated-private-copy-turn",
+        payload: { item, controls, policyRevision: fixture.service.controller.snapshot().policy.revision } },
+    ]);
+    fixture.service.controller.refreshProfile();
+    assert.ok(session.repositories!.every((repository) => fixture.service.controller.ownedLocalRoots().includes(repository.root.root)));
+    assert.equal(fixture.requests.length, 0); assert.equal(fixture.service.controller.snapshot().sandboxExecutions!.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

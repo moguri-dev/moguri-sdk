@@ -71,7 +71,7 @@ test("native host tools include macOS installation paths without replacing expli
   assert.equal(sandboxHostEnvironment({}).PATH, "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin");
 });
 
-test("actual SendBox 0.2.3 adapter verifies pinned artifacts, guest process controls and owned VM absence with Finder's minimal PATH and no model call", { skip: !configuration, timeout: 90_000 }, async () => {
+test("actual pinned SendBox adapter verifies its exact selected release, guest process controls and owned VM absence with Finder's minimal PATH and no model call", { skip: !configuration, timeout: 90_000 }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/native-sdk-")), state = join(root, "state");
@@ -84,7 +84,7 @@ test("actual SendBox 0.2.3 adapter verifies pinned artifacts, guest process cont
     assert.equal(runtime.readiness.ready, false);
     const probeId = randomUUID(), result = await runtime.probe("generated-native", probeId);
     assert.equal(result.ready, true);
-    assert.equal(result.release, "0.2.3");
+    assert.equal(result.release, configuration.qualification!.release);
     assert.equal(result.workerDigest, configuration.qualification!.workerDigest);
     assert.equal(result.image, configuration.image);
     const intent = JSON.parse(await readFile(join(state, "native-executions", probeId, "intent.json"), "utf8"));

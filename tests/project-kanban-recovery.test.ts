@@ -9,7 +9,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY, setupFixture, waitFor } from "./fixture.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("schema 61 upgrades atomically without rewriting retained history, and a failed marker leaves it reopenable", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
@@ -17,7 +17,8 @@ test("schema 61 upgrades atomically without rewriting retained history, and a fa
   try {
     await fixture.service.close();
     const db = new DatabaseSync(path);
-    db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema'); PRAGMA user_version=61; COMMIT;");
+    removePost77FixtureMarkers(db, fixture.service.controller.events(0));
+    db.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema'); PRAGMA user_version=61; COMMIT;");
     const before = retainedCiphertextRows(db);
     db.exec("CREATE TRIGGER generated_kanban_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='project_kanban_schema' BEGIN SELECT RAISE(ABORT,'Generated Kanban migration failure'); END;");
     db.close();

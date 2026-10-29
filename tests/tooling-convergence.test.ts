@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { EventStore } from "../apps/service/src/store.ts";
 import { factoryControls, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 const tooling = "lean_tooling_schema", candidate = "candidate_retention_schema", convergence = "lean_tooling_convergence_schema";
 const markers = (db: DatabaseSync) => db.prepare("SELECT id,value FROM retention_metadata ORDER BY id").all();
@@ -24,9 +24,10 @@ async function fixture(lineage: "main" | "tooling") {
         parentSessionId: "generated-parent", kind: "side", mode: "read-only", parentSnapshotDigest: snapshot } },
     ]);
   }
+  removePost77FixtureMarkers(store.db, store.events());
   store.db.prepare("DELETE FROM retention_metadata WHERE id=?").run(lineage === "main" ? tooling : candidate);
   store.db.prepare("DELETE FROM retention_metadata WHERE id=?").run(convergence);
-  store.db.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema','session_navigation_schema','workspace_experience_schema')");
+  store.db.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','session_github_workflows_schema','session_github_convergence_schema','session_navigation_schema','workspace_experience_schema')");
   store.db.exec("PRAGMA user_version=57");
   const rows = retainedCiphertextRows(store.db); store.close();
   return { directory, path, key, rows, raw, snapshot, close: () => rm(directory, { recursive: true, force: true }) };

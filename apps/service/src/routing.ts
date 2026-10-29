@@ -1,23 +1,14 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import {
-  AutomaticRouterPlanSchema, DEFAULT_ROUTER_PROMPT, KUPO_MODEL_ID, modelContextWindows, MoguriError, SingleRoutingPlanSchema,
-  type AutomaticKupoSettings, type AutomaticRoutingPlan, type Controls, type KupoCapability, type KupoSettings, type ModelInfo, type RoutingTurn, type SingleRoutingPlan,
+  AutomaticRouterPlanSchema, DEFAULT_ROUTER_PROMPT, KUPO_MODEL_ID, MoguriError, routingModelReady, routingWorkingWindow, SingleRoutingPlanSchema,
+  type AutomaticKupoSettings, type AutomaticRoutingPlan, type BoundedRoutingModel, type Controls, type KupoCapability, type KupoSettings, type ModelInfo, type RoutingTurn, type SingleRoutingPlan,
 } from "../../../packages/protocol/src/index.ts";
 import type { RoutingPool } from "../../../packages/protocol/src/compound.ts";
 import { compoundModelBinding, compoundPool, reviewedModelPair } from "./compound-policy.ts";
 
-export interface BoundedRoutingModel extends ModelInfo { maxTokens: number }
-export const routingWorkingWindow = (model: ModelInfo): number => {
-  try { return modelContextWindows(model).values[0] ?? 0; }
-  catch (error) {
-    if (!(error instanceof MoguriError && error.code === "model_context")) throw error;
-    throw new MoguriError("routing_context", "A configured model has invalid working-window declarations. Refresh its capabilities; no window or model was substituted.", 409);
-  }
-};
-export const routingModelReady = (model: ModelInfo, settings: RoutingPool, env: Controls["env"]): model is BoundedRoutingModel => model.id !== KUPO_MODEL_ID && !model.synthetic &&
-  (model.environments?.includes(env) ?? env === "Local") && (model.source === "local" && model.endpointBoundary === "loopback" || settings.allowHosted) &&
-  typeof model.maxTokens === "number" && Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 && Number.isSafeInteger(model.contextWindow) && model.contextWindow >= 8192 && routingWorkingWindow(model) >= 8192;
+export { routingModelReady, routingWorkingWindow };
+export type { BoundedRoutingModel };
 
 export function kupoPool(settings: RoutingPool, models: ModelInfo[], env: Controls["env"], estimatedTokens = 0) {
   if (!settings.enabled) throw new MoguriError("routing_disabled", "Explicitly configure the experimental kupo policy and eligible pool first. Fixed models remain available.", 409);

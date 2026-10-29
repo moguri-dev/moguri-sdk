@@ -7,7 +7,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/index.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
-import { appendLegacyAutopilot, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { appendLegacyAutopilot, removePost77FixtureMarkers, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 for (const version of [73, 74]) test(`the new service preserves schema-${version} ciphertext, events and website grants`, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -17,7 +17,7 @@ for (const version of [73, 74]) test(`the new service preserves schema-${version
     const original = retainedCiphertextRows(fixture.service.store.db), events = fixture.service.store.events(), path = fixture.service.store.path;
     sdk.disconnect(); await fixture.service.close();
     const previous = new DatabaseSync(path);
-    try { previous.exec(`DELETE FROM retention_metadata WHERE id='theme_catalog_schema'; PRAGMA user_version=${version};`); } finally { previous.close(); }
+    try { removePost77FixtureMarkers(previous, events); previous.exec(`DELETE FROM retention_metadata WHERE id='model_selection_continuity_schema'; PRAGMA user_version=${version};`); } finally { previous.close(); }
     reopened = new EventStore(path, fixture.retentionKey);
     assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(retainedCiphertextRows(reopened.db), original); assert.deepEqual(reopened.events(), events);
@@ -92,7 +92,8 @@ async function privateWorkflow59Fixture() {
   await sdk.sessions.autonomy(fixture.sessionId, "Autopilot"); sdk.disconnect(); await fixture.service.close();
   const raw = new DatabaseSync(fixture.service.store.path);
   try {
-    raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','workspace_experience_schema','session_navigation_schema','session_github_convergence_schema'); PRAGMA user_version=59; COMMIT;");
+    removePost77FixtureMarkers(raw, fixture.service.controller.events(0));
+    raw.exec("BEGIN IMMEDIATE; DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema','model_preferences_schema','composer_workflows_schema','side_context_schema','retained_telemetry_schema','session_reliability_schema','kanban_interactions_schema','session_kupo_kanban_schema','automatic_kupo_schema','project_kanban_schema','workspace_experience_schema','session_navigation_schema','session_github_convergence_schema'); PRAGMA user_version=59; COMMIT;");
   } finally { raw.close(); }
   return fixture;
 }

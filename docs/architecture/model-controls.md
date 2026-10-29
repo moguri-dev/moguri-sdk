@@ -8,7 +8,7 @@ controls and progressive disclosure, not new client-only execution behavior.
 
 Provider/model availability belongs to the actual profile, not client-only
 picker state. Providers can be disabled without signing out, deleting secrets
-or changing existing sessions. Local/SSH endpoint configuration remains exact;
+or silently selecting another model. Local/SSH endpoint configuration remains exact;
 the provider-list action changes its existing enabled flag and the shared
 availability preference atomically. Copilot availability is independent of
 its retained login. Enabling may refresh configured metadata, never authorize
@@ -36,8 +36,11 @@ share the service registry; hiding a row alone is insufficient. New selection
 and new model admissions reject disabled or unselected IDs, including prepared
 calls held before admission. Already admitted work retains its actual result,
 charges and cancellation outcome; configuration never refunds an unknown hold
-or replays a call. Existing session/default IDs remain visible as unavailable
-instead of being cleared or rebound to another provider.
+or replays a call. Since protocol 77, explicitly disabling a selected model
+clears the affected session selection atomically and preserves its effort
+preference for the next explicit choice. Re-enabling is not reselection.
+Saved defaults and exact provider choices remain unavailable rather than being
+rebound to another provider; temporary discovery failures do not erase them.
 
 Reuse TypeBox/React/Electron and maintained pi-ai under their existing
 MIT/component notices; no dependency or provider-evidence call is added.
@@ -223,6 +226,144 @@ or paid inference was used. Experimental OpenTUI FFI, lazy Ghostty chunk,
 optional `.icon` and transitive deprecation notices remain non-blocking.
 Physical SendBox, external Linux, live-provider, quality and full-milestone
 exclusions remain unchanged. CI remains main-push-only, not a passing PR check.
+
+## Model-selection continuity
+
+The owner requires a fresh session model selection after explicitly disabling
+that selected model, rather than silently choosing a replacement or restoring
+the selection when availability returns. The service must persist invalidation
+with the availability change. Original drafts, queue intent, already admitted
+results and accounting remain retained; the next model admission needs an
+explicit available selection. Historical defaults and exact provider choices
+are not rewritten as another model.
+
+Switching models preserves the user's thinking preference. Keep an exact
+supported effort; otherwise use the next higher supported effort, or the
+highest supported effort when no higher value exists. Max therefore uses High
+on a High-limited model, not Model default. The user explicitly requires Max
+to return when switching back to a Max-capable model. Preserve an optional
+`preferredThinkingEffort` separately from the actual transport option when they
+differ, including a model without adjustable thinking or synthetic Kupo.
+Kupo still controls its actual roles and gains no fixed-model effort override.
+Explicitly choosing an effort or Model default replaces/clears that preference.
+Model switches retain their existing working-window reset, without truncating
+history or changing model, provider, environment, autonomy or budget.
+
+These are shared control-plane/SDK rules, not renderer-only state. Reuse
+TypeBox, React/Electron and maintained pi-ai under their existing MIT/component
+notices; no new dependency, discovery request or inference is needed. The
+optional preference extends existing controls and remembered-model events.
+A metadata-only schema/protocol-77 upgrade retains legacy events,
+encrypted history, receipts and unknown accounting without rewriting them.
+It adds the explicit `model_selection_continuity_schema = '1'` feature marker,
+not a retention table or model call: the existing controls/event shapes gain
+only an optional non-authorizing field. A current missing/corrupt marker,
+premature marker or relabelled preference history fails without repair.
+Legacy controls acquire no invented preference or model call during migration,
+and future preference history cannot be relabelled as pre-77 data.
+Standalone protocol 77 still refuses future state, including numeric 78 with
+a distinct `theme_catalog_schema = '1'` marker. That independently developed
+themes lineage is not proof of model continuity. Only a later genuinely
+combined implementation may explicitly converge the known model-77-only and
+theme-78-only lineages, after checking their actual feature history, without
+lowering schema 78. No unmerged themes code or speculative forward reader is
+included here. The intermediate unmarked-77 development archive/evidence is
+retained separately, not accepted as that sibling lineage.
+
+The freshly repeated prerequisites pass before implementation: generated
+providers **1,070.74 ms** (cancellation **30.41 ms**), SQLite **63.02 ms**
+(append p95 **0.0556 ms**), owned PTY **160.89 ms** (cancellation **151.73 ms**,
+zero survivors), OpenTUI **1,049.69 ms**, hidden Electron **750.82 ms**
+(startup **253.24 ms**, **439.47 MiB**) and bounded filesystem/Git
+**89.60 ms**. Maintained supported/ignored thinking transport probes pass
+in **83.75 ms**. Fixed historical unavailable-checkpoint diagnostics are not
+relabelled as current native/live qualification.
+
+The desktop model list distinguishes GPT, Claude, Google and Grok using the
+existing inline icon mechanism. This is cosmetic identification from declared
+catalog labels, never evidence of model family, training independence, quality
+or permission. Unavailable models are not eligible Kupo inputs or checkable
+pool choices. Retained unavailable approvals remain inspectable/removable,
+not checked as though active or rebound to another provider.
+Clearing the picker does not turn an already owned routed tool into an
+ordinary fixed-model tool: authorization still binds the retained routing
+record and its current selection/policy. Revocation keeps the real partial
+outcome and completed role charges, not a relabelled failure or fresh permission.
+
+Generated tests must prove nearest-effort ordering, preference restoration,
+explicit reset, shared SDK/slash/TUI behavior, disable/re-enable without
+reselection, active-call accounting, failed atomic persistence, revision/profile
+isolation, restart/migration failure recovery, vendor icons and unavailable
+Kupo controls/admission. Native artifact qualification must follow the actual
+new worker/protocol bytes; the earlier protocol-76 measurements remain
+historical, not relabelled qualification for a changed image.
+
+The source shared-runtime selection/effort/availability/routing/upgrade suite
+passes **138/138 cases** in **19,436.18 ms**. It includes a real generated
+worker request with `reasoning_effort: high` while the stored preference is Max,
+held queue preservation, a failed atomic invalidation append, actual
+restart/upgrade, source actor validation and cancellation/accounting gates.
+The source desktop menus/defaults/provider/Kupo/geometry suite passes
+**23/23 flows** in **38.4 seconds**, including the disabled-current-model
+reselection, all four icon paths and preference reset/restoration. Actual
+OpenTUI keyboard/model-related flows pass **16/16** in **16,769.08 ms**.
+These generated passes are not paid-provider, microphone, notarization or new
+physical-native evidence. Protocol-77 package/native identities require their
+own retained qualification before delivery.
+
+After reserving the independent feature lineages, the marker-bearing runtime
+passes **143/143 shared-runtime cases** in **20,560.32 ms**. All generated
+state/recovery selectors plus tooling convergence pass **260 cases** in
+**90,085.17 ms**, with one explicit physical controller-loss skip requiring its
+own native receipts. Marker insertion/version advance roll back together;
+missing, corrupt and prematurely retained markers fail without repair.
+A synthetic future-78 fixture with only the distinct theme marker is refused
+without changing version, encrypted rows or creating a model marker. Existing
+legacy fixtures now omit the genuinely post-76 model marker before asserting
+their original older migration/lineage failures; their assertions are unchanged.
+
+The intermediate source `397f9ab0d742b9391850d3e536c2e59a30be0f9b`
+and its previously passing 57-case packaged cut remain under
+`release/qualification-history/protocol-77-before-feature-marker-763e16eeb5c2`.
+Its ZIP SHA-512 is
+`763e16eeb5c217e3c43b7671b8642b9d9e9f49bb56264888c26b3e7f080bfa882ea28687c8458aa43e30875a8ac061f5760747f06d658f9bc3babe550eb8b542`.
+That unpublished unmarked-77 state is not promoted into the final feature
+lineage or silently repaired. The marker-only host change preserves all six
+compiled native payload/dependency hashes; final host/package qualification
+still uses the marker-bearing source and retains its separate evidence.
+
+### Final marker-bearing protocol-77 qualification
+
+The final host/package source is
+`c78994612260fa413a613a1f117569cae03b0167`. Its actual delivered app passes
+**57/57 desktop flows in 2.1 minutes**, including effort restoration/default
+reset, re-selection after disable/re-enable, all four decorative icon paths,
+inactive Kupo choices and the earlier dictation/tooltip/scroll fixes.
+The packed external SDK type-checks the new field/helpers and passes actual
+SDK/CLI/TUI preference/restart/reselection probes plus all 12 installed worker
+continuation probes, with zero root/consumer npm vulnerabilities.
+The actual packaged Node/service proves `model_selection_continuity_schema`
+is **`'1'`**, rather than assuming it from numeric 77.
+
+The [fresh physical qualification](sendbox-0.2.4-qualification.md#protocol-77-model-controls-follow-up)
+passes all six exact-artifact gates in **16,343.68 ms**, using immutable image
+`docker.io/library/moguri-worker@sha256:f4834d0b70f247f18128701adae006a5384f72890b990c9ea441ee003e2f7f85`.
+Its current archive identities, full CNAME/effective shared-cloud scope,
+three generated 126-token model calls, strict user tool actors and exact
+original VM absence are retained separately from the protocol-76 run.
+
+The verified labelled combined installer is
+`release/Moguri-0.30.0-alpha.1-model-continuity-77-macos-arm64.dmg`,
+**794,168,142 bytes**, SHA-256
+`fca71bc20793bc0ae1d1728606fab6ab50f50342385ac7fb91f12278b5b8c325`.
+The **779,920,147-byte ZIP** passes actual update staging in
+**110,249.11 ms**; read-only DMG identity/layout and exact application bytes
+also pass. This remains an ad-hoc-signed, non-notarized development app.
+Earlier labelled installers/archives remain untouched. No personal app,
+browser, microphone, OS authorization, speech weights or paid inference is
+used or implied. The older physical workload/controller-loss fixture skips,
+remaining issue #35 matrix, independent themes PR and full-milestone gates
+are not completed by these passes.
 
 ## Cascading menus and complete slash discovery
 

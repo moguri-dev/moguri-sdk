@@ -4,7 +4,7 @@ import test from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
 import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("protocol 70 dictation repair advances only metadata and recovers without rewriting original model preferences or encrypted state", async (t) => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready(), path = fixture.service.store.path;
@@ -15,7 +15,7 @@ test("protocol 70 dictation repair advances only metadata and recovers without r
     const original = retainedCiphertextRows(fixture.service.store.db);
     sdk.disconnect(); await fixture.service.close();
     const raw = new DatabaseSync(path);
-    try { raw.exec("DELETE FROM retention_metadata WHERE id IN ('theme_catalog_schema','native_web_policy_schema','chat_home_schema'); PRAGMA user_version=70"); } finally { raw.close(); }
+    try { removePost77FixtureMarkers(raw, fixture.service.controller.events(0)); raw.exec("DELETE FROM retention_metadata WHERE id IN ('model_selection_continuity_schema','native_web_policy_schema','chat_home_schema'); PRAGMA user_version=70"); } finally { raw.close(); }
     const exec = DatabaseSync.prototype.exec;
     const fault = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
       if (/PRAGMA user_version=71/.test(sql)) throw new Error("Generated dictation metadata interruption");
