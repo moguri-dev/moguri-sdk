@@ -70,6 +70,45 @@ inspection and metadata-only reconciliation; no Git effect is replayed.
 Managed checkout changes cannot move an existing captured change set. Read-only
 Git previews also suppress index-stat refresh, preserving the original index.
 
+### Follow-up qualification
+
+The final runtime correction is `f0cc4bec5e676051b7dba3f2f9439ce77a7e7b67`;
+subsequent commits change only generated fixtures and documentation. The complete
+final serial run uses `26689184e86ef7ea4c8d2c25d5f6e52afcb0f6f4`.
+Current compiled guest hashes still match the
+[original protocol81 physical receipt](sendbox-0.2.4-qualification.md#protocol-81-session-and-git-follow-up).
+Historical or deliberately stopped qualification attempts are not counted.
+
+| Surface | Observed result |
+| --- | --- |
+| Complete serial Node suite, including actual native TUI | **1,975 passed, 15 explicit physical-native skips / 1,990 total**, zero failures, 25.95 min |
+| Complete hidden source desktop | **284 passed, 3 explicit package/native skips**, zero failures, 8.5 min |
+| Repeated draft/modal/peer-terminal acknowledgement flows | **55/55**, 1.2 min |
+| Exact service-failure/stop-journal/rollback/reconnect and decision cases | **56/56** |
+| Original predecessor consent and combined80/81 migration/reopen cases | **70/70**, 22,376.49 ms |
+| Final generated recognizer marker/cancellation/capture and hidden controls | **20/20 Node**, **9/9 hidden desktop**; no production speech change |
+| Independently installed packed SDK/types/browser/React/Node/CLI and actual workers | **PASS**, including new Git/receipt/result/managed-reopen cases and **12/12** owned-worker probes |
+| Generated retention and real hidden Ghostty primitive | **PASS**, 500 events/250 retained artifacts in 178.36 ms; 108-by-24 acknowledgement in 24.80 ms |
+| Generated owned SSH and isolated worktree primitives | **PASS**, 148.71/101.64 ms |
+| Exact current physical SendBox qualification | **7/7 gates**, 23,075.63 ms, original owned guests absent |
+| Strict types, production build, root and fresh external-consumer audits | **PASS**, zero reported vulnerabilities |
+
+Legacy fixture creation retains actual predecessor controls rather than
+relabeling a new explicit selection. The generated recognizer now writes its
+complete PID marker before advertising readiness; an empty concurrent read
+previously became PID zero and falsely tested the caller's process group.
+The cleanup assertions still require the exact positive owned PID to be absent.
+No microphone, personal account or paid inference was used.
+
+Full logs remain in the session's `files/` as `verified-unit-81.log`,
+`qualified-desktop-81.log`, `qualified-packed-sdk-81.log` and
+`qualified-native-81.log`. The exact native receipt remains at its original
+repository-local path above. Nonfatal packed-consumer deprecations
+(`whatwg-encoding`, `node-domexception`) and its explicitly reviewed Moguri
+postinstall notice remain visible. Main-only CI's account billing/spending
+eligibility failure and runner notices are recorded with the native evidence;
+no working-branch CI or personal authorization was triggered.
+
 ## Change contract
 
 This owner-requested follow-up covers Local tool and GitHub read failures,
