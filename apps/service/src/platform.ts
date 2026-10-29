@@ -1435,7 +1435,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       }
     }
   }
-  async callMcp(session: Session, args: Record<string, unknown>, signal: AbortSignal, webAccess?: WebAccess): Promise<unknown> {
+  async callMcp(session: Session, args: Record<string, unknown>, signal: AbortSignal, webAccess?: WebAccess, guard?: () => void): Promise<unknown> {
+    guard?.();
     if (session.controls.env !== "Local" || !this.snapshot().policy.allowedEnvs.includes("Local") && !session.localFinishing) throw new MoguriError("mcp_env", "No qualified MCP broker is available in the selected environment. No Local fallback.");
     const serverId = String(args.serverId);
     const server = this.server(serverId, session.projectId);
@@ -1446,6 +1447,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (serverId === "builtin" && isBrowserTool(String(args.tool))) {
       const tool = BROWSER_MCP_TOOLS.find((tool) => tool.name === args.tool)!;
       if (args.schemaDigest !== builtinToolDigest(tool)) throw new MoguriError("browser_schema", "The browser schema changed. Rediscover it and review the exact call.", 409);
+      guard?.();
       const result = await this.browser.call(session.id, tool.name, input, signal, webAccess);
       return { content: [{ type: "text", text: result.text }], isError: result.outcome !== "completed", outcome: result.outcome };
     }
@@ -1459,9 +1461,9 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     const root = workingRoot ?? join(this.stateDir, "gateway-workspace");
     if (!workingRoot) await mkdir(root, { recursive: true, mode: 0o700 });
     return this.gateway.operate({ action: "call", server, root, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared,
-      ...(serverId === "builtin" && args.tool === "fetch_page" ? { webAccess } : {}), scripts: await this.scripts(project?.id) }, signal, session.id);
+      ...(serverId === "builtin" && args.tool === "fetch_page" ? { webAccess } : {}), scripts: await this.scripts(project?.id) }, signal, session.id, guard);
   }
-  async delegate(session: Session, call: ToolCall, signal: AbortSignal): Promise<{ text: string; isError: boolean; outcome: string }> {
+  async delegate(session: Session, call: ToolCall, signal: AbortSignal, guard?: () => void): Promise<{ text: string; isError: boolean; outcome: string }> {
     if (call.name === "git_read") return this.gitTools.read(session, call.arguments, signal);
     if (call.name === "command_job") return { text: JSON.stringify(this.commandJob(session, call, signal)), isError: false, outcome: "completed" };
     if (call.name === "read_command_job") {
@@ -1546,7 +1548,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       }
       if (action === "read_result") return { text: JSON.stringify(this.readResult(String(call.arguments.resultId), Number(call.arguments.offset ?? 0), 12000, session.id)), isError: false, outcome: "completed" };
       if (action === "call") {
-        const result = await this.callMcp(session, call.arguments, signal, this.host.webAccess?.(session, call));
+        const result = await this.callMcp(session, call.arguments, signal, this.host.webAccess?.(session, call), guard);
         const id = randomUUID();
         const browser = call.arguments.serverId === "builtin" && isBrowserTool(String(call.arguments.tool)) && isRecord(result);
         const partial = browser && (result.outcome === "partial" || result.outcome === "cancelled");

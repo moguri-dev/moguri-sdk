@@ -127,6 +127,15 @@ schema at the next sized model boundary. The opaque name binds server ID,
 schema digest and actual root/account/transport binding. Initial bootstrap
 remains three tools; direct-first preference still needs exact discovery.
 
+The direct binding combines the complete session command root identity,
+coordination peer/build and permission/policy epoch with the gateway approval
+fingerprint. The server/schema fingerprint alone does not pin a Local inode or
+owner. Recheck before and after asynchronous approval validation and immediately
+before the connector spawn, including after credential resolution. A generated
+root-inode replacement while approval waits must reject the old leaf; one
+after approval but before connector dispatch must retain a partial outcome
+without running the connector or retrying it on the replacement tree.
+
 At execution, the worker and service canonicalize the captured leaf to the
 same `mcp_gateway action=call`. Original provider messages/results retain the
 leaf name; durable approvals, execution and public-result lookup retain the

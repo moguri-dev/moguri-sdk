@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rmdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { directMcpTool, directMcpSchema, modelToolName, resolveDirectMcpCall } from "../apps/service/src/direct-mcp-tools.ts";
@@ -25,7 +25,7 @@ test("direct MCP preserves the actual leaf schema and explicit canonical binding
   assert.throws(() => directMcpTool({ ...tool, inputSchema: { type: "object", description: "x".repeat(13000) } }, "b".repeat(64)), { code: "mcp_direct_schema" });
 });
 
-for (const mode of ["allow", "deny", "stale"] as const) test(`the actual worker uses a provider-visible MCP leaf with ${mode} source/approval`, { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+for (const mode of ["allow", "deny", "stale", "root", "dispatch-root"] as const) test(`the actual worker uses a provider-visible MCP leaf with ${mode} source/approval`, { skip: process.platform !== "darwin", timeout: 20000 }, async (t) => {
   const allow = mode === "allow";
   let directName = "", leafExposed = false;
   const options: GeneratedProviderOptions = {
@@ -66,12 +66,35 @@ for (const mode of ["allow", "deny", "stale"] as const) test(`the actual worker 
         if (direct && mode === "stale") {
           const current = sdk.settings.get()!;
           await sdk.settings.update({ ...current.values, mcpServers: current.values.mcpServers.map((server) => ({ ...server, enabled: false })) }, current.revision);
+        } else if (direct && mode === "root") {
+          const original = `${f.project}-original`;
+          await rename(f.project, original);
+          try {
+            await mkdir(f.project);
+            try { await assert.rejects(() => sdk.approvals.respond(f.sessionId, approval.id, true), { code: "mcp_direct_stale" }); }
+            finally { await rmdir(f.project); }
+          } finally { await rename(original, f.project); }
+          await sdk.approvals.respond(f.sessionId, approval.id, false);
+        } else if (direct && mode === "dispatch-root") {
+          const gateway = f.service.controller.platform.gateway, access = gateway.accessToken.bind(gateway);
+          let entered = false, release!: () => void;
+          const gate = new Promise<void>((resolve) => { release = resolve; });
+          t.mock.method(gateway, "accessToken", async (...args: Parameters<typeof gateway.accessToken>) => { entered = true; await gate; return access(...args); });
+          await sdk.approvals.respond(f.sessionId, approval.id, true);
+          await waitFor(() => entered);
+          const original = `${f.project}-original`;
+          await rename(f.project, original);
+          try {
+            await mkdir(f.project);
+            try { release(); await f.terminal(); }
+            finally { release(); await rmdir(f.project); }
+          } finally { await rename(original, f.project); }
         } else await sdk.approvals.respond(f.sessionId, approval.id, !direct);
         if (direct) break;
       }
     }
     await f.terminal();
-    assert.equal(f.session().status, "completed"); assert.equal(leafExposed, true);
+    assert.equal(f.session().status, mode === "dispatch-root" ? "partial" : "completed"); assert.equal(leafExposed, true);
     assert.equal(existsSync(marker), allow);
     if (allow) {
       assert.equal(await readFile(marker, "utf8"), "generated call\n");
@@ -92,7 +115,7 @@ for (const mode of ["allow", "deny", "stale"] as const) test(`the actual worker 
       assert.deepEqual(retained, source);
       assert.match((await next.tools.resultById(f.sessionId, source.operationId, { expectedDigest: source.digest, expectedRevision: source.revision })).text, /Generated direct result/);
       assert.equal(await readFile(marker, "utf8"), "generated call\n", "reopen and source reads cannot repeat the connector");
-    } else assert.equal(f.service.controller.events(0).some((event) => event.event_type === "tool.started" && event.payload.call.directMcp), false);
+    } else assert.equal(f.service.controller.events(0).some((event) => event.event_type === "tool.started" && event.payload.call.directMcp), mode === "dispatch-root");
   } finally { sdk.disconnect(); next?.disconnect(); await reopened?.close(); await f.close(); }
 });
 

@@ -1932,7 +1932,19 @@ export class ControlPlane extends EventEmitter {
     return { sourceTurnId: original.turn_id, finishedSequence: original.seq, actor: "user" };
   }
   private directDiscoveryScope(session: Session): string {
-    return frameDigest([this.projection.settings.permissionRevision, this.projection.policy.revision, this.coordinationScope(session)]);
+    return frameDigest([this.projection.settings.permissionRevision, this.projection.policy.revision, this.commandBinding(session), this.coordinationScope(session)]);
+  }
+  private directMcpBinding(session: Session, call: ToolCall): string {
+    const binding = this.permissionContext(session, call).mcpBinding;
+    if (!binding) throw new MoguriError("mcp_direct_scope", "The discovered MCP schema has no exact account/root binding.", 409);
+    return frameDigest([this.directDiscoveryScope(session), binding]);
+  }
+  private assertDirectMcpBinding(session: Session, call: ToolCall): void {
+    if (call.directMcp && (call.name !== "mcp_gateway" || call.arguments.action !== "call" ||
+      call.arguments.serverId !== call.directMcp.serverId || call.arguments.tool !== call.directMcp.tool ||
+      call.arguments.schemaDigest !== call.directMcp.schemaDigest || this.directMcpBinding(session, call) !== call.directMcp.bindingDigest)) {
+      throw new MoguriError("mcp_direct_stale", "The actual direct MCP schema/server/root/account binding changed. Rediscover before a new request; no mutation was replayed.", 409);
+    }
   }
   private captureDirectMcpTools(run: Run, call: ToolCall, result: { text: string; isError: boolean; outcome: string }, originalScope: string | null) {
     if (result.isError || call.name !== "mcp_gateway" || call.arguments.action !== "tools") return result;
@@ -1945,9 +1957,8 @@ export class ControlPlane extends EventEmitter {
     const tools = body.tools.map((value) => {
       const tool = parse(McpToolInfoSchema, value);
       if (tool.serverId !== String(call.arguments.serverId)) throw new MoguriError("mcp_direct_catalog", "The discovered tool belongs to another original MCP server. No alias was installed.", 403);
-      const binding = this.permissionContext(current, { id: call.id, name: "mcp_gateway", arguments: { action: "call",
-        serverId: tool.serverId, tool: tool.name, schemaDigest: tool.digest } }).mcpBinding;
-      if (!binding) throw new MoguriError("mcp_direct_scope", "The discovered MCP schema has no exact account/root binding.", 409);
+      const binding = this.directMcpBinding(current, { id: call.id, name: "mcp_gateway", arguments: { action: "call",
+        serverId: tool.serverId, tool: tool.name, schemaDigest: tool.digest } });
       try {
         const definition = directMcpTool(tool, binding), previous = definitions.findIndex((entry) => entry.binding.serverId === tool.serverId && entry.binding.tool === tool.name);
         if (previous < 0 && definitions.length >= 64) return { ...tool, directUnavailable: "This turn already has 64 captured direct MCP schemas. Use the existing exact gateway instead." };
@@ -3315,11 +3326,7 @@ export class ControlPlane extends EventEmitter {
       Boolean(this.writerReservations.has(key) && this.writerReservations.get(key) !== session.id);
   }
   private async assertCurrentTool(session: Session, call: ToolCall, modelOwned = true): Promise<void> {
-    if (call.directMcp && (call.name !== "mcp_gateway" || call.arguments.action !== "call" ||
-      call.arguments.serverId !== call.directMcp.serverId || call.arguments.tool !== call.directMcp.tool ||
-      call.arguments.schemaDigest !== call.directMcp.schemaDigest || this.permissionContext(session, call).mcpBinding !== call.directMcp.bindingDigest)) {
-      throw new MoguriError("mcp_direct_stale", "The actual direct MCP schema/server/root/account binding changed. Rediscover before a new request; no mutation was replayed.", 409);
-    }
+    this.assertDirectMcpBinding(session, call);
     if (modelOwned && readOnlyWorkflow(this.currentWorkflow(session)) &&
       (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read")) {
       throw new MoguriError("workflow_read_only", "This actual critique request is read-only. No edit, execution or child authority was granted.", 403);
@@ -3361,6 +3368,7 @@ export class ControlPlane extends EventEmitter {
     if (hook) this.platform.extensions.assertHook(this.session(current.id), hook);
     if (this.session(current.id).revision !== current.revision || configuration && this.platform.sessions.projects.configuration(configuration.projectId).revision !== configuration.revision ||
       this.projection.settings.permissionRevision !== permission || this.projection.policy.revision !== policy) throw new MoguriError("policy_changed", "Session or project policy changed during authorization. No new effect was admitted.", 409);
+    this.assertDirectMcpBinding(this.session(current.id), call);
   }
   private scopedReadPolicy(): string { return JSON.stringify([this.profileId, this.projection.policy.revision, this.projection.settings.permissionRevision]); }
   private grantTool(run: Run, callId: string, access?: WebAccess): void {
@@ -3958,7 +3966,7 @@ export class ControlPlane extends EventEmitter {
         const nativeTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", effectiveMode, folderPolicy(projectSettings), { project: Boolean(project || current.repositories), workspace: homeWorkspace(current), multiRepository: Boolean(current.repositories), restrictedRepositories: this.restrictedRepositories(current), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current), coordinator: Boolean(run.yieldedTo && current.mode === "agent" && current.pendingMode !== "read-only") });
         const directTools = nativeTools.some((tool) => tool.name === "mcp_gateway") ? (run.directMcpTools ?? []).filter((tool) => {
           const call: ToolCall = { id: "captured-direct-binding", name: "mcp_gateway", arguments: { action: "call", serverId: tool.binding.serverId, tool: tool.binding.tool, schemaDigest: tool.binding.schemaDigest } };
-          try { return this.permissionContext(current, call).mcpBinding === tool.binding.bindingDigest; }
+          try { return this.directMcpBinding(current, call) === tool.binding.bindingDigest; }
           catch (error) { if (!(error instanceof MoguriError)) throw error; return false; }
         }) : [];
         run.directMcpTools = directTools;
@@ -4415,7 +4423,15 @@ export class ControlPlane extends EventEmitter {
         this.reply(run, { kind: "reply", requestId: request.requestId, error: "This capability has no qualified remote workspace transport. No local host operation or repository fallback was used." }); return;
       }
       const discoveryScope = request.call.name === "mcp_gateway" && request.call.arguments.action === "tools" ? this.directDiscoveryScope(session) : null;
-      void this.platform.delegate(session, request.call, run.abort.signal).then((result) =>
+      const directGuard = request.call.directMcp ? () => {
+        run.abort.signal.throwIfAborted();
+        const current = this.session(run.sessionId);
+        if (run.done || current.turnId !== run.turnId || !run.granted.has(request.call.id) || !this.nativeCatalog(current).some((tool) => tool.name === request.call.name)) {
+          throw new MoguriError("mcp_direct_stale", "The original direct MCP owner or current tool scope changed before dispatch. No replacement connector was started.", 409);
+        }
+        this.assertDirectMcpBinding(current, request.call);
+      } : undefined;
+      void this.platform.delegate(session, request.call, run.abort.signal, directGuard).then((result) =>
         this.reply(run, { kind: "reply", requestId: request.requestId, value: this.captureDirectMcpTools(run, request.call, result, discoveryScope) })).catch((error: unknown) => {
         this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "Capability failed; effects and cleanup may be unconfirmed.", isError: true, outcome: run.abort.signal.aborted || request.call.name === "mcp_gateway" ? "partial" : "failed" } });
       });

@@ -1641,6 +1641,15 @@ try {
         const sources=(await beta.tools.results(parent.id)).sources;
         const actual=original??sources.find(value=>value.name==="mcp_gateway");
         assert.ok(actual);assert.match((await beta.tools.resultById(parent.id,actual.operationId)).text,/portableSdkMemory/);
+        const second=await beta.sessions.create(opened.id,"Generated installed distinct direct owner",{modelId:generatedModel.id,modelOptions:{contextWindow:32768}});
+        await beta.sessions.autonomy(second.id,"Autopilot");
+        const secondSession=beta.getState().snapshot.sessions.find(value=>value.id===second.id),secondEditor=new DraftEditor(beta,second.id,secondSession.draft);
+        try{secondEditor.edit("Generated installed direct MCP second owner.");await secondEditor.send("queue");}finally{secondEditor.dispose();}
+        assert.equal((await terminal(second.id)).status,"completed");
+        const leafFor=id=>beta.getState().events.find(value=>value.session_id===id&&value.event_type==="tool.completed"&&value.payload.call.directMcp)?.payload.call.directMcp;
+        const firstBinding=leafFor(parent.id),secondBinding=leafFor(second.id);
+        assert.ok(firstBinding);assert.ok(secondBinding);assert.notEqual(firstBinding.name,secondBinding.name);
+        assert.notEqual(firstBinding.bindingDigest,secondBinding.bindingDigest);
         const assignment=await beta.sessions.spawnPrompt(parent.id,"Generated installed actual child assignment.");
         const child=await terminal(assignment.id);assert.equal(child.status,"completed");assert.equal(child.controls.autonomy,"Manual");
         assert.ok(child.messages.some(message=>message.role==="notice"&&message.text.includes("Generated installed actual child assignment.")));
@@ -1650,7 +1659,7 @@ try {
         try{assert.deepEqual(reopened.settings.get().values.toolPreferences.order,ranked);assert.equal((await reopened.tools.resultById(parent.id,actual.operationId,{expectedDigest:actual.digest,expectedRevision:actual.revision})).text,(await beta.tools.resultById(parent.id,actual.operationId)).text);}
         finally{reopened.disconnect();}
         await beta.settings.reset("toolPreferences",beta.settings.get().revision);
-        console.log("Installed protocol-82 typed commands/ranking, profile isolation, actual direct MCP leaf/worker/result, assigned Manual child, UI workflow and prompt-free continuation pass through the external SDK.");
+        console.log("Installed protocol-82 typed commands/ranking, profile isolation, actual owner-distinct direct MCP leaves/workers/results, assigned Manual child, UI workflow and prompt-free continuation pass through the external SDK.");
         }finally{generatedModel.contextWindow=previousWindow;betaProvider.state.models=previousModels;betaProvider.onChange();await beta.models.refresh();}
       }` : ""}
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
