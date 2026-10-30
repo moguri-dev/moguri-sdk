@@ -189,6 +189,9 @@ folders), using the existing renderer collapse sets. Expand opens that outer
 group too. Unrelated groups, paging, drafts, roots and durable state are
 unchanged. These actions have keyboard entry, focus restoration and a polite
 count announcement.
+The native summary remains a controlled presentation toggle: a delayed native
+`toggle` event cannot undo an immediately selected expand action. Menu
+Enter/Space activation is consumed before restoring focus to the summary.
 
 The group action menu reuses the seven project icon colors and custom picker,
 including keyboard selection, Escape and focus restoration. Optional folder
