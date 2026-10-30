@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { MoguriError, isRecord, parse, kanbanIssueSignature, type CommandResult, type EventInput } from "../../../packages/protocol/src/index.ts";
 import {
-  GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, GithubOperationResultSchema, GithubQuerySchema, GithubRepositorySchema, GithubReviewDocumentSchema, githubRootQuarantined,
+  GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, GithubOperationResultSchema, GithubQuerySchema, GithubRepositorySchema, GithubReviewDocumentSchema, githubRootQuarantined, githubSourceOwner,
   type GithubAction, type GithubBrowse, type GithubGitState, type GithubItem, type GithubOperation,
   type GithubOperationResult, type GithubPreview, type GithubQuery, type GithubResponse, type GithubScope, type GithubCommand,
   type GithubReviewDocument, type GithubRepository, type GithubWorkSource, type GithubSourceBinding, type GitRead, type GitReadData,
@@ -169,7 +169,7 @@ export class GitHubWorkflows {
       } catch { return false; }
     });
   }
-  private policy(scope: GithubScope, action?: GithubAction): string {
+  private policy(scope: GithubScope, action?: GithubAction, observation = false): string {
     const snapshot = this.host.snapshot(), configuration = this.host.configuration(scope.projectId);
     if (this.shutdown.signal.aborted || this.host.closing(scope.projectId)) throw new MoguriError("github_closing", "The service or project is closing. No new Git/GitHub operation was admitted.", 409);
     if (scope.env !== "Local" || !snapshot.policy.allowedEnvs.includes("Local")) throw new MoguriError("github_env", "This operation requires explicitly allowed Local project execution. Remote/Sandbox policies never fall back to Local.", 403);
@@ -185,21 +185,21 @@ export class GitHubWorkflows {
       ["*", "run_command", action.kind, githubAction(action) ? "github" : "git", ...(filesystemWriter(action) ? ["git_write"] : [])].includes(rule.tool))) throw new MoguriError("github_denied", "A hard user tool denial excludes this Git/GitHub operation. Review cannot override policy.", 403);
     if (action && permissions.commands.some((rule) => rule.decision === "deny" && rule.command === action.kind)) throw new MoguriError("github_denied", "A hard exact-command denial excludes this operation.", 403);
     return digest(stable({ profileId: snapshot.profileId, policy: snapshot.policy, permissionRevision: snapshot.settings.permissionRevision,
-      permissions, configuration, ...(action && githubAction(action) ? { credentialEpoch: this.credentialEpoch } : {}), session: session ? { id: session.id, projectId: session.projectId, workspaceId: session.workspaceId,
+      permissions, configuration: observation ? configuration.values : configuration, ...(action && githubAction(action) ? { credentialEpoch: this.credentialEpoch } : {}), session: session ? { id: session.id, projectId: session.projectId, workspaceId: session.workspaceId,
         env: session.controls.env, kind: session.kind, mode: session.mode, pendingMode: session.pendingMode,
         ...(action ? { status: session.status } : {}) } : null }));
   }
-  private async context(scope: GithubScope, action: GithubAction | undefined, signal: AbortSignal, jobId?: string, projectWorkId?: string, toolAuthority?: GitToolAuthority) {
+  private async context(scope: GithubScope, action: GithubAction | undefined, signal: AbortSignal, jobId?: string, projectWorkId?: string, toolAuthority?: GitToolAuthority, observation = false) {
     toolAuthority?.guard();
     const ownerSessionId = toolAuthority?.sessionId ?? (projectWorkId && action ? this.workAuthority(scope, action, projectWorkId) : undefined);
-    const policyDigest = this.policy(scope, action), project = this.host.project(scope.projectId, scope.workspaceId);
+    const policyDigest = this.policy(scope, action, observation), project = this.host.project(scope.projectId, scope.workspaceId);
     await this.host.assertRoot(scope.projectId, scope.workspaceId, signal);
     const root = await sourceRoot(project.path);
     const recoveryState = action?.kind === "git.rebase" && action.mode !== "start" ? await this.gitState(root.root, signal) : null;
     const current = () => {
       signal.throwIfAborted();
       toolAuthority?.guard();
-      if (this.policy(scope, action) !== policyDigest || this.host.project(scope.projectId, scope.workspaceId).path !== root.root ||
+      if (this.policy(scope, action, observation) !== policyDigest || this.host.project(scope.projectId, scope.workspaceId).path !== root.root ||
         stable(sourceRootSync(root.root)) !== stable(root)) throw new MoguriError("github_stale", "The reviewed root identity, session or policy changed. No stale authority or fallback root was used.", 409);
       if (action && filesystemWriter(action)) {
         const permit = this.permitRebaseRecovery(root, action, recoveryState);
@@ -482,13 +482,17 @@ export class GitHubWorkflows {
       configurationRevision: this.host.configuration(scope.projectId).revision, policyRevision: state.policy.revision,
       permissionRevision: state.settings.permissionRevision };
   }
+  observationPolicy(scope: GithubScope): string {
+    return digest(stable([this.discoveryPolicy(), this.policy(scope, undefined, true)]));
+  }
   async projectContext(scope: GithubScope, expectedAccount?: Pick<GithubWorkSource, "account" | "accountId">,
     expectedRemote?: { repository: string; fetchUrl: string; pushUrl?: string; name?: string }, expectedBinding?: GithubSourceBinding,
-    requested?: AbortSignal): Promise<Extract<GithubResponse, { type: "github.project" }>> {
+    requested?: AbortSignal, observation = false): Promise<Extract<GithubResponse, { type: "github.project" }>> {
     this.discoveryPolicy();
     const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]);
-    const context = await this.context(scope, undefined, signal), root = context.root.root, configuration = this.host.configuration(scope.projectId);
-    if (expectedBinding && stable(this.sourceBinding(scope, context.root)) !== stable(expectedBinding)) {
+    const context = await this.context(scope, undefined, signal, undefined, undefined, undefined, observation), root = context.root.root, configuration = this.host.configuration(scope.projectId);
+    const actualBinding = this.sourceBinding(scope, context.root);
+    if (expectedBinding && stable(observation ? githubSourceOwner(actualBinding) : actualBinding) !== stable(observation ? githubSourceOwner(expectedBinding) : expectedBinding)) {
       throw new MoguriError("github_source", "The captured root, profile or policy changed. No GitHub metadata was requested through a replacement binding.", 409);
     }
     const gitPolicy = { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders };

@@ -217,6 +217,10 @@ export const GithubSourceBindingSchema = object({
   root: GithubReviewDocumentSchema.properties.root, configurationRevision: count, policyRevision: count, permissionRevision: count,
 });
 export type GithubSourceBinding = Static<typeof GithubSourceBindingSchema>;
+export const githubSourceOwner = (binding: GithubSourceBinding) => ({
+  env: binding.env, profileId: binding.profileId, projectId: binding.projectId, workspaceId: binding.workspaceId,
+  root: { root: binding.root.root, device: binding.root.device, inode: binding.root.inode },
+});
 export const GithubProjectResponseSchema = object({
   type: Type.Literal("github.project"), boundary: Type.Literal("controller-gh-account-not-ssh"), account, accountId: id,
   repository, defaultBranch: ref, branch: Type.String({ maxLength: 4096 }), url: Type.String({ maxLength: 2048 }),

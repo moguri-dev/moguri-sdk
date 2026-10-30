@@ -1,0 +1,86 @@
+# Dismissible alerts and stable Kanban observation
+
+## Change contract
+
+Reuse React, the existing icon/theme/keyboard controls, TypeBox, Node, the
+service/SDK queue and GitHub read adapters under their existing MIT/component
+notices; SQLite remains public domain. No dependency, durable event, public
+command/query shape, schema migration or protocol change is required.
+
+Desktop notifications use one dismissible alert component with an accessible
+native X button. Error/warning messages remain distinguishable from polite
+informational outcomes. A successful card move is information, never a red
+error. Dismissal is view-local presentation only: it does not clear a service
+failure, acknowledge uncertain effects, answer a question, approve work, discard
+a draft or enable a blocked control. Necessary recovery controls remain
+available outside a dismissed message. Changed/new messages reappear; ordinary
+rerenders do not resurrect a dismissed message. Retained chat notices, review
+forms and live loading/account labels are not disposable alerts.
+The native TUI footer likewise distinguishes operation errors from information
+and exposes `[x]`; Escape dismisses a footer notice only in ordinary composer
+focus. Neither dismissal consumes text or touches a pending answer/approval.
+
+Kanban's persisted source identity remains exact: Local profile/project/
+workspace, canonical root device/inode, numeric GitHub account/repository and
+captured remote. Project presentation revisions and old policy counters are not
+new owners. Each read-only observation must instead capture and recheck current
+policy throughout its job. A real root/account/remote change or current denial
+still blocks reads and publication. Existing source/card digests remain intact;
+failed jobs are not rewritten as success, partial pages never publish, and no
+GitHub mutation, credential fallback or automatic write replay is introduced.
+SDK/TUI and desktop observe the same service-owned outcome.
+
+Generated regressions must cover informational severity and X dismissal,
+keyboard/focus behavior, changed-message reset, persistent conditions and draft/
+approval preservation, successful sync after presentation/current-policy
+updates, real changed-owner denial, concurrent changes, cancellation and restart.
+Packed SDK and hidden desktop checks exercise the actual shared runtime.
+
+## Phase 0
+
+Before feature edits, `npm run spike` passed its six executable generated
+foundation groups on macOS arm64 / Node 26.12.0:
+
+| Fixture | Result | Measurement |
+| --- | --- | --- |
+| Copilot discovery/stream/cancel | PASS | Six intercepted requests; 1,076.25 ms; cancellation 32.22 ms. |
+| SQLite WAL/crash/rebuild | PASS | 1,000 events; append p95 0.0514 ms; rebuild 0.525 ms; interrupted transaction rolled back. |
+| Nested PTY cancellation | PASS | 151.89 ms; zero surviving owned fixture processes. |
+| OpenTUI React streaming | PASS | 60 updates; 17.73 ms average. |
+| Hidden Electron baseline | PASS | 10,000 rows; 183.23 ms cold start; 443.91 MiB; 8.21 ms scroll frame. |
+| Node filesystem/Git baseline | PASS | 2,000 files / 2,047 entries; 1.18 ms search; 7.75 ms Git status. |
+
+The raw log is `kanban-alerts-phase0.log` in the originating session. Generic
+initial-checkpoint diagnostics still report FAIL for unavailable personal/live
+provider/decision/SSH and quality evaluation, Rust/Linux supervision and signed
+releases. Historical native/attachment/default/budget diagnostics do not
+replace those capabilities' separate qualified receipts. No personal login,
+microphone, paid inference or source checkout was used as a fixture.
+
+## Implementation
+
+The old `.notice` base style used error colors even when its live-region role
+was informational. Information is now the default, with explicit error colors.
+`Alert` supplies native X dismissal, severity, announcement and focus behavior
+for every desktop banner; the AST-validated migration converted 223 message
+sites in 67 existing files without reformatting unrelated code. Snapshot
+updates do not reopen an unchanged dismissed message. Rich draft/settings/
+approval recovery actions stay outside the dismissible body, and image errors
+are outside attachment-preview buttons rather than nested interactive controls.
+Retained chat text, live labels and actual review forms remain their own UI.
+
+The stale sync error compared every field of a persisted `GithubSourceBinding`
+against current project/settings counters. Read-only Kanban observation now
+compares only exact owner/root identity at that lifetime boundary, while a
+fresh per-job policy signature pins current permissions, allowed Env,
+configuration values and credential epoch. Presentation-only project metadata
+does not change that signature. It is rechecked after staged reads and before
+publication; current denials and real source changes still fail before
+replacement metadata is requested. The original source is reused, not
+re-signed, so card `sourceDigest` values and historical failed jobs survive.
+All non-observation reviews keep their prior strict revision behavior.
+
+The packed SDK verifier also exercises this path in an independently installed
+runtime with generated CLI/GraphQL responses and actual generated Git roots:
+color/policy updates, source-preserving issue closure, foreign-account denial
+and restart without rewriting source IDs or failed jobs.

@@ -24,6 +24,7 @@ try {
   const installedSdk = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   const { PROTOCOL_VERSION: installedProtocol } = installedSdk;
   const conversationNavigationAvailable = typeof installedSdk.conversationNavigation === "function";
+  const kanbanObservationAvailable = typeof installedSdk.githubSourceOwner === "function";
   const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
   const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
@@ -1867,6 +1868,10 @@ try {
   if (installedProtocol >= 44) {
     const { qualifyWorkspaceEntry } = await import("./qualify-workspace-entry.mjs");
     console.log(await qualifyWorkspaceEntry({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-entry") }));
+  }
+  if (kanbanObservationAvailable) {
+    const { qualifyKanbanObservation } = await import("./qualify-kanban-observation.mjs");
+    console.log(await qualifyKanbanObservation({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-kanban") }));
   }
   if (installedProtocol >= 55 && process.platform === "darwin") {
     const { qualifyModelDefaults } = await import("./qualify-model-defaults.mjs");
