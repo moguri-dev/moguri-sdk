@@ -1768,11 +1768,11 @@ export class ControlPlane extends EventEmitter {
     queueMicrotask(() => this.pumpAll());
     return id;
   }
-  private eligibleExternal(sessionId: string, call: ToolCall): Session {
+  private eligibleExternal(sessionId: string, call: ToolCall, owningQueueItem?: string): Session {
     const session = this.session(sessionId);
     if (session.controls.env === "Local" && session.projectId && (this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId))) throw new MoguriError("workspace_busy", "A managed install or artifact publication owns this workspace. Wait for it to settle.", 409);
     if (session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only") throw new MoguriError("subagent_readonly", "Read-only sessions cannot own external tool calls.", 403);
-    if (session.turnId || session.queue.length || session.status === "archived") throw new MoguriError("session_busy", "Use an idle, restored session for an external MCP client. The active agent already owns its turn.", 409);
+    if (session.turnId || session.queue.some((item) => item.id !== owningQueueItem) || session.status === "archived") throw new MoguriError("session_busy", "Use an idle, restored session for an external MCP client. The active agent already owns its turn.", 409);
     if (this.otherWriter(session)) throw new MoguriError("workspace_busy", "Another session owns this workspace. Wait for it to settle before requesting an external MCP call.", 409);
     if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and explicitly resume this workspace before requesting new external tool work.", 409);
     const env = session.controls.env;
@@ -1782,25 +1782,26 @@ export class ControlPlane extends EventEmitter {
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
     return session;
   }
-  private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }): Promise<string> {
+  private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }, owner?: CommandOwner, finish?: WorkspaceFinish): Promise<string> {
+    const admit = () => { owner?.guard(); return this.eligibleExternal(session.id, call, owner?.item.id); };
     if (session.controls.env === "Remote") {
       if (!identity) throw new MoguriError("remote_mcp_intent", "Remote MCP needs the original canonical command identity before admission.", 409);
       const previous = this.projection.remoteMcpCalls.find((entry) => entry.commandId === identity.id);
       if (previous) throw new MoguriError(previous.commandDigest === identity.digest ? "remote_mcp_recorded" : "idempotency_conflict",
         "This original Remote MCP command already owns an intent/result. Inspect it; no connector or tool was replayed.", 409);
     }
-    session = this.eligibleExternal(session.id, call);
+    session = admit();
     if (homeChat(session) && session.controls.env === "Local" && !session.homeRoot && homeDirectoryTool(call)) {
       this.commit([this.event(session, "session.home_bound", { root: this.platform.sessions.homeRoot() })]);
-      session = this.eligibleExternal(session.id, call);
+      session = admit();
     }
     const admission = this.admissionSignature(session);
     const captured = await this.platform.repositories.capture(session, AbortSignal.timeout(5000));
-    session = this.eligibleExternal(session.id, call);
+    session = admit();
     if (this.admissionSignature(session) !== admission) throw new MoguriError("mcp_scope_changed", "The exact external MCP root, controls or authority changed before admission. No call was started.", 409);
     const repositoryCapture = this.platform.repositories.finalize(session, captured);
     const remote = session.controls.env === "Remote" ? await this.prepareRemoteMcpCall(session, call, true) : null;
-    session = this.eligibleExternal(session.id, call);
+    session = admit();
     if (this.admissionSignature(session) !== admission) throw new MoguriError("mcp_scope_changed", "The exact MCP root or authority changed during admission. No effect was started.", 409);
     const turnId = randomUUID();
     const stepId = randomUUID();
@@ -1826,15 +1827,21 @@ export class ControlPlane extends EventEmitter {
       if (!root) throw new MoguriError("remote_mcp_owner", "Remote MCP has no exact writer-root identity. No intent or connector was admitted.", 409);
       external.remoteRoot = root;
     }
-    this.externalRuns.set(session.id, external);
-    try { this.commit([
+    const intent: EventInput[] = [
       { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: call.name === "mcp_gateway" ? `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}` : `External tool request: ${call.name}`, attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: this.projection.policy.revision, repositoryCapture } },
       { ...scope, event_type: "job.started", payload: { job: { id: jobId, kind: call.name === "mcp_gateway" ? "mcp.call" : "tool.call",
         ...(call.name !== "mcp_gateway" && identity ? { toolingIntent: identity } : {}),
         sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: turnId, status: "waiting_input", progress: "Exact external-tool approval required", resultDigest: null, error: null } } },
       { ...scope, event_type: "tool.requested", payload: { approval: { id: approvalId, stepId, call, policyRevision: external.policyRevision, permissionRevision: external.permissionRevision } } },
       ...(remoteIntent ? [this.mcpEvent(remoteIntent)] : []),
-    ]); } catch (error) { this.externalRuns.delete(session.id); throw error; }
+    ];
+    if (finish) {
+      finish(intent, { id: jobId });
+      this.externalRuns.set(session.id, external);
+    } else {
+      this.externalRuns.set(session.id, external);
+      try { this.commit(intent); } catch (error) { this.externalRuns.delete(session.id); throw error; }
+    }
     const authorization = this.authorization(session, call, this.toolScope(session, call).root);
     if (authorization.decision === "allow") {
       this.commit([this.event(this.session(session.id), "tool.decided", { approvalId, allow: true,
@@ -2601,10 +2608,14 @@ export class ControlPlane extends EventEmitter {
       const session = this.session(command.sessionId), record = this.platform.scriptReviews.read({ type: "script.review.read", sessionId: session.id, reviewId: command.reviewId }).review;
       const preview: ToolCall = { id: randomUUID(), name: "run_script", arguments: { path: record.source.path, reviewId: record.id,
         expectedRevision: command.expectedRevision, expectedDigest: command.expectedDigest, ...(record.repositoryProjectId ? { repository: record.repositoryProjectId } : {}) } };
-      this.eligibleExternal(session.id, preview);
+      owner?.guard();
+      const signal = owner ? AbortSignal.any([owner.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000);
+      this.eligibleExternal(session.id, preview, owner?.item.id);
       await this.assertCurrentTool(session, preview, false);
-      const call = await this.platform.scriptReviews.force(command, envelope.id, AbortSignal.timeout(10_000));
-      await this.scriptExecution(this.session(session.id), call, AbortSignal.timeout(10_000), "user", envelope.id);
+      owner?.guard();
+      const call = await this.platform.scriptReviews.force(command, envelope.id, signal);
+      owner?.guard();
+      await this.scriptExecution(this.session(session.id), call, signal, "user", envelope.id);
       const id = await this.externalCall(this.session(session.id), call, async (signal) => {
         const current = this.session(session.id); await this.assertCurrentTool(current, call, false);
         const execution = await this.scriptExecution(current, call, signal, "user", envelope.id), scope = this.toolScope(current, call);
@@ -2612,8 +2623,8 @@ export class ControlPlane extends EventEmitter {
           mode: current.mode, env: current.controls.env, folders: folderPolicy(scope.settings),
           homeRoot: homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined, scriptExecution: execution,
         }, this.nativeCatalog(current));
-      }, { id: envelope.id, digest: commandDigest });
-      return finish([], { id });
+      }, { id: envelope.id, digest: commandDigest }, owner, finish);
+      return { id };
     }
     if (command.type === "tooling.execute") {
       const session = this.session(command.sessionId);

@@ -69,7 +69,7 @@ export async function executeReviewedScript(root: string, execution: ScriptExecu
       outcome: partial ? "partial" : result.exitCode === 0 && result.signal === null ? "completed" : "failed" };
   } catch (error) {
     if (!dispatched) throw error;
-    const code = error instanceof MoguriError ? error.code : error instanceof Error && "code" in error ? String(error.code) : signal.aborted ? "cancelled" : "script_result";
+    const code = signal.aborted ? "cancelled" : error instanceof MoguriError ? error.code : error instanceof Error && "code" in error ? String(error.code) : "script_result";
     console.error("Reviewed script dispatch is unconfirmed:", code);
     return { text: `Reviewed script execution is partial or unconfirmed (${code}). Inspect its original effects and owned process result before retrying. No rollback or complete cancellation was inferred.`,
       isError: true, outcome: "partial" };

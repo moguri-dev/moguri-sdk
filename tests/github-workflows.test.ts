@@ -191,6 +191,28 @@ async function generated(options: GitHubWorkflowOptions & { gh?: GeneratedGithub
     close: async () => { runtime.close(); await Promise.all([...jobs.values()].map((value) => value.done)); store.close(); await rm(directory, { recursive: true, force: true }); } };
 }
 
+test("comment-filtered work-item reviews keep exact source freshness without falsely rejecting unchanged hidden source content", async () => {
+  const gh = new GeneratedGithub(), f = await generated({ gh });
+  const marker = "GENERATED_HIDDEN_REVIEW_BASE";
+  gh.issue.body = `Visible original body.<!--${marker}-->`;
+  try {
+    const action: GithubAction = { kind: "github.issue.update", repository: "generated/repo", account: gh.login, number: 3, body: "Generated explicit replacement." };
+    const preview = await f.preview(action);
+    assert.equal(preview.document.resource?.content.includes(marker), false);
+    assert.ok(preview.document.resource?.contentViewDigest);
+    const command = f.command(preview), admitted = await f.runtime.execute(command, f.finish(command));
+    const result = await f.settled(admitted.id!);
+    assert.equal(result.operation.status, "completed", result.operation.diagnostic ?? "");
+    assert.equal(gh.writes.length, 1); assert.equal(gh.issue.body, "Generated explicit replacement.");
+    gh.issue.body = "Visible stable base.<!--generated-first-hidden-revision-->";
+    const stale = await f.preview(action);
+    gh.issue.body = "Visible stable base.<!--generated-second-hidden-revision-->";
+    const staleCommand = f.command(stale);
+    await assert.rejects(() => f.runtime.execute(staleCommand, f.finish(staleCommand)), /changed|fresh|review/i);
+    assert.equal(gh.writes.length, 1, "Filtering must not turn changed upstream bytes into the reviewed source.");
+  } finally { await f.close(); }
+});
+
 test("approved model issue creation retains model origin without granting Git or inspection authority", async () => {
   const f = await generated({ gh: new GeneratedGithub() });
   try {

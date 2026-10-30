@@ -37,7 +37,8 @@ retained work-item attachments. Its two distinct metadata markers are
 `work_item_comments_schema=1` and `repository_script_review_schema=1`.
 They append atomically with the version change. Genuine 82 events, receipts,
 encrypted grants, profiles, drafts, controls, unknown accounting and historical
-qualification remain unchanged. Actual 83 history cannot be relabeled as 82;
+qualification remain unchanged. Actual retained script-review/force history
+cannot be relabeled as 82;
 new worker/native bytes require fresh qualification, not an edited old receipt.
 
 ## Work items
@@ -96,6 +97,12 @@ permission. CLI and TUI share `/script-review list`, `read ID`, and
 `force ID REVIEW_REV SHA SESSION_REV confirm-unsafe`; CLI also exposes
 `moguri script-review ... --session ID`. An admitted force returns an original
 job to inspect, not a claim that execution succeeded.
+Queued TUI/CLI force commands retain their exact user-input ownership and
+atomically commit their job/turn intent with the original command receipt.
+They cannot adopt another queue entry, consume held prompts or replay a
+failed/missing receipt. Filtered GitHub review content uses the same view at
+freshness recheck while preserving the original upstream digest, so hidden
+source drift still invalidates the review.
 
 Qualified execution is **non-interactive Local only**: POSIX shell/Bash,
 explicit Node ESM/CommonJS, or installed Python 3. Source bytes use a private

@@ -1283,7 +1283,7 @@ export class GitHubWorkflows {
   private async githubWrite(id: string, document: GithubReviewDocument, action: Extract<GithubAction, { repository: string }>, signal: AbortSignal): Promise<GithubOperationResult> {
     const root = document.root.root, base = `repos/${action.repository}`, resource = document.resource!;
     if (await this.account(root, action.account, signal) !== document.accountId) throw new MoguriError("github_account", "The exact authenticated account changed before mutation.", 409);
-    const latest = await this.resource(root, action, signal);
+    const latest = visibleResource(await this.resource(root, action, signal));
     if (stable(latest) !== stable(resource)) throw new MoguriError("github_review", "The remote resource revision changed immediately before mutation. Review the live resource again; nothing was dispatched.", 409);
     const actualGit = await this.gitState(root, signal);
     if (stable(actualGit) !== stable(document.git)) throw new MoguriError("github_review", "The reviewed Git/index/worktree changed immediately before the GitHub mutation. No effect was dispatched.", 409);
