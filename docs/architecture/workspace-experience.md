@@ -184,6 +184,12 @@ own retained checks. Earlier protocol77/78 receipts remain historical evidence.
 
 ### Navigation group actions
 
+Each group's menu expands/collapses only its actual member projects (attached
+folders), using the existing renderer collapse sets. Expand opens that outer
+group too. Unrelated groups, paging, drafts, roots and durable state are
+unchanged. These actions have keyboard entry, focus restoration and a polite
+count announcement.
+
 The group action menu reuses the seven project icon colors and custom picker,
 including keyboard selection, Escape and focus restoration. Optional folder
 colors use `project.folder_saved`. Renaming or ordering a group preserves its
@@ -268,7 +274,14 @@ without creating a hidden chat or calling a model. Selecting a chat narrows the
 scope. Sending excerpts still requires review of the exact source digest.
 Generated advice cannot apply configuration or authenticate anything.
 
-Dashboard pages are My work, Usage, Cost and Velocity. Seven UTC days is the
+Dashboard pages are My work, Usage, Cost and Velocity. My work prioritizes
+current active sessions using SDK snapshot/events and shared status labels.
+Waiting input, running and stopping remain distinct; held-only queues are not
+active work. Exact-session navigation flushes drafts through the existing
+owner path without answering, approving or dispatching work. The project
+filter applies, but historical date ranges never hide current activity.
+Disconnected observations are labeled stale, with navigation disabled.
+Seven UTC days is the
 initial range; 30/60/90-day presets and a custom range are available. Custom starts
 at the trailing year. All-role model accounting keeps estimates, missing usage,
 held capacity and invoices distinct. Velocity shows observed completions,
@@ -282,7 +295,8 @@ New Local user consoles default to configured HOME, never the state directory.
 Project consoles still bind the actual Moguri worktree. Existing owners retain
 their original root and input is never replayed. Missing roots fail explicitly.
 
-Settings use hover/focus copy controls for non-secret text fields and information
+Settings use hover/focus copy controls for non-secret configuration text fields
+(not Settings search) and information
 tooltips for explanations. Errors, live status and consequential safety warnings
 stay visible. Icon-only navigation keeps accessible names and keyboard focus.
 Tooltip focus follows keyboard-visible focus, not every focused element: a
