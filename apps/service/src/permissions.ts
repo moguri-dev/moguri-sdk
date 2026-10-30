@@ -1,10 +1,11 @@
-import { relative, isAbsolute, normalize } from "node:path";
+import { relative, isAbsolute, normalize, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type { Controls, RememberApproval, RememberedApproval, ToolCall, UserSettings } from "../../../packages/protocol/src/index.ts";
 import { appearanceErrors, commandFamily, sqlEndpoint, skillArchiveUrl, validateShortcutSet, validateModelPreferences, isPasteFilePath, MoguriError,
   canonicalWebSite, effectiveWebAllowances, webSiteMatches, isRecord, type WebAccess } from "../../../packages/protocol/src/index.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { validateRemoteTarget } from "./remote.ts";
+import { matchesFolder } from "./project-policy.ts";
 
 export interface Authorization { decision: "ask" | "allow" | "deny"; ruleId?: string; reason: string; actor?: "policy" }
 export const automaticNativeTools = new Set([
@@ -144,11 +145,15 @@ export function authorizeTool(settings: UserSettings, call: ToolCall, root: stri
   const unspecified: Authorization = { decision: defaultDecision, reason: defaultDecision === "deny" ? "Denied by the explicit default tool policy." : "No matching user delegation." };
   const value = typeof call.arguments.path === "string" ? call.arguments.path : "";
   if (!root && ["list_files", "read_file", "write_file", "run_command"].includes(call.name) && !(call.name === "read_file" && isPasteFilePath(value))) return { decision: "deny", reason: "A selected project is required for workspace access." };
-  const scoped = value && root && isAbsolute(value) ? relative(root, value) : value;
+  const scoped = value ? normalize(root ? relative(root, resolve(root, value)) : value).replace(/\/$/, "") : "";
+  if (value && root && (isAbsolute(scoped) || scoped === ".." || scoped.startsWith("../"))) {
+    return { decision: "deny", reason: "Choose a path inside the exact approved workspace, not an outside or aliased absolute root." };
+  }
   const matched = settings.permissions.tools.filter((rule) => {
     if (rule.tool !== "*" && rule.tool !== call.name) return false;
-    const prefix = rule.pathPrefix.replace(/\/$/, "");
-    return !prefix || scoped === prefix || scoped.startsWith(`${prefix}/`);
+    const prefix = rule.pathPrefix ? normalize(rule.pathPrefix).replace(/\/$/, "") : "";
+    return !prefix || scoped === prefix || scoped.startsWith(`${prefix}/`) ||
+      rule.decision !== "allow" && matchesFolder(scoped, [prefix]);
   });
   const denial = matched.find((rule) => rule.decision === "deny");
   if (denial) return { decision: "deny", ruleId: denial.id, reason: "Denied by user tool policy." };

@@ -7,7 +7,7 @@ import { readProjectFile, scopedPath } from "./files.ts";
 export interface FolderPolicy { denied: string[]; readOnly: string[] }
 const key = (path: string) => {
   const value = normalize(path).replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
-  return process.platform === "darwin" ? value.toLowerCase() : value;
+  return process.platform === "darwin" ? value.normalize("NFC").toLowerCase() : value;
 };
 export function folderPolicy(settings: ProjectSettings): FolderPolicy { return { denied: settings.deniedFolders, readOnly: settings.readOnlyFolders }; }
 export function matchesFolder(path: string, folders: string[]): boolean {
