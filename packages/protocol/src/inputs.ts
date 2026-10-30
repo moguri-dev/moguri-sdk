@@ -78,4 +78,4 @@ export type InputResponse =
   | { type: "attachment.folder.preview"; preview: ContextPreview }
   | { type: "attachment.github.preview"; preview: ContextPreview }
   | { type: "attachment.session.preview"; preview: ContextPreview }
-  | { type: "attachment.read"; attachment: Attachment; content: { kind: "text"; text: string } | { kind: "image"; data: string; mimeType: "image/png" } | { kind: "document"; summary: DocumentSummary } };
+  | { type: "attachment.read"; attachment: Attachment; content: { kind: "text"; text: string; filter?: { kind: "work-item-comments-v1"; sourceDigest: string; viewDigest: string; viewBytes: number } } | { kind: "image"; data: string; mimeType: "image/png" } | { kind: "document"; summary: DocumentSummary } };

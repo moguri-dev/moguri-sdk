@@ -35,6 +35,12 @@ export const attachmentStatus = (attachment: Attachment): string => attachment.k
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
+  readonly scriptReviews = {
+    read: (sessionId: string, reviewId: string) => this.query({ type: "script.review.read", sessionId, reviewId }),
+    force: (sessionId: string, reviewId: string, expectedDigest: string, expectedRevision: number,
+      expectedSessionRevision = this.sessionRevision(sessionId), commandId: string = crypto.randomUUID()) =>
+      this.command({ type: "script.review.force", sessionId, reviewId, expectedDigest, expectedRevision, expectedSessionRevision, confirmUnsafe: true }, commandId),
+  };
   readonly commands = createCommandsApi(this, async (command, connection) => {
     if (this.connection !== connection) throw new ClientError("command_connection_changed", "The original command connection changed. Its UI action was not acknowledged through a replacement service.");
     const result = await this.request("/v1/commands", { id: crypto.randomUUID(), profileId: this.profileId, command });

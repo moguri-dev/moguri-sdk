@@ -4,6 +4,7 @@ import { MoguriError } from "./core.ts";
 import { ModelAdviceSourceSchema } from "./questions.ts";
 import type { CapabilityJob } from "./platform.ts";
 import type { LocalIssue } from "./workspace.ts";
+import type { WorkItemCommentFilter } from "./markdown.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -175,5 +176,5 @@ export type LinearResponse =
   | { type: "linear.workflow.catalog"; resource: LinearCatalogResource; identity: LinearIdentity; team: LinearTeam; items: LinearEntity[]; nextCursor: string | null; page: number; limitReached: boolean; credentialGeneration: string }
   | { type: "linear.workflow.issue"; identity: LinearIdentity; team: LinearTeam; issue: LinearIssue; credentialGeneration: string }
   | { type: "linear.workflow.preview"; preview: LinearPreview }
-  | { type: "linear.workflow.read"; operation: LinearOperation; document: LinearReviewDocument; result: LinearResult | null; job: CapabilityJob | null }
+  | { type: "linear.workflow.read"; operation: LinearOperation; document: LinearReviewDocument; result: LinearResult | null; job: CapabilityJob | null; commentFilter?: WorkItemCommentFilter }
   | { type: "linear.workflow.list"; operations: LinearOperation[] };

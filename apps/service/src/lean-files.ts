@@ -7,15 +7,16 @@ import { MoguriError, isRecord } from "../../../packages/protocol/src/index.ts";
 import { readProjectFile, writeProjectBytes, isProtectedProjectPath, textFilePage } from "./files.ts";
 import { assertFolderAccess, matchesFolder, repositoryInstructionLayers, type FolderPolicy } from "./project-policy.ts";
 import { defaultProjectSettings } from "../../../packages/protocol/src/sessions.ts";
-import { stopGroup } from "./supervisor.ts";
+import { groupExists, stopGroup } from "./supervisor.ts";
+import { Writable } from "node:stream";
 import { isUtf8 } from "node:buffer";
 
 export interface ProgramResult { stdout: string; stderr: string; exitCode: number | null; signal: NodeJS.Signals | null; elapsedMs: number; clipped: boolean; timedOut: boolean; cleanup: boolean }
-export async function boundedProgram(root: string, executable: string, args: string[], signal: AbortSignal, options: { input?: string; timeoutMs?: number; maxBytes?: number; started?: (pid: number) => void } = {}): Promise<ProgramResult> {
+export async function boundedProgram(root: string, executable: string, args: string[], signal: AbortSignal, options: { input?: string; keepInputOpen?: boolean; inputFd3?: string; home?: string; rejectBackground?: boolean; timeoutMs?: number; maxBytes?: number; started?: (pid: number) => void } = {}): Promise<ProgramResult> {
   signal.throwIfAborted();
   const started = performance.now(), maximum = options.maxBytes ?? 512 * 1024;
-  const child = spawn(executable, args, { cwd: root, detached: true, stdio: ["pipe", "pipe", "pipe"],
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "en_US.UTF-8", LC_ALL: "C", NO_COLOR: "1", GIT_PAGER: "cat", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } });
+  const child = spawn(executable, args, { cwd: root, detached: true, stdio: ["pipe", "pipe", "pipe", ...(options.inputFd3 === undefined ? [] : ["pipe" as const])],
+    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "en_US.UTF-8", LC_ALL: "C", NO_COLOR: "1", GIT_PAGER: "cat", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", ...(options.home ? { HOME: options.home } : {}) } });
   const stdout: Buffer[] = [], stderr: Buffer[] = [];
   let bytes = 0, clipped = false, timedOut = false, stopping: Promise<boolean> | undefined;
   const stop = () => { if (child.pid) stopping ??= stopGroup(child.pid); };
@@ -28,7 +29,14 @@ export async function boundedProgram(root: string, executable: string, args: str
   child.stdout.on("data", (value: Buffer) => collect(value, false));
   child.stderr.on("data", (value: Buffer) => collect(value, true));
   child.stdin.on("error", (error: NodeJS.ErrnoException) => { if (error.code !== "EPIPE") { console.error("Tool input failed:", error.code); stop(); } });
-  child.stdin.end(options.input);
+  if (options.keepInputOpen) { if (options.input) child.stdin.write(options.input); }
+  else child.stdin.end(options.input);
+  if (options.inputFd3 !== undefined) {
+    const channel = child.stdio[3];
+    if (!(channel instanceof Writable)) { stop(); throw new MoguriError("tool_input", "The owned script source pipe was not created. No alternative input transport was used."); }
+    channel.on("error", (error: NodeJS.ErrnoException) => { if (error.code !== "EPIPE") { console.error("Script source input failed:", error.code); stop(); } });
+    channel.end(options.inputFd3);
+  }
   signal.addEventListener("abort", stop, { once: true });
   const timer = setTimeout(() => { timedOut = true; stop(); }, options.timeoutMs ?? 10000);
   try {
@@ -37,8 +45,10 @@ export async function boundedProgram(root: string, executable: string, args: str
       child.once("error", (error: NodeJS.ErrnoException) => reject(new MoguriError("tool_program", `${executable} could not start (${error.code ?? "unknown"}). Install/configure it in this exact execution environment; no fallback was used.`)));
       child.once("close", (exitCode, exitSignal) => resolve({ exitCode, signal: exitSignal }));
     });
+    const background = options.rejectBackground && !stopping && child.pid && groupExists(child.pid);
     const cleanup = stopping ? await stopping : child.pid ? await stopGroup(child.pid) : true;
     if (!cleanup) throw new MoguriError("tool_partial", "The exact owned program group did not confirm cleanup. Inspect it before resuming; no successful cancellation was inferred.");
+    if (background) throw new MoguriError("tool_partial", "Background descendants survived the reviewed script and the known group was stopped. Inspect the original effects before retrying; no complete success was inferred.");
     signal.throwIfAborted();
     const decode = (parts: Buffer[]) => {
       let buffer = Buffer.concat(parts);

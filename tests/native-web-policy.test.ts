@@ -13,9 +13,10 @@ test("factory Manual and Guided authorize native reads, searches, queries and ed
       const decision = authorizeTool(settings, { id: "generated-native", name, arguments: { path: "generated.txt" } }, "/generated", context);
       assert.equal(decision.decision, "allow", name); assert.equal(decision.actor, "policy", name);
     }
-    const script: ToolCall = { id: "generated-script", name: "run_command", arguments: { command: "node generated.mjs" } };
+    const script: ToolCall = { id: "generated-script", name: "run_command", arguments: { command: "npm test" } };
     assert.equal(authorizeTool(settings, script, "/generated", context).decision, "ask");
-    assert.equal(authorizeTool(settings, { ...script, arguments: { command: "pwd; node generated.mjs" } }, "/generated", context).decision, "ask");
+    assert.equal(authorizeTool(settings, { ...script, arguments: { command: "pwd; npm test" } }, "/generated", context).decision, "ask");
+    assert.equal(authorizeTool(settings, { ...script, arguments: { command: "node generated.mjs" } }, "/generated", context).decision, "deny", "Repository scripts need complete source review before execution approval.");
     assert.equal(authorizeTool(settings, { id: "generated-web", name: "web_fetch", arguments: { url: "https://example.invalid/" } }, "/generated", context).decision, "ask");
   }
 });

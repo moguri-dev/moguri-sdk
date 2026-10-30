@@ -2,6 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { ControlsSchema } from "./controls.ts";
 import { MoguriError } from "./core.ts";
+import type { WorkItemCommentFilter } from "./markdown.ts";
 import { GithubSourceBindingSchema, GithubWorkSourceSchema, type GithubItem } from "./github-workflows.ts";
 import type { BoardConfig, IssuePosition, LocalIssue } from "./workspace.ts";
 
@@ -155,7 +156,7 @@ export type KanbanQuery = Static<typeof KanbanQuerySchema>;
 export const isKanbanQuery = (value: unknown): value is KanbanQuery => Value.Check(KanbanQuerySchema, value);
 export type KanbanResponse =
   | { type: "kanban.items"; source: KanbanSource; local: LocalIssue[]; github: GithubItem[]; nextPage: number | null; warning: string }
-  | { type: "project.work.read"; run: ProjectWorkRun; text: string };
+  | { type: "project.work.read"; run: ProjectWorkRun; text: string; commentFilter?: WorkItemCommentFilter };
 export interface KanbanSnapshot { projectWorkRuns: ProjectWorkRun[] }
 export interface KanbanEventPayloads { "project.work_recorded": { run: ProjectWorkRun } }
 export const ProjectWorkReadSchema = object({ action: Type.Literal("read"), source: Type.Optional(KanbanSourceSchema), page: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) });

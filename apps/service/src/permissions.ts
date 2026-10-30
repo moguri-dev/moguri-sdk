@@ -6,12 +6,13 @@ import { appearanceErrors, commandFamily, sqlEndpoint, skillArchiveUrl, validate
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { validateRemoteTarget } from "./remote.ts";
 import { matchesFolder } from "./project-policy.ts";
+import { unreviewedScriptCommand } from "./script-command-guard.ts";
 
 export interface Authorization { decision: "ask" | "allow" | "deny"; ruleId?: string; reason: string; actor?: "policy" }
 export const automaticNativeTools = new Set([
   "git_read", "read_file", "list_files", "find_files", "search_files", "diff_files", "edit_file", "write_file", "query_data",
   "sqlite_query", "sqlite_transaction", "inspect_document", "write_document", "edit_document", "discover_tools", "read_tool_result",
-  "read_agent_terminal", "read_command_job", "list_documents", "read_document", "search_document", "query_state", "mutate_state",
+  "read_agent_terminal", "read_command_job", "list_documents", "read_document", "search_document", "query_state", "mutate_state", "review_script",
   "session_context", "wait_session", "memory_search", "clock", "ask_user", "task_progress",
 ]);
 export interface PermissionContext {
@@ -20,6 +21,7 @@ export interface PermissionContext {
   enforcedWebDomains?: string[];
 }
 export function toolWebTarget(call: ToolCall): string | undefined {
+  if (call.name === "review_script" && call.arguments.action === "inspect" && typeof call.arguments.url === "string") return call.arguments.url;
   if (call.name === "web_search") return "https://html.duckduckgo.com/html/";
   if (["web_fetch", "fetch_page"].includes(call.name)) return typeof call.arguments.url === "string" ? call.arguments.url : undefined;
   if (call.name !== "mcp_gateway" || call.arguments.action !== "call" || call.arguments.serverId !== "builtin" || !isRecord(call.arguments.arguments)) return;
@@ -37,12 +39,12 @@ export function approvedWebAccess(settings: UserSettings, call: ToolCall, contex
 }
 const argumentsDigest = (value: ToolCall["arguments"]) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const commandText = (call: ToolCall): string | null => call.name === "run_command" || call.name === "command_job" && call.arguments.action === "start" ?
-  typeof call.arguments.command === "string" ? call.arguments.command : null : call.name === "debug" ? `debug ${JSON.stringify(call.arguments)}` : null;
+  typeof call.arguments.command === "string" ? call.arguments.command : null : call.name === "run_script" ? `reviewed-script ${JSON.stringify({ reviewId: call.arguments.reviewId, digest: call.arguments.expectedDigest, path: call.arguments.path })}` : call.name === "debug" ? `debug ${JSON.stringify(call.arguments)}` : null;
 function rememberedTarget(call: ToolCall, context: PermissionContext, match: RememberApproval["match"]): RememberedApproval["target"] {
   const command = commandText(call);
   if (command !== null) {
     if (match === "tool") throw new MoguriError("approval_command", "Use an exact command or safe command family, not a blanket execution-tool grant.");
-    const family = match === "family" && call.name !== "debug" ? commandFamily(command) : null;
+    const family = match === "family" && call.name !== "debug" && call.name !== "run_script" ? commandFamily(command) : null;
     if (match === "family" && !family) throw new MoguriError("approval_family", "This shell expression has no safe command-family grant. Approve the exact command instead.");
     return { kind: "command", command: family ?? command, match };
   }
@@ -58,6 +60,7 @@ function rememberedTarget(call: ToolCall, context: PermissionContext, match: Rem
   return { kind: "tool", tool: call.name, ...(match === "tool" ? {} : { argumentsDigest: argumentsDigest(call.arguments) }) };
 }
 export function rememberToolApproval(settings: UserSettings, call: ToolCall, context: PermissionContext, request: RememberApproval, id: string): UserSettings {
+  if (call.name === "run_script") throw new MoguriError("script_approval_once", "This reviewed script owns one original source-bound attempt. Approve only this action; no future script grant or replay can be remembered.");
   if (request.scope === "project" && !context.projectId) throw new MoguriError("approval_project", "A project-scoped approval requires this session's actual project.");
   const scope: RememberedApproval["scope"] = request.scope === "session" ? { kind: "session", sessionId: context.sessionId } :
     request.scope === "project" ? { kind: "project", projectId: context.projectId! } : { kind: "global" };
@@ -75,7 +78,7 @@ function rememberedAuthorization(settings: UserSettings, call: ToolCall, context
     if (grant.env !== context.env || grant.scope.kind === "session" && grant.scope.sessionId !== context.sessionId ||
       grant.scope.kind === "project" && grant.scope.projectId !== context.projectId) return false;
     const target = grant.target;
-    if (target.kind === "command") return command !== null && (target.match === "exact" ? command === target.command : call.name !== "debug" && commandFamily(command) === target.command);
+    if (target.kind === "command") return command !== null && (target.match === "exact" ? command === target.command : call.name !== "debug" && call.name !== "run_script" && commandFamily(command) === target.command);
     if (target.kind === "mcp") return call.name === "mcp_gateway" && call.arguments.action === "call" &&
       call.arguments.serverId === target.serverId && call.arguments.tool === target.tool && (context.mcpSchemaDigest ?? call.arguments.schemaDigest) === target.schemaDigest && context.mcpBinding === target.bindingDigest;
     return call.name === target.tool && (target.argumentsDigest === undefined || argumentsDigest(call.arguments) === target.argumentsDigest);
@@ -115,7 +118,7 @@ export function validateSettings(settings: UserSettings): void {
     }
   }
   for (const rule of settings.permissions.tools) {
-    if (["run_command", "command_job", "debug"].includes(rule.tool) && rule.decision === "allow") throw new MoguriError("unsafe_rule", "Allow shell/watch commands or DAP actions only by exact command/request rules, never a blanket execution grant.");
+    if (["run_command", "run_script", "command_job", "debug"].includes(rule.tool) && rule.decision === "allow") throw new MoguriError("unsafe_rule", "Allow shell/watch commands or DAP actions only by exact command/request rules, never a blanket execution grant.");
     if (rule.tool === "*" && rule.decision === "allow") throw new MoguriError("unsafe_rule", "A wildcard cannot grant all tools. Name each delegated tool.");
     if (isAbsolute(rule.pathPrefix) || normalize(rule.pathPrefix).split(/[\\/]/).includes("..")) throw new MoguriError("unsafe_rule", "Tool path rules must remain inside the approved project.");
   }
@@ -124,7 +127,7 @@ export function validateSettings(settings: UserSettings): void {
     if (rememberedIds.has(grant.id)) throw new MoguriError("unsafe_rule", "Remembered approval IDs must be unique.");
     rememberedIds.add(grant.id);
     if (grant.target.kind === "command" && grant.target.match === "family" && commandFamily(grant.target.command) !== grant.target.command ||
-      grant.target.kind === "tool" && ["*", "run_command", "command_job", "debug", "mcp_gateway"].includes(grant.target.tool)) {
+      grant.target.kind === "tool" && ["*", "run_command", "run_script", "command_job", "debug", "mcp_gateway"].includes(grant.target.tool)) {
       throw new MoguriError("unsafe_rule", "Use an exact command, safe command family or schema-bound MCP tool, never a blanket execution grant.");
     }
   }
@@ -150,21 +153,25 @@ export function authorizeTool(settings: UserSettings, call: ToolCall, root: stri
     return { decision: "deny", reason: "Choose a path inside the exact approved workspace, not an outside or aliased absolute root." };
   }
   const matched = settings.permissions.tools.filter((rule) => {
-    if (rule.tool !== "*" && rule.tool !== call.name) return false;
+    if (rule.tool !== "*" && rule.tool !== call.name && !(call.name === "run_script" && rule.tool === "run_command")) return false;
     const prefix = rule.pathPrefix ? normalize(rule.pathPrefix).replace(/\/$/, "") : "";
     return !prefix || scoped === prefix || scoped.startsWith(`${prefix}/`) ||
       rule.decision !== "allow" && matchesFolder(scoped, [prefix]);
   });
   const denial = matched.find((rule) => rule.decision === "deny");
   if (denial) return { decision: "deny", ruleId: denial.id, reason: "Denied by user tool policy." };
+  if (call.name === "run_command" || call.name === "command_job" && call.arguments.action === "start") {
+    const blocked = typeof call.arguments.command === "string" ? unreviewedScriptCommand(call.arguments.command) : "Provide one exact literal command.";
+    if (blocked) return { decision: "deny", reason: blocked };
+  }
   const automatic: Authorization | undefined = context?.automaticApprovals === true && ["Autopilot", "Autopilot Max"].includes(context.autonomy) && defaultDecision !== "deny" ?
     { decision: "allow", ruleId: `autonomy:${context.sessionId}`, reason: "Automatic approvals explicitly enabled by the user for this session." } : undefined;
   const remembered = () => rememberedAuthorization(settings, call, context);
   const nativeGateway = call.name === "mcp_gateway" && (call.arguments.action === "read_result" || call.arguments.action === "discover" ||
     call.arguments.serverId === "builtin" && (call.arguments.action === "tools" ||
       call.arguments.action === "call" && ["browser_status", "grep_logs", "search_memory", "memory_graph"].includes(String(call.arguments.tool))));
-  if (call.name === "run_command" || call.name === "command_job" && call.arguments.action === "start" || call.name === "debug") {
-    const exact = call.name === "debug" ? `debug ${JSON.stringify(call.arguments)}` : call.arguments.command;
+  if (call.name === "run_command" || call.name === "run_script" || call.name === "command_job" && call.arguments.action === "start" || call.name === "debug") {
+    const exact = commandText(call);
     const commands = settings.permissions.commands.filter((rule) => rule.command === exact);
     const rule = commands.find((rule) => rule.decision === "deny") ?? commands.find((rule) => rule.decision === "allow") ?? commands.find((rule) => rule.decision === "ask");
     if (rule?.decision === "deny") return { decision: "deny", ruleId: rule.id, reason: "Denied by exact command policy." };
@@ -184,7 +191,7 @@ export function authorizeTool(settings: UserSettings, call: ToolCall, root: stri
     if (allowance || enforced) return { decision: "allow", actor: "policy", ruleId: allowance?.id ?? "native:enforced-network", reason: allowance ?
       `Actual-user ${allowance.scope.kind} Local website allowlist.` : "The exact verified guest already enforces this approved host." };
   }
-  if (defaultDecision !== "deny" && (automaticNativeTools.has(call.name) || nativeGateway)) {
+  if (defaultDecision !== "deny" && (automaticNativeTools.has(call.name) && !(call.name === "review_script" && webTarget) || nativeGateway)) {
     return { decision: "allow", actor: "policy", ruleId: `native:${call.name}`, reason: "Native operation is automatically permitted within its existing root, mode and hard policy." };
   }
   return unspecified;

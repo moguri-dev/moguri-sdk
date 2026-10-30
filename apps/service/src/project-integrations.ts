@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stripMarkdownComments } from "../../../packages/protocol/src/markdown.ts";
 import { isRecord, MoguriError, type GitHubConnection, type GithubBoardSource, type LinearConnection, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
 import { boundedBody, fetchJson } from "./network.ts";
 import { runProgram } from "./program.ts";
@@ -60,7 +61,7 @@ function githubBoardIssue(value: unknown, repository: string, expectedNumber?: n
       draft: request.isDraft, checkedAt, diagnostic: null };
   });
   return { nodeId: value.id, databaseId, repo: repository, number: Number(value.number), url: String(value.url),
-    title: value.title, body: value.body, state: value.state === "CLOSED" ? "closed" : "open",
+    title: stripMarkdownComments(value.title), body: stripMarkdownComments(value.body), state: value.state === "CLOSED" ? "closed" : "open",
     stateReason: value.stateReason === "NOT_PLANNED" ? "not_planned" : value.stateReason === "COMPLETED" ? "completed" : value.stateReason === "DUPLICATE" ? "duplicate" : null,
     updatedAt: value.updatedAt, pullRequests };
 }
@@ -342,7 +343,7 @@ export class ProjectIntegrations {
       if (url.protocol !== "https:" || url.host !== "linear.app" || url.username || url.password || url.search || url.hash) throw new MoguriError("linear_response", "The remote issue link is not a canonical Linear destination.");
       ids.add(node.id);
       return {
-        title: node.title.slice(0, 160), body: (node.description ?? "").slice(0, 64 * 1024),
+        title: stripMarkdownComments(node.title).slice(0, 160), body: stripMarkdownComments(node.description ?? "").slice(0, 64 * 1024),
         linear: { id: node.id, identifier: node.identifier, url: url.href, updatedAt: node.updatedAt },
       };
     });

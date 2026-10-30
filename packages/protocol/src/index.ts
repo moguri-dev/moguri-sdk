@@ -6,6 +6,9 @@ import { PlatformCommandSchema, defaultSettings, normalizeSettings, type Applica
 export * from "./platform.ts";
 export * from "./model.ts";
 export * from "./search.ts";
+export * from "./markdown.ts";
+import { stripMarkdownComments } from "./markdown.ts";
+import { ScriptReviewRecordSchema, projectScriptReview, type ScriptReviewRecord } from "./script-reviews.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
@@ -68,7 +71,7 @@ export * from "./shortcuts.ts";
 export * from "./queued-commands.ts";
 import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
 
-export const PROTOCOL_VERSION = 82;
+export const PROTOCOL_VERSION = 83;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -311,6 +314,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "workspace.saved": { workspace: ManagedWorkspace; branchOperation?: { operationId: string; previousBranch: string } };
   "change_set.saved": { changeSet: ChangeSet };
   "question.asked": { question: UserQuestion };
+  "script.review_recorded": { review: ScriptReviewRecord };
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
   "session.configured": { controls: Controls; autonomySelection?: { actor: "user"; commandId: string; commandDigest: string; autonomy: Controls["autonomy"] } };
@@ -452,7 +456,7 @@ export const eventTypes: readonly EventType[] = [
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
   "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
-  "board.saved", "issue.saved", "cache.prepared",
+  "board.saved", "issue.saved", "script.review_recorded", "cache.prepared",
   "session.organized", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
@@ -501,6 +505,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const notificationSounds = new Map<string, NotificationSound>();
   const boards = new Map<string, IssueBoard>();
   const issues = new Map<string, LocalIssue>();
+  const scriptReviews = new Map<string, ScriptReviewRecord>();
   const dependencyCaches = new Map<string, CacheReceipt>();
   const projectConfigurations = new Map<string, ProjectConfiguration>();
   const projectFolders = new Map<string, NavigationFolder>();
@@ -994,6 +999,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         source.binding.profileId !== event.profile_id || source.binding.workspaceId !== null)) throw new MoguriError("github_sync_corrupt", "The retained GitHub board source lost its exact profile/root ownership. State was preserved.", 409);
       boards.set(event.payload.board.projectId, structuredClone(event.payload.board));
     }
+    if (event.event_type === "script.review_recorded") {
+      const review = event.payload.review, previous = scriptReviews.get(review.id), session = sessions.get(review.sessionId);
+      if (!Value.Check(ScriptReviewRecordSchema, review) || review.profileId !== profileId || event.session_id !== review.sessionId ||
+        (event.project_id ?? null) !== review.projectId || !session) throw new MoguriError("script_review_corrupt", "A script review lost its actual profile/session/source owner.", 409);
+      const origin = !previous ? review.inspection : !previous.advice && review.advice ? review.advice.source : null;
+      if (origin && !session.usage.some((usage) => usage.stepId === origin.stepId && usage.modelId === origin.modelId &&
+        (usage.providerId ?? null) === origin.providerId)) throw new MoguriError("script_review_corrupt", "Script advice has no actual retained owning-model provenance.", 409);
+      scriptReviews.set(review.id, projectScriptReview(previous, review));
+    }
     if (event.event_type === "issue.saved") {
       const issue = event.payload.issue, link = issue.github;
       if (issue.order !== undefined && (!Number.isSafeInteger(issue.order) || issue.order < 0) || link &&
@@ -1001,7 +1015,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           !Number.isFinite(Date.parse(link.checkedAt)) || !Number.isFinite(Date.parse(link.updatedAt)))) {
         throw new MoguriError("github_sync_corrupt", "The retained card lost its exact order or GitHub source identity. State was preserved.", 409);
       }
-      issues.set(issue.id, structuredClone(issue));
+      issues.set(issue.id, { ...structuredClone(issue), title: stripMarkdownComments(issue.title), body: stripMarkdownComments(issue.body) });
     }
     if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.workspaceId ?? "base"}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
     if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: normalizeSettings(event.payload.settings) };
@@ -1554,7 +1568,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
-    boards: [...boards.values()], issues: [...issues.values()], dependencyCaches: [...dependencyCaches.values()], projectWorkRuns: [...projectWorkRuns.values()],
+    boards: [...boards.values()], issues: [...issues.values()], scriptReviews: [...scriptReviews.values()].filter((review) => sessions.has(review.sessionId)), dependencyCaches: [...dependencyCaches.values()], projectWorkRuns: [...projectWorkRuns.values()],
     providerPriceCatalogs, providerPriceRevision,
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
     sandboxPublications: [...sandboxPublications.values()].filter((publication) => artifacts.has(publication.id)),

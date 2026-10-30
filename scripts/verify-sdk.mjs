@@ -30,6 +30,8 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  if (installedProtocol >= 83) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-content-review.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
@@ -80,6 +82,12 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 83 ? `
+      const sourceReview=await sdk.scriptReviews.read("generated-session","generated-review");
+      void sourceReview.review.advice?.source.modelId;void sourceReview.review.source.rootDigest;
+      await sdk.scriptReviews.force("generated-session","generated-review","a".repeat(64),1,0,"generated-explicit-force");
+      void sdk.getState().snapshot?.scriptReviews[0]?.attempt?.owner;
+      ` : ""}
       ${installedProtocol >= 82 ? `
       const ranked:ToolPreferences={order:["cli","rest","mcp-direct","mcp-gateway"]};
       void ToolPreferencesSchema;void defaultToolPreferences;void effectiveToolPreferences(ranked);

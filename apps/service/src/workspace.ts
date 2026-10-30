@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stripMarkdownComments } from "../../../packages/protocol/src/markdown.ts";
 import {
   compareIssues, defaultBoard, githubIssuePhase, githubManagedIssue, githubSourceOwner, githubSyncSettings, issuePosition, kanbanPreferences, MoguriError, type BoardConfig, type CommandResult, type EventInput, type GithubBoardSource,
   type IssueBoard, type LocalIssue, type Project, type Snapshot, type WorkspaceCommand, type WorkspaceQuery, type WorkspaceResponse,
@@ -48,7 +49,7 @@ export class WorkspaceRuntime {
   private prAborts = new Map<string, AbortController>();
   private linear = new Map<string, AbortController>();
   private importedAt = new Map<string, number>();
-  constructor(private readonly host: WorkspaceHost, store: EventStore, private readonly stateDir: string, private readonly options: WorkspaceOptions = {}) {
+  constructor(private readonly host: WorkspaceHost, private readonly store: EventStore, private readonly stateDir: string, private readonly options: WorkspaceOptions = {}) {
     this.cache = new DependencyCache(store, stateDir, { ...options.cache, registries: () => this.host.snapshot().dependencyRegistries ?? [] });
     this.integrations = new ProjectIntegrations(options.integrations?.vault ?? new McpKeychain(`dev.moguri.profile.${this.host.snapshot().profileId}.integrations`), options.integrations);
   }
@@ -87,7 +88,16 @@ export class WorkspaceRuntime {
     if (!board.columns.some((column) => column.id === id)) throw new MoguriError("issue_phase", "Choose an existing phase from this project's board.");
   }
   private saved(issue: LocalIssue, actor: "user" | "github" | "linear" = "user"): EventInput {
-    return { event_type: "issue.saved", profile_id: this.host.snapshot().profileId, project_id: issue.projectId, payload: { issue, actor } };
+    const filtered = { ...issue, title: stripMarkdownComments(issue.title), body: stripMarkdownComments(issue.body) };
+    if (!filtered.title.trim()) throw new MoguriError("issue_title", "Give this ticket a visible title after hidden comments are removed.");
+    return { event_type: "issue.saved", profile_id: this.host.snapshot().profileId, project_id: issue.projectId, payload: { issue: filtered, actor } };
+  }
+  private unchangedImportedText(issue: LocalIssue, field: "title" | "body"): boolean {
+    const expected = field === "title" ? issue.github?.titleDigest : issue.github?.bodyDigest;
+    if (!expected) return false;
+    if (digest(issue[field]) === expected) return true;
+    return this.store.events().some((event) => event.profile_id === this.host.snapshot().profileId && event.event_type === "issue.saved" &&
+      event.payload.issue.id === issue.id && digest(event.payload.issue[field]) === expected && stripMarkdownComments(event.payload.issue[field]) === issue[field]);
   }
   private initialBoard(board: IssueBoard): EventInput[] {
     return this.host.snapshot().boards.some((entry) => entry.projectId === board.projectId) ? [] : [{ event_type: "board.saved", profile_id: this.host.snapshot().profileId, project_id: board.projectId, payload: { board } }];
@@ -218,8 +228,8 @@ export class WorkspaceRuntime {
           const base: LocalIssue = previous ?? { id: randomUUID(), projectId, number: ++nextNumber, title: item.title, body: item.body, kind: "misc",
             phaseId: githubSyncSettings(board).phases.backlog, revision: -1, archived: false, createdAt: now, updatedAt: now, linear: null, pullRequest: null };
           const next: LocalIssue = { ...base,
-            title: !previous || digest(previous.title) === previous.github?.titleDigest ? item.title : previous.title,
-            body: !previous || digest(previous.body) === previous.github?.bodyDigest ? item.body : previous.body,
+            title: !previous || this.unchangedImportedText(previous, "title") ? item.title : previous.title,
+            body: !previous || this.unchangedImportedText(previous, "body") ? item.body : previous.body,
             github: { nodeId: item.nodeId, databaseId: item.databaseId, repo: item.repo, number: item.number, url: item.url, state: item.state,
               stateReason: item.stateReason, updatedAt: item.updatedAt, checkedAt: now, diagnostic: null, pullRequests: item.pullRequests,
               sourceDigest: digest(JSON.stringify(github.source)), titleDigest: digest(item.title), bodyDigest: digest(item.body) },
