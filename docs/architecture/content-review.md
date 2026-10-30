@@ -104,7 +104,7 @@ failed/missing receipt. Filtered GitHub review content uses the same view at
 freshness recheck while preserving the original upstream digest, so hidden
 source drift still invalidates the review.
 
-Qualified execution is **non-interactive Local only**: POSIX shell/Bash,
+Supported execution is **non-interactive Local only**: POSIX shell/Bash,
 explicit Node ESM/CommonJS, or installed Python 3. Source bytes use a private
 pipe, never process argv, a temporary script or a second download. Node's
 trusted loader supplies only the exact main snapshot; Python compiles the
@@ -133,3 +133,76 @@ nested PTY cancellation **151.98 ms**, no known survivors; 60 TUI frames
 **8.08 ms** scroll frame; 2,000-file search **1.07 ms**, Git status **5.74 ms**.
 Live entitlement, physical SendBox, Rust/Linux release and signing/notarization
 were not qualified by these generated checks.
+
+## Final generated qualification
+
+The final desktop source is
+`f89faa990941f3006513f263f6f3f2680d44a9ac`, based on merged main
+`37105eb604c17cdbfad52e08e699b8b62797f726`. It retains the separate settings,
+navigation, file-policy and protocol-83 commits without rewriting history.
+Both new markers remain distinct and equal to `1`; genuine 82 migrations
+append them atomically without rewriting original events, grants or ciphertext.
+
+The complete Node run uses
+`03edc14b89cd5784fdf75261efe88077cd570bc6`. Later commits change only a renderer
+button's accessible name and its UI checks, including explicit connection
+readiness before a recovery keypress. SDK/service/worker sources and the exact
+payload bytes below are unchanged. Strict types and production builds pass;
+the final complete desktop run includes those renderer changes.
+
+| Surface | Observed result |
+| --- | --- |
+| Complete Node/worker/CLI/TUI suite | 2,046 passed, 15 existing platform/native skips, zero failures; 2,061 checks in 1,598.98 seconds |
+| Complete hidden Electron suite | 302 passed, three existing skips, zero failures; 305 flows in 8.2 minutes |
+| Repeated affected desktop flows | 48 passed in 46.2 seconds; three repetitions of settings, Dashboard, recovery and unsafe-script interactions |
+| Independently packed SDK | Browser-safe root/React, explicit Node/MCP entrypoints, declarations and actual installed runtime/worker/CLI/shared-TUI checks pass |
+| Installed acknowledged-role worker | 12 passed in 4,544.45 ms, including failed receipts, accounting and control loss |
+| Canonical file policy and exact-byte Local/SSH recovery | 17 passed in 15,770.98 ms, including actual workers, original Home/project roots and real control-plane SIGKILL |
+| Owned rootless loopback SSH primitive | One generated request; pinned worker-side inference origin in 123.58 ms on Node 26.12.0 |
+| Dependency installation and audits | `npm ci` passed; source and independent-consumer audits reported zero vulnerabilities |
+
+These macOS arm64 checks use controller Node 26.11.1, generated repositories,
+recognizers, providers, accounts and loopback endpoints, not personal credentials,
+microphones, authorization pages or paid inference. Actual script execution
+checks exercise shell `sh` and Node snapshots, including cancellation of busy
+code and genuine parent SIGKILL. They do not independently qualify Python,
+physical SendBox, an external Linux/Rust host or release signing/notarization.
+
+The installed consumer proves complete original-source model inspection,
+unsafe advice without an execution prompt, separate actual-user force, normal
+policy enforcement, the original queued TUI command receipt, filtered work-item
+context, service restart and no paid/execution replay. Source, policy, root,
+revision and missing-receipt rejection remain fail-closed. The complete suites
+also cover failed persistence, stale upstream hidden-only content changes,
+cancelled work and genuine 82 migration/reopen/rollback.
+
+Observed final SHA-256 identities:
+
+| Payload | SHA-256 |
+| --- | --- |
+| `dist/worker.mjs` | `249638b3a59d1aae3f2b7007c3872bb117e387282cb3eee392a05ba8d6e855f2` |
+| `dist/remote-bridge.mjs` | `72e068c0ba90e3bbe46f4f89c9c72da7432d77e0f8f5e62a4939c0b23d1c3edf` |
+| `dist/runtime.mjs` | `f8c4ead7f9eb99250b9fb7172c276083e166fc9cc1376d19c58b6f5738759a08` |
+
+Raw logs remain in the working session's `files/`:
+`content-review-complete-suites.log` (successful complete Node run and an earlier
+desktop diagnostic attempt), `content-review-sdk-remote-final.log` (successful
+packed/SSH checks), `content-review-desktop-final.log` (rebuild and repeated
+affected flows), and `content-review-desktop-complete-final.log` (successful
+complete desktop run). Earlier failed attempts and original failure traces
+remain diagnostic evidence, not passing receipts. Generated Dashboard
+before/after, out-of-range active activity and unsafe-script-review screenshots
+are retained separately for human review.
+
+Earlier protocol-82 observations in [settings](settings-platform.md) and
+[file access](file-access.md) retain their original identities and scope.
+Current results do not retroactively qualify those or any other payload.
+The OWASP category matrix remains a bounded review with explicit gaps, not
+blanket compliance or a semantic malware guarantee.
+
+Main-only CI is unchanged. Main run `41019712786` failed before steps because
+GitHub requires account billing/spending-limit action; it was not rerun or
+worked around. Working-branch checks are not claimed green by absence.
+Existing large Vite chunks, experimental OpenTUI FFI, and packed-consumer
+`whatwg-encoding`/`node-domexception` deprecations remain disclosed. No
+validation, headroom assertion, consent gate or hard policy was weakened.

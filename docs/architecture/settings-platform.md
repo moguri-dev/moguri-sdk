@@ -6,12 +6,14 @@ the inventory of available behavior.
 
 ## Registered-project selection and active-session follow-up
 
-This follow-up reuses React and Electron (MIT), Playwright (Apache-2.0), the
-existing browser-safe SDK, shared session indicators, revision-bound project
-configuration, retained drafts and native navigation menus. No dependency,
-service capability, event, durable field or migration is introduced. Protocol
-82 and its actual migration history remain unchanged; no worker/native payload
-is requalified by changing a version number.
+The presentation-only commits `ccfd724`, `0f0ec2d` and `3bcaa87` reuse React and
+Electron (MIT), Playwright (Apache-2.0), the existing browser-safe SDK, shared
+session indicators, revision-bound project configuration, retained drafts and
+native navigation menus. That slice adds no dependency, service capability,
+event, durable field or migration. Its original protocol-82 observations below
+remain historical. The combined follow-up uses the separately documented
+[protocol-83 content-review contract and qualification](content-review.md);
+no earlier worker/native receipt is relabeled.
 
 The project configuration dropdown lists only the active profile's registered
 projects. Its exact selected ID is independent of the current conversation.
@@ -75,11 +77,13 @@ exact-session focus and preserved drafts/questions/held queues.
 
 `npm ci --no-fund`, typecheck, build and the packed external consumer
 `npm run verify:sdk` passed; both dependency audits reported zero vulnerabilities.
-Protocol 82, its genuine migration/restart history and existing SDK/CLI/TUI
-paths remain unchanged. The packed consumer also retains its real worker,
-profile, budget, cancellation and restart probes. These are targeted source
-checks, not a claim that the full suite, live GitHub authentication, packaged
-release or unqualified native boundaries were requalified.
+These original protocol-82 measurements retain their genuine migration/restart
+history and existing SDK/CLI/TUI paths. The packed consumer also retains its
+real worker, profile, budget, cancellation and restart probes. These were
+targeted source checks, not whole-suite or release qualification. The later
+[combined protocol-83 evidence](content-review.md#final-generated-qualification)
+records the full Node/desktop results and exact current payload identities;
+live GitHub authentication and unqualified native boundaries remain separate.
 
 Generated Dashboard screenshots are retained in the Playwright output as
 `active-sessions.png` and `active-sessions-filtered.png`. No real account,

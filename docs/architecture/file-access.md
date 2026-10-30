@@ -9,6 +9,9 @@ dependency, capability API, event, durable field, permission grant or migration
 is added. Saved rules and original tool arguments are not rewritten.
 Protocol 82 history remains genuine; a matching protocol number does not
 requalify changed worker or SSH bridge bytes.
+The combined follow-up's new content-review state and current exact-byte
+evidence belong to [protocol 83](content-review.md), not this repair's
+historical protocol-82 measurements.
 
 Tool requests and configured path prefixes normalize before matching. Requests
 resolve relative to the exact selected root, including internal `..` and
@@ -117,4 +120,5 @@ case and internal-directory-alias checks. Observed SHA-256 identities:
 
 These are this repair's generated Local/loopback SSH evidence, not inherited
 82 receipts, physical SendBox qualification, or approval of later changed
-payloads.
+payloads. The [final combined qualification](content-review.md#final-generated-qualification)
+records fresh Local/SSH results for the changed protocol-83 worker and bridge.
