@@ -61,6 +61,34 @@ these generated checks. Main CI run `41019712786` never started its steps:
 GitHub annotations require account billing/spending-limit action, not a workflow
 change or another run.
 
+### Generated qualification
+
+The six new hidden Electron scenarios in
+`tests/e2e/settings-dashboard.spec.ts` passed twice (**12/12 in 13.7 s**).
+The final focused client regression run passed **37/37 in 1.2 min**; the
+associated SDK/service checks passed **46/46 in 5.95 s**. They exercise actual
+keyboard/context-menu selection, empty/foreign-profile and deleted project
+targets, concurrent configuration revisions, unchanged ordinary copy controls,
+current group membership, the intercepted supported GitHub setup URL, live
+waiting/running/stopping activity, refreshed work counts, stale connections,
+exact-session focus and preserved drafts/questions/held queues.
+
+`npm ci --no-fund`, typecheck, build and the packed external consumer
+`npm run verify:sdk` passed; both dependency audits reported zero vulnerabilities.
+Protocol 82, its genuine migration/restart history and existing SDK/CLI/TUI
+paths remain unchanged. The packed consumer also retains its real worker,
+profile, budget, cancellation and restart probes. These are targeted source
+checks, not a claim that the full suite, live GitHub authentication, packaged
+release or unqualified native boundaries were requalified.
+
+Generated Dashboard screenshots are retained in the Playwright output as
+`active-sessions.png` and `active-sessions-filtered.png`. No real account,
+authorization page, customer data or model endpoint was used. Existing Vite
+chunks above 500 kB still produce a size warning; the packed consumer reports
+the upstream `whatwg-encoding`/`node-domexception` deprecations and explicitly
+reviews this package's install script before rebuilding. No warning was hidden
+or validation disabled.
+
 ## Scope and navigation
 
 Settings are grouped as General, Models, Integrations, Execution & permissions,
