@@ -1,10 +1,11 @@
 import { ClientError } from "../../client/src/index.ts";
 import {
-  GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, LinearCatalogResourceSchema, LinearWorkflowInputSchema,
+  GitActionSchema, GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, LinearCatalogResourceSchema, LinearWorkflowInputSchema,
   isRecord, parse, type GithubScope, type GithubWorkSource, type Session,
 } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 import type { SlashResult } from "./slash.ts";
+import { gitSessionScope } from "./git.ts";
 
 const result = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
 function object(text: string) {
@@ -12,8 +13,27 @@ function object(text: string) {
   if (!isRecord(value)) throw new ClientError("integration_input", "Use one complete JSON object. No operation was admitted.");
   return value;
 }
-export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "github" | "linear", argument: string, client: "desktop" | "tui" | "cli" = "cli"): Promise<SlashResult> {
+export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "git" | "github" | "linear", argument: string, client: "desktop" | "tui" | "cli" = "cli"): Promise<SlashResult> {
   const match = argument.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/), action = match?.[1] ?? "history", tail = match?.[2] ?? "";
+  if (name === "git") {
+    if (action === "history" && !tail) return result(await sdk.git.history({ ...(session.projectId ? { projectId: session.projectId } : {}) }));
+    if (action === "read" && tail) return result(await sdk.git.operation(tail));
+    if (action === "wait" && tail) return result(await sdk.git.wait(tail));
+    if (action === "stop" && tail.endsWith(" confirm-stop")) return result(await sdk.git.cancel(tail.slice(0, -" confirm-stop".length)));
+    if (action === "status" && !tail) return result(await sdk.git.status(session.id));
+    if (action === "branches" && !tail) return result(await sdk.git.branches(session.id));
+    if (action === "log" && !tail) return result(await sdk.git.log(session.id));
+    if (action === "show" && /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(tail)) return result(await sdk.git.show(session.id, tail));
+    if (action === "diff" && (!tail || tail === "staged")) return result(await sdk.git.diff(session.id, tail === "staged"));
+    if (action === "preview") return result(await sdk.git.preview(session.id, parse(GitActionSchema, JSON.parse(tail))));
+    if (action === "execute" && tail.startsWith("confirm-write ")) {
+      const input = object(tail.slice("confirm-write ".length));
+      if (["type", "scope", "confirm"].some((key) => key in input)) throw new ClientError("git_input", "Supply action, original expectedDigest and exact confirmations only. This selected session owns the immutable root.");
+      parse(GitActionSchema, input.action);
+      return result(await sdk.command(parse(GithubCommandSchema, { ...input, type: "github.execute", scope: gitSessionScope(sdk, session.id), confirm: true })));
+    }
+    throw new ClientError("git_command", "Use /git status, branches, log, show COMMIT_SHA, diff [staged], preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, history, read/wait ID or stop ID confirm-stop. Rollback is git.revert for the exact current commit, never reset.");
+  }
   if (name === "github") {
     if (action === "repos") {
       const query = tail.startsWith("public ") ? tail.slice(7) : tail, repositories = await sdk.github.repositories({ source: tail.startsWith("public ") ? "public" : "account", query });

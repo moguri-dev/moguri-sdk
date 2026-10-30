@@ -25,6 +25,9 @@ export interface DefaultsSnapshot {
 export interface ResolvedControls { controls: Controls; defaults: DefaultsSnapshot }
 export const controlKeys = ["env", "modelId", "autonomy", "automaticApprovals", "budget", "modelOptions", "preferredThinkingEffort", "verbosity"] as const;
 export const factoryControls = (): Controls => ({ env: "Local", modelId: null, autonomy: "Manual", budget: { kind: "unlimited" } });
+export const selectAutonomyControls = (controls: Controls, autonomy: Controls["autonomy"]): Controls => ({
+  ...controls, autonomy, automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max",
+});
 export function selectModelControls(controls: Controls, model: { id: string; synthetic?: boolean; thinkingLevels?: readonly ThinkingEffort[] } | null): Controls {
   const preferred = controls.preferredThinkingEffort ?? controls.modelOptions?.thinkingEffort;
   const effort = preferred && model && !model.synthetic ? supportedThinkingEffort(preferred, model.thinkingLevels ?? []) : undefined;

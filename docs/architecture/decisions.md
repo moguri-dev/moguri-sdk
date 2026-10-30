@@ -66,6 +66,23 @@ separately reserved protocol-77 model-continuity migration. Its original JRPG
 presentation and actual mouse navigation do not copy franchise assets, create a
 GitHub inbox or qualify changed native worker/bridge payloads by version alone.
 
+The [protocol-81 session/Git follow-up](session-reliability.md#explicit-selection-and-retained-request-follow-up)
+preserves the actually combined80 lineage and this stack. Explicit autonomy
+selection, original-result identities and command receipts share the existing
+authority; finite [native Git tools](github-workflows.md#git-operations) reuse
+the reviewed CLI/root/job lifecycle, not another Git engine. No dependency or
+client queue is added. Both new migration markers are transactional, and changed
+worker/bridge bytes require fresh qualification rather than inherited receipts.
+
+The [protocol-82 command/tool preference follow-up](command-tool-preferences.md)
+adds original workflow presets, atomic assigned children and a profile-owned
+ranked method preference. Exact discovered MCP leaves may expose their own
+typed model schemas while retaining gateway execution/account/root approvals.
+The existing worker, queue, coordination, SDK and stack remain authoritative;
+no dependency, new scheduler, global subagent opt-in or credential bypass is
+introduced. Its two distinct migration markers are atomic and preserve genuine
+81 and combined80 history. Changed worker/native bytes need a fresh receipt.
+
 D30's [lean tooling and coordination contract](lean-tooling.md) records
 prerequisite measurements, independent implementation, reused MIT libraries,
 strict schema-58 lineage convergence and qualified/unsupported boundaries. Typed native

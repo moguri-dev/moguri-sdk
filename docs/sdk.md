@@ -5,11 +5,16 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **78** for the independently implemented
-[shared theme catalogue and terminal navigation](architecture/themes-and-tui.md),
-preserving the genuine protocol-76 baseline. It does not import the separately
-reserved protocol-77 model-continuity implementation; that lineage is rejected
-until actual combined-source convergence and requalification. Existing features include
+Current source uses protocol **82** for
+[shared workflow commands, ranked methods and direct MCP schemas](architecture/command-tool-preferences.md).
+It retains protocol81
+[exact session request recovery](architecture/session-reliability.md#explicit-selection-and-retained-request-follow-up)
+and [built-in reviewed Git](architecture/github-workflows.md#git-operations).
+It preserves the genuinely combined80 model-continuity, theme, queued-command,
+project-folder and grouped-Sandbox lineages and their original encrypted history.
+Its distinct workflow-command and tool-preference migration markers are appended
+atomically alongside the preserved81 markers; earlier native/package
+receipts qualify only their original bytes. Existing features include
 [direct effort and exact context-window shortcuts](architecture/model-controls.md#direct-tuning-slash-commands),
 [cascading model controls and complete slash discovery](architecture/model-controls.md#cascading-menus-and-complete-slash-discovery),
 [per-question refreshed side context](architecture/session-reliability.md#per-question-side-context),
@@ -28,6 +33,16 @@ accounting; the earlier schema-55 model-default upgrade is metadata-only.
 Schema 58 strictly converges the candidate-retention and earlier development
 lean-tooling lineages using their actual markers, preserving both guarantees.
 Older running services require reviewed restart.
+`ToolPreferencesSchema`, `toolMethods`, `defaultToolPreferences` and
+`effectiveToolPreferences` are browser-safe exports. Set the complete four-ID
+`settings.values.toolPreferences.order` with an exact settings revision, or
+reset the `toolPreferences` section. Ranking is model advice, not permission.
+`sdk.workflows.start(sessionId, kind, prompt?, expectedDraftRevision?)` shares
+the new presets; `sdk.sessions.spawnPrompt(sessionId, prompt, expectedDraftRevision?)`
+atomically assigns an actual Manual child. `/continue` takes no prompt.
+Direct MCP aliases are model-facing discoveries, not user-supplied permission
+metadata or a new credential API.
+
 Schema 59 adds an independent transactional metadata marker. Older source
 settings normalize to no configured skill sources; ciphertext, receipts,
 identities and existing accounting are unchanged.
@@ -330,10 +345,58 @@ owner and cannot be called as standalone user jobs.
 `tools.execute(sessionId, name, arguments, schemaDigest)` admits a Local user
 tool job under exact normal approval, without a model call or Env fallback.
 Its returned ID is admission, not success: inspect `jobs.wait` and the original
-result. `tools.result(sessionId, stepId, callId, offset)` pages an original
-public model-tool source and preserves outcome/`rawComplete`; private controls,
+result. `tools.results(sessionId, { before?, limit? })` discovers original
+public sources. `tools.resultById(sessionId, operationId,
+{ offset?, expectedDigest?, expectedRevision? })` pages the exact retained source
+with UTF-8 byte offsets, including after paging, source edits and restart.
+Pin its digest/revision for continuations. Every public model-tool context
+includes its actual `retainedSource`; models need not invent opaque step IDs.
+The older `tools.result(sessionId, stepId, callId, offset)` also accepts that
+call's exact activity operation ID in place of `stepId`, never a heuristic
+cross-session lookup. Both preserve outcome/`rawComplete`; private controls,
 hooks and other/deleted sessions are excluded. `tools.state` queries the
 canonical in-memory todo/memory projection, not persistent internal tables.
+
+`sessions.autonomy(sessionId, autonomy, expectedRevision?)` is an explicit
+selection, including reselecting a legacy Autopilot value. It retains actual-user
+command provenance and automatic-approval consent across later turns/restarts.
+Loading old values or changing an unrelated setting cannot broaden old consent.
+An actual generic autonomy change also discards a copied Manual false marker.
+
+`commandReceipt(command, commandId)` only inspects that original exact
+profile-owned command: `committed` includes its canonical result; `pending`
+and `unknown` are not success or permission to resend. Lost mutation replies
+are reconciled once against the original authenticated service/store, without
+re-executing the command. Local edits remain intact. Reads use the service's
+30-second deadline plus a separate two-second delivery allowance, rather than
+an unrelated shorter transport cutoff. An expired read cancels/discards its
+original source and returns `query_timeout`; it does not disconnect healthy
+editing or silently rerun a tool. Electron forwards the same deadline and receipt
+route. `DraftEditor` resumes only canonically undispatched autosaves after
+checking the original fresh revision; peer changes remain conflicts and
+unknown dispatched saves or input submissions are not replayed. Dispose editors
+to release their reconnect subscription. Late SSH original-result grants survive
+restart without converting their original partial turn into success.
+
+`git.status/branches/log/show/diff(sessionId, ...)` and
+`git.preview(sessionId, action)` resolve the actual Local project/worktree.
+`git.execute(preview, confirmations, true)` uses the existing independently
+retained Git job pipeline; inspect `git.wait/operation` rather than treating
+admission as success. The finite `GitAction` union includes branch creation,
+current-branch rename, clean switch, exact-file stage/unstage, selected staged
+commits, a new current-tip revert commit, push, rebase and tags. Selected commits
+reuse the existing private-index pattern and preserve the real index, unrelated
+staged files and unstaged bytes; they do not borrow the artifact helper's
+different new-branch publication semantics. Normal pushes also compare the
+captured destination SHA/absence, without granting non-fast-forward writes.
+Managed rename binds `document.managedBranch` and atomically updates the original
+workspace/change-set name without changing root/base identity. Existing managed
+roots cannot be switched to another change set. A partial metadata
+acknowledgement requires separate exact user inspection and metadata-only
+`workspaces.reconcile`; it never reruns Git or relabels the operation successful.
+`git_read` and `git_write` expose the same capabilities to the actual model
+catalogue; ordinary `/git` commands execute through the original service queue.
+Unsupported Remote/Sandbox/group/Home execution never borrows a Local checkout.
 
 `tools.command(sessionId, jobId, offset, targetSessionId?)` reads the original
 watch job. Another session needs an actual coordination grant. Its typed
@@ -1636,8 +1699,13 @@ The original intake acknowledges frames without waiting for model startup;
 read returns the current transcript/revision, and the final capability job
 retains the acknowledged complete transcript. Duplicate/out-of-order frames,
 late audio after revocation and incomplete flushes are rejected, never replayed.
+`startCapture` resolves with the exact service lease acknowledgement, without
+waiting for a full conversation snapshot. Observe its job through the shared
+event stream or `jobs.wait`; no second capture queue or admission retry is used.
 `DraftEditor.startDictation(start, end)` replaces only its original provisional
 span, preserving surrounding typing and refusing foreign/overlapping changes.
+An ordinary autosave does not delay this local span; pending input intake and
+attachment capture are refused rather than arming a later recording.
 Insertion never sends a prompt.
 
 The retained batch API uses `voice.startCapture(sessionId, optionalOriginalId)`,

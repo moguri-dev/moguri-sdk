@@ -38,20 +38,22 @@ export class McpGateway {
     if (server?.transport.type === "http" && server.transport.auth === "bearer" && !token) throw new MoguriError("mcp_auth_required", "Configure this server's bearer credential in the OS keychain. No unauthenticated fallback was attempted.", 401);
     return token;
   }
-  async operate(operation: Omit<McpOperation, "token">, requested: AbortSignal, owner?: string): Promise<unknown> {
+  async operate(operation: Omit<McpOperation, "token">, requested: AbortSignal, owner?: string, guard?: () => void): Promise<unknown> {
     const abort = new AbortController();
     const signal = AbortSignal.any([requested, abort.signal]);
     this.active.add(abort);
-    const task = this.execute(operation, signal);
+    const task = this.execute(operation, signal, guard);
     this.tasks.add(task);
     this.contexts.set(abort, { task, root: operation.root, owner });
     try { return await task; }
     finally { this.active.delete(abort); this.tasks.delete(task); this.contexts.delete(abort); }
   }
-  private async execute(operation: Omit<McpOperation, "token">, signal: AbortSignal): Promise<unknown> {
+  private async execute(operation: Omit<McpOperation, "token">, signal: AbortSignal, guard?: () => void): Promise<unknown> {
     signal.throwIfAborted();
+    guard?.();
     const token = await this.accessToken(operation.server, signal);
     signal.throwIfAborted();
+    guard?.();
     return runMcpConnector({ ...operation, ...(token ? { token } : {}) }, this.workerPath, signal);
   }
   async tools(server: McpServerConfig | null, root: string, signal: AbortSignal, scripts?: McpOperation["scripts"], owner?: string): Promise<McpToolInfo[]> {

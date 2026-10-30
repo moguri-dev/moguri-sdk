@@ -6,6 +6,8 @@ import { attachmentDigests, eventTypes, hasCombinedWorkspaceHistory, isRecord, M
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
 const combinedSchemaMarkers = ["model_selection_continuity_schema", "theme_catalog_schema", ...workspaceSchemaMarkers, "theme_model_workspace_convergence_schema"] as const;
+const recoverySchemaMarkers = ["session_request_recovery_schema", "builtin_git_schema"] as const;
+const commandToolSchemaMarkers = ["workflow_commands_schema", "tool_preferences_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -452,11 +454,45 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=80; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 81) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of recoverySchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=81; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      if (version < 82) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of commandToolSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=82; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
+    const recoveryLineage = () => {
+      for (const id of recoverySchemaMarkers) {
+        if (version < 81 && marker(id) !== undefined) throw new Error(`Premature session request/Git schema marker ${id}. Original state was preserved.`);
+        if (version >= 81) require(id, "session request/Git recovery");
+      }
+      for (const id of commandToolSchemaMarkers) {
+        if (version < 82 && marker(id) !== undefined) throw new Error(`Premature command/tool preference schema marker ${id}. Original state was preserved.`);
+        if (version >= 82) require(id, "command/tool preference");
+      }
+      if (version >= 4 && version < 82 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "session.resumed" && event.payload.continuation ||
+        event.event_type === "settings.updated" && event.payload.settings.toolPreferences !== undefined ||
+        (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && (event.payload.item.spawnPromptOrigin ||
+          event.payload.item.workflow && !["review", "security", "performance", "debug"].includes(event.payload.item.workflow.kind) ||
+          event.payload.item.command && ["impeccable", "continue", "orchestrate", "spawn", "spar", "critique", "roast-me", "tool-preferences"].includes(event.payload.item.command.name)) ||
+        event.event_type === "tool.requested" && event.payload.approval.call.directMcp ||
+        (event.event_type === "tool.started" || event.event_type === "tool.completed") && event.payload.call.directMcp)) {
+        throw new Error("Actual workflow/tool delivery history cannot become a pre-82 lineage. Original state was preserved.");
+      }
+    };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");
     for (const id of workspaceSchemaMarkers) {
       if (version < 79 && marker(id) !== undefined) throw new Error(`Premature workspace schema marker ${id}. Original state was preserved.`);
@@ -479,8 +515,16 @@ export class EventStore {
       require("theme_catalog_schema", "theme catalogue");
       require("theme_model_workspace_convergence_schema", "combined theme/model/workspace");
     }
-    if (version < 4 || version >= 80) return;
+    if (version < 4 || version >= 81) { recoveryLineage(); return; }
     const events = this.readEvents(0, true, version < 10);
+    if (events.some((event) => event.event_type === "session.configured" && event.payload.autonomySelection ||
+      event.event_type === "workspace.saved" && event.payload.branchOperation ||
+      event.event_type === "tool.started" && ["git_read", "git_write"].includes(event.payload.call.name) ||
+      event.event_type === "github.operation_recorded" && (event.payload.operation.toolCallDigest ||
+        ["git.branch.create", "git.branch.rename", "git.switch", "git.revert", "git.commit", "git.stage", "git.unstage"].includes(event.payload.operation.kind)))) {
+      throw new Error("Session request/Git history cannot be relabelled without its original recovery markers. Original state was preserved.");
+    }
+    if (version >= 80) { recoveryLineage(); return; }
     if (model === undefined && events.some((event) =>
       (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.preferredThinkingEffort !== undefined ||
       event.event_type === "model.selection_remembered" && event.payload.selection?.preferredThinkingEffort !== undefined ||
@@ -495,11 +539,12 @@ export class EventStore {
     }
     const retiredCombined = this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') LIKE 'slash.%' LIMIT 1").get();
     if (hasCombinedWorkspaceHistory(events) || retiredCombined) throw new Error("Combined80 queued/native group runtime history cannot be relabelled as a standalone predecessor. Original state was preserved.");
-    if (version >= 79) return;
+    if (version >= 79) { recoveryLineage(); return; }
     const futureHistory = events.some((event) => event.event_type === "project.folder_removed" ||
       event.event_type === "project.folder_saved" && event.payload.folder.color !== undefined);
     const retiredFuture = this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='project.folder_removed' LIMIT 1").get();
     if (futureHistory || retiredFuture) throw new Error("Workspace interaction history cannot be relabelled as pre-79 state. Original state was preserved.");
+    recoveryLineage();
   }
   private migrateWorkflowFeatures(version: number): void {
     const marker = (id: string) => this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value;

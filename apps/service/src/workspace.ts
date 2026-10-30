@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  compareIssues, defaultBoard, githubIssuePhase, githubManagedIssue, githubSyncSettings, issuePosition, kanbanPreferences, MoguriError, type BoardConfig, type CommandResult, type EventInput, type GithubBoardSource,
+  compareIssues, defaultBoard, githubIssuePhase, githubManagedIssue, githubSourceOwner, githubSyncSettings, issuePosition, kanbanPreferences, MoguriError, type BoardConfig, type CommandResult, type EventInput, type GithubBoardSource,
   type IssueBoard, type LocalIssue, type Project, type Snapshot, type WorkspaceCommand, type WorkspaceQuery, type WorkspaceResponse,
 } from "../../../packages/protocol/src/index.ts";
 import { DependencyCache, type DependencyCacheOptions } from "./dependency-cache.ts";
@@ -21,6 +21,7 @@ interface WorkspaceHost {
   assertRoot?(projectId: string, workspaceId: string | undefined, signal: AbortSignal): Promise<void>;
   onLinearCredentialsChanged?(): void;
   onLinearBoardChanged?(projectId: string): void;
+  githubPolicy?(projectId: string): string;
   githubProject?(projectId: string, signal: AbortSignal, source?: GithubBoardSource): Promise<Extract<import("../../../packages/protocol/src/github-workflows.ts").GithubResponse, { type: "github.project" }>>;
 }
 function boardObservationPolicy(board: BoardConfig) {
@@ -33,6 +34,10 @@ const boardPresentationOnly = (previous: IssueBoard, next: BoardConfig) => {
   const binding = (board: BoardConfig) => JSON.stringify({ policy: boardObservationPolicy(board), kanban: { ...kanbanPreferences(board), visible: false } });
   return binding(previous) === binding(next);
 };
+const githubSourceIdentity = (source: GithubBoardSource) => JSON.stringify({
+  repository: source.repository, repositoryId: source.repositoryId, account: source.account, accountId: source.accountId,
+  binding: githubSourceOwner(source.binding), remote: { name: source.remote.name, fetchUrl: source.remote.fetchUrl },
+});
 export class WorkspaceRuntime {
   readonly cache: DependencyCache;
   readonly integrations: ProjectIntegrations;
@@ -94,6 +99,10 @@ export class WorkspaceRuntime {
   private observe(board: IssueBoard, issue: LocalIssue): void {
     if (board.autoRefreshPrs && this.due(issue)) queueMicrotask(() => this.refresh(board.projectId, false));
   }
+  private githubPolicy(projectId: string): string {
+    if (!this.host.githubPolicy) throw new MoguriError("github_sync_unavailable", "This host cannot capture current GitHub observation policy. No source or policy fallback was used.", 409);
+    return this.host.githubPolicy(projectId);
+  }
   private async currentGithubSource(board: IssueBoard, signal: AbortSignal): Promise<GithubBoardSource> {
     const source = board.githubSource;
     if (!source) throw new MoguriError("github_sync_source", "Enable the optional GitHub issue import with its actual repository/account before synchronizing imported cards.", 409);
@@ -101,7 +110,7 @@ export class WorkspaceRuntime {
     signal.throwIfAborted(); await this.host.assertRoot?.(board.projectId, undefined, signal);
     const actual = await this.host.githubProject(board.projectId, signal, source);
     if (actual.repository !== source.repository || actual.accountId !== source.accountId || actual.account !== source.account ||
-      JSON.stringify(actual.binding) !== JSON.stringify(source.binding)) {
+      JSON.stringify(githubSourceOwner(actual.binding)) !== JSON.stringify(githubSourceOwner(source.binding))) {
       throw new MoguriError("github_sync_source_changed", "The captured GitHub account, repository, root or policy changed. Original cards were kept; no source or account was substituted.", 409);
     }
     return source;
@@ -109,7 +118,8 @@ export class WorkspaceRuntime {
   private async readGithubIssues(board: IssueBoard, force: boolean, signal: AbortSignal, progress: (message: string) => void) {
     const original = this.host.snapshot().issues.filter((issue) => issue.projectId === board.projectId && issue.github);
     const importing = githubSyncSettings(board).importIssues && (force || Date.now() - (this.importedAt.get(board.projectId) ?? 0) >= 300_000);
-    if (!importing && !original.some((issue) => force || this.due(issue))) return { items: [] as GithubBoardIssue[], source: null, importing: false };
+    if (!importing && !original.some((issue) => force || this.due(issue))) return { items: [] as GithubBoardIssue[], source: null, importing: false, policy: null };
+    const policy = this.githubPolicy(board.projectId);
     const source = await this.currentGithubSource(board, signal), items = new Map<number, GithubBoardIssue>();
     const sourceDigest = digest(JSON.stringify(source));
     if (original.some((issue) => issue.github?.sourceDigest !== sourceDigest || issue.github.repo !== source.repository)) {
@@ -138,7 +148,7 @@ export class WorkspaceRuntime {
       const group = required.slice(offset, offset + 20);
       for (const item of await this.integrations.githubBoardIssues(source, group.map((issue) => issue.github!.number), signal)) items.set(item.number, item);
     }
-    return { items: [...items.values()], source, importing };
+    return { items: [...items.values()], source, importing, policy };
   }
   private refresh(projectId: string, force: boolean): string {
     const existing = this.refreshing.get(projectId);
@@ -176,10 +186,14 @@ export class WorkspaceRuntime {
         signal.throwIfAborted();
         const currentBoard = this.board(projectId);
         if (boardObservationSignature(currentBoard) !== boardObservationSignature(board) || this.host.closing(projectId)) throw new MoguriError("github_sync_changed", "Board configuration or ownership changed during synchronization. No stale observation was applied.", 409);
-        if (github.source) await this.currentGithubSource(board, signal);
+        if (github.source) {
+          if (github.policy !== this.githubPolicy(projectId)) throw new MoguriError("github_sync_changed", "Current GitHub read policy changed during synchronization. Original cards were kept; no old page was published.", 409);
+          await this.currentGithubSource(board, signal);
+        }
         await this.host.assertRoot?.(projectId, undefined, signal);
         if (boardObservationSignature(this.board(projectId)) !== boardObservationSignature(board) || this.host.closing(projectId) || this.host.project(projectId).path !== project.path ||
-          JSON.stringify(sourceRootSync(project.path)) !== JSON.stringify(originalRoot)) {
+          JSON.stringify(sourceRootSync(project.path)) !== JSON.stringify(originalRoot) ||
+          github.source && github.policy !== this.githubPolicy(projectId)) {
           throw new MoguriError("github_sync_changed", "The exact board/root changed before observation commit. Original cards were preserved.", 409);
         }
         const all = this.host.snapshot().issues.filter((issue) => issue.projectId === projectId), now = new Date().toISOString();
@@ -278,10 +292,10 @@ export class WorkspaceRuntime {
             remote: { name: context.remote.name, fetchUrl: context.remote.fetchUrl } };
           await this.host.githubProject(board.projectId, signal, captured);
           if (board.githubSource && this.host.snapshot().issues.some((issue) => issue.projectId === board.projectId && issue.github) &&
-            JSON.stringify(captured) !== JSON.stringify(board.githubSource)) {
+            githubSourceIdentity(captured) !== githubSourceIdentity(board.githubSource)) {
             throw new MoguriError("github_sync_source_changed", "Existing imported cards retain another exact root/account/repository binding. No source was retargeted; leave sync off until the original binding is restored.", 409);
           }
-          githubSource = captured;
+          githubSource = retainedSource ?? captured;
           if (this.board(board.projectId).revision !== command.expectedRevision || this.host.closing(board.projectId)) throw new MoguriError("board_conflict", "This board changed while reviewing its exact GitHub source. Your settings were not overwritten.", 409);
         }
         if (!presentationOnly) {

@@ -1,5 +1,195 @@
 # Session reliability and compact controls
 
+## Explicit selection and retained-request follow-up
+
+The protocol-81 follow-up starts from merged combined80 (`9cc20bd`). It reuses
+Node.js, React/OpenTUI, TypeBox and the SDK under their existing MIT/component
+notices, SQLite under its public-domain terms, and the installed Git CLI under
+GPL-2.0. No dependency, model call, credential lookup or new client queue is
+needed. Main-only CI remains unchanged.
+
+Before feature edits, the generated Phase 0 baseline passes provider fixtures
+in 1,092.49 ms (31.08 ms cancellation), SQLite in 74.33 ms (0.063 ms append
+p95, 0.60 ms rebuild), known-group PTY cancellation in 151.20 ms with zero
+observed survivors, OpenTUI updates in 17.23 ms, hidden Electron startup in
+213.92 ms (447.19 MiB, 8.05 ms scroll frames), and 2,000-file search/Git reads
+in 0.94/6.49 ms. Missing packages were restored with the locked install, with
+zero npm advisories. The baseline's unavailable live-account, Rust/Linux,
+physical guest, quality and notarization gates are not newly qualified.
+
+An explicit autonomy-selection command must retain actual user intent even
+when reselecting a legacy saved value. Loading old controls or editing a model,
+window, budget or draft must not upgrade bounded consent. New selections and
+explicitly consented defaults must survive subsequent turns, competing clients
+and restart; hard denials and execution/budget/root restrictions still win.
+
+Public retained results must have discoverable original identities, not require
+models to invent opaque step IDs. Reads bind the actual profile/session,
+turn/step/call and operation revision, with digest-pinned UTF-8 continuation.
+Hooks, private roles, another session and user-console input/output are excluded.
+Deletion cannot be repaired by replaying the source operation.
+
+Snapshot recovery must not leave a healthy event socket permanently
+disconnected, apply an old connection's late snapshot, or indefinitely postpone
+a command acknowledgement behind streaming refreshes. Capability deadlines are
+service-owned; a shorter generic transport timer is not a capability failure.
+An uncertain mutation is inspected by its exact original command identity,
+never resent. A retained receipt is acknowledged as committed; pending and
+unknown outcomes remain distinguishable and preserve local drafts.
+An explicit service error stays an error, even if an earlier intake receipt
+exists. Only a missing/malformed transport acknowledgement is recovered from
+that receipt; a failed stop journal or rollback cannot become success.
+
+The Electron custom-protocol proxy shares that read deadline and explicitly
+forwards the read-only original-command receipt route. A transient initial
+snapshot failure may authenticate the same exact profile over its event socket;
+authentication and missing-profile failures cannot fall back to Default.
+Draft autosave resumes only a save rejected as disconnected **before dispatch**,
+against the freshly received original draft revision. A newer peer edit becomes
+a visible conflict. Unknown dispatched saves, input submissions, paste captures,
+tool/Git effects and approvals are never replayed by this recovery path.
+
+Late verified SSH frames retain the original tool's raw-result grant as well
+as its compact text, binding actual profile/session/turn/model-step/call.
+Paging/reopen uses those bytes, not a live file reread. The original partial
+turn and its accounting remain partial; reconciliation does not resume a model
+or promote late output into successful completion.
+
+Protocol 81 requires separate `session_request_recovery_schema` and
+`builtin_git_schema` markers. Its atomic migration preserves all six combined80
+lineage markers, ciphertext, original grants/receipts and unknown charges.
+Generated interrupted migration/reopen, stale/disconnected/concurrent clients,
+late acknowledgements, original result ownership and actual TUI/hidden desktop
+flows are required, together with the independently installed SDK. Changed
+worker bytes require their own qualification, not historical protocol80 receipts.
+
+Managed Git rename retains its captured metadata revision and appends the tagged
+`workspace.saved`, matching change-set branch and terminal Git/job records
+atomically. A lost metadata acknowledgement remains partial until exact user
+inspection and metadata-only reconciliation; no Git effect is replayed.
+Managed checkout changes cannot move an existing captured change set. Read-only
+Git previews also suppress index-stat refresh, preserving the original index.
+
+### Follow-up qualification
+
+The final runtime correction is `f0cc4bec5e676051b7dba3f2f9439ce77a7e7b67`;
+subsequent commits change only generated fixtures and documentation. The complete
+final serial run uses `26689184e86ef7ea4c8d2c25d5f6e52afcb0f6f4`.
+Current compiled guest hashes still match the
+[original protocol81 physical receipt](sendbox-0.2.4-qualification.md#protocol-81-session-and-git-follow-up).
+Historical or deliberately stopped qualification attempts are not counted.
+
+| Surface | Observed result |
+| --- | --- |
+| Complete serial Node suite, including actual native TUI | **1,975 passed, 15 explicit physical-native skips / 1,990 total**, zero failures, 25.95 min |
+| Complete hidden source desktop | **284 passed, 3 explicit package/native skips**, zero failures, 8.5 min |
+| Repeated draft/modal/peer-terminal acknowledgement flows | **55/55**, 1.2 min |
+| Exact service-failure/stop-journal/rollback/reconnect and decision cases | **56/56** |
+| Original predecessor consent and combined80/81 migration/reopen cases | **70/70**, 22,376.49 ms |
+| Final generated recognizer marker/cancellation/capture and hidden controls | **20/20 Node**, **9/9 hidden desktop**; no production speech change |
+| Independently installed packed SDK/types/browser/React/Node/CLI and actual workers | **PASS**, including new Git/receipt/result/managed-reopen cases and **12/12** owned-worker probes |
+| Generated retention and real hidden Ghostty primitive | **PASS**, 500 events/250 retained artifacts in 178.36 ms; 108-by-24 acknowledgement in 24.80 ms |
+| Generated owned SSH and isolated worktree primitives | **PASS**, 148.71/101.64 ms |
+| Exact current physical SendBox qualification | **7/7 gates**, 23,075.63 ms, original owned guests absent |
+| Strict types, production build, root and fresh external-consumer audits | **PASS**, zero reported vulnerabilities |
+
+Legacy fixture creation retains actual predecessor controls rather than
+relabeling a new explicit selection. The generated recognizer now writes its
+complete PID marker before advertising readiness; an empty concurrent read
+previously became PID zero and falsely tested the caller's process group.
+The cleanup assertions still require the exact positive owned PID to be absent.
+No microphone, personal account or paid inference was used.
+
+Full logs remain in the session's `files/` as `verified-unit-81.log`,
+`qualified-desktop-81.log`, `qualified-packed-sdk-81.log` and
+`qualified-native-81.log`. The exact native receipt remains at its original
+repository-local path above. Nonfatal packed-consumer deprecations
+(`whatwg-encoding`, `node-domexception`) and its explicitly reviewed Moguri
+postinstall notice remain visible. Main-only CI's account billing/spending
+eligibility failure and runner notices are recorded with the native evidence;
+no working-branch CI or personal authorization was triggered.
+
+## Push-to-talk audio onset
+
+The Ctrl+Space follow-up reuses the existing browser AudioContext/AudioWorklet
+and local SDK/capture lease with Node/React/TypeBox under their existing MIT
+notices; the installed NeMo-Speech runtime and model licenses are unchanged.
+There is no dependency, protocol, event, migration or recognizer/vocabulary
+change. No real microphone, personal account or model weights are used to
+qualify it.
+
+The generated red regressions reproduce two independent causes of clipped
+opening speech: no microphone starts while an unrelated draft save is awaiting
+its acknowledgement, and the complete first 250 ms of input is lost while the
+audio worklet initializes after the device has already opened.
+
+Only the actual recording gesture prepares a silent, input-free processing
+context, in parallel with admission. No microphone opens before the original
+service capture and fresh desktop permission check. The normalized graph is
+ready before device acquisition, and the returned stream connects synchronously
+before permission-release IPC or any other await. No initial PCM is truncated
+or replayed. First-time OS authorization remains explicit; an already granted
+permission does not repeat the OS prompt or a redundant post-prompt snapshot.
+
+Dictation binds its original local selection without awaiting an ordinary
+autosave. Existing autosave serialization and foreign-revision conflicts still
+protect edits. A pending input submission or attachment capture is refused
+rather than arming a delayed microphone. The SDK's ephemeral capture admission
+returns its exact service acknowledgement without waiting for a full conversation
+snapshot; job state continues through the shared event stream and `jobs.wait`.
+CLI/TUI use that same SDK contract, not a second capture queue.
+
+Release-before-admission, blur, sleep, profile/session change and failure abort
+the exact prepared graph and owned capture. A late service lease or device
+cannot open another microphone. Existing two-click/button, held shortcut,
+streaming/flush limits, cleanup errors and draft preservation remain distinct.
+The tests inspect real generated opening PCM and held-save timing, not a
+constant fake recognizer's final sentence as a proxy for captured audio.
+
+Before feature edits, all six generated Phase 0 executable groups pass:
+providers **1,095.06 ms** (32.71 ms cancellation), SQLite **66.95 ms**
+(0.0656 ms append p95), known-group PTY **159.98 ms** (152.30 ms cancellation,
+zero observed survivors), OpenTUI **1,066.20 ms**, hidden Electron **591.79 ms**
+(176.81 ms cold start, 442.88 MiB), and filesystem/Git **93.13 ms**.
+The generic initial-checkpoint unavailable diagnostics are not newly qualified
+live-provider, Rust/Linux, release, quality or personal-microphone gates.
+
+### Onset qualification
+
+Source `7a63f69913e9d1332f06146e91adb9663b66dd1e` passes **53 related Node
+tests**, **31 actual hidden desktop cases** (52.7 s), and **12 repeated
+cold-onset/held-save/failed-processor/release cases** (21.1 s), without skips or
+failures in those selectors. Strict types, build and the fresh independently
+installed packed SDK also pass, including its **12 actual installed-worker
+probes**. Root and external-consumer audits report zero vulnerabilities.
+
+The old build captures **zero** opening probe samples when worklet startup is
+delayed by 650 ms. With this fix, three independent runs preserve **3,214 to
+3,336** above-threshold opening samples in the first 4,096 normalized samples,
+despite the same processor delay and a separately cold **1,000-ms** recognizer.
+The generated tone exists for only its first 250 ms, so later silence cannot
+pass this check. A deliberately unacknowledged draft save previously prevents
+all microphone acquisition; the fixed focus/key-gesture-to-recording observations
+are **228.07 to 241.10 ms** while that same save remains blocked. These are
+generated-device observations, not a promise about OS prompts or personal
+hardware.
+
+Release before service admission opens **zero microphones** and closes the
+exact silent preparation. An unavailable processor also opens no microphone,
+closes its context, cancels the real original job and preserves draft text.
+Pending input intake, concurrent drafts, actual controller SIGKILL, unchanged
+stream/restart/no-replay behavior and both main/side composer interactions are
+covered by the related suites. No real microphone, weights or live speech
+accuracy was exercised; this repairs lost onset audio rather than rewriting
+proper names or claiming new recognizer accuracy.
+
+Logs are retained in the session's `files/` as `ptt-onset-red.log`,
+`ptt-onset-repeated.log`, `ptt-onset-related-unit.log`,
+`ptt-onset-related-desktop.log` and `ptt-onset-packed-sdk.log`.
+The worker, remote bridge, MCP worker and data-worker hashes remain exactly the
+protocol81 physical payload recorded above; no native receipt was relabelled.
+There is no new packaged/notarized app or personal authorization claim.
+
 ## Change contract
 
 This owner-requested follow-up covers Local tool and GitHub read failures,

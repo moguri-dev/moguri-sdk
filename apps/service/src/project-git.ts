@@ -5,7 +5,7 @@ import { assertFolderName, validateProjectPath } from "./project-policy.ts";
 import { runProgram } from "./program.ts";
 
 const git = (root: string, args: string[], signal: AbortSignal, filters: string[] = []) => runProgram("git", [
-  "--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false",
+  "--no-pager", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false", "-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false",
   ...filters, "--literal-pathspecs", ...args,
 ], {
   cwd: root, signal, label: "Read workspace Git state", timeoutMs: 30_000, maxBytes: 512 * 1024,
@@ -22,6 +22,9 @@ export async function gitReadFilters(root: string, signal: AbortSignal): Promise
     drivers.add(match[1]!);
   }
   return [...drivers].flatMap((driver) => ["-c", `filter.${driver}.smudge=`, "-c", `filter.${driver}.clean=`, "-c", `filter.${driver}.process=`, "-c", `filter.${driver}.required=false`]);
+}
+export async function readGit(root: string, args: string[], signal: AbortSignal): Promise<string> {
+  return git(root, args, signal, await gitReadFilters(root, signal));
 }
 
 export async function readGitBinding(root: string, signal: AbortSignal): Promise<{ gitCommonDir: string; head: string; branch: string }> {

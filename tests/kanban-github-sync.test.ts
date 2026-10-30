@@ -5,6 +5,7 @@ import { setupFixture, waitFor } from "./fixture.ts";
 import { githubBoardFixture } from "./fixtures/github-board.ts";
 import { ProjectIntegrations } from "../apps/service/src/project-integrations.ts";
 import { startService } from "../apps/service/src/server.ts";
+import { mkdir, rename, rmdir } from "node:fs/promises";
 
 test("hiding a synced board preserves its captured source and cards without a new GitHub read even after presentation changes", async () => {
   const fixture = await githubBoardFixture();
@@ -19,8 +20,96 @@ test("hiding a synced board preserves its captured source and cards without a ne
     assert.deepEqual(hidden.board.githubSource, original.board.githubSource);
     assert.deepEqual(hidden.issues, original.issues);
     assert.equal(fixture.calls.length, calls); assert.equal(fixture.reads.length, reads);
-    assert.equal((await fixture.refresh()).status, "failed");
+    assert.equal((await fixture.refresh()).status, "completed");
     assert.deepEqual((await fixture.sdk.issues.board(fixture.projectId)).board.githubSource, original.board.githubSource);
+  } finally { await fixture.close(); }
+});
+
+test("a retained board uses fresh read policy without retargeting its source or requiring an old settings epoch", async () => {
+  const fixture = await githubBoardFixture();
+  try {
+    await fixture.configure(true); assert.equal((await fixture.refresh()).status, "completed");
+    const original = await fixture.sdk.issues.board(fixture.projectId), settings = fixture.sdk.settings.get()!;
+    await fixture.sdk.settings.update({ ...settings.values, permissions: { ...settings.values.permissions, tools: [
+      ...settings.values.permissions.tools, { id: "generated-unrelated-read-policy", tool: "read_file", pathPrefix: "", decision: "ask" },
+    ] } }, settings.revision);
+    fixture.state.cards[0]!.draft = false;
+    assert.equal((await fixture.refresh()).status, "completed");
+    const current = await fixture.sdk.issues.board(fixture.projectId);
+    assert.deepEqual(current.board.githubSource, original.board.githubSource);
+    assert.equal(current.issues[0]?.github?.sourceDigest, original.issues[0]?.github?.sourceDigest);
+    assert.equal(current.issues[0]?.phaseId, "review");
+    await fixture.configure(false); await fixture.configure(true);
+    assert.equal((await fixture.refresh()).status, "completed");
+    assert.deepEqual((await fixture.sdk.issues.board(fixture.projectId)).board.githubSource, original.board.githubSource);
+  } finally { await fixture.close(); }
+});
+
+test("a presentation revision during an owned issue read does not invalidate its unchanged root and source", async () => {
+  const fixture = await githubBoardFixture(), gate = Promise.withResolvers<void>(); let entered = false;
+  try {
+    await fixture.configure(true); assert.equal((await fixture.refresh()).status, "completed");
+    const original = await fixture.sdk.issues.board(fixture.projectId);
+    fixture.state.beforeRead = async (query) => { if (query.includes("issues(")) { entered = true; await gate.promise; } };
+    const job = await fixture.sdk.issues.refresh(fixture.projectId); await waitFor(() => entered);
+    const configuration = (await fixture.sdk.projects.configuration(fixture.projectId)).configuration;
+    await fixture.sdk.projects.organize(fixture.projectId, { folderId: configuration.folderId, color: "#3b82f6", order: configuration.order }, configuration.revision);
+    fixture.state.cards[0]!.draft = false; gate.resolve();
+    assert.equal((await fixture.sdk.jobs.wait(job.id!)).status, "completed");
+    const current = await fixture.sdk.issues.board(fixture.projectId);
+    assert.deepEqual(current.board.githubSource, original.board.githubSource);
+    assert.equal(current.issues[0]?.phaseId, "review");
+  } finally { gate.resolve(); await fixture.close(); }
+});
+
+test("an actual permission change during a read rejects its late page, while a later newly allowed read can recover", async () => {
+  const fixture = await githubBoardFixture(), gate = Promise.withResolvers<void>(); let entered = false;
+  try {
+    await fixture.configure(true); assert.equal((await fixture.refresh()).status, "completed");
+    const original = await fixture.sdk.issues.board(fixture.projectId);
+    fixture.state.beforeRead = async (query) => { if (query.includes("issues(")) { entered = true; await gate.promise; } };
+    const job = await fixture.sdk.issues.refresh(fixture.projectId); await waitFor(() => entered);
+    const settings = fixture.sdk.settings.get()!;
+    await fixture.sdk.settings.update({ ...settings.values, permissions: { ...settings.values.permissions, tools: [
+      ...settings.values.permissions.tools, { id: "generated-deny-board-read", tool: "github", pathPrefix: "", decision: "deny" },
+    ] } }, settings.revision);
+    fixture.state.cards[0]!.draft = false; gate.resolve();
+    assert.equal((await fixture.sdk.jobs.wait(job.id!)).status, "failed");
+    assert.deepEqual((await fixture.sdk.issues.board(fixture.projectId)).issues, original.issues);
+    const reads = fixture.reads.length, calls = fixture.calls.length;
+    assert.equal((await fixture.refresh()).status, "failed");
+    assert.equal(fixture.reads.length, reads); assert.equal(fixture.calls.length, calls);
+    await fixture.sdk.settings.update(settings.values, fixture.sdk.settings.get()!.revision);
+    assert.equal((await fixture.refresh()).status, "completed");
+    assert.deepEqual((await fixture.sdk.issues.board(fixture.projectId)).board.githubSource, original.board.githubSource);
+    assert.equal((await fixture.sdk.issues.board(fixture.projectId)).issues[0]?.phaseId, "review");
+  } finally { gate.resolve(); await fixture.close(); }
+});
+
+for (const changed of ["root", "remote", "folder-policy", "environment"] as const) test(`a changed ${changed} cannot borrow a board's original read ownership`, async () => {
+  const fixture = await githubBoardFixture();
+  try {
+    await fixture.configure(true); assert.equal((await fixture.refresh()).status, "completed");
+    const original = await fixture.sdk.issues.board(fixture.projectId), calls = fixture.calls.length, reads = fixture.reads.length;
+    if (changed === "root") {
+      await rename(fixture.root, `${fixture.root}-original`);
+      try {
+        await mkdir(fixture.root);
+        try { assert.equal((await fixture.refresh()).status, "failed"); }
+        finally { await rmdir(fixture.root); }
+      } finally { await rename(`${fixture.root}-original`, fixture.root); }
+    } else {
+      if (changed === "remote") fixture.git(["remote", "set-url", "origin", "git@github.com:generated-owner/other.git"]);
+      if (changed === "folder-policy") {
+        const configuration = (await fixture.sdk.projects.configuration(fixture.projectId)).configuration;
+        await fixture.sdk.projects.configure(fixture.projectId, { ...configuration.values, deniedFolders: ["generated-private"] }, configuration.revision);
+      }
+      if (changed === "environment") await fixture.sdk.command({ type: "policy.set", allowedEnvs: ["Remote"] });
+      assert.equal((await fixture.refresh()).status, "failed");
+    }
+    assert.equal(fixture.calls.length, calls); assert.equal(fixture.reads.length, reads);
+    const current = await fixture.sdk.issues.board(fixture.projectId);
+    assert.deepEqual(current.issues, original.issues); assert.deepEqual(current.board.githubSource, original.board.githubSource);
   } finally { await fixture.close(); }
 });
 
@@ -249,6 +338,8 @@ test("an actual service restart retains exact source ownership and imports updat
   let restarted: Awaited<ReturnType<typeof startService>> | undefined, peer: MoguriSdk | undefined;
   try {
     await fixture.configure(true); assert.equal((await fixture.refresh()).status, "completed");
+    const configuration = (await fixture.sdk.projects.configuration(fixture.projectId)).configuration;
+    await fixture.sdk.projects.organize(fixture.projectId, { folderId: configuration.folderId, color: "#3b82f6", order: configuration.order }, configuration.revision);
     const before = await fixture.sdk.issues.board(fixture.projectId), oldJobs = new Set(fixture.service.controller.snapshot().jobs.map((job) => job.id));
     fixture.sdk.disconnect(); await fixture.service.close();
     fixture.state.cards[0]!.draft = false;

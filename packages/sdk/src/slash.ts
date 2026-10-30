@@ -10,6 +10,7 @@ import { continueWorkInput, KanbanSourceSchema, kanbanPreferences } from "../../
 import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
 import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } from "../../protocol/src/model.ts";
 import { themePalettes, type Appearance } from "../../protocol/src/preferences.ts";
+import { ToolPreferencesSchema, effectiveToolPreferences, toolMethods } from "../../protocol/src/tool-preferences.ts";
 import { parseSlashInput, type SlashResult } from "../../protocol/src/queued-commands.ts";
 import { sessionSlash, sessionSlashCommands } from "./session-slash.ts";
 
@@ -42,7 +43,15 @@ export const slashCommands = [
   { name: "security", description: "Investigate and fix reachable security weaknesses within existing authority", argument: "[PROMPT]" },
   { name: "performance", description: "Measure and improve current-code performance without changing outcomes", argument: "[PROMPT]" },
   { name: "debug", description: "Debug current code and the session-owned app/logs, using approved DAP when available", argument: "[PROMPT]" },
+  { name: "impeccable", description: "Design and implement a beautiful, accessible UI within the actual task and policy", argument: "[PROMPT]" },
+  { name: "continue", description: "Continue the actual retained task after an error or interruption, without replaying unknown effects" },
+  { name: "orchestrate", description: "Coordinate the explicit task across actual owned child sessions within existing limits", argument: "PROMPT" },
+  { name: "spawn", description: "Create an actual agent child and atomically queue its exact assignment", argument: "PROMPT" },
+  { name: "spar", description: "Ask focused questions to understand the request, then work on the agreed direction", argument: "PROMPT" },
+  { name: "critique", description: "Critique an idea's assumptions, edge cases and failure modes without edits", argument: "PROMPT" },
+  { name: "roast-me", description: "Give a sharper constructive critique of the work, never personal abuse", argument: "PROMPT" },
   { name: "tools", description: "Discover the actual scoped typed tool catalogue without inference", argument: "[OFFSET] [QUERY]" },
+  { name: "tool-preferences", description: "View or rank equivalent available integration methods; ranking never grants permission", argument: "[METHOD METHOD METHOD METHOD|reset]" },
   { name: "home", description: "Inspect this Local chat's captured Home and original writer ownership", argument: "[status|acknowledge WRITER_ID REVISION confirm-inspected]" },
   { name: "firewall", description: "Manage actual-user Local website allowances at session, project or profile scope", argument: "[list|add session|project|global HOST_ORIGIN|remove ID]" },
   { name: "tool", description: "Admit an exact approved Local user tool job; model-only capabilities stay blocked", argument: "NAME SCHEMA_SHA ARGUMENTS_JSON" },
@@ -63,7 +72,7 @@ export const slashCommands = [
   { name: "attach-github", description: "Preview a typed GitHub issue/PR reference", argument: "[gh-cli] [SHA256] URL" },
   { name: "attach-session", description: "Preview authorized session text without controlling the source", argument: "[SHA256] SESSION_ID" },
   { name: "attached", description: "Inspect an attachment snapshot", argument: "ATTACHMENT_ID" },
-  { name: "suggestions", description: "Preview global usage gaps by default, or explicitly select this session's scope", argument: "[all|session|run DIGEST|run-all DIGEST]" },
+  { name: "suggestions", description: "Review and generate suggestions for this actual project; global scope stays explicit", argument: "[all|session|run DIGEST|run-all DIGEST]" },
   { name: "skills", description: "Find and read fresh skills through the shared gateway, without installation or tool permission", argument: "[find QUERY|read ID SHA|sources|import SKILL.md]" },
   { name: "meta", aliases: ["metachat"], description: "Open a settings-focused chat with reviewed proposals", argument: "[REQUEST]" },
   { name: "attention", description: "Show questions, approvals and finished work; mark read without answering", argument: "[read ID]" },
@@ -100,6 +109,7 @@ export const slashCommands = [
   { name: "capability", description: "Inspect historical bytes, explicitly enable/disable, roll back disabled or insert a reviewed skill", argument: "[history ID|version ID SHA|enable/disable ID REV confirm-state|rollback ID REV SHA confirm-rollback|use ID SHA]" },
   { name: "containment", description: "Inspect process-group limits or require qualified SendBox for whole-session containment", argument: "[status|require-sandbox confirm-policy]" },
   { name: "cache", description: "Inspect verified Local dependency plans and explicit private registry scopes", argument: "[inspect MANAGER|prepare MANAGER SHA accept-metadata|install MANAGER SHA accept-metadata replace-node-modules|registries|registry-save REV ID|- JSON|registry-remove ID REV confirm-remove|token ID|clear-token ID]" },
+  { name: "git", description: "Built-in exact-root Git reads and reviewed branch, stage, commit, revert and push operations", argument: "[status|branches|log|show SHA|diff [staged]|preview ACTION_JSON|execute confirm-write JSON|history|read/wait ID]" },
   { name: "github", description: "Repository discovery, project PRs/issues and reviewed GitHub writes", argument: "[repos [public QUERY]|project|issues|pulls|source issue|pull NUMBER|start issue|pull NUMBER SHA|browse JSON|preview ACTION_JSON|execute confirm-write JSON|history]" },
   { name: "linear", description: "Reviewed Linear issue/project/comment workflows and explicit two-way local ticket sync", argument: "[status|import [CURSOR]|catalog JSON|issue UUID|preview JSON|execute SHA confirm-write JSON|history|read/wait ID|stop ID confirm-stop|token]" },
   { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
@@ -183,6 +193,15 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "resume":
       if (command.argument) throw new ClientError("resume_input", "Use /resume for this actual session after inspecting original effects.");
       await sdk.command({ type: "session.resume", sessionId }); return { kind: "ok", message: "Undispatched work resumed. Terminal commands and unknown effects were not replayed." };
+    case "tool-preferences": {
+      const current = sdk.settings.get();
+      if (!current) throw new ClientError("settings_missing", "Connect to this profile's shared settings before reviewing or changing the tool order.");
+      if (!command.argument) return { kind: "text", text: `Integration method order:\n${effectiveToolPreferences(current.values.toolPreferences).order
+        .map((id, index) => `${index + 1}. ${toolMethods.find((method) => method.id === id)!.name} (${id})`).join("\n")}\n\n/tool-preferences METHOD METHOD METHOD METHOD ranks all four IDs, or use reset. This is advice for available equivalent integrations, never permission, account selection or a retry of an uncertain write.` };
+      if (command.argument === "reset") await sdk.settings.reset("toolPreferences", current.revision);
+      else await sdk.settings.update({ ...current.values, toolPreferences: parse(ToolPreferencesSchema, { order: command.argument.trim().split(/\s+/) }) }, current.revision);
+      return { kind: "ok", message: "Shared integration method order saved. Permissions, accounts and execution environments are unchanged." };
+    }
     case "theme": {
       const settings = sdk.settings.get();
       if (!settings) throw new ClientError("settings_missing", "Connect to this profile's settings before selecting a theme.");
@@ -280,7 +299,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "firewall": case "home": case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
       return toolingSlash(sdk, session.id, command.name, command.argument);
-    case "review": case "security": case "performance": case "debug": {
+    case "review": case "security": case "performance": case "debug":
+    case "impeccable": case "continue": case "orchestrate": case "spar": case "critique": case "roast-me": {
+      if (command.name === "continue" && command.argument) throw new ClientError("continue_input", "Use /continue without a prompt to continue this actual retained task.");
+      if (["orchestrate", "spar", "critique", "roast-me"].includes(command.name) && !command.argument.trim()) throw new ClientError("workflow_prompt", `Use /${command.name} PROMPT. No task or user idea was invented.`);
       const consume = !session.draft.text || session.draft.text.trim() === text.trim();
       await sdk.workflows.start(session.id, command.name, command.argument, consume ? session.draft.revision : undefined);
       return { kind: "ok", message: `Queued /${command.name} through this session's existing model, environment, budget and permission policy.` };
@@ -316,6 +338,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       };
       throw new ClientError("agent_terminal_input", "Use /agent-terminal list [SEQUENCE ID] or /agent-terminal read COMMAND_ID [UTF8_OFFSET|tail]. No user console was accessed.");
     }
+    case "git":
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument, client);
     case "knowledge":
@@ -961,8 +984,8 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         const created = await sdk.suggestions.generate(action === "run-all" ? null : session.id, hash, action === "run-all", true);
         return { kind: "session", sessionId: created.id!, side: false };
       }
-      if (command.argument && command.argument !== "all" && command.argument !== "session") throw new ClientError("suggestion_scope", "Use /suggestions for global gaps, /suggestions session, or run/run-all with the reviewed digest.");
-      const allProjects = command.argument !== "session";
+      if (command.argument && command.argument !== "all" && command.argument !== "session") throw new ClientError("suggestion_scope", "Use /suggestions for this actual project (or project-free scope), /suggestions all for an explicit global review, or run/run-all with its reviewed digest.");
+      const allProjects = command.argument === "all";
       const { preview } = await sdk.suggestions.preview(allProjects ? null : session.id, allProjects);
       return client === "desktop" ? { kind: "panel", panel: "Suggestions", allProjects } : { kind: "text", text: JSON.stringify(preview, null, 2) + `\n\nOnly after scope review: /suggestions ${allProjects ? "run-all" : "run"} ${preview.digest}` };
     }
@@ -995,6 +1018,12 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "subsession": {
       const result = await sdk.sessions.spawn(sessionId, "agent", command.argument || undefined);
+      return { kind: "session", sessionId: result.id!, side: false };
+    }
+    case "spawn": {
+      if (!command.argument.trim()) throw new ClientError("spawn_prompt", "Use /spawn PROMPT. An empty child assignment was not created.");
+      const result = await sdk.sessions.spawnPrompt(sessionId, command.argument,
+        session.draft.text.trim() === text.trim() ? session.draft.revision : undefined);
       return { kind: "session", sessionId: result.id!, side: false };
     }
     case "terminal":

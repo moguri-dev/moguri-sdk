@@ -5,6 +5,7 @@ import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-co
 import { executeTool } from "./tools.ts";
 import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
 import { isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
+import { retainedToolText } from "../../../packages/protocol/src/tooling.ts";
 import { localProvider, localModelFetch } from "./local-provider.ts";
 import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
 import { streamMetrics } from "./stream-metrics.ts";
@@ -13,6 +14,7 @@ import { executeRemoteMcp } from "./remote-mcp-runtime.ts";
 import { executeCompoundValidation } from "./compound-validation.ts";
 import { discoverTools } from "./tool-catalog.ts";
 import { OwnedDebugRuntime } from "./owned-debug.ts";
+import { resolveDirectMcpCall, modelToolName } from "./direct-mcp-tools.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -211,7 +213,7 @@ async function run(start: WorkerStart): Promise<void> {
           await finish("partial", "The provider deferred completion. Deferred continuation is not supported; no result or retry is assumed.");
           return;
         }
-        const calls = toolCalls(message);
+        const calls = toolCalls(message).map((call) => resolveDirectMcpCall(call, boundary.directMcpTools ?? []));
         if (message.stopReason === "length") {
           await finish("partial", `The model reached this response's ${boundary.maxTokens}-token output limit.${model.reasoning ? " Reasoning counts toward this limit." : ""}${calls.length ? " No tools from this incomplete response were executed." : ""} Review the partial response before continuing.`);
           return;
@@ -263,7 +265,9 @@ async function run(start: WorkerStart): Promise<void> {
           incompleteCleanup ||= result.outcome === "partial";
           const retained = await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call, ...result });
           if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The original tool result was not durably acknowledged; no continuation was authorized.");
-          context.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: result.text }], isError: result.isError, timestamp: Date.now() });
+          context.push({ role: "toolResult", toolCallId: call.id, toolName: modelToolName(call),
+            content: [{ type: "text", text: retained.value.source ? retainedToolText(result.text, retained.value.source) : result.text }],
+            isError: result.isError, timestamp: Date.now() });
           if (incompleteCleanup) throw new Error("Tool side effects are partial or cleanup is unconfirmed. Inspect the partial tool result before continuing.");
           if (result.endTurn) {
             if (call.name !== "project_work" || call.arguments.action !== "publish" || result.isError || result.outcome !== "completed") throw new Error("Only an acknowledged project-work publication can end this turn.");

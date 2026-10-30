@@ -1,4 +1,4 @@
-import { GLOBAL_PROFILE_ID, isRecord, PROFILE_ID, PROTOCOL_VERSION, type Command, type CommandEnvelope, type CommandResult, type Connection, type Snapshot, type StoredEvent } from "../../protocol/src/index.ts";
+import { GLOBAL_PROFILE_ID, isRecord, PROFILE_ID, PROTOCOL_VERSION, QUERY_TIMEOUT_MS, QUERY_REPLY_GRACE_MS, type Command, type CommandEnvelope, type CommandResult, type Connection, type Snapshot, type StoredEvent } from "../../protocol/src/index.ts";
 
 export interface ClientState { snapshot: Snapshot | null; status: "connecting" | "connected" | "disconnected"; error: string | null; events: StoredEvent[] }
 function isSnapshot(value: unknown, profileId: string): value is Snapshot {
@@ -13,6 +13,7 @@ export class MoguriClient {
   private state: ClientState = { snapshot: null, status: "connecting", error: null, events: [] };
   private listeners = new Set<() => void>();
   private socket?: WebSocket;
+  private readySocket?: WebSocket;
   private timer?: ReturnType<typeof setTimeout>;
   private reconnect?: ReturnType<typeof setTimeout>;
   private disposed = false;
@@ -34,12 +35,15 @@ export class MoguriClient {
     const generation = ++this.generation;
     await this.refresh();
     if (this.disposed || generation !== this.generation) throw new ClientError("connection_cancelled", "This original client opening was cancelled. No replacement connection or input was used.");
-    if (!this.state.snapshot && this.refreshError instanceof ClientError) throw this.refreshError;
+    if (!this.state.snapshot && this.refreshError instanceof ClientError && !(this.refreshError.status !== undefined &&
+      (this.refreshError.status >= 500 || [408, 429].includes(this.refreshError.status)))) throw this.refreshError;
     this.openSocket();
   }
-  protected async request(path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
+  protected async request(path: string, body?: unknown, signal?: AbortSignal, connection = this.connection): Promise<unknown> {
     signal?.throwIfAborted();
-    const connection = this.connection, requestId = path === "/v1/query" && signal ? crypto.randomUUID() : null;
+    const requestId = path === "/v1/query" ? crypto.randomUUID() : null;
+    const deadline = AbortSignal.timeout(requestId ? QUERY_TIMEOUT_MS + QUERY_REPLY_GRACE_MS : 20_000);
+    const requested = signal ? AbortSignal.any([signal, deadline]) : deadline;
     const headers = { Authorization: `Bearer ${connection.token}`, "X-Moguri-Profile": this.profileId, ...(body ? { "Content-Type": "application/json" } : {}) };
     let cancellation: Promise<ClientError | null> | undefined;
     const cancel = () => {
@@ -56,75 +60,107 @@ export class MoguriClient {
         }
       })();
     };
-    signal?.addEventListener("abort", cancel, { once: true });
+    requested.addEventListener("abort", cancel, { once: true });
     try {
       const response = await fetch(`${connection.baseUrl}${path}`, {
         method: body ? "POST" : "GET", headers: { ...headers, ...(requestId ? { "X-Moguri-Query-Id": requestId } : {}) },
-        ...(body ? { body: JSON.stringify(body) } : {}), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
+        ...(body ? { body: JSON.stringify(body) } : {}), signal: requested,
       });
       const result: unknown = await response.json();
       signal?.throwIfAborted();
       if (!response.ok) {
         const error = isRecord(result) && isRecord(result.error) ? result.error : undefined;
-        throw new ClientError(typeof error?.code === "string" ? error.code : "request_failed", typeof error?.message === "string" ? error.message : `Service request failed (${response.status}).`);
+        throw new ClientError(typeof error?.code === "string" ? error.code : "request_failed", typeof error?.message === "string" ? error.message : `Service request failed (${response.status}).`, response.status);
       }
       return result;
     } catch (error) {
       const failed = cancellation ? await cancellation : null;
       if (failed) throw failed;
+      if (requestId && deadline.aborted && !signal?.aborted) throw new ClientError("query_timeout", "This source read exceeded its service deadline and delivery allowance. No state was changed or source operation replayed. Inspect the selected source and retry the read explicitly.");
       throw error;
-    } finally { signal?.removeEventListener("abort", cancel); }
+    } finally { requested.removeEventListener("abort", cancel); }
+  }
+  async commandReceipt(command: Command, id: string): Promise<{ status: "committed"; result: CommandResult } | { status: "pending" | "unknown" }> {
+    return this.readReceipt({ id, profileId: this.profileId, command }, this.connection);
+  }
+  private async readReceipt(envelope: CommandEnvelope, connection: Connection): Promise<{ status: "committed"; result: CommandResult } | { status: "pending" | "unknown" }> {
+    const value = await this.request("/v1/command-receipt", envelope, undefined, connection);
+    if (!isRecord(value) || !["committed", "pending", "unknown"].includes(String(value.status)) ||
+      value.status === "committed" && !isRecord(value.result)) throw new ClientError("command_receipt", "The exact original command receipt was not valid. No write was retried.");
+    return value as { status: "committed"; result: CommandResult } | { status: "pending" | "unknown" };
+  }
+  private async synchronizeCommand(): Promise<void> {
+    await this.refreshTask;
+    if (!this.disposed) await this.refresh();
   }
   async command(command: Command, id: string = crypto.randomUUID()): Promise<CommandResult> {
     if (this.state.status !== "connected") throw new ClientError("disconnected", "Reconnect to Moguri before changing state. Your local edit has not been sent.");
+    const connection = this.connection, envelope: CommandEnvelope = { id, profileId: this.profileId, command: structuredClone(command) };
+    let result: unknown;
     try {
-      const envelope: CommandEnvelope = { id, profileId: this.profileId, command };
-      const result = await this.request("/v1/commands", envelope);
-      await this.refresh();
+      result = await this.request("/v1/commands", envelope, undefined, connection);
       if (!isRecord(result)) throw new Error("Invalid command response.");
-      return result as CommandResult;
     } catch (error) {
-      await this.refresh();
-      throw error;
+      if (error instanceof ClientError && error.code !== "request_failed") { await this.synchronizeCommand(); throw error; }
+      let receipt: Awaited<ReturnType<MoguriClient["readReceipt"]>> | undefined;
+      try {
+        const current = this.connection;
+        if (current === connection || connection.storeId && current.storeId === connection.storeId) receipt = await this.readReceipt(envelope, current);
+      } catch (inspection) {
+        console.error("Moguri could not inspect the original command receipt:", inspection instanceof ClientError ? inspection.code : "transport_unavailable");
+      }
+      if (receipt?.status === "committed") result = receipt.result;
+      else {
+        await this.synchronizeCommand();
+        throw new ClientError(receipt?.status === "pending" ? "command_pending" : "command_outcome_unknown",
+          `Command ${id} ${receipt?.status === "pending" ? "is still pending in its original service" : "has no confirmed outcome"}. No write was resent. Inspect its exact command receipt before another attempt; local edits are preserved.`);
+      }
     }
+    await this.synchronizeCommand();
+    return result as CommandResult;
   }
   refresh(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     if (this.refreshTask) { this.refreshAgain = true; return this.refreshTask; }
-    this.refreshTask = this.performRefresh().finally(() => { this.refreshTask = undefined; });
+    this.refreshTask = this.performRefresh().finally(() => {
+      this.refreshTask = undefined;
+      if (this.refreshAgain) { this.refreshAgain = false; this.scheduleRefresh(); }
+    });
     return this.refreshTask;
   }
   private async performRefresh(): Promise<void> {
-    const generation = this.generation;
+    const generation = this.generation, connection = this.connection;
     try {
-      do {
-        this.refreshAgain = false;
-        const snapshot = await this.request("/v1/snapshot");
-        if (this.disposed || generation !== this.generation) return;
-        if (!isSnapshot(snapshot, this.profileId)) {
-          throw new Error("The service protocol is incompatible. Update both clients.");
-        }
-        const projects = new Set(snapshot.projects.map((project) => project.id));
-        const sessions = new Set(snapshot.sessions.map((session) => session.id));
-        this.update({ snapshot, error: null, events: this.state.events.filter((event) => (!event.project_id || projects.has(event.project_id)) && (!event.session_id || sessions.has(event.session_id))) });
-        this.refreshError = undefined;
-      } while (this.refreshAgain && !this.disposed && generation === this.generation);
+      const snapshot = await this.request("/v1/snapshot", undefined, undefined, connection);
+      if (this.disposed || generation !== this.generation || connection !== this.connection) return;
+      if (!isSnapshot(snapshot, this.profileId)) throw new Error("The service protocol is incompatible. Update both clients.");
+      const projects = new Set(snapshot.projects.map((project) => project.id));
+      const sessions = new Set(snapshot.sessions.map((session) => session.id));
+      if (this.state.snapshot && snapshot.seq < this.state.snapshot.seq) { this.refreshAgain = true; return; }
+      this.update({ snapshot, error: null,
+        ...(this.readySocket === this.socket && this.socket?.readyState === WebSocket.OPEN ? { status: "connected" as const } : {}),
+        events: this.state.events.filter((event) => (!event.project_id || projects.has(event.project_id)) && (!event.session_id || sessions.has(event.session_id))) });
+      this.refreshError = undefined;
     } catch (error) {
-      if (this.disposed || generation !== this.generation) return;
+      if (this.disposed || generation !== this.generation || connection !== this.connection) return;
       this.refreshError = error;
       this.update({ status: "disconnected", error: error instanceof Error ? error.message : "Service connection failed." });
+      if (this.readySocket === this.socket && this.socket?.readyState === WebSocket.OPEN) this.scheduleRefresh(300);
     }
   }
-  private scheduleRefresh(): void {
+  private scheduleRefresh(delay = 40): void {
     if (this.disposed || this.timer) return;
-    this.timer = setTimeout(() => { this.timer = undefined; void this.refresh(); }, 40);
+    this.timer = setTimeout(() => { this.timer = undefined; void this.refresh(); }, delay);
   }
   private openSocket(): void {
     if (this.disposed) return;
     this.update({ status: "connecting" });
-    const socket = new WebSocket(this.connection.wsUrl);
+    const connection = this.connection, socket = new WebSocket(connection.wsUrl);
     this.socket = socket;
-    socket.onopen = () => socket.send(JSON.stringify({ type: "authenticate", protocolVersion: PROTOCOL_VERSION, token: this.connection.token, after: this.after, profileId: this.profileId }));
+    socket.onopen = () => {
+      if (this.disposed || this.socket !== socket) { socket.close(); return; }
+      socket.send(JSON.stringify({ type: "authenticate", protocolVersion: PROTOCOL_VERSION, token: connection.token, after: this.after, profileId: this.profileId }));
+    };
     socket.onmessage = (frame) => {
       if (this.disposed || this.socket !== socket) return;
       try {
@@ -135,6 +171,7 @@ export class MoguriClient {
           if (!isSnapshot(snapshot, this.profileId)) throw new Error("Unsupported event protocol or profile scope.");
           this.after = snapshot.seq;
           this.backoff = 300;
+          this.readySocket = socket;
           this.update({ status: "connected", error: null, snapshot });
         } else if (message.type === "event" && isEvent(message.event)) {
           if (message.event.profile_id !== this.profileId) throw new Error("A foreign-profile event was rejected.");
@@ -142,7 +179,7 @@ export class MoguriClient {
           const deletedSession = message.event.event_type === "session.deleted" ? message.event.payload.deletedSessionId : null;
           const deletedProject = message.event.event_type === "project.removed" ? message.event.payload.deletedProjectId : null;
           this.update({ events: [...this.state.events.filter((event) => (!deletedSession || event.session_id !== deletedSession) && (!deletedProject || event.project_id !== deletedProject)).slice(-199), message.event] });
-          if (this.state.status === "connected") this.scheduleRefresh();
+          this.scheduleRefresh();
         } else if (message.type === "invalidate") this.scheduleRefresh();
       } catch {
         this.update({ error: "An invalid event frame was rejected. Reconnecting to resynchronize." });
@@ -152,11 +189,20 @@ export class MoguriClient {
     socket.onerror = () => { if (!this.disposed && this.socket === socket) this.update({ error: "The event connection failed. Reconnecting; unsent edits are preserved." }); };
     socket.onclose = () => {
       if (this.disposed || this.socket !== socket) return;
+      this.readySocket = undefined;
       this.update({ status: "disconnected" });
       this.reconnect = setTimeout(() => {
         void (async () => {
-          try { if (this.resolveConnection) this.connection = await this.resolveConnection(); }
-          catch { this.update({ error: "Service restart is not ready. Reconnecting without resending commands." }); }
+          try {
+            if (this.resolveConnection) {
+              const connection = await this.resolveConnection();
+              if (this.disposed || this.socket !== socket) return;
+              if (this.connection.storeId && connection.storeId !== this.connection.storeId) throw new ClientError("connection_scope", "The discovered service owns different retained state. Reopen the original store explicitly; no input or mutation was resent.");
+              if (connection !== this.connection) { this.generation++; this.connection = connection; }
+            }
+          }
+          catch (error) { this.update({ error: error instanceof ClientError ? error.message : "Service restart is not ready. Reconnecting without resending commands." }); }
+          if (this.disposed || this.socket !== socket) return;
           this.openSocket();
         })();
       }, this.backoff);
@@ -169,7 +215,8 @@ export class MoguriClient {
     clearTimeout(this.timer);
     clearTimeout(this.reconnect);
     this.socket?.close();
+    this.readySocket = undefined;
     this.update({ status: "disconnected" });
   }
 }
-export class ClientError extends Error { constructor(readonly code: string, message: string) { super(message); } }
+export class ClientError extends Error { constructor(readonly code: string, message: string, readonly status?: number) { super(message); } }

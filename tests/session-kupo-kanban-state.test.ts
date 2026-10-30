@@ -17,7 +17,12 @@ for (const lineage of ["automatic-61", "workflows-61", "kanban-62"] as const) {
       const policy = { ...defaultSingleKupoSettings(), classifierModelId: fixture.modelId };
       await sdk.routing.configure(policy, sdk.settings.get()!.revision);
       if (lineage === "automatic-61") appendLegacyAutopilot(fixture.service, fixture.sessionId);
-      else await sdk.sessions.autonomy(fixture.sessionId, "Autopilot");
+      else {
+        const session = fixture.session();
+        fixture.service.store.commit([{ event_type: "session.configured", profile_id: "default", session_id: session.id,
+          project_id: session.projectId, payload: { controls: { ...session.controls, autonomy: "Autopilot", automaticApprovals: true } } }]);
+        fixture.service.controller.refreshProfile(); await sdk.refresh();
+      }
       if (lineage === "kanban-62") {
         await sdk.kanban.open(fixture.session().projectId!);
         const board = (await sdk.issues.board(fixture.session().projectId!)).board;

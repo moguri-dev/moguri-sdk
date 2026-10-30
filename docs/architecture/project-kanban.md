@@ -40,6 +40,10 @@ an already owned synchronization. Its commit still checks the exact effective
 board observation policy, captured repository/account/root and current card
 revisions. Visibility cannot restore stale GitHub authority: a later explicit
 refresh still refuses a changed binding before replacement metadata is read.
+The [observation follow-up](alerts-kanban-sync.md) distinguishes stable source
+ownership from historical policy counters: presentation changes and a newly
+permitted fresh read do not retarget the source. Real root/account/upstream
+changes still fail, and each current read pins/rechecks its effective policy.
 Local cards and explicitly loaded GitHub/Linear items share the project view.
 Imported third-party text remains untrusted source data and imports stay
 read-only. Work item selection may bind a retained card from the session's own
@@ -100,6 +104,9 @@ reads; GraphQL also verifies the actual viewer and repository identity within
 each complete response. No credential, public-account or alternate-root
 fallback is allowed. Disabling sync aborts the original owned read; an ignored
 abort or late response cannot publish a card after revocation.
+Original source/card digests remain unchanged when current policy epochs
+advance. No failed job is rewritten as completed and strict write/source
+reviews retain their full original revision checks.
 Repository and issue IDs use `fullDatabaseId`, not the limited GraphQL Int32
 field. Decimal BigInt responses retain their exact safely representable value;
 larger values are rejected rather than rounded into another source identity.

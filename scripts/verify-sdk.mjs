@@ -24,6 +24,7 @@ try {
   const installedSdk = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
   const { PROTOCOL_VERSION: installedProtocol } = installedSdk;
   const conversationNavigationAvailable = typeof installedSdk.conversationNavigation === "function";
+  const kanbanObservationAvailable = typeof installedSdk.githubSourceOwner === "function";
   const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
   const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
@@ -61,6 +62,7 @@ try {
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
     ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
     ${installedProtocol >= 77 ? 'import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "moguri";' : ""}
+    ${installedProtocol >= 82 ? 'import {ToolPreferencesSchema,defaultToolPreferences,effectiveToolPreferences,type ToolPreferences,type WorkflowKind} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -78,6 +80,25 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 82 ? `
+      const ranked:ToolPreferences={order:["cli","rest","mcp-direct","mcp-gateway"]};
+      void ToolPreferencesSchema;void defaultToolPreferences;void effectiveToolPreferences(ranked);
+      const currentTools=sdk.settings.get()!;await sdk.settings.update({...currentTools.values,toolPreferences:ranked},currentTools.revision);
+      await sdk.settings.reset("toolPreferences",sdk.settings.get()!.revision);
+      const requestedWorkflows:WorkflowKind[]=["impeccable","continue","orchestrate","spar","critique","roast-me"];
+      for(const kind of requestedWorkflows)await sdk.workflows.start("generated-session",kind,kind==="continue"?"":"Generated typed actual task.");
+      await sdk.sessions.spawnPrompt("generated-session","Generated typed child assignment.",0);
+      ` : ""}
+      ${installedProtocol >= 81 ? `
+      const originalReceipt=await sdk.commandReceipt({type:"session.autonomy",sessionId:"generated-session",expectedRevision:0,autonomy:"Autopilot"},"generated-command");
+      if(originalReceipt.status==="committed")void originalReceipt.result.revision;
+      const retainedSources=await sdk.tools.results("generated-session",{limit:5});void retainedSources.sources[0]?.operationId;
+      const retainedPage=await sdk.tools.resultById("generated-session","a".repeat(64),{offset:0,expectedDigest:"b".repeat(64),expectedRevision:1});
+      void retainedPage.source.turnId;void retainedPage.source.revision;
+      await sdk.git.status("generated-session");await sdk.git.log("generated-session",{head:"a".repeat(40),offset:0,limit:10});
+      const builtinGitReview=await sdk.git.preview("generated-session",{kind:"git.commit",paths:["generated.ts"],message:"Generated selected commit"});
+      await sdk.git.execute(builtinGitReview.preview,builtinGitReview.preview.document.confirmations,true);
+      ` : ""}
       ${installedProtocol >= 77 ? `
       const boundedPreference:Controls=selectModelControls({...factoryControls(),modelOptions:{thinkingEffort:"max"}},{id:"generated-high-only",thinkingLevels:["high"]});
       const preferred:ModelSelection={modelId:"generated-high-only",thinkingEffort:"high",preferredThinkingEffort:"max"};
@@ -497,7 +518,7 @@ try {
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}} from "moguri";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}${installedProtocol >= 82 ? ",effectiveToolPreferences,defaultToolPreferences,slashCommands" : ""}} from "moguri";
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     const generatedHome=join(root,"generated-chat-home");await mkdir(generatedHome,{recursive:true});
@@ -564,6 +585,58 @@ try {
       console.log("Installed protocol-76 child-session review binds the exact tree before cascading deletion.");
       ` : ""}
       const s=await sdk.command({type:"session.create",projectId:p.id});
+      ${installedProtocol >= 81 && process.platform === "darwin" ? `{
+      const directory=join(root,"generated-installed-git");await mkdir(directory);
+      const state=join(root,"generated-installed-git-state"),key=Buffer.alloc(32,0x68);
+      await writeFile(join(directory,"fixture.txt"),"Generated installed Git original.\\n");
+      git(["init","--initial-branch=main"],directory);git(["config","user.name","Generated fixture"],directory);git(["config","user.email","fixture@example.invalid"],directory);
+      git(["config","commit.gpgSign","false"],directory);git(["config","core.hooksPath","/dev/null"],directory);
+      git(["add","--","fixture.txt"],directory);git(["commit","--no-gpg-sign","-m","Generated installed Git base"],directory);
+      const options={stateDir:state,retentionKey:key,provider:makeProvider()};
+      let gitRuntime=await createRuntime(options),gitSdk=await connectMoguri({stateDir:state,autoStart:false});
+      try{
+        const project=await gitSdk.command({type:"project.add",path:directory}),session=await gitSdk.sessions.create(project.id);
+        const current=()=>gitSdk.getState().snapshot.sessions.find(value=>value.id===session.id);
+        const consent={type:"session.autonomy",sessionId:session.id,autonomy:"Autopilot",expectedRevision:current().revision};
+        await gitSdk.command(consent,"generated-installed-autonomy");
+        assert.equal((await gitSdk.commandReceipt(consent,"generated-installed-autonomy")).status,"committed");
+        assert.equal(current().controls.automaticApprovals,true);
+        const perform=async action=>{const review=(await gitSdk.git.preview(session.id,action)).preview;
+          const admitted=await gitSdk.git.execute(review,review.document.confirmations,true);
+          const result=await gitSdk.git.wait(admitted.id);assert.equal(result.operation.status,"completed",result.operation.diagnostic);return result;};
+        const base=(await gitSdk.git.status(session.id)).git.head;
+        await perform({kind:"git.branch.create",branch:"generated/installed",start:base,checkout:true});
+        await perform({kind:"git.branch.rename",from:"generated/installed",to:"generated/installed-renamed"});
+        await writeFile(join(directory,"fixture.txt"),"Generated installed Git change.\\n");
+        await perform({kind:"git.stage",paths:["fixture.txt"]});
+        await perform({kind:"git.commit",paths:["fixture.txt"],message:"Generated installed selected commit"});
+        const committed=(await gitSdk.git.status(session.id)).git.head;
+        await perform({kind:"git.revert",commit:committed});
+        assert.equal(git(["show","HEAD:fixture.txt"],directory).trim(),"Generated installed Git original.");
+        const owned=await gitSdk.command({type:"workspace.create",projectId:project.id,branch:"generated/installed-owned",baseRef:"main"});
+        const ownedState=gitSdk.getState().snapshot.managedWorkspaces.find(value=>value.id===owned.id);assert.ok(ownedState.jobId);
+        assert.equal((await gitSdk.jobs.wait(ownedState.jobId)).status,"completed");
+        const ownedSession=await gitSdk.sessions.create(project.id,"Generated installed managed branch",undefined,owned.id);
+        const ownedReview=(await gitSdk.git.preview(ownedSession.id,{kind:"git.branch.rename",from:"generated/installed-owned",to:"generated/installed-owned-renamed"})).preview;
+        const ownedRename=await gitSdk.git.execute(ownedReview,ownedReview.document.confirmations,true);
+        assert.equal((await gitSdk.git.wait(ownedRename.id)).operation.status,"completed");
+        assert.equal((await gitSdk.workspaces.inspect(owned.id)).inspection.diagnostic,null);
+        assert.equal((await gitSdk.git.status(ownedSession.id)).git.branch,"generated/installed-owned-renamed");
+        const tool=(await gitSdk.tools.catalog(session.id,"read_file")).tools.find(value=>value.name==="read_file");
+        const read=await gitSdk.tools.execute(session.id,"read_file",{path:"fixture.txt"},tool.schemaDigest);
+        assert.equal((await gitSdk.jobs.wait(read.id)).status,"completed");
+        const source=(await gitSdk.tools.results(session.id)).sources.find(value=>value.name==="read_file");assert.ok(source);
+        const page=await gitSdk.tools.resultById(session.id,source.operationId,{expectedDigest:source.digest,expectedRevision:source.revision});
+        assert.equal(page.text,"Generated installed Git original.\\n");
+        gitSdk.disconnect();await gitRuntime.close();gitRuntime=await createRuntime(options);gitSdk=await connectMoguri({stateDir:state,autoStart:false});
+        assert.equal(current().controls.automaticApprovals,true);
+        assert.equal((await gitSdk.workspaces.inspect(owned.id)).inspection.diagnostic,null);
+        assert.equal((await gitSdk.tools.resultById(session.id,source.operationId,{expectedDigest:source.digest,expectedRevision:source.revision})).text,page.text);
+        assert.equal((await gitSdk.commandReceipt(consent,"generated-installed-autonomy")).status,"committed");
+        assert.equal((await gitSdk.git.log(session.id)).data.action,"log");
+      }finally{gitSdk.disconnect();await gitRuntime.close();}
+      console.log("Installed protocol-81 exact receipts, explicit automatic consent, public original-result grants/restart and real reviewed Git branch/stage/selected commit/revert plus atomic managed branch/change-set rename/restart pass without model calls or scripts.");
+      }` : ""}
       ${installedProtocol >= 59 ? `{
       const skillDirectory=join(root,"generated-skills");await mkdir(skillDirectory);
       const skillPath=join(skillDirectory,"SKILL.md");
@@ -1246,6 +1319,18 @@ try {
           frame({role:"assistant",content:JSON.stringify({pattern:"single",modelId:"generated-external-budget",confidence:0.95,reason:"Generated installed classifier-only advice."})});frame({},"stop");
         }else if(String(body.messages[user]?.content).includes("Generated installed Guided question")&&!body.messages.slice(user+1).some(value=>value.role==="tool")){
           frame({role:"assistant",tool_calls:[{index:0,id:"generated-installed-guided-call",type:"function",function:{name:"ask_user",arguments:JSON.stringify({question:"Choose a generated installed approach?",choices:["Generated installed first","Generated installed second"],allowFreeform:false,recommendation:{choiceIndex:1,reason:"Generated installed solver recommendation."}})}}]});frame({},"tool_calls");
+        }else if(PROTOCOL_VERSION>=82&&String(body.messages[user]?.content).includes("Generated installed direct MCP")){
+          const results=body.messages.slice(user+1).filter(value=>value.role==="tool");
+          let selected;
+          if(!results.length)selected={name:"mcp_gateway",arguments:{action:"tools",serverId:"builtin",query:"grep_logs"}};
+          else if(results.length===1)selected={name:"discover_tools",arguments:{query:JSON.parse(results[0].content).tools.find(value=>value.name==="grep_logs").directName}};
+          else if(results.length===2){
+            const name=JSON.parse(results[0].content).tools.find(value=>value.name==="grep_logs").directName;
+            assert.ok(body.tools.some(value=>value.function.name===name&&value.function.parameters.properties.path));
+            selected={name,arguments:{path:"generated.ts",query:"portableSdkMemory"}};
+          }
+          if(selected){frame({role:"assistant",tool_calls:[{index:0,id:"generated-installed-direct-"+generatedRequests.length,type:"function",function:{name:selected.name,arguments:JSON.stringify(selected.arguments)}}]});frame({},"tool_calls");}
+          else{frame({role:"assistant",content:"Generated installed direct result retained."});frame({},"stop");}
         }else{frame({role:"assistant",content:"Generated external budget response."});frame({},"stop");}
         response.write("data: "+JSON.stringify({choices:[],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42,...(PROTOCOL_VERSION>=66?{prompt_tokens_details:{cached_tokens:10}}:{})}})+"\\n\\n");response.end("data: [DONE]\\n\\n");
       });
@@ -1534,6 +1619,50 @@ try {
           console.log("Installed protocol-70 SDK reduces 21 models to three, blocks disabled slash selection and enforces an exact retained provider source without fallback or inference.");
         }finally{betaProvider.state.models=savedModels;betaProvider.onChange();await beta.settings.update(savedSettings,beta.settings.get().revision);await beta.models.refresh();}
       }
+      ${installedProtocol >= 82 ? `{
+        const previousModels=structuredClone(betaProvider.state.models),previousWindow=generatedModel.contextWindow;
+        try{
+        generatedModel.contextWindow=32768;betaProvider.state.models[0].contextWindow=32768;betaProvider.onChange();await beta.models.refresh();
+        for(const name of ["impeccable","continue","suggestions","orchestrate","spawn","spar","critique","roast-me"])assert.ok(slashCommands.some(command=>command.name===name));
+        const before=beta.settings.get(),ranked=["cli","rest","mcp-direct","mcp-gateway"];
+        await beta.settings.update({...before.values,toolPreferences:{order:ranked}},before.revision);
+        assert.deepEqual(effectiveToolPreferences(sdk.settings.get().values.toolPreferences),defaultToolPreferences());
+        const opened=await beta.projects.add(project),parent=await beta.sessions.create(opened.id,"Generated installed command owner",{modelId:generatedModel.id,modelOptions:{contextWindow:32768}});
+        await beta.sessions.autonomy(parent.id,"Autopilot");
+        const current=()=>beta.getState().snapshot.sessions.find(value=>value.id===parent.id);
+        const terminal=async id=>{for(let n=0;n<400;n++){const value=beta.getState().snapshot.sessions.find(value=>value.id===id);if(!value.turnId&&["completed","failed","partial","stopped"].includes(value.status))return value;await new Promise(resolve=>setTimeout(resolve,20));}throw Error("Generated installed82 work did not settle.");};
+        const requestsBefore=generatedRequests.length;
+        const editor=new DraftEditor(beta,parent.id,current().draft);
+        try{editor.edit("Generated installed direct MCP task.");await editor.send("queue");}finally{editor.dispose();}
+        const directOutcome=await terminal(parent.id);
+        assert.equal(directOutcome.status,"completed",directOutcome.lastError??JSON.stringify(directOutcome.messages.slice(-3)));
+        assert.equal(generatedRequests.length,requestsBefore+4);
+        assert.match(JSON.stringify(generatedRequests[requestsBefore]),/1. CLI/);
+        const original=(await beta.tools.results(parent.id)).sources.find(value=>value.name==="mcp_gateway"&&value.rawComplete);
+        const sources=(await beta.tools.results(parent.id)).sources;
+        const actual=original??sources.find(value=>value.name==="mcp_gateway");
+        assert.ok(actual);assert.match((await beta.tools.resultById(parent.id,actual.operationId)).text,/portableSdkMemory/);
+        const second=await beta.sessions.create(opened.id,"Generated installed distinct direct owner",{modelId:generatedModel.id,modelOptions:{contextWindow:32768}});
+        await beta.sessions.autonomy(second.id,"Autopilot");
+        const secondSession=beta.getState().snapshot.sessions.find(value=>value.id===second.id),secondEditor=new DraftEditor(beta,second.id,secondSession.draft);
+        try{secondEditor.edit("Generated installed direct MCP second owner.");await secondEditor.send("queue");}finally{secondEditor.dispose();}
+        assert.equal((await terminal(second.id)).status,"completed");
+        const leafFor=id=>beta.getState().events.find(value=>value.session_id===id&&value.event_type==="tool.completed"&&value.payload.call.directMcp)?.payload.call.directMcp;
+        const firstBinding=leafFor(parent.id),secondBinding=leafFor(second.id);
+        assert.ok(firstBinding);assert.ok(secondBinding);assert.notEqual(firstBinding.name,secondBinding.name);
+        assert.notEqual(firstBinding.bindingDigest,secondBinding.bindingDigest);
+        const assignment=await beta.sessions.spawnPrompt(parent.id,"Generated installed actual child assignment.");
+        const child=await terminal(assignment.id);assert.equal(child.status,"completed");assert.equal(child.controls.autonomy,"Manual");
+        assert.ok(child.messages.some(message=>message.role==="notice"&&message.text.includes("Generated installed actual child assignment.")));
+        await beta.workflows.start(parent.id,"impeccable","Generated installed actual UI task.");assert.equal((await terminal(parent.id)).status,"completed");
+        await beta.workflows.start(parent.id,"continue");assert.equal((await terminal(parent.id)).status,"completed");
+        const reopened=await sdk.profiles.open(beta.profileId);
+        try{assert.deepEqual(reopened.settings.get().values.toolPreferences.order,ranked);assert.equal((await reopened.tools.resultById(parent.id,actual.operationId,{expectedDigest:actual.digest,expectedRevision:actual.revision})).text,(await beta.tools.resultById(parent.id,actual.operationId)).text);}
+        finally{reopened.disconnect();}
+        await beta.settings.reset("toolPreferences",beta.settings.get().revision);
+        console.log("Installed protocol-82 typed commands/ranking, profile isolation, actual owner-distinct direct MCP leaves/workers/results, assigned Manual child, UI workflow and prompt-free continuation pass through the external SDK.");
+        }finally{generatedModel.contextWindow=previousWindow;betaProvider.state.models=previousModels;betaProvider.onChange();await beta.models.refresh();}
+      }` : ""}
       const rootCharges=(await sdk.budgets.dashboard()).totals.knownReportedTokens+(await beta.budgets.dashboard()).totals.knownReportedTokens;
       await sdk.profiles.globalBudget({basis:"estimate",tokens:rootCharges},0,true);
       assert.equal((await beta.budgets.status(betaMetered.id)).status.remainingTokens,0);
@@ -1739,6 +1868,10 @@ try {
   if (installedProtocol >= 44) {
     const { qualifyWorkspaceEntry } = await import("./qualify-workspace-entry.mjs");
     console.log(await qualifyWorkspaceEntry({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-entry") }));
+  }
+  if (kanbanObservationAvailable) {
+    const { qualifyKanbanObservation } = await import("./qualify-kanban-observation.mjs");
+    console.log(await qualifyKanbanObservation({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-kanban") }));
   }
   if (installedProtocol >= 55 && process.platform === "darwin") {
     const { qualifyModelDefaults } = await import("./qualify-model-defaults.mjs");

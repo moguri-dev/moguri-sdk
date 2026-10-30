@@ -102,6 +102,7 @@ test("cancellation during graceful finalization discards the transcript and reap
     abort.abort();
     await assert.rejects(capture, /aborted/i);
     const pid = Number(await readFile(fixture.marker, "utf8"));
+    assert.ok(Number.isSafeInteger(pid) && pid > 1, "readiness must follow a complete owned PID marker");
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   } finally { await fixture.close(); }
 });
@@ -113,6 +114,7 @@ test("cancellation during finalization discards the transcript and stops the exa
     fixture.voice.stop("generated-cancel-finalize"); abort.abort();
     await assert.rejects(capture, { name: "AbortError" });
     const pid = Number(await readFile(fixture.marker, "utf8"));
+    assert.ok(Number.isSafeInteger(pid) && pid > 1, "readiness must follow a complete owned PID marker");
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   } finally { await fixture.close(); }
 });

@@ -68,7 +68,9 @@ export * from "./shortcuts.ts";
 export * from "./queued-commands.ts";
 import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
 
-export const PROTOCOL_VERSION = 80;
+export const PROTOCOL_VERSION = 82;
+export const QUERY_TIMEOUT_MS = 30_000;
+export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const text = Type.String({ maxLength: MAX_TEXT });
@@ -87,6 +89,7 @@ export const CommandSchema = object({
       folderProjects: Type.Optional(Type.Array(object({ projectId: id, revision: Type.Integer({ minimum: 0 }) }), { minItems: 1, maxItems: 1000 })),
       title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })), overrides: Type.Optional(ControlDefaultsSchema), workspaceId: Type.Optional(id) }),
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
+    object({ type: Type.Literal("session.autonomy"), ...sessionId, expectedRevision: revision, autonomy: ControlsSchema.properties.autonomy }),
     object({ type: Type.Literal("session.yolo"), ...sessionId, expectedRevision: revision }),
     object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema) }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
@@ -119,11 +122,15 @@ export type CommandResult = { id?: string; revision?: number; commandClaim?: imp
 export interface Project { id: string; name: string; path: string }
 export const ToolCallSchema = Type.Object({
   id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()),
+  directMcp: Type.Optional(object({ name: Type.String({ pattern: "^mcp_direct_[a-f0-9]{40}$" }), serverId: id,
+    tool: Type.String({ minLength: 1, maxLength: 160 }), schemaDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+    bindingDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) })),
   hook: Type.Optional(object({ id, revision, contentDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
     trigger: Type.Union([Type.Literal("turn.start"), Type.Literal("turn.end")]), actor: Type.Literal("user-configured-hook") })),
 });
 export interface ToolCall {
   id: string; name: string; arguments: Record<string, unknown>;
+  directMcp?: { name: string; serverId: string; tool: string; schemaDigest: string; bindingDigest: string };
   hook?: { id: string; revision: number; contentDigest: string; trigger: "turn.start" | "turn.end"; actor: "user-configured-hook" };
 }
 export interface PublicMessage {
@@ -181,6 +188,7 @@ export interface QueueItem {
   origin?: CoordinationTaskOrigin;
   workflow?: { kind: WorkflowKind };
   sidePromptOrigin?: { sessionId: string; commandDigest: string };
+  spawnPromptOrigin?: { sessionId: string; commandDigest: string };
   command?: QueuedSlash;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
@@ -276,6 +284,7 @@ export interface Connection {
   wsUrl: string;
   token: string;
   pid: number;
+  storeId?: string;
 }
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
@@ -299,17 +308,17 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "sandbox.frame_recorded": { executionId: string; sequence: number; digest: string };
   "sandbox.publication_recorded": { publication: SandboxPublication };
   "sandbox.setup_recorded": { operation: SandboxSetupOperation };
-  "workspace.saved": { workspace: ManagedWorkspace };
+  "workspace.saved": { workspace: ManagedWorkspace; branchOperation?: { operationId: string; previousBranch: string } };
   "change_set.saved": { changeSet: ChangeSet };
   "question.asked": { question: UserQuestion };
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
-  "session.configured": { controls: Controls };
+  "session.configured": { controls: Controls; autonomySelection?: { actor: "user"; commandId: string; commandDigest: string; autonomy: Controls["autonomy"] } };
   "session.continue_work_chosen": { choice: "kanban" | "prompt"; draftRevision: number; actor: "user" };
   "model.selection_remembered": { selection: ModelSelection | null; sourceSessionId: string; sourceProjectId: string | null; actor: "user" };
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
-  "session.resumed": Record<string, never>;
+  "session.resumed": { continuation?: { sourceTurnId: string; finishedSequence: number; actor: "user" } };
   "session.blocked": { diagnostic: string };
   "draft.saved": { text: string; attachments: Attachment[]; source?: CommandDraftSource };
   "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
@@ -736,7 +745,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       if (!previous) {
         const head = owner.queue.find((item) => item.delivery !== "steer" && !item.held), parsed = head && parseSlashInput(head.text);
-        if (!head?.command || head.origin || head.workflow || head.sidePromptOrigin || head.mode || head.id !== next.queueItemId ||
+        if (!head?.command || head.origin || head.workflow || head.sidePromptOrigin || head.spawnPromptOrigin || head.mode || head.id !== next.queueItemId ||
           head.command.actor !== "user" || head.command.name !== next.name || head.command.client !== next.client ||
           head.command.bindingDigest !== next.bindingDigest || !parsed || parsed.name !== next.name || parsed.argument !== head.command.argument) {
           throw new MoguriError("command_history", "Queued command claim lost its exact ordered user input. No model prompt or authority was substituted.", 409);
@@ -888,6 +897,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (question) Object.assign(question, { status: "cancelled", diagnostic: event.payload.diagnostic, revision: question.revision + 1 });
     }
     if (event.event_type === "workspace.saved") {
+      const proof = event.payload.branchOperation;
+      if (proof) {
+        const previous = managedWorkspaces.get(event.payload.workspace.id), operation = githubOperations.get(proof.operationId), next = event.payload.workspace;
+        if (!previous || !operation || operation.kind !== "git.branch.rename" || operation.workspaceId !== next.id ||
+          operation.projectId !== next.projectId || operation.root.root !== next.path || previous.branch !== proof.previousBranch ||
+          next.identity?.device !== operation.root.device || next.identity.inode !== operation.root.inode ||
+          next.revision !== previous.revision + 1 || previous.status !== "ready" || next.status !== "ready" ||
+          (["projectId", "path", "baseCommit", "gitCommonDir", "createdAt", "changeSetId", "jobId"] as const).some((key) =>
+            previous[key] !== next[key]) ||
+          JSON.stringify(previous.identity) !== JSON.stringify(next.identity)) throw new MoguriError("workspace_branch_corrupt", "Managed branch metadata lost its original verified Git operation/root/change set. State was preserved.", 409);
+      }
       managedWorkspaces.set(event.payload.workspace.id, structuredClone(event.payload.workspace));
       if (event.payload.workspace.status === "partial") blockedWorkspaces.add(event.payload.workspace.id);
       if (event.payload.workspace.status === "removed") blockedWorkspaces.delete(event.payload.workspace.id);
@@ -1266,6 +1286,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         }
         break;
       case "session.configured":
+        if (event.payload.autonomySelection && (event.payload.autonomySelection.actor !== "user" ||
+          !event.payload.autonomySelection.commandId || !/^[a-f0-9]{64}$/.test(event.payload.autonomySelection.commandDigest) ||
+          event.payload.autonomySelection.autonomy !== event.payload.controls.autonomy ||
+          event.payload.controls.automaticApprovals !== ["Autopilot", "Autopilot Max"].includes(event.payload.controls.autonomy))) {
+          throw new MoguriError("autonomy_consent_corrupt", "Explicit autonomy selection lost its actual user command or selected consent. Original state was preserved.", 409);
+        }
         if (session.defaults) for (const key of controlKeys) if (JSON.stringify(session.controls[key]) !== JSON.stringify(event.payload.controls[key])) session.defaults.sources[key] = "session";
         session.controls = structuredClone(event.payload.controls); session.revision++; break;
       case "session.organized": {
@@ -1320,7 +1346,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "queue.edited": {
         const item = session.queue.find((item) => item.id === event.payload.messageId);
         if (item) {
-          item.text = event.payload.text; delete item.origin; delete item.workflow; delete item.sidePromptOrigin;
+          item.text = event.payload.text; delete item.origin; delete item.workflow; delete item.sidePromptOrigin; delete item.spawnPromptOrigin;
           if (event.payload.attachments) item.attachments = event.payload.attachments;
           if (event.payload.command === null) delete item.command;
           else if (event.payload.command !== undefined) item.command = structuredClone(event.payload.command);
