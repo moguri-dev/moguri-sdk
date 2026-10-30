@@ -52,7 +52,17 @@ try {
     "--session", sessionId, "--json"], { env: { ...process.env, MOGURI_STATE_DIR: stateDir }, encoding: "utf8", timeout: 15_000 })).stdout);
   assert.equal(cliRead.text, source);
   assert.equal((await sdk.slash(sessionId, "/script-review list", "tui")).kind, "text");
-  const forced = await sdk.scriptReviews.force(sessionId, reviewId, sourceDigest, original.revision, current().revision, "generated-installed-force");
+  const command = `/script-review force ${reviewId} ${original.revision} ${sourceDigest} ${current().revision} confirm-unsafe`;
+  const queued = await sdk.command({ type: "draft.save", sessionId, text: command, expectedRevision: current().draft.revision, attachments: [] });
+  await sdk.command({ type: "message.send", sessionId, expectedRevision: queued.revision, delivery: "queue", client: "tui" });
+  const execution = await waitFor(() => {
+    const value = sdk.getState().snapshot.commandExecutions.find((entry) => entry.sessionId === sessionId && entry.name === "script-review");
+    return value && ["completed", "failed", "partial"].includes(value.status) ? value : null;
+  });
+  assert.equal(execution.status, "completed", execution.diagnostic ?? "");
+  const recorded = await sdk.query({ type: "slash.read", executionId: execution.id });
+  assert.equal(recorded.result.kind, "text");
+  const forced = JSON.parse(recorded.result.text);
   assert.equal((await sdk.jobs.wait(forced.id)).status, "completed");
   assert.equal(await readFile(join(project, "generated-result.txt"), "utf8"), "GENERATED_INSTALLED_FORCE");
   const retained = (await sdk.scriptReviews.read(sessionId, reviewId)).review;
