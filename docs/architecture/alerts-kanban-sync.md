@@ -16,6 +16,8 @@ a draft or enable a blocked control. Necessary recovery controls remain
 available outside a dismissed message. Changed/new messages reappear; ordinary
 rerenders do not resurrect a dismissed message. Retained chat notices, review
 forms and live loading/account labels are not disposable alerts.
+Static safety explanations remain dismissible without becoming live status
+announcements; dynamic warnings retain an explicit alert/status role.
 The native TUI footer likewise distinguishes operation errors from information
 and exposes `[x]`; Escape dismisses a footer notice only in ordinary composer
 focus. Neither dismissal consumes text or touches a pending answer/approval.
