@@ -86,3 +86,42 @@ The packed SDK verifier also exercises this path in an independently installed
 runtime with generated CLI/GraphQL responses and actual generated Git roots:
 color/policy updates, source-preserving issue closure, foreign-account denial
 and restart without rewriting source IDs or failed jobs.
+
+## Qualification
+
+The service/TUI/shared-alert implementation is `af299f7`; the static/live-region
+and generated fixture corrections are `c81cdba`. The latter changes only
+desktop presentation and tests, not observation authority or the SDK API.
+
+| Executed check | Result |
+| --- | --- |
+| Complete serial Node/native-TUI suite | **2,013 passed**, **15 explicit physical-native skips**, **2,028 total**, zero failures; 28.34 min. |
+| Complete hidden desktop suite after the semantic fixes | **295 passed**, **3 explicit package/native skips**, zero failures; 8.4 min. |
+| Repeated exact alert/ownership regressions | **15/15 hidden cases pass**, three repetitions of each new case. |
+| Final full build/types and corrected native paths | Pass; **2** semantic/architecture Node cases and **11** hidden alert/document/review/session cases rechecked after the final full build. |
+| Fresh packed SDK | Imports/types, explicitly approved audited install and new installed Kanban observation/restart pass; the new probe uses **0 model calls / 0 GitHub writes**, taking 991.18 ms. All **12/12** installed-worker probes pass. |
+| Root and independently installed dependency audits | **Zero vulnerabilities**. |
+| Native payload continuity | Every package/lock/worker/bridge/MCP/data-worker digest matches the existing qualified protocol82 image. This slice does not relabel old physical receipts or claim a new guest/release qualification. |
+
+Generated tests cover root/account/remote/folder/Env denial before replacement
+metadata, revoked in-flight policy, cancellation, local-edit preservation,
+restart, unchanged source/card digests, failed-job retention, neutral move
+messages, keyboard/mouse X dismissal, new-message reset, recovery controls and
+actual pending-approval ownership. No personal data, login, microphone, paid
+inference or real repository mutation is used as a fixture.
+
+Full-client qualification caught static safety text becoming an extra live
+status and old tests choosing an informational X instead of the actual error.
+Static explanations now retain no live role unless explicitly dynamic, and
+tests select the intended error. A native trace also proved document assertions
+finished before shutdown raced the renderer's saved-draft acknowledgement.
+The fixture now waits for that real acknowledgement; no guard or timeout was
+weakened.
+
+Final raw evidence is retained in this session's `kanban-alerts-full-unit.log`,
+`kanban-alerts-qualified-desktop.log`, `kanban-alerts-repeat-desktop.log`,
+`kanban-alerts-packed-sdk.log`, `kanban-alerts-final-build.log` and
+`kanban-alerts-final-desktop.log`. Existing FFI/chunk-size/deprecation notices
+remain visible. The unchanged main-only CI policy still does not run on this
+working branch; the previously observed main account-eligibility refusal
+requires GitHub Billing & plans action, not disabled validation.
