@@ -150,3 +150,42 @@ explicit `directUnavailable` reason and keep their original gateway interface;
 there is no schema truncation or hidden alternative execution. Actual pinned
 SSH leaves follow the existing Remote MCP approval/framing/retention path;
 controller execution, access forwarding and Local fallback are not inferred.
+
+## Qualification
+
+The final implementation is `b31971c`, including the root/dispatch correction
+from `89fbbc0`; `a544f4e` changes only generated desktop-fixture teardown.
+All checks below use generated data, loopback providers/SSH and hidden clients,
+not personal credentials, microphone capture, paid inference or a live quality
+evaluation.
+
+| Check | Actual result |
+| --- | --- |
+| Complete serial Node/native-TUI suite | **2,003 passed**, **15 explicit physical-native skips**, **2,018 total**, zero failures; 27.25 min. |
+| Complete hidden desktop suite | **290 passed**, **3 explicit package/native skips**, zero failures; 8.3 min. |
+| Repeated command/ranking/recovery desktop cases | **15/15 passed**, including native shutdown after the actual renderer acknowledgement. |
+| Fresh packed external SDK | Browser/React/Node/CLI imports/types, audited installation, owner-distinct actual direct MCP leaves/results, assigned Manual child and workflow/continuation pass; **12/12** installed-worker probes pass. |
+| Types/build and dependency audits | Pass; **zero vulnerabilities** in both root and independently installed consumers. |
+| Exact physical SendBox qualification | **7/7 gates pass** for the source-fenced controller and exact unchanged protocol82 guest payload; see the [original receipts, measurements and exclusions](sendbox-0.2.4-qualification.md#protocol-82-command-and-tool-follow-up). |
+
+Focused regressions reproduce the old direct-call admission after a Local root
+inode replacement, then prove rejection before approval and no connector
+dispatch after asynchronous credential resolution. They also cover real
+structured questions/answers, separate subsequent edit approval, failed/partial
+continuation, atomic child creation/receipt recovery, actual writer yielding,
+parent/child cancellation, profile/CAS/reset/reopen and genuine81 migration with
+unchanged ciphertext.
+
+The first full run exposed unrelated matches created by concatenating all new
+search keywords; bounded alias groups preserve the old model/effort searches
+while finding ranking/direct/REST/CLI controls. A subsequent native trace showed
+every ranking assertion complete before `app.close` waited on the still-owned
+unsaved-view guard. The generated fixture now returns to the real saved
+composer before shutdown, rather than disabling the guard or raising timeouts.
+
+Raw final logs are `commands-final-unit.log`, `commands-desktop-qualified.log`,
+`commands-desktop-repeat.log`, `commands-final-packed.log` and
+`commands-native-final.log` in the originating session. Existing experimental
+FFI, large Vite chunks and transitive-package deprecation notices are not
+silenced. Main-only CI remains unchanged; the captured main run was refused
+before any steps for GitHub Billing & plans payment/spending eligibility.
