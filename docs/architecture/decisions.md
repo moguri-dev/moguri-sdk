@@ -53,6 +53,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D29 | Document attachments reuse scoped encrypted snapshots and bounded inspection; PDF.js and streamed ZIP/strict XML parse in restricted resource-bounded processes. | Parser content/resource qualification, grant retention, provenance, worker transport or browser-safe packed SDK checks fail. |
 | D30 | Lazy typed discovery and compact recoverable views reuse the owned worker; deterministic utilities, structured authoring/SQL and root-bound parent/child coordination extend the same SDK/policy/budget authority. | Required evidence becomes unreachable, actual actor/root/cap ownership fails, or representative task-quality evaluation regresses. |
 | D31 | Profile-owned retained-request backoff, one-time scheduled input and evidence-qualified Kupo modes share the existing SDK/worker/ledger; compaction is explicit opt-in and all-role finite holds retain exact owners. | Deadline/order, source/account identity, cancellation/restart, model/effort/context evidence, packed-client or exact native-byte qualification fails. |
+| D32 | Model-free native schedule preparation uses the existing managed capture; bounded decision/metadata-finishing roles remain on the exact SSH/native parent with separate private-role release, all-role holds and terminal no-replay. | Source/policy/draft scope, actual transport/cancellation, atomic failed/late receipts, client/packed SDK or exact native-byte qualification fails. |
 
 D28's [task progress contract](task-progress.md) records generated checklist and
 hidden-client qualification. D29's [document contract](document-attachments.md)
@@ -80,7 +81,18 @@ The cache API is unchanged; its patched closure and exact third-party notices
 are built into distributed Node runtimes so packed consumers do not inherit
 development-root overrides. Current worker/native bytes still need their own
 physical receipt. Missing Jev output bounds, Remote/native wind-down and other
-real gates are not newly qualified.
+real gates were not qualified by protocol84.
+
+D32's [owned model transport contract](owned-model-transports.md) extends
+genuine84 with separate `scheduled_native_preparation_schema`,
+`owned_model_transport_schema` and `transport_finishing_schema` markers in one
+atomic85 migration. It retains the original `d6aeae4` installer/receipt identity,
+not a relabeled Local model or previous guest qualification. A tool-less role
+inside a rooted parent is not a rootless OS process. Raw late data/accounting
+may improve one originally admitted step without changing terminal work,
+cleanup, delegation or source acceptance. Jev remains upstream-unqualified;
+native rollback root transfer awaits the actual user policy decision. Metadata
+finishing is not Remote/native accepted-work Git integration.
 
 The owner-requested [shared themes and TUI follow-up](themes-and-tui.md) retains
 OpenTUI/React and the existing profile settings/event authority. Protocol 78 adds

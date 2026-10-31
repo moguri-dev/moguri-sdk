@@ -200,6 +200,14 @@ export class Winddowns {
         return events;
       });
   }
+  lateResult(record: WinddownRecord, resultDigest: string, outcome: string): EventInput[] {
+    if (record.version !== 2 || record.status !== "partial" || !record.step.stepId || record.step.state !== "unconfirmed") {
+      if (record.step.resultDigest === resultDigest && record.step.outcome === outcome) return [];
+      throw new MoguriError("winddown_late_owner", "Only the exact original unconfirmed non-Local finishing step can gain late data. No held role, result replacement or Git work was adopted.", 409);
+    }
+    return [this.event(projectWinddown(record, { ...record, revision: record.revision + 1, updatedAt: new Date().toISOString(),
+      step: { ...record.step, state: "recorded", resultDigest, outcome } }))];
+  }
   async query(query: WinddownQuery): Promise<WinddownResponse> {
     if (query.type === "winddown.status") {
       const state = this.host.snapshot(), session = state.sessions.find((session) => session.id === query.sessionId);

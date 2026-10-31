@@ -34,6 +34,8 @@ try {
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 84) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-session-intake.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 85 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-owned-transports.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 90_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
@@ -68,6 +70,7 @@ try {
     ${installedProtocol >= 77 ? 'import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "moguri";' : ""}
     ${installedProtocol >= 82 ? 'import {ToolPreferencesSchema,defaultToolPreferences,effectiveToolPreferences,type ToolPreferences,type WorkflowKind} from "moguri";' : ""}
     ${installedProtocol >= 84 ? 'import {type KupoMode,type ScheduledTiming,type ModelFailure,type KupoModelProfileInput,scheduleLocalChoices,RECOVERY_DELAYS_MS} from "moguri";' : ""}
+    ${installedProtocol >= 85 ? 'import {type OwnedModelTransport,type DecisionRecord,type WinddownRecord,type SandboxWorkspace} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -82,6 +85,13 @@ try {
         const prompt=client.scheduledPrompts.list(id)[0];if(prompt){await client.scheduledPrompts.sendNow(prompt.id,prompt.revision);await client.scheduledPrompts.cancel(prompt.id);}
         await client.tools.history(id,{limitMessages:1});void scheduleLocalChoices;void RECOVERY_DELAYS_MS;
       };void typedIntake;
+      ` : ""}
+      ${installedProtocol >= 85 ? `
+      const ownedData=(decision:DecisionRecord,finishing:WinddownRecord,workspace:SandboxWorkspace)=>{
+        if(decision.version===2){const actual:OwnedModelTransport=decision.transport;void actual.executionId;void decision.env;}
+        if(finishing.version===2){void finishing.scopeDigest;void finishing.transport?.workerDigest;void finishing.source;}
+        if(workspace.preparation?.version===2){void workspace.preparation.commandDigest;void workspace.preparation.draftDigest;}
+      };void ownedData;
       ` : ""}
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;

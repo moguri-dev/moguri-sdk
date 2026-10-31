@@ -65,6 +65,16 @@ process.once("message", (raw: unknown) => {
           query: connection.query.bind(connection) };
       };
     }
+    if (raw.holdDecisionEffect === true) {
+      let held = false;
+      service.controller.on("change", () => {
+        const decision = service.controller.snapshot().decisions.find((record) => record.status === "ready");
+        if (decision && !held) {
+          held = true; process.send?.({ kind: "held-decision-effect", decisionId: decision.id });
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+        }
+      });
+    }
     if (raw.holdQueuedFile === true) {
       const query = service.controller.platform.managed.query.bind(service.controller.platform.managed); let held = false;
       service.controller.platform.managed.query = async (...args) => {

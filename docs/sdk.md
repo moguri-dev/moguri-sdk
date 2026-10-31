@@ -5,7 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **84** for
+Current source uses protocol **85** for
+[owned SSH/native decisions, metadata finishing and model-free scheduled preparation](architecture/owned-model-transports.md).
+It preserves protocol84
 [retained model recovery, scheduled input and evidence-qualified Kupo modes](architecture/recovery-scheduling-kupo.md),
 preserving protocol83 content/script safeguards and protocol82
 [shared workflow commands, ranked methods and direct MCP schemas](architecture/command-tool-preferences.md).
@@ -877,10 +879,40 @@ another parent turn. There is deliberately no public `evaluate`, `answer`,
 `bounded-model` policy and available canonical model ID, then separately choose
 Autopilot Max in session controls. Fixed and kupo Single model selection stays
 independent. Hosted inputs require separate consent; the root-less Local worker
-still uses actual all-role token/USD admission and existing finishing holds.
+uses actual all-role token/USD admission and existing finishing holds.
+Protocol85 additionally binds tool-less subcalls to the original SSH/native
+parent using version-2 `DecisionRecord`/`DecisionDocument` and
+`OwnedModelTransport`. Their `env`, exact execution/worker/peer or guest/root
+identity and `owned-role-acknowledged` cleanup cannot become a Local record or
+proof of parent exit. An unchanged readiness read starts no inference.
 The dedicated Jev contract remains unqualified because the current API cannot
 enforce a positive output-token bound. Remote/native Max never executes on the
 Local controller as a fallback.
+
+Existing `scheduledPrompts.create` can perform model-free native source
+preparation under the explicitly enabled managed policy before its atomic
+ghost/draft admission. `SandboxWorkspace.preparation.version === 2` binds the
+original scheduling command/digest and saved draft revision/digest; it never
+claims a model turn or restores a failed stage.
+
+Version-2 `WinddownRecord`/`WinddownDocument` keeps planned scope separate from
+the actual transport bound once at hold transfer/model start. `winddown.read`
+returns its original aggregate-only model input/result. SSH/native reports
+cannot acquire Local Git fields or `completed` publication state. A changed
+current session Env cannot adopt them through `commitPreview`.
+Exact late inspection may fill an admitted partial step's raw observation and
+settle its original charge, but cannot change terminal outcome/cleanup, validate
+advice or restart the parent. Deleted reports are not reconstructed.
+
+| Error | Meaning and recovery |
+| --- | --- |
+| `decision_transport` | No exact active pinned parent or qualified provider scope; review the selected Env, never substitute a controller worker. |
+| `decision_late_owner` | Original model/role/peer/root or settled owner does not match inspection; preserve the original unknown hold and inspect its actual owner. |
+| `winddown_late_owner` | Original complete finishing hold/start/transport is absent or changed; no new hold, model or Git effect is inferred. |
+
+These use the existing authenticated, immutable-profile query/command and
+receipt surface; no public paid-evaluate, replay or authority-grant endpoint is
+added. See [owned model transports](architecture/owned-model-transports.md).
 
 Shared `/decisions status|list|read ID|stop ID confirm-stop|set POLICY_JSON`
 and CLI `moguri decisions status --session ID`, `list`, `read ID`, `stop ID`,
@@ -1226,16 +1258,16 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
 | `roleSequences` | Read exact independently retained role intent, original input and one selected raw role input/result; never start a model, grant acceptance or resume partial work. |
 | `compound` | Explicit Local source/cost preview/start/read, focused validation preview, actual-user stage/test review/deny and exact stop. Real conditional Cascade/Critique uses the existing root-less worker and all-role ledger. `lineageDraft` prepares an unpersisted exact model/source claim with browser-safe hashing; it does not inspect providers, save policy or prove training/quality. Source application stays in `candidates`. |
-| `winddown` | Canonical readiness, independently retained finishing holds/model input/results, exact stop/decline, and separate actual-user accepted-work/new-local-branch preview/commit/wait. Finite Local Single/Compound use the same all-role ledger; summaries grant no source or Git authority and never resume ordinary work. |
-| `decisions` | Service-derived compatible-provider readiness, independently retained exact request/model/rubric/raw evidence, all-role accounting and exact one-shot stop. No public evaluate, paid retry, answer or approval command. Local Max acts only inside separate explicit user delegation and preserves the real decision-provider actor. |
+| `winddown` | Canonical readiness and independent selected-boundary finishing holds/input/results/stop. Local accepted-work/new-branch Git preview/commit remains separate; SSH/native metadata cannot adopt it. All roles share one ledger; summaries grant no source/Git authority or ordinary continuation. |
+| `decisions` | Exact request/model/rubric/raw evidence, actual Local or original SSH/native parent transport, all-role accounting and one-shot stop. No public evaluate, paid retry, answer or approval endpoint. Only separate explicit delegation can use the real decision-provider actor. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
 | `activity` | Exact session-scoped operation metadata and lazy original arguments/results; public response copy and original owning-turn information. No private reasoning, terminal buffers or recovery from a deleted source. |
 | `agentTerminals` | Original agent `run_command` requests/results and bounded UTF-8 output/tails. No private User/Global console access, stdin, new execution or implicit persistent shell. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
-| `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
-| `routing` | Automatic configured-model policy, service-owned `capabilities(env?)`, exact policy/configure CAS and ordinary routing/selected-response history. Explicit Single and reviewed worktree Compound policies remain available. Finite automatic budgets, images and synthetic tuning stay blocked. |
+| `compactions` | Source/model-bound reviewed generation/apply/restore and explicit opt-in bounded automatic text compaction through the same worker/ledger. Originals/images remain retained; no history deletion or answer/permission promotion. |
+| `routing` | Actual mode/capability/profile readiness, revision-bound policy and original classifier/role/selected-response history. Explicit Single/Compound stays separate. Finite automatic work requires complete selected-boundary holds/finishing; unsupported image/effort/model combinations stay blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe low-level dispatcher/catalogue. Frontend text uses `commands.submit`, not eager `slash` dispatch. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |

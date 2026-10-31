@@ -1144,7 +1144,11 @@ export class ControlPlane extends EventEmitter {
         if (entry.status !== "settled") events.push({ event_type: "model.late_usage", profile_id: this.profileId,
           ...(session ? { project_id: session.projectId, session_id: session.id } : {}), turn_id: execution.turnId, step_id: request.stepId,
           payload: { usage: this.modelUsage(session, request, entry), executionId: execution.id, sequence: frame.sequence } });
+        if (entry.role === "checkpoint") events.push(...this.lateFinishingEvents(execution, request));
       }
+      if (request.kind === "model.complete" && !request.usageReported &&
+        this.projection.budgetEntries.find((entry) => entry.id === request.stepId)?.role === "checkpoint") events.push(...this.lateFinishingEvents(execution, request));
+      if (request.kind === "owned-model.complete") events.push(...this.lateOwnedModelEvents(execution, request, frame.sequence));
       events.push({ event_type: "sandbox.frame_recorded", profile_id: this.profileId, project_id: execution.projectId,
         turn_id: execution.turnId, payload: { executionId: execution.id, sequence: frame.sequence, digest: frame.digest } });
     }
@@ -1251,7 +1255,9 @@ export class ControlPlane extends EventEmitter {
         const stepId = frame.request.stepId;
         const prior = session.usage.find((usage) => usage.stepId === stepId);
         if (prior?.quality === "unknown" && frame.request.usageReported && assistantMessage(frame.request.message).model === prior.apiModelId) events.push({ ...scope, event_type: "model.late_usage", payload: { usage: this.modelUsage(session, frame.request), executionId: execution.id, sequence: frame.sequence } });
+        if (this.projection.budgetEntries.find((entry) => entry.id === stepId)?.role === "checkpoint") events.push(...this.lateFinishingEvents(execution, frame.request));
       }
+      if (frame.request.kind === "owned-model.complete") events.push(...this.lateOwnedModelEvents(execution, frame.request, frame.sequence));
       if (frame.request.kind === "mcp.complete") {
         const call = this.mcpCall(frame.request.result.operationId, session.id), result = this.decodeMcpResult(call, frame.request);
         if (call.executionId !== execution.id) throw new MoguriError("remote_mcp_authority", "The late MCP frame belongs to a different execution. No result was adopted.", 409);
@@ -4078,8 +4084,7 @@ export class ControlPlane extends EventEmitter {
         execution.workspace !== this.remoteWorkspace(session) || remoteFingerprint(execution.target) !== this.remote.readiness.hostFingerprint) {
         throw new MoguriError("decision_transport", "The captured SSH peer/root/build ended or changed. No alias or controller root was substituted.", 409);
       }
-      return parse(OwnedModelTransportSchema, { env: "Remote", executionId: execution.id, workerDigest: execution.workerDigest,
-        peerFingerprint: remoteFingerprint(execution.target), hostKey: execution.target.hostKey, root: execution.workspace });
+      return this.executionModelTransport(execution);
     }
     const execution = this.projection.sandboxExecutions?.find((entry) => entry.id === run.sandboxExecutionId);
     if (!execution || execution.status !== "running" || !execution.nativeSessionId || !execution.planDigest || !execution.signerFingerprint ||
@@ -4087,9 +4092,59 @@ export class ControlPlane extends EventEmitter {
       throw new MoguriError("decision_transport", "The original native guest/root/build is not active and verified. No replacement guest was launched for advice.", 409);
     }
     this.assertNativePolicy(execution);
+    return this.executionModelTransport(execution);
+  }
+  private executionModelTransport(execution: RemoteExecution | SandboxExecution): OwnedModelTransport {
+    if ("workspace" in execution) return parse(OwnedModelTransportSchema, { env: "Remote", executionId: execution.id, workerDigest: execution.workerDigest,
+      peerFingerprint: remoteFingerprint(execution.target), hostKey: execution.target.hostKey, root: execution.workspace });
     return parse(OwnedModelTransportSchema, { env: "Sandbox", executionId: execution.id, workerDigest: execution.workerDigest,
       workspaceId: execution.workspaceId, nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest,
       signerFingerprint: execution.signerFingerprint, sourceDigest: execution.stage.sourceDigest, image: execution.image, root: execution.root });
+  }
+  private lateOwnedModelEvents(execution: RemoteExecution | SandboxExecution, request: Extract<OwnedModelRequest, { kind: "owned-model.complete" }>, sequence: number): EventInput[] {
+    const entry = this.projection.budgetEntries.find((entry) => entry.id === request.stepId), message = assistantMessage(request.message);
+    const transport = this.executionModelTransport(execution);
+    if (!entry || entry.env !== transport.env || entry.sessionId !== execution.sessionId || entry.turnId !== execution.turnId ||
+      !["decision", "steering"].includes(entry.role) || message.model !== entry.apiModelId) {
+      throw new MoguriError("decision_late_owner", "Late private accounting has no exact original profile, turn, environment or model step. No substituted or free usage was adopted.", 409);
+    }
+    const { ownerId: _, ...value } = request, normalized = { ...value, kind: "model.complete" as const };
+    const usage = this.modelUsage(this.projection.sessions.find((session) => session.id === execution.sessionId), normalized, entry);
+    const accounting: EventInput[] = entry.status !== "settled" && reportedModelUsage(usage) ? [{ event_type: "model.late_usage", profile_id: this.profileId,
+      project_id: execution.projectId, session_id: execution.sessionId, turn_id: execution.turnId, step_id: request.stepId,
+      payload: { usage, executionId: execution.id, sequence } }] : [];
+    const record = this.projection.decisions.find((record) => record.id === request.ownerId);
+    if (!record) {
+      console.error("Late private model report is deleted or unavailable. Only its independently retained exact started-step accounting can reconcile; no report or advice was restored.");
+      return accounting;
+    }
+    if (record.version !== 2 || record.sessionId !== execution.sessionId || record.turnId !== execution.turnId || record.stepId !== request.stepId ||
+      JSON.stringify(record.transport) !== JSON.stringify(transport) || entry.env !== record.env ||
+      entry.sessionId !== record.sessionId || entry.turnId !== record.turnId || entry.role !== record.role || entry.modelId !== record.modelId ||
+      entry.providerId !== record.providerId || entry.apiModelId !== record.apiModelId || message.model !== record.apiModelId) {
+      throw new MoguriError("decision_late_owner", "Late private usage/result lost its exact original profile, role, model or peer/root/guest. No substituted accounting or result was retained.", 409);
+    }
+    this.decisions.document(record);
+    const resultDigest = this.store.putBlob(JSON.stringify({ ...message, errorMessage: message.errorMessage ? "Provider request failed." : undefined, diagnostics: undefined }));
+    return [...this.decisions.lateResult(record, resultDigest, message.stopReason), ...accounting];
+  }
+  private lateFinishingEvents(execution: RemoteExecution | SandboxExecution, request: Extract<WorkerRequest, { kind: "model.complete" }>): EventInput[] {
+    const record = this.projection.winddowns.find((record) => record.step.stepId === request.stepId);
+    if (!record) {
+      console.error("Late finishing report is deleted or unavailable. Original accounting stays independent; no report, Git source or model call was restored.");
+      return [];
+    }
+    const entry = this.projection.budgetEntries.find((entry) => entry.id === request.stepId), message = assistantMessage(request.message);
+    if (record.version !== 2 || record.sessionId !== execution.sessionId || record.turnId !== execution.turnId ||
+      JSON.stringify(record.transport) !== JSON.stringify(this.executionModelTransport(execution)) || !entry || entry.env !== record.env ||
+      entry.sessionId !== record.sessionId || entry.turnId !== record.turnId || entry.role !== "checkpoint" || entry.planId !== record.step.planId ||
+      entry.modelId !== record.step.modelId || entry.providerId !== record.step.providerId || entry.apiModelId !== record.step.apiModelId ||
+      message.model !== record.step.apiModelId) {
+      throw new MoguriError("winddown_late_owner", "Late finishing data changed its original held/start/model or peer/root/guest binding. No result, source or Git authority was adopted.", 409);
+    }
+    this.winddowns.document(record);
+    const resultDigest = this.store.putBlob(JSON.stringify({ ...message, errorMessage: message.errorMessage ? "Provider request failed." : undefined, diagnostics: undefined }));
+    return this.winddowns.lateResult(record, resultDigest, message.stopReason);
   }
   private transportPreparationScope(session: Session): string {
     if (session.controls.env === "Remote") {

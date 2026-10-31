@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Message } from "@earendil-works/pi-ai";
 import { executeTool } from "./tools.ts";
-import { assistantMessage, contextMessages, parentMessage, toolCalls, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
+import { assistantMessage, contextMessages, parentMessage, toolCalls, isOwnedModelRequest, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
 import { isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
 import { retainedToolText } from "../../../packages/protocol/src/tooling.ts";
 import { streamWorkerModel } from "./worker-model.ts";
@@ -16,7 +16,7 @@ const abort = new AbortController();
 let authority = true;
 let terminalRequested = false;
 let debuggerRuntime: OwnedDebugRuntime | undefined;
-const pending = new Map<string, { resolve: (message: WorkerReply) => void; reject: (error: Error) => void; interruptible: boolean; kind: WorkerRequest["kind"] }>();
+const pending = new Map<string, { resolve: (message: WorkerReply) => void; reject: (error: Error) => void; interruptible: boolean; kind: WorkerRequest["kind"]; ownerId?: string }>();
 let parentStart: WorkerStart | undefined;
 let ownedModel: { id: string; abort: AbortController; done: Promise<void> } | undefined;
 const ownedModelIds = new Set<string>();
@@ -27,7 +27,8 @@ async function request(message: WorkerRequest & { requestId: string }): Promise<
   const interruptible = message.kind === "boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary" ||
     message.kind === "owned-model.boundary";
   if (interruptible) abort.signal.throwIfAborted();
-  return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible, kind: message.kind }); send(message); });
+  return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible, kind: message.kind,
+    ...(isOwnedModelRequest(message) ? { ownerId: message.ownerId } : {}) }); send(message); });
 }
 async function finish(outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): Promise<void> {
   if (ownedModel) { ownedModel.abort.abort(); await ownedModel.done; }
@@ -348,7 +349,12 @@ process.on("message", (raw: unknown) => {
     });
     ownedModel = { id: message.ownerId, abort: roleAbort, done };
   } else if (message.kind === "owned-model.stop") {
-    if (ownedModel?.id === message.ownerId) { ownedModel.abort.abort(); send({ kind: "owned-model.ack", ownerId: message.ownerId }); }
+    if (ownedModel?.id === message.ownerId) {
+      ownedModel.abort.abort(); send({ kind: "owned-model.ack", ownerId: message.ownerId });
+      for (const [id, waiter] of pending) if (waiter.ownerId === message.ownerId) {
+        waiter.reject(new Error("The original private model operation was cancelled without inferring a result acknowledgement.")); pending.delete(id);
+      }
+    }
   }
   else if (message.kind === "reply") {
     const waiter = pending.get(message.requestId);
@@ -358,7 +364,7 @@ process.on("message", (raw: unknown) => {
     if (message.kind === "control-lost") authority = false;
     send({ kind: "ack" });
     abort.abort();
-    for (const [id, waiter] of pending) if (waiter.interruptible || !authority) { waiter.reject(new Error("Turn stopped or control authority disconnected.")); pending.delete(id); }
+    for (const [id, waiter] of pending) if (waiter.interruptible || waiter.ownerId || !authority) { waiter.reject(new Error("Turn stopped or control authority disconnected.")); pending.delete(id); }
   }
 });
 process.on("disconnect", () => {

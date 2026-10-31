@@ -105,9 +105,13 @@ export function projectDecision(previous: DecisionRecord | undefined, value: unk
     if (next.revision !== 0 || next.status !== "pending" || next.createdAt !== next.updatedAt || next.stepId || next.workerOutcome || next.cancellation !== "none" ||
       next.cleanup !== "pending" || next.diagnostic) corrupt("A decision must begin with exact undispatched original request intent.");
   } else {
+    const lateResult = previous.version === 2 && ["rejected", "failed", "partial"].includes(previous.status) && next.status === previous.status &&
+      previous.stepId !== null && previous.resultDigest === null && next.resultDigest !== null && next.adviceDigest === null &&
+      next.workerOutcome === previous.workerOutcome && next.cancellation === previous.cancellation && next.cleanup === previous.cleanup &&
+      next.diagnostic === previous.diagnostic;
     const immutable = ["version", "id", "profileId", "sessionId", "turnId", "ownerSessionId", "ownerTurnId", "projectId", "workspaceId", "env", "kind",
       "sourceDigest", "bindingDigest", "policyDigest", "inputDigest", "modelId", "providerId", "apiModelId", "role", "inputBound", "outputBound", "createdAt"] as const;
-    if (!activeDecision(previous) || next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
+    if (!activeDecision(previous) && !lateResult || next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
       JSON.stringify(previous.source) !== JSON.stringify(next.source) ||
       (previous.version === 2 || next.version === 2) && (previous.version !== 2 || next.version !== 2 || JSON.stringify(previous.transport) !== JSON.stringify(next.transport)) ||
       (["stepId", "actualInputDigest", "resultDigest", "adviceDigest", "modelOutcome", "workerOutcome"] as const).some((key) => previous[key] !== null && previous[key] !== next[key]) ||

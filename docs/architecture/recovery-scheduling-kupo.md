@@ -161,7 +161,13 @@ The packed external SDK must expose the same browser-safe/React/Node contracts.
 Fixture routing observations are mechanical qualification, not live quality or
 calibration evidence. Unsupported combinations must remain explicitly blocked.
 
-## Supported and blocked boundaries
+## Delivered protocol84 supported and blocked boundaries
+
+This table and its exact qualification remain evidence for the original
+`d6aeae4` delivery/installer, not the new worker. Protocol85's model-free native
+scheduling preparation and selected-parent decision/finishing implementation
+are recorded separately in [owned model transports](owned-model-transports.md).
+Native rollback restaging and Jev remain distinct unresolved gates.
 
 | Boundary | Current executable result |
 |---|---|

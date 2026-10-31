@@ -167,12 +167,14 @@ export class Decisions {
     try {
       signal.throwIfAborted();
       child = record.version === 1 ? localWorker(this.workerPath, record.id) : this.host.ownedWorker(session, record.id, source, async (request) => {
-        live.chain = live.chain.then(() => this.message(live, request)).catch((error: unknown) => {
+        const work = live.chain.then(() => this.message(live, request));
+        live.chain = work.catch((error: unknown) => {
           live.error = error instanceof Error ? error : new Error("Owned model transport failed.");
           console.error("Owned decision exchange failed:", error instanceof MoguriError ? error.code : "decision_transport");
-          this.cancel(record.id, "The original owned subcall exchange failed; no result or replay can authorize an action.");
+          // Cancellation writes must not create a receipt for the failed source transaction.
+          this.abort(live);
         });
-        await live.chain;
+        await work;
       });
     } catch (error) {
       console.error("Original decision transport could not be admitted:", error instanceof MoguriError ? error.code : "decision_transport");
@@ -375,6 +377,18 @@ export class Decisions {
     return this.host.snapshot().decisions.filter(activeDecision).map((record) => this.event(projectDecision(record, { ...record, revision: record.revision + 1, updatedAt: now(),
       status: record.status === "ready" || !record.stepId ? "rejected" : "partial", cleanup: record.cleanup === decisionCleanup(record) ? record.cleanup : "unconfirmed",
       diagnostic: "Control plane restarted with original decision intent/result. Cleanup and undisclosed usage remain unconfirmed; no advice, paid call or effect was replayed." })));
+  }
+  lateResult(record: DecisionRecord, resultDigest: string, modelOutcome: string): EventInput[] {
+    if (record.version !== 2 || activeDecision(record) || this.live.has(record.id) || !record.stepId) {
+      throw new MoguriError("decision_late_owner", "Wait for the original non-Local role to settle before inspecting its late result. No active or replacement owner was adopted.", 409);
+    }
+    if (record.resultDigest) {
+      if (record.resultDigest !== resultDigest || record.modelOutcome !== modelOutcome) {
+        throw new MoguriError("decision_late_result", "The late original result changed already retained bytes. No replacement or replay was accepted.", 409);
+      }
+      return [];
+    }
+    return [this.event(projectDecision(record, { ...record, revision: record.revision + 1, updatedAt: now(), resultDigest, modelOutcome }))];
   }
   query(query: DecisionQuery): DecisionResponse {
     if (query.type === "decisions.read") {

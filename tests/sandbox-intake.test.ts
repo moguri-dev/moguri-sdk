@@ -21,10 +21,10 @@ test("actual native Kupo preserves a scheduled ghost/new draft and owned Stop wi
     await sdk.settings.update(settings.values, settings.revision); await sdk.sandbox.probe();
     const bound = await sdk.projects.add(project), created = await sdk.sessions.create(bound.id!, "Generated native scheduled Kupo", { env: "Sandbox", modelId: KUPO_MODEL_ID });
     const session = () => service.controller.snapshot().sessions.find((value) => value.id === created.id)!;
-    const preview = (await sdk.sandbox.preview(created.id!, ["fixture.txt"])).preview;
-    await sdk.sandbox.prepare(created.id!, ["fixture.txt"], preview.digest, session().revision);
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text: "Generated native scheduled original.", attachments: [] });
     const scheduled = await sdk.scheduledPrompts.create(created.id!, { kind: "delay", minutes: 5, timeZone: "UTC" });
+    assert.equal(service.controller.snapshot().sandboxWorkspaces!.find((workspace) => workspace.id === session().sandboxWorkspaceId)?.preparation?.kind, "scheduled");
+    assert.equal(session().turnId, null); assert.equal(service.controller.snapshot().sandboxExecutions!.length, 0);
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: session().draft.revision, text: "Generated newer native draft.", attachments: [] });
     assert.equal(session().messages.length, 0); assert.equal(provider.requests.length, 0);
     clock.advanceBy(300000);

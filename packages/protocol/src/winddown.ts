@@ -94,6 +94,9 @@ export function projectWinddown(previous: WinddownRecord | undefined, value: unk
   if (!previous) {
     if (next.revision !== 0 || next.status !== "held" || next.createdAt !== next.updatedAt || step.state !== "pending" || next.commit || next.diagnostic) corrupt("Wind-down must begin as original undispatched held capacity.");
   } else {
+    const lateResult = previous.version === 2 && previous.status === "partial" && next.status === "partial" &&
+      previous.step.state === "unconfirmed" && step.state === "recorded" && previous.step.resultDigest === null && step.resultDigest !== null &&
+      next.diagnostic === previous.diagnostic && step.diagnostic === previous.step.diagnostic;
     const immutable = ["version", "id", "profileId", "sessionId", "turnId", "ownerSessionId", "ownerTurnId", "projectId", "workspaceId", "folderId", "env",
       "inputDigest", "authorityDigest", "policyDigest", "originId", "createdAt"] as const;
     const transitions: Record<WinddownRecord["status"], WinddownRecord["status"][]> = {
@@ -102,7 +105,7 @@ export function projectWinddown(previous: WinddownRecord | undefined, value: unk
       completed: [], declined: [], unavailable: [], failed: [], partial: [], unused: [],
     };
     if (next.revision !== previous.revision + 1 || immutable.some((key) => next[key] !== previous[key]) || JSON.stringify(next.source) !== JSON.stringify(previous.source) ||
-      !transitions[previous.status].includes(next.status)) corrupt("Original ownership, held capacity or terminal work changed/replayed.");
+      !transitions[previous.status].includes(next.status) && !lateResult) corrupt("Original ownership, held capacity or terminal work changed/replayed.");
     if (previous.version === 2 || next.version === 2) {
       if (previous.version !== 2 || next.version !== 2 || previous.scopeDigest !== next.scopeDigest ||
         previous.transport && JSON.stringify(previous.transport) !== JSON.stringify(next.transport) ||
