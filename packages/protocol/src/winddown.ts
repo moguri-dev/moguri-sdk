@@ -5,6 +5,7 @@ import { RoleSequenceStepSchema, validateRoleLedger } from "./role-sequences.ts"
 import { CandidateRecordSchema, CandidateRootSchema } from "./candidates.ts";
 import { MoguriError } from "./core.ts";
 import type { BudgetPlan } from "./budget-plans.ts";
+import { OwnedModelTransportSchema } from "./owned-model-transports.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -21,27 +22,34 @@ export const WinddownSettingsSchema = Type.Object({
 export type WinddownSettings = Static<typeof WinddownSettingsSchema>;
 export const defaultWinddownSettings = (): WinddownSettings => ({ enabled: false, modelId: null, allowHosted: false, outputTokens: 256, timeoutMs: 30000 });
 const count = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
-export const WinddownMetadataSchema = Type.Object({
+const LocalWinddownMetadataSchema = Type.Object({
   version: Type.Literal(1), turnId: Type.String({ minLength: 1, maxLength: 128 }), env: Type.Literal("Local"),
   purpose: Type.Literal("budget-wind-down"), taskDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   calls: count, callSetDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   byRole: Type.Array(Type.Object({ role: ModelRoleSchema, calls: count, knownTokens: count, unknownCalls: count }, { additionalProperties: false }), { maxItems: 13 }),
   basis: Type.Literal("canonical-aggregate-only-no-history-or-code"),
 }, { additionalProperties: false });
+export const WinddownMetadataSchema = Type.Union([LocalWinddownMetadataSchema, object({
+  ...LocalWinddownMetadataSchema.properties, version: Type.Literal(2), env: Type.Union([Type.Literal("Remote"), Type.Literal("Sandbox")]),
+})]);
 export type WinddownMetadata = Static<typeof WinddownMetadataSchema>;
 export const WinddownSourceSchema = object({
   projectId: id, workspaceId: maybeId, root: Type.String({ minLength: 1, maxLength: 4096 }),
   device: Type.String({ pattern: "^[0-9]+$" }), inode: Type.String({ pattern: "^[0-9]+$" }),
 });
-export const WinddownDocumentSchema = object({
+const LocalWinddownDocumentSchema = object({
   format: Type.Literal("moguri-budget-winddown"), version: Type.Literal(1),
   sessionId: id, turnId: id, source: Type.Union([WinddownSourceSchema, Type.Null()]), taskDigest: hash,
   settings: WinddownSettingsSchema, modelJson: Type.String({ minLength: 1, maxLength: 16384 }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 8192 }), inputBound: count, outputBound: Type.Integer({ minimum: 1, maximum: 2048 }),
   authorityDigest: hash, policyDigest: hash, policyJson: Type.String({ minLength: 1, maxLength: 128 * 1024 }),
 });
+export const WinddownDocumentSchema = Type.Union([LocalWinddownDocumentSchema, object({
+  ...LocalWinddownDocumentSchema.properties, version: Type.Literal(2), source: Type.Null(),
+  env: Type.Union([Type.Literal("Remote"), Type.Literal("Sandbox")]), scopeDigest: hash,
+})]);
 export type WinddownDocument = Static<typeof WinddownDocumentSchema>;
-export const WinddownRecordSchema = object({
+const LocalWinddownRecordSchema = object({
   version: Type.Literal(1), id, profileId: id, sessionId: id, turnId: id, ownerSessionId: id, ownerTurnId: maybeId,
   projectId: maybeId, workspaceId: maybeId, folderId: maybeId, env: Type.Literal("Local"), source: Type.Union([WinddownSourceSchema, Type.Null()]),
   inputDigest: hash, authorityDigest: hash, policyDigest: hash, originId: id, revision: count, createdAt: timestamp, updatedAt: timestamp,
@@ -54,11 +62,21 @@ export const WinddownRecordSchema = object({
     publicationAttempted: Type.Boolean(), publishedCommit: maybeGit, resultDigest: maybeHash, cancelRequested: Type.Boolean(),
   }), Type.Null()]), diagnostic,
 });
+export const WinddownRecordSchema = Type.Union([LocalWinddownRecordSchema, object({
+  ...LocalWinddownRecordSchema.properties, version: Type.Literal(2), source: Type.Null(),
+  env: Type.Union([Type.Literal("Remote"), Type.Literal("Sandbox")]), scopeDigest: hash,
+  transport: Type.Union([OwnedModelTransportSchema, Type.Null()]),
+})]);
 export type WinddownRecord = Static<typeof WinddownRecordSchema>;
 function corrupt(message: string): never { throw new MoguriError("winddown_corrupt", `${message} State was preserved; no checkpoint model, Git approval or replay was adopted.`, 409); }
 export function projectWinddown(previous: WinddownRecord | undefined, value: unknown): WinddownRecord {
   if (!Value.Check(WinddownRecordSchema, value)) corrupt("Wind-down has an unsupported shape/version.");
   const next = value, step = next.step;
+  if (next.version === 2 && (next.transport && next.transport.env !== next.env ||
+    next.commit !== null || next.commitDocumentDigest !== null || ["committing", "completed"].includes(next.status) ||
+    ["running", "ready"].includes(next.status) && !next.transport || ["held", "unused"].includes(next.status) && next.transport !== null)) {
+    corrupt("Transport finishing cannot adopt Local Git or lose its exact actual model boundary.");
+  }
   if (![next.createdAt, next.updatedAt].every((value) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value) ||
     step.role !== "checkpoint" || !step.providerId || next.source && (next.source.projectId !== next.projectId || next.source.workspaceId !== next.workspaceId ||
       !next.source.root.startsWith("/") || !next.source.root.isWellFormed() || next.source.root.includes("\0")) ||
@@ -85,6 +103,13 @@ export function projectWinddown(previous: WinddownRecord | undefined, value: unk
     };
     if (next.revision !== previous.revision + 1 || immutable.some((key) => next[key] !== previous[key]) || JSON.stringify(next.source) !== JSON.stringify(previous.source) ||
       !transitions[previous.status].includes(next.status)) corrupt("Original ownership, held capacity or terminal work changed/replayed.");
+    if (previous.version === 2 || next.version === 2) {
+      if (previous.version !== 2 || next.version !== 2 || previous.scopeDigest !== next.scopeDigest ||
+        previous.transport && JSON.stringify(previous.transport) !== JSON.stringify(next.transport) ||
+        !previous.transport && next.transport && (previous.status !== "held" || next.status !== "running" || step.state !== "started")) {
+        corrupt("Original finishing transport changed or was inferred without its exact once-only model start.");
+      }
+    }
     if ((["planId", "role", "modelId", "providerId", "apiModelId", "inputBound", "outputBound"] as const).some((key) => step[key] !== previous.step[key]) ||
       (["stepId", "inputDigest", "resultDigest", "outcome"] as const).some((key) => previous.step[key] !== null && previous.step[key] !== step[key])) corrupt("Original checkpoint model/bounds or actual observations changed.");
     const oldCommit = previous.commit, commit = next.commit;

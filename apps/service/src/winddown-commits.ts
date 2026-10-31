@@ -53,6 +53,7 @@ export class WinddownCommits {
   }
   async preview(value: Input, signal = AbortSignal.timeout(15000)) {
     const input = structuredClone(value), record = this.host.record(input.winddownId);
+    if (record.env !== "Local") throw new MoguriError("winddown_commit_env", "This finishing report ran on its actual Remote/native boundary. Local accepted-work/Git helpers cannot publish that source or a controller mapping.", 409);
     if (record.status !== "ready" || record.commit !== null) throw new MoguriError("winddown_commit_state", "Only one exact complete known finishing report may request a fresh actual-user accepted-work review. Terminal/partial work cannot replay.", 409);
     const context = this.context(record, input.sessionId);
     await this.host.assertRoot(context.session, signal);

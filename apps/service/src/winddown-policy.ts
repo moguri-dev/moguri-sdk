@@ -15,14 +15,14 @@ export function winddownContext(metadata: WinddownMetadata): Message[] {
 export function winddownCapability(value: unknown, models: ModelInfo[], env: Controls["env"]) {
   const settings = parse(WinddownSettingsSchema, value);
   if (!settings.enabled || !settings.modelId) throw new MoguriError("winddown_unavailable", "Explicitly configure a bounded wind-down model and review its privacy/output policy. Finite kupo was not enabled by reservation primitives alone.", 409);
-  if (env !== "Local") throw new MoguriError("winddown_env", "This accepted-work/Git wind-down lifecycle is explicitly Local. Unqualified Remote/native paths cannot fall back or lift caps.", 409);
   const model = models.find((model) => model.id === settings.modelId);
-  if (!model || model.id === KUPO_MODEL_ID || model.synthetic || !model.providerId || !model.apiModelId || !model.environments?.includes("Local") ||
+  if (!model || model.id === KUPO_MODEL_ID || model.synthetic || !model.providerId || !model.apiModelId || !model.environments?.includes(env) ||
     !Number.isSafeInteger(model.maxTokens) || !model.maxTokens || model.maxTokens < settings.outputTokens ||
-    !Number.isSafeInteger(model.contextWindow) || model.contextWindow < 8192) throw new MoguriError("winddown_model", "The exact wind-down model lacks qualified concrete identity, Local capability or its full positive output bound. No replacement.", 409);
+    !Number.isSafeInteger(model.contextWindow) || model.contextWindow < 8192) throw new MoguriError("winddown_model", "The exact wind-down model lacks qualified concrete identity, selected-environment capability or its full positive output bound. No replacement.", 409);
   if (!(model.source === "local" && model.endpointBoundary === "loopback") && !settings.allowHosted) throw new MoguriError("winddown_privacy", "The wind-down metadata destination needs separate explicit hosted/network consent. A local provider label is not an endpoint boundary.", 403);
   const maximum = Number.MAX_SAFE_INTEGER;
-  const worst: WinddownMetadata = { version: 1, turnId: "x".repeat(128), env: "Local", purpose: "budget-wind-down", taskDigest: "0".repeat(64),
+  const boundary = env === "Local" ? { version: 1 as const, env } : { version: 2 as const, env };
+  const worst: WinddownMetadata = { ...boundary, turnId: "x".repeat(128), purpose: "budget-wind-down", taskDigest: "0".repeat(64),
     calls: maximum, callSetDigest: "0".repeat(64), byRole: ModelRoleSchema.anyOf.map((role) => ({ role: role.const, calls: maximum, knownTokens: maximum, unknownCalls: maximum })),
     basis: "canonical-aggregate-only-no-history-or-code" };
   const context = winddownContext(worst); validateContextSize(context);

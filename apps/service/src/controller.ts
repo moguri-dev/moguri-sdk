@@ -502,6 +502,16 @@ export class ControlPlane extends EventEmitter {
       job: (...args) => this.platform.winddownJob(...args), stopJob: (id) => this.platform.stopWinddownJob(id),
       artifact: (session, text) => this.platform.artifacts.generation(session, text, "Reserved budget checkpoint", "winddown"),
       stop: (sessionId, turnId) => { if (this.session(sessionId).turnId === turnId) this.stop(sessionId); },
+      scopeDigest: (session) => this.transportPreparationScope(session),
+      transport: (session) => this.ownedModelTransport(session),
+      prepareModel: (session, modelId, signal) => {
+        if (session.controls.env === "Local") return this.provider.prepare(modelId, signal);
+        const run = this.runs.get(session.id);
+        if (!run || run.done || run.abort.signal.aborted || session.turnId !== run.turnId) {
+          throw new MoguriError("winddown_transport", "The actual parent transport ended. No controller model or finishing replay was used.", 409);
+        }
+        return this.prepareWorkerModel(run, modelId, signal);
+      },
     });
     this.decisions = new Decisions(store, workerPath, {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events) => this.commit(events),
@@ -657,14 +667,17 @@ export class ControlPlane extends EventEmitter {
       diagnostics: ["Kupo is unavailable because this control plane is stopping or closed. Retained history does not authorize inference."] };
     const enabled = this.projection.settings.values.kupo.enabled;
     const hard = enabled && Boolean(this.projection.budgetPolicy.limit || this.profileHooks?.globalBudget().limit);
-    let qualified = false;
+    const qualified: Controls["env"][] = [];
     if (hard) {
-      try { winddownCapability(this.projection.settings.values.winddown, this.provider.state.models, "Local"); qualified = true; }
-      catch (error) { if (!(error instanceof MoguriError)) throw error; }
+      for (const env of ["Local", "Remote", "Sandbox"] as const) {
+        try { winddownCapability(this.projection.settings.values.winddown, this.provider.state.models, env); qualified.push(env); }
+        catch (error) { if (!(error instanceof MoguriError)) throw error; }
+      }
     }
-    const result = kupoAvailability(this.projection.settings.values.kupo, this.provider.state.models, hard && !qualified);
-    return hard && qualified && result.model.environments?.includes("Local") ? { ...result, model: { ...result.model, environments: ["Local" as const] },
-      diagnostics: [...result.diagnostics, "Finite routing is restricted to the explicit Local reserved-checkpoint boundary; no Remote/native fallback."] } : result;
+    const result = kupoAvailability(this.projection.settings.values.kupo, this.provider.state.models, hard && !qualified.length);
+    return hard && qualified.length ? { ...result, model: { ...result.model,
+      environments: result.model.environments?.filter((env) => qualified.includes(env)) ?? [] },
+      diagnostics: [...result.diagnostics, "Finite routing requires its exact selected-boundary reserved checkpoint; no provider/Env fallback."] } : result;
   }
   private requireKupo(controls: Controls, session?: Session): void {
     if (controls.budget.kind === "limited" || this.projection.budgetPolicy.limit || this.profileHooks?.globalBudget().limit ||
@@ -673,7 +686,7 @@ export class ControlPlane extends EventEmitter {
       try { winddownCapability(this.projection.settings.values.winddown, this.provider.state.models, controls.env); }
       catch (error) {
         if (!(error instanceof MoguriError)) throw error;
-        throw new MoguriError("routing_budget", `Finite kupo requires its explicit complete Local wind-down/checkpoint policy. ${error.message}`, 409);
+        throw new MoguriError("routing_budget", `Finite kupo requires its explicit complete selected-boundary wind-down/checkpoint policy. ${error.message}`, 409);
       }
     }
     if (controls.modelOptions && Object.keys(controls.modelOptions).length) throw new MoguriError("routing_options", "Working-context/thinking overrides are not yet qualified across a kupo pool. Pin a fixed model for those options.", 409);
@@ -2542,8 +2555,8 @@ export class ControlPlane extends EventEmitter {
   private reserveKupoResponse(run: Run, session: Session, routing: RoutingTurn, phase: RoutingResponseReservation["roles"][number]["phase"],
     modelId: string, configured: ReturnType<typeof modelRequest>, constraints: KupoConstraints,
     repositoryCapture: import("../../../packages/protocol/src/index.ts").RepositoryCapture): { events: EventInput[]; maxTokens: number } {
-    if (routing.policy.workflow !== "auto" || !routing.mode || !routing.plan || session.controls.env !== "Local" || !run.winddown) {
-      throw new MoguriError("budget_routing_owner", "Finite automatic roles need their exact mode-aware Local owner and pre-reserved checkpoint. No controller/Env fallback or cap bypass.", 409);
+    if (routing.policy.workflow !== "auto" || !routing.mode || !routing.plan || !run.winddown) {
+      throw new MoguriError("budget_routing_owner", "Finite automatic roles need their exact mode-aware selected-boundary owner and pre-reserved checkpoint. No controller/Env fallback or cap bypass.", 409);
     }
     const contextDigest = this.routingContextDigest(session);
     const candidates = this.projection.routings.find((entry) => entry.id === routing.id)?.responseReservations ?? [];
@@ -3754,8 +3767,10 @@ export class ControlPlane extends EventEmitter {
           automaticPool(policy, this.provider.state.models, "Sandbox", 0, this.automaticConstraints(current)) :
           kupoPool(policy, this.provider.state.models, "Sandbox") : null;
         const decisions = this.projection.settings.values.decisions;
+        const finishing = this.projection.settings.values.winddown;
         const models = [...new Set([...(pool ? [...(pool.classifier ? [pool.classifier.id] : []), ...pool.candidates.map((model) => model.id)] : [current.controls.modelId!]),
-          ...(current.controls.autonomy === "Autopilot Max" && decisions.enabled && decisions.provider === "bounded-model" && decisions.modelId ? [decisions.modelId] : [])])];
+          ...(current.controls.autonomy === "Autopilot Max" && decisions.enabled && decisions.provider === "bounded-model" && decisions.modelId ? [decisions.modelId] : []),
+          ...(finishing.enabled && finishing.modelId && this.platform.budgets.status(current.id).limits.length ? [finishing.modelId] : [])])];
         if (models.length > 16) throw new MoguriError("sandbox_provider_scope", "This native turn exceeds sixteen already approved provider candidates. No extra provider was selected.", 409);
         const urls: string[] = [];
         for (const id of models) {
@@ -4075,6 +4090,20 @@ export class ControlPlane extends EventEmitter {
     return parse(OwnedModelTransportSchema, { env: "Sandbox", executionId: execution.id, workerDigest: execution.workerDigest,
       workspaceId: execution.workspaceId, nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest,
       signerFingerprint: execution.signerFingerprint, sourceDigest: execution.stage.sourceDigest, image: execution.image, root: execution.root });
+  }
+  private transportPreparationScope(session: Session): string {
+    if (session.controls.env === "Remote") {
+      const target = this.remote.assertReady();
+      return frameDigest(["planned-model-transport-v1", this.profileId, session.id, "Remote", target,
+        this.remote.readiness.workerDigest, this.remoteWorkspace(session)]);
+    }
+    if (session.controls.env === "Sandbox") {
+      return frameDigest(["planned-model-transport-v1", this.profileId, session.id, "Sandbox", this.sandbox.assertReady(),
+        this.projection.settings.values.sandboxManagement, this.commandBinding(session),
+        session.repositories?.map((binding) => this.platform.sessions.projects.configuration(binding.projectId).revision),
+        session.projectId ? this.platform.sessions.projects.configuration(session.projectId).revision : null]);
+    }
+    throw new MoguriError("model_transport_scope", "Only a real Remote/native owner has a planned transport scope. No Local mapping was reclassified.", 409);
   }
   private ownedModelConnection(session: Session, id: string, source: DecisionSource, handler: (request: WorkerRequest) => Promise<void>): WorkerConnection {
     this.ownedModelTransport(session);
