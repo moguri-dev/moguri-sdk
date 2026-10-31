@@ -3,6 +3,8 @@ import { RoutingPoolSchema, CompoundSettingsSchema, CompoundLineageReviewSchema,
 import type { Controls, ModelInfo, PublicMessage, StoredEvent, Usage } from "./index.ts";
 import { MoguriError } from "./core.ts";
 import { modelContextWindows } from "./model.ts";
+import { KupoAutomaticLimitsSchema, KupoCompactionSettingsSchema, KupoModelProfileSchema, type KupoMode, type KupoModelProfile } from "./kupo-modes.ts";
+import type { ThinkingEffort } from "./model.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const modelId = Type.String({ minLength: 1, maxLength: 256 });
@@ -32,6 +34,9 @@ export const AutomaticKupoSettingsSchema = object({
   ...RoutingPoolSchema.properties, workflow: Type.Literal("auto"),
   approvedModelIds: Type.Array(modelId, { maxItems: 128, uniqueItems: true }),
   lineageReviews: Type.Array(CompoundLineageReviewSchema, { maxItems: 64 }),
+  modelProfiles: Type.Optional(Type.Array(KupoModelProfileSchema, { maxItems: 128 })),
+  automaticLimits: Type.Optional(KupoAutomaticLimitsSchema),
+  autoCompaction: Type.Optional(KupoCompactionSettingsSchema),
 });
 export type AutomaticKupoSettings = Static<typeof AutomaticKupoSettingsSchema>;
 export const KupoSettingsSchema = Type.Union([AutomaticKupoSettingsSchema, SingleKupoSettingsSchema, CompoundSettingsSchema]);
@@ -50,6 +55,9 @@ export interface SoleModelPlan {
 const automaticPlan = {
   modelId, complexity: Type.Union([Type.Literal("simple"), Type.Literal("moderate"), Type.Literal("complex")]),
   confidence: Type.Number({ minimum: 0, maximum: 1 }), reason: SingleRoutingPlanSchema.properties.reason,
+  taskKind: Type.Optional(Type.Union([Type.Literal("substantive"), Type.Literal("readme"), Type.Literal("summary"), Type.Literal("trivial")])),
+  efforts: Type.Optional(Type.Record(modelId, Type.Union([Type.Literal("provider"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"),
+    Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")]), { maxProperties: 128 })),
 };
 export const AutomaticRouterPlanSchema = Type.Union([
   object({ ...automaticPlan, pattern: Type.Literal("single") }),
@@ -59,13 +67,25 @@ export const AutomaticRouterPlanSchema = Type.Union([
 export type AutomaticRoutingPlan = Static<typeof AutomaticRouterPlanSchema> & { basis: "classifier" };
 export type RoutingPlan = SingleRoutingPlan | SoleModelPlan | AutomaticRoutingPlan;
 export type KupoResponsePhase = "draft" | "gate" | "critic" | "revision" | "escalation";
+export const RoutingResponseReservationSchema = object({
+  version: Type.Literal(1), id: Type.String({ minLength: 1, maxLength: 128 }), contextDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+  authorityDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+  roles: Type.Array(object({
+    planId: Type.String({ minLength: 1, maxLength: 128 }), modelId,
+    phase: Type.Union([Type.Literal("solver"), Type.Literal("draft"), Type.Literal("gate"), Type.Literal("critic"), Type.Literal("revision"), Type.Literal("escalation")]),
+    inputBound: Type.Integer({ minimum: 0 }), outputBound: Type.Integer({ minimum: 1 }),
+    stepId: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
+  }), { minItems: 1, maxItems: 16 }),
+});
+export type RoutingResponseReservation = Static<typeof RoutingResponseReservationSchema>;
 export interface KupoObservation {
   routingId: string; phase: KupoResponsePhase; responseStepId: string | null;
   verdict: "pass" | "escalate" | "revise" | "reject" | null; response: PublicMessage | null;
 }
 export interface KupoCapability {
   modelId: string; categories: Array<"general" | "reasoning" | "tools" | "vision" | "long-context">;
-  toolInput: boolean | null; contextWindow: number; maxTokens: number; environments: Array<"Local" | "Remote">;
+  toolInput: boolean | null; contextWindow: number; maxTokens: number; environments: Array<"Local" | "Sandbox" | "Remote">;
+  efforts?: Array<ThinkingEffort | "provider">; evaluation?: KupoModelProfile;
 }
 export interface RoutingTurn {
   id: string; sessionId: string; projectId: string | null; turnId: string; env: "Local" | "Sandbox" | "Remote"; createdAt: string;
@@ -74,6 +94,10 @@ export interface RoutingTurn {
   modelSnapshots?: ModelInfo[]; capabilities?: KupoCapability[];
   critiquePairs?: Array<{ modelId: string; criticId: string; reviewId: string }>;
   selectedStepIds?: string[];
+  mode?: KupoMode;
+  cascadePairs?: Array<{ modelId: string; escalationId: string }>;
+  contextHandovers?: Array<{ compactionId: string; sourceDigest: string; contextDigest: string }>;
+  responseReservations?: RoutingResponseReservation[];
   status: "planning" | "ready" | "running" | "completed" | "stopped" | "failed" | "partial";
   classifierStepId: string | null; plan: RoutingPlan | null; diagnostic: string | null;
 }
@@ -88,4 +112,16 @@ export function canonicalModelResponse(events: readonly StoredEvent[], event: St
     throw new MoguriError("routing_corrupt", "The selected original Kupo response or model actor is missing. No substitute source was inferred.", 409);
   }
   return { message: source.payload.kupo.response, usage: source.payload.usage };
+}
+export function ordinarySolverStep(events: readonly StoredEvent[], profileId: string, sessionId: string, turnId: string, stepId: string): boolean {
+  const event = events.findLast((event) => event.profile_id === profileId && event.session_id === sessionId && event.turn_id === turnId &&
+    (event.event_type === "model.completed" && event.step_id === stepId ||
+      event.event_type === "routing.response_selected" && event.payload.sourceStepId === stepId));
+  if (!event) return false;
+  const source = canonicalModelResponse(events, event);
+  return Boolean(source && source.message.role === "assistant" && source.usage.quality === "provider-reported" &&
+    source.usage.totalTokens !== null && Number.isSafeInteger(source.usage.totalTokens) && source.usage.totalTokens >= 0 &&
+    source.usage.outputTokens !== null && Number.isSafeInteger(source.usage.outputTokens) && source.usage.outputTokens >= 0 &&
+    source.usage.outputTokens <= source.usage.totalTokens && ["stop", "toolUse"].includes(source.usage.outcome) &&
+    (event.event_type === "routing.response_selected" || ["solver", "side", "subagent"].includes(source.usage.role)));
 }

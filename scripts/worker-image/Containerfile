@@ -14,8 +14,9 @@ COPY dist ./dist
 COPY --chmod=0444 payload.json ./payload.json
 RUN node --input-type=module -e '\
     import { createHash } from "node:crypto"; \
-    import { lstat, readFile, realpath } from "node:fs/promises"; \
+    import { lstat, mkdtemp, readFile, realpath, rm } from "node:fs/promises"; \
     import pty from "node-pty"; \
+    import * as cache from "./dist/cacache.mjs"; \
     const payload = JSON.parse(await readFile("payload.json", "utf8")); \
     if (process.versions.node !== "26.12.0") throw new Error("Unexpected workload Node version"); \
     const entry = "/usr/local/bin/node"; \
@@ -24,6 +25,12 @@ RUN node --input-type=module -e '\
       const actual = createHash("sha256").update(await readFile(path)).digest("hex"); \
       if (actual !== expected) throw new Error("Workload payload digest mismatch"); \
     } \
+    const cacheRoot = await mkdtemp("/tmp/moguri-generated-cache-"); \
+    try { \
+      const bytes = Buffer.from("Generated Linux cache closure."); \
+      await cache.put(cacheRoot, "generated", bytes, { algorithms: ["sha512"] }); \
+      if (!(await cache.get(cacheRoot, "generated")).data.equals(bytes)) throw new Error("Distributed cache closure failed"); \
+    } finally { await rm(cacheRoot, { recursive: true, force: true }); } \
     const child = pty.spawn("/bin/sh", ["-c", "printf GENERATED_LINUX_PTY_READY"], { cwd: "/tmp", env: { PATH: "/usr/bin:/bin" } }); \
     let output = ""; child.onData(data => { output += data; }); \
     const exit = await new Promise(resolve => child.onExit(resolve)); \

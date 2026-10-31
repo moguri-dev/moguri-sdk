@@ -6,6 +6,9 @@ const id = Type.String({ minLength: 1, maxLength: 128 });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const revision = Type.Integer({ minimum: 0 });
 const keep = Type.Integer({ minimum: 1, maximum: 20 });
+export const AutomaticCompactionOriginSchema = object({
+  actor: Type.Literal("user-policy"), ownerTurnId: id, policyDigest: hash, settingsRevision: revision, permissionRevision: revision, policyRevision: revision,
+});
 export const CompactionCommandSchema = Type.Union([
   object({ type: Type.Literal("compaction.generate"), sessionId: id, modelId: id, keepRecentTurns: keep, expectedDigest: hash, confirmCost: Type.Literal(true) }),
   object({ type: Type.Literal("compaction.apply"), sessionId: id, compactionId: id, expectedRevision: revision }),
@@ -23,6 +26,7 @@ export const CompactionQuerySchema = Type.Union([
 export type CompactionQuery = Static<typeof CompactionQuerySchema>;
 export const isCompactionQuery = (value: unknown): value is CompactionQuery => Value.Check(CompactionQuerySchema, value);
 export interface ContextCompaction {
+  automatic?: Static<typeof AutomaticCompactionOriginSchema>;
   id: string; sessionId: string; projectId: string | null; turnId: string; revision: number; contractVersion: 1;
   status: "running" | "proposed" | "applied" | "superseded" | "restored" | "discarded" | "stopped" | "partial" | "failed";
   env: "Local" | "Sandbox" | "Remote"; modelId: string; modelBindingDigest: string; keepRecentTurns: number;

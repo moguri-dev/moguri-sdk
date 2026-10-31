@@ -19,6 +19,7 @@ import { readNativeCompletion, readNativeNetwork } from "../apps/service/src/nat
 import { defaultSandboxManagement, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { nativeApiFixture } from "../tests/fixtures/native-api.ts";
 import { reviewNativeTools, waitFor } from "../tests/fixture.ts";
+import { cacheRuntimeFiles } from "./build-cache.mjs";
 
 const { values } = parseArgs({ options: {
   distribution: { type: "string" }, workload: { type: "string" }, archive: { type: "string" },
@@ -109,7 +110,7 @@ await gate("artifacts", [], async () => {
   assert.equal(workload.payload.version, JSON.parse(await readFile("package.json", "utf8")).version);
   assert.equal(workload.image, distribution.worker.image);
   assert.equal(workload.digest, workload.image.slice(workload.image.lastIndexOf("@") + 1));
-  const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs"], current = {};
+  const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", ...cacheRuntimeFiles], current = {};
   assert.deepEqual(Object.keys(workload.payload.files).sort(), [...inputs].sort());
   for (const path of inputs) {
     current[path] = hash(await readFile(path)); assert.equal(current[path], workload.payload.files[path], `Current payload changed: ${path}`);

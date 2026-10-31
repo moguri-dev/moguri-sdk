@@ -1,7 +1,9 @@
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { startService } from "../../apps/service/src/server.ts";
 import type { ProviderAdapter } from "../../apps/service/src/provider.ts";
-import { isRecord, type StoredEvent } from "../../packages/protocol/src/index.ts";
+import { isRecord, ThinkingEffortSchema, type StoredEvent } from "../../packages/protocol/src/index.ts";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { GeneratedFileVault } from "./generated-vault.ts";
 import { GENERATED_RETENTION_KEY } from "../fixture.ts";
 import { createRemoteFrameGate } from "./remote-frame-gate.ts";
@@ -9,6 +11,16 @@ import { randomUUID } from "node:crypto";
 import { githubApplicationFixture } from "../github-workflows-fixture.ts";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { GeneratedIntakeClock } from "./intake-clock.ts";
+
+const generatedModelSchema = Type.Object({
+  id: Type.String(), name: Type.String(), contextWindow: Type.Integer({ minimum: 8192, maximum: 10_000_000 }),
+  maxTokens: Type.Integer({ minimum: 1 }), imageInput: Type.Boolean(),
+  supportedContextWindows: Type.Optional(Type.Array(Type.Integer({ minimum: 8192 }))),
+  thinkingLevels: Type.Optional(Type.Array(ThinkingEffortSchema)),
+  kupoThinkingLevels: Type.Optional(Type.Array(ThinkingEffortSchema)),
+  kupoThinkingMinimumOutput: Type.Optional(Type.Record(Type.String({ pattern: "^(off|minimal|low|medium|high|xhigh|max)$" }), Type.Integer({ minimum: 1 }))),
+}, { additionalProperties: false });
 
 process.once("message", (raw: unknown) => {
   void (async () => {
@@ -18,9 +30,13 @@ process.once("message", (raw: unknown) => {
     await mkdir(home, { recursive: true, mode: 0o700 });
     const base = githubCopilotProvider().getModels().find((model) => model.id === raw.modelId);
     if (!base) throw new Error("Generated provider model is absent.");
-    const model = { ...base, baseUrl: raw.baseUrl };
+    const metadata = raw.modelInfo === undefined ? undefined : Value.Parse(generatedModelSchema, raw.modelInfo);
+    if (metadata && metadata.id !== raw.modelId) throw new Error("Generated recovery metadata lost its exact model.");
+    if (raw.intakeAt !== undefined && (typeof raw.intakeAt !== "string" || !Number.isFinite(Date.parse(raw.intakeAt)))) throw new Error("Invalid generated recovery clock.");
+    const clock = typeof raw.intakeAt === "string" ? new GeneratedIntakeClock(raw.intakeAt) : undefined;
+    const model = { ...base, baseUrl: raw.baseUrl, ...(metadata ? { name: metadata.name, contextWindow: metadata.contextWindow, maxTokens: metadata.maxTokens } : {}) };
     const provider: ProviderAdapter = {
-      state: { status: "connected", models: [{ id: model.id, name: "Generated crash-recovery solver", contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: false }], login: null, diagnostic: null },
+      state: { status: "connected", models: [metadata ?? { id: model.id, name: "Generated crash-recovery solver", contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: false }], login: null, diagnostic: null },
       onChange: () => {}, refresh: async () => {}, cancel: async () => {}, logout: async () => {},
       login: () => { throw new Error("Personal authorization is forbidden in generated recovery fixtures."); },
       prepare: async (id, signal) => { signal.throwIfAborted(); if (id !== model.id) throw new Error("Generated model mismatch."); return { model, auth: { apiKey: "generated-test-only", baseUrl: model.baseUrl } }; },
@@ -29,10 +45,17 @@ process.once("message", (raw: unknown) => {
     if (raw.nativeCommand !== undefined && (!Array.isArray(raw.nativeCommand) || !raw.nativeCommand.every((part) => typeof part === "string"))) throw new Error("Invalid generated native command.");
     const projectWork = raw.projectWork === true ? await githubApplicationFixture({ provider, ownedNetwork: true, retentionKey: GENERATED_RETENTION_KEY }) : null;
     const service = projectWork?.service ?? await startService({ stateDir: raw.stateDir, provider, retentionKey: GENERATED_RETENTION_KEY, platform: {
-      remote: { vault, modelsVault: vault }, ...(Array.isArray(raw.nativeCommand) ? { sandbox: { vault, command: raw.nativeCommand } } : {}), terminal: raw.rawTerminal === true ?
+      ...(clock ? { intakeClock: clock } : {}), remote: { vault, modelsVault: vault }, ...(Array.isArray(raw.nativeCommand) ? { sandbox: { vault, command: raw.nativeCommand } } : {}), terminal: raw.rawTerminal === true ?
         { vault, defaultRoot: home, executable: process.execPath, args: ["-e", "process.stdin.setRawMode(true); process.stdin.on('data',d=>process.stdout.write(d)); process.stdout.write('GENERATED_CHILD_TERMINAL_READY\\n');"] } :
         { vault, defaultRoot: home, executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CHILD_TERMINAL_READY\\n'; exec cat"] },
     } });
+    if (clock) process.on("message", (message: unknown) => {
+      if (!isRecord(message) || message.kind !== "intake.advance") return;
+      if (typeof message.ms !== "number" || !Number.isSafeInteger(message.ms) || message.ms < 0 || message.ms > 86400_000) {
+        throw new Error("Invalid generated intake-clock advance.");
+      }
+      clock.advanceBy(message.ms); process.send?.({ kind: "intake.advanced", at: new Date(clock.now()).toISOString() });
+    });
     if (raw.holdNativeResult === true) {
       const gate = createRemoteFrameGate("model.complete", (frame) => process.send?.({ kind: "held-native-model", executionId: frame?.executionId }));
       const launch = service.controller.sandbox.launch.bind(service.controller.sandbox);

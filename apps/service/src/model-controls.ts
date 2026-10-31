@@ -1,12 +1,42 @@
 import { getSupportedThinkingLevels, hasApi, normalizeContext, type Api, type Context, type Model, type Message } from "@earendil-works/pi-ai";
-import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
+import { clampMaxTokensToContext, DEFAULT_THINKING_BUDGETS, MIN_ANSWER_TOKENS } from "@earendil-works/pi-ai/api/simple-options";
 import { estimateContextTokens, estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
-import { modelContextWindows, supportsModelContextWindow, MoguriError, type ModelInfo, type ModelOptions, type ModelWindowCapability, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
+import { modelContextWindows, supportsModelContextWindow, MoguriError, type KupoMode, type ModelInfo, type ModelOptions, type ModelWindowCapability, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 
 const CONTEXT_HEADROOM = 4096;
 export function supportedThinking(model: Model<Api>): ThinkingEffort[] {
   if (!model.reasoning || hasApi(model, "openai-completions") && model.compat?.supportsReasoningEffort === false) return [];
   return getSupportedThinkingLevels(model).filter((level) => level !== "off");
+}
+export function qualifiedKupoThinking(model: Model<Api>): ThinkingEffort[] {
+  const levels: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  const budgeted = kupoThinkingMinimumOutput(model);
+  return supportedThinking(model).filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (Object.keys(budgeted).length && ["xhigh", "max"].includes(level)) return false;
+    if (hasApi(model, "openai-completions") && model.compat?.thinkingFormat === "qwen-chat-template") return false;
+    if (typeof mapped === "number" || level in budgeted && budgeted[level]! > model.maxTokens) return false;
+    if (hasApi(model, "anthropic-messages")) {
+      if (!model.compat?.forceAdaptiveThinking && ["xhigh", "max"].includes(level)) return false;
+      if (model.compat?.forceAdaptiveThinking && (["xhigh", "max"].includes(level) ? mapped !== level : level === "minimal")) return false;
+    }
+    return typeof mapped !== "string" || !levels.includes(mapped) || mapped === level;
+  });
+}
+export function kupoThinkingMinimumOutput(model: Model<Api>): Partial<Record<ThinkingEffort, number>> {
+  const budgeted = hasApi(model, "anthropic-messages") && model.compat?.forceAdaptiveThinking !== true ||
+    hasApi(model, "openai-completions") && Boolean(model.compat?.supportsThinkingTokenBudget || model.compat?.thinkingTokenBudgetField ||
+      model.compat?.thinkingFormat && ["chat-template", "qwen-chat-template", "baseten"].includes(model.compat.thinkingFormat));
+  return budgeted ? Object.fromEntries(Object.entries(DEFAULT_THINKING_BUDGETS).map(([effort, tokens]) => [effort, tokens + MIN_ANSWER_TOKENS])) : {};
+}
+export function validateKupoThinking(model: Model<Api>, mode: KupoMode, effort: ThinkingEffort | undefined, outputTokens = model.maxTokens): void {
+  if (!supportedThinking(model).length && effort === undefined && mode !== "performance") return;
+  if (!effort || !qualifiedKupoThinking(model).includes(effort) ||
+    (kupoThinkingMinimumOutput(model)[effort] ?? 0) > outputTokens ||
+    mode === "performance" && !["xhigh", "max"].includes(effort) ||
+    mode === "savings" && !["low", "medium", "high"].includes(effort)) {
+    throw new MoguriError("routing_effort", "This mode has no exact qualified thinking option on the actual prepared transport. Aliases/clamps cannot turn High into Performance or Max into Savings; no paid request or fallback was dispatched.", 409);
+  }
 }
 export function validateModelOptions(model: (ModelWindowCapability & Pick<ModelInfo, "thinkingLevels">) | undefined, options: ModelOptions | undefined): void {
   if (!options) return;

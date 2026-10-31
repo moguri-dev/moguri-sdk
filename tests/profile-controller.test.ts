@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { EventStore } from "../apps/service/src/store.ts";
 import { ControlPlane, envelope } from "../apps/service/src/controller.ts";
 import { fixtureProvider, waitFor } from "./fixture.ts";
+import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
 
 test("immutable profile controllers isolate real model turns, drafts, artifacts, derived attention and budget owners", { skip: process.platform !== "darwin" }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-profile-controllers-")), stateA = join(directory, "state-a"), stateB = join(directory, "state-b");
@@ -44,6 +45,43 @@ test("immutable profile controllers isolate real model turns, drafts, artifacts,
     assert.equal(second.snapshot().sessions[0]?.id, b.id);
     assert.equal(second.platform.budgets.status(b.id!).totals.reportedTokens, 42);
     assert.equal((await first.platform.query({ type: "artifact.read", artifactId: artifact.id! })).type, "artifact.read");
+  } finally {
+    await first.close(); await second.close(); alpha.close(); beta.close();
+    await providerA.close(); await providerB.close(); await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("profile-wide recovery clocks never retry another immutable profile's failed prompt or reset its cycle", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-profile-recovery-")), stateA = join(directory, "state-a"), stateB = join(directory, "state-b");
+  await mkdir(stateA, { mode: 0o700 }); await mkdir(stateB, { mode: 0o700 });
+  const key = Buffer.alloc(32, 0x6a), path = join(directory, "state.sqlite");
+  const alpha = new EventStore(path, key, "generated-profile-recovery-master", "default"), beta = new EventStore(path, key, "generated-profile-recovery-master", "generated-beta");
+  const options = { responseMode: "text" as const, maxOutputTokens: 128, httpFailure: { status: 408, message: "Generated profile-owned failure.", remaining: 1 } };
+  const providerA = await fixtureProvider(options), providerB = await fixtureProvider({ ...options, httpFailure: { ...options.httpFailure } });
+  const clockA = new GeneratedIntakeClock(), clockB = new GeneratedIntakeClock();
+  const first = new ControlPlane(alpha, providerA.provider, undefined, { stateDir: stateA, intakeClock: clockA, terminal: { defaultRoot: stateA } });
+  const second = new ControlPlane(beta, providerB.provider, undefined, { stateDir: stateB, intakeClock: clockB, terminal: { defaultRoot: stateB } });
+  try {
+    await first.initialize(); await second.initialize();
+    for (const [control, profileId, modelId, text] of [[first, "default", providerA.modelId, "Generated alpha-owned input."],
+      [second, "generated-beta", providerB.modelId, "Generated beta-owned input."]] as const) {
+      const created = await control.dispatch(envelope({ type: "session.create", projectId: null, overrides: { modelId } }, profileId));
+      await control.dispatch(envelope({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text, attachments: [] }, profileId));
+      await control.dispatch(envelope({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" }, profileId));
+    }
+    await waitFor(() => first.snapshot().sessions[0]?.status === "failed" && second.snapshot().sessions[0]?.status === "failed");
+    const originalBetaCycle = second.snapshot().modelRecoveryCycle!;
+    clockA.advanceBy(30000);
+    await waitFor(() => first.snapshot().sessions[0]?.status === "completed");
+    assert.equal(providerA.requests.length, 2); assert.equal(providerB.requests.length, 1);
+    assert.equal(first.snapshot().modelRecoveryCycle?.generation, 1);
+    assert.deepEqual(second.snapshot().modelRecoveryCycle, originalBetaCycle);
+    assert.equal(first.snapshot().modelFailures[0]?.profileId, "default"); assert.equal(second.snapshot().modelFailures[0]?.profileId, "generated-beta");
+    assert.equal(JSON.stringify(first.snapshot()).includes("Generated beta-owned input."), false);
+    clockB.advanceBy(30000);
+    await waitFor(() => second.snapshot().sessions[0]?.status === "completed");
+    assert.equal(providerB.requests.length, 2); assert.equal(second.snapshot().modelRecoveryCycle?.generation, 1);
+    assert.ok(second.events(0).every((event) => event.profile_id === "generated-beta"));
   } finally {
     await first.close(); await second.close(); alpha.close(); beta.close();
     await providerA.close(); await providerB.close(); await rm(directory, { recursive: true, force: true });

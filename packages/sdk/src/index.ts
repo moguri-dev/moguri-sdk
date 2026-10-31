@@ -1,9 +1,9 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { isRecord, QuerySchema, parse, selectModelControls, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
+import { isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
-import { lineageDraft } from "./compound.ts";
+import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 import { createCommandsApi } from "./commands.ts";
 import { responseText, type ActivityCursor } from "../../protocol/src/activity.ts";
@@ -35,6 +35,24 @@ export const attachmentStatus = (attachment: Attachment): string => attachment.k
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
+  readonly scheduledPrompts = {
+    list: (sessionId?: string) => (this.getState().snapshot?.scheduledPrompts ?? []).filter((prompt) => sessionId === undefined || prompt.sessionId === sessionId),
+    create: (sessionId: string, timing: import("../../protocol/src/scheduled-prompts.ts").ScheduledTiming, expectedRevision = this.draftRevision(sessionId)) =>
+      this.command({ type: "prompt.schedule", sessionId, expectedRevision, timing }),
+    sendNow: (id: string, expectedRevision?: number) => {
+      const prompt = this.scheduledPrompt(id);
+      return this.command({ type: "prompt.send_now", sessionId: prompt.sessionId, scheduledPromptId: id, expectedRevision: expectedRevision ?? prompt.revision });
+    },
+    cancel: (id: string, expectedRevision?: number) => {
+      const prompt = this.scheduledPrompt(id);
+      return this.command({ type: "prompt.cancel", sessionId: prompt.sessionId, scheduledPromptId: id, expectedRevision: expectedRevision ?? prompt.revision });
+    },
+  };
+  private scheduledPrompt(id: string) {
+    const prompt = this.getState().snapshot?.scheduledPrompts.find((prompt) => prompt.id === id);
+    if (!prompt) throw new ClientError("schedule_missing", "Choose an original scheduled prompt in this connected profile.");
+    return prompt;
+  }
   readonly scriptReviews = {
     read: (sessionId: string, reviewId: string) => this.query({ type: "script.review.read", sessionId, reviewId }),
     force: (sessionId: string, reviewId: string, expectedDigest: string, expectedRevision: number,
@@ -129,6 +147,7 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly tools = {
+    history: (sessionId: string, input: import("../../protocol/src/tooling.ts").HistoryReadInput = {}) => this.query({ type: "tooling.history", sessionId, input }),
     catalog: async (sessionId: string, query = "", offset = 0) => { await this.prepareHome(sessionId); return this.query({ type: "tooling.catalog", sessionId, query, offset }); },
     execute: (sessionId: string, name: string, args: Record<string, unknown>, schemaDigest: string) => this.command({ type: "tooling.execute", sessionId, name, arguments: args, schemaDigest }),
     result: (sessionId: string, stepId: string, callId: string, offset = 0) => this.query({ type: "tooling.result", sessionId, input: { stepId, callId, offset } }),
@@ -196,6 +215,18 @@ export class MoguriSdk extends TransportClient {
     read: (sessionId: string, attachmentId: string) => this.query({ type: "attachment.read", sessionId, attachmentId }),
   };
   readonly sessions = {
+    kupoMode: (sessionId: string, kupoMode: import("../../protocol/src/kupo-modes.ts").KupoMode, expectedRevision = this.sessionRevision(sessionId)) => {
+      const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
+      if (!session || session.controls.modelId !== "kupo" || this.settings.get()?.values.kupo.workflow !== "auto") throw new ClientError("routing_mode", "Choose automatic Kupo in this actual session before selecting its mode. Fixed-model effort and legacy policies are unchanged.");
+      return this.sessions.configure(sessionId, { ...session.controls, kupoMode }, expectedRevision, true);
+    },
+    retry: (sessionId: string, failureId?: string, expectedRevision?: number) => {
+      const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
+      const failure = failureId ? snapshot?.modelFailures.find((failure) => failure.id === failureId && failure.sessionId === sessionId) :
+        session && snapshot ? retryFailure(session, snapshot.modelFailures) : undefined;
+      if (!failure) throw new ClientError("model_retry_missing", "This chat has no eligible original model failure. No prompt, tool or model request was replayed.");
+      return this.command({ type: "session.retry", sessionId, failureId: failure.id, expectedRevision: expectedRevision ?? failure.revision });
+    },
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
     home: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.home", sessionId, expectedRevision }),
@@ -381,6 +412,8 @@ export class MoguriSdk extends TransportClient {
       this.query({ type: "skills.read", skillId, expectedDigest, ...(sessionId ? { sessionId } : {}) }, signal),
   };
   readonly routing = {
+    modes: (sessionId: string) => this.query({ type: "routing.modes", sessionId }),
+    profileDraft: (input: import("../../protocol/src/kupo-modes.ts").KupoModelProfileInput) => kupoProfileDraft(this.profileId, () => this.getState().snapshot?.provider.models ?? [], input),
     policy: () => this.settings.get()?.values.kupo ?? null,
     capabilities: (env?: Controls["env"]) => structuredClone((this.getState().snapshot?.routingCapabilities ?? [])
       .filter((profile) => env === undefined || profile.environments.some((value) => value === env))),

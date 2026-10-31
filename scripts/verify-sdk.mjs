@@ -32,6 +32,8 @@ try {
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
   if (installedProtocol >= 83) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-content-review.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 84) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-session-intake.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
@@ -65,6 +67,7 @@ try {
     ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
     ${installedProtocol >= 77 ? 'import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "moguri";' : ""}
     ${installedProtocol >= 82 ? 'import {ToolPreferencesSchema,defaultToolPreferences,effectiveToolPreferences,type ToolPreferences,type WorkflowKind} from "moguri";' : ""}
+    ${installedProtocol >= 84 ? 'import {type KupoMode,type ScheduledTiming,type ModelFailure,type KupoModelProfileInput,scheduleLocalChoices,RECOVERY_DELAYS_MS} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -72,6 +75,14 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 84 ? `
+      const typedIntake = async (client:MoguriSdk,id:string,mode:KupoMode,timing:ScheduledTiming,failure:ModelFailure,profile:KupoModelProfileInput) => {
+        await client.sessions.kupoMode(id,mode);await client.routing.modes(id);await client.routing.profileDraft(profile);
+        await client.sessions.retry(id,failure.id,failure.revision);await client.scheduledPrompts.create(id,timing);
+        const prompt=client.scheduledPrompts.list(id)[0];if(prompt){await client.scheduledPrompts.sendNow(prompt.id,prompt.revision);await client.scheduledPrompts.cancel(prompt.id);}
+        await client.tools.history(id,{limitMessages:1});void scheduleLocalChoices;void RECOVERY_DELAYS_MS;
+      };void typedIntake;
+      ` : ""}
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
       const upgradeReview = async (review:ServiceUpgradeReview):Promise<boolean> => {void review.fingerprint;void review.observedProtocol;return false;};

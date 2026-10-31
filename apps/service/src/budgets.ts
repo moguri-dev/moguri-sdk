@@ -10,7 +10,7 @@ interface ModelReservationInput {
   stepId: string; turnId: string; providerId: string | null; apiModelId: string; role: ModelRole;
   inputEstimate: number; maxOutputTokens: number; modelId?: string; repositoryCapture?: RepositoryCapture;
 }
-type PlannedReservationInput = Omit<ModelReservationInput, "stepId"> & { id: string; authorityDigest: string };
+type PlannedReservationInput = Omit<ModelReservationInput, "stepId"> & { id: string; authorityDigest: string; purpose?: BudgetPlan["purpose"] };
 const integer = (value: number | null | undefined): value is number => value !== null && value !== undefined && Number.isSafeInteger(value) && value >= 0;
 export const reportedModelUsage = (usage: Usage): usage is Usage & { totalTokens: number; outputTokens: number } =>
   usage.quality === "provider-reported" && integer(usage.totalTokens) && integer(usage.outputTokens) && usage.outputTokens <= usage.totalTokens;
@@ -221,7 +221,7 @@ export class BudgetRuntime {
       if (limit.usd !== undefined) { if (usd === null) diagnostics.push(`${scope} has unpriced calls or planned holds; cumulative USD admission is blocked.`); else remainingUsd.push(Math.max(0, micros(limit.usd) - usd) / 1_000_000); }
     }
     const selectedModelId = actualModelId ?? session.controls.modelId, rate = this.rate(selectedModelId, apiModelId);
-    if (limits.some(({ limit }) => limit.usd !== undefined) && !rate) diagnostics.push("The selected model needs an explicit fresh dated USD estimate; unknown pricing is not zero.");
+    if (limits.some(({ limit }) => limit.usd !== undefined) && !rate && selectedModelId !== "kupo") diagnostics.push("The selected model needs an explicit fresh dated USD estimate; unknown pricing is not zero.");
     if (limits.some(({ limit }) => limit.usd !== undefined) && rate?.source === "provider-api-equivalent" &&
       this.host.snapshot().settings.values.budgets.useProviderRatesForLimits !== true) diagnostics.push("Provider API-equivalent prices are display estimates. Explicitly allow them for USD limits, or configure a fresh user rate; no hard policy was bypassed.");
     if (limits.length && entries.some((entry) => entry.modelId === selectedModelId && entry.outputLimitViolation)) diagnostics.push("This provider exceeded an actual forwarded output limit. Finite admission for this model is unqualified; verify the provider instead of retrying around it.");
@@ -301,7 +301,7 @@ export class BudgetRuntime {
     const entry = reserved.event.payload.entry;
     const plan = projectBudgetPlan(undefined, {
       version: 1, id: input.id, profileId: this.host.snapshot().profileId, sessionId: session.id, ownerSessionId: entry.ownerSessionId,
-      turnId: input.turnId, ownerTurnId: entry.ownerTurnId ?? null, projectId: entry.projectId, folderId: entry.folderId, env: session.controls.env, purpose: "winddown",
+      turnId: input.turnId, ownerTurnId: entry.ownerTurnId ?? null, projectId: entry.projectId, folderId: entry.folderId, env: session.controls.env, purpose: input.purpose ?? "winddown",
       role: input.role, modelId: entry.modelId, providerId: input.providerId, apiModelId: input.apiModelId, authorityDigest: input.authorityDigest,
       inputBound: input.inputEstimate, outputBound: input.maxOutputTokens, tokens: entry.reservedTokens, usdMicros: entry.reservedUsdMicros, rate: entry.rate,
       revision: 0, createdAt: entry.createdAt, updatedAt: entry.createdAt, status: "held", consumedStepId: null, release: null,

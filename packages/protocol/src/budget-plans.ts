@@ -12,7 +12,7 @@ export const BudgetPlanSchema = object({
   scopePath: Type.Optional(Type.Array(id, { minItems: 1, maxItems: 8, uniqueItems: true })),
   projectId: Type.Union([id, Type.Null()]), folderId: Type.Union([id, Type.Null()]),
   env: Type.Union([Type.Literal("Local"), Type.Literal("Remote"), Type.Literal("Sandbox")]),
-  purpose: Type.Literal("winddown"), role: ModelRoleSchema, modelId: id, providerId: Type.Union([id, Type.Null()]), apiModelId: id,
+  purpose: Type.Union([Type.Literal("winddown"), Type.Literal("routing")]), role: ModelRoleSchema, modelId: id, providerId: Type.Union([id, Type.Null()]), apiModelId: id,
   authorityDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   inputBound: units, outputBound: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), tokens: units,
   usdMicros: Type.Union([units, Type.Null()]), rate: Type.Union([BudgetRateSchema, Type.Null()]),

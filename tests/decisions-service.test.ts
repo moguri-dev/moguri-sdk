@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fixtureProvider, waitFor } from "./fixture.ts";
 import { setupDecisions } from "./fixtures/decisions-api.ts";
-import { isRecord } from "../packages/sdk/src/index.ts";
+import { defaultKupoSettings, isRecord, ordinarySolverStep } from "../packages/sdk/src/index.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { generatedAdvice } from "./fixtures/decisions-api.ts";
 import { appendLegacyAutopilot } from "./fixtures/legacy-state.ts";
+import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
 
 test("legacy bounded Max preserves its separately configured delegated tool review and original all-role charges", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
   const f = await setupDecisions(), { sdk, advice } = f;
@@ -124,4 +125,50 @@ test("kupo Single and explicitly bounded Max remain independent: the real routed
     assert.equal(JSON.stringify(f.solver.requests.at(-1)?.messages).includes("Generated classifier advice"), false);
     assert.equal(JSON.stringify(f.solver.requests.at(-1)?.messages).includes('"confidence"'), false);
   } finally { await f.close(); await advice.close(); }
+});
+
+test("a modern selected Cascade draft owns exact delegated technical decisions; router/critic steps cannot adopt the bounded-model actor", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+  const fixture = await routedFixture({ configured: false, legacy: false }), advice = await fixtureProvider({
+    modelId: "generated-modern-decision-api", exposeModels: true, responseMode: "text", replyText: JSON.stringify({ answers: { action: {
+      type: "choice", choice: "option1", confidence: 0.98, probabilities: { option0: 0.01, option1: 0.98, askUser: 0.01 },
+    } } }),
+  });
+  try {
+    const settings = structuredClone(fixture.sdk.settings.get()!.values);
+    settings.localModels.push({ id: "generated-modern-decisions", name: "Generated explicit bounded-model alternative", enabled: true, baseUrl: `${advice.baseUrl}/v1`, auth: "none",
+      models: [{ id: advice.modelId, name: "Generated explicit bounded-model alternative", contextWindow: 32768, maxTokens: 2048, imageInput: false }] });
+    await fixture.sdk.settings.update(settings, fixture.sdk.settings.get()!.revision); await fixture.sdk.models.refresh();
+    const model = fixture.sdk.getState().snapshot!.provider.models.find((entry) => entry.apiModelId === advice.modelId)!;
+    const configured = structuredClone(fixture.sdk.settings.get()!.values);
+    configured.decisions = { ...configured.decisions, enabled: true, provider: "bounded-model", modelId: model.id, outputTokens: 256,
+      technicalQuestions: [{ id: "generated-modern-technical", kind: "technical-choice", question: "Choose a generated fixture approach?",
+        choices: ["Generated first choice", "Generated second choice"] }] };
+    await fixture.sdk.settings.update(configured, fixture.sdk.settings.get()!.revision);
+    const draft = await generatedKupoProfile(fixture.sdk, fixture.solverId, { category: "economy", score: 0.3, price: 0 });
+    const gate = await generatedKupoProfile(fixture.sdk, fixture.modelId, { category: "frontier", score: 0.8, price: 5 });
+    await fixture.sdk.routing.configure({ ...defaultKupoSettings(), approvedModelIds: [fixture.solverId, fixture.modelId], modelProfiles: [draft, gate],
+      automaticLimits: { maxEscalations: 1, maxRevisions: 0, maxResultBytes: 1024 } }, fixture.sdk.settings.get()!.revision);
+    fixture.options.respond = (_request, index) => ({ text: index === 1 ? JSON.stringify({ pattern: "cascade", modelId: fixture.solverId,
+      escalationId: fixture.modelId, complexity: "moderate", taskKind: "substantive", confidence: 0.95, reason: "GENERATED_ROUTER_ADVICE_NOT_AUTHORITY" }) :
+      JSON.stringify({ verdict: "pass", reason: "Generated gate advice is not permission." }) });
+    fixture.solverOptions.toolCall = { name: "ask_user", args: { question: "Choose a generated fixture approach?",
+      choices: ["Generated first choice", "Generated second choice"], allowFreeform: false } };
+    await fixture.select(); await fixture.sdk.sessions.autonomy(fixture.sessionId, "Autopilot Max");
+    await fixture.send("Generated exact delegated Cascade technical choice."); await fixture.terminal();
+    assert.equal(fixture.session().status, "completed", fixture.session().lastError ?? "");
+    const state = fixture.service.controller.snapshot(), decision = state.decisions.find((record) => record.kind === "question")!;
+    assert.ok(decision); assert.equal(decision.status, "applied"); assert.equal(advice.requests.length, 1);
+    const events = fixture.service.controller.events(0), selected = events.find((event) => event.event_type === "routing.response_selected" &&
+      event.payload.sourceStepId === decision.source.parentStepId);
+    assert.ok(selected?.event_type === "routing.response_selected");
+    assert.equal(ordinarySolverStep(events, state.profileId, fixture.sessionId, decision.turnId, selected.payload.sourceStepId), true);
+    for (const event of events) if (event.event_type === "model.completed" && ["router", "critic"].includes(event.payload.usage.role!)) {
+      assert.equal(ordinarySolverStep(events, state.profileId, fixture.sessionId, decision.turnId, event.step_id!), false);
+    }
+    assert.equal(state.questions[0]?.answer?.actor, "decision-provider"); assert.equal(state.questions[0]?.answer?.modelId, model.id);
+    assert.equal(state.settings.values.decisions.provider, "bounded-model");
+    assert.equal(fixture.session().messages.filter((message) => message.role === "user").length, 1);
+    assert.ok(state.budgetEntries.some((entry) => entry.role === "decision" && entry.modelId === model.id && entry.status === "settled"));
+    assert.equal(JSON.stringify(fixture.solver.requests).includes("GENERATED_ROUTER_ADVICE_NOT_AUTHORITY"), false);
+  } finally { await fixture.close(); await advice.close(); }
 });

@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
 import { MoguriError } from "./core.ts";
+import { KupoModeSchema, type KupoMode } from "./kupo-modes.ts";
 
 export const MIN_WORKING_CONTEXT = 8192;
 export interface ModelWindowCapability { contextWindow: number; supportedContextWindows?: readonly number[] }
@@ -40,10 +41,12 @@ export const ModelSelectionSchema = Type.Object({
   modelId: Type.String({ minLength: 1, maxLength: 128 }),
   thinkingEffort: Type.Optional(ThinkingEffortSchema),
   preferredThinkingEffort: Type.Optional(ThinkingEffortSchema),
+  kupoMode: Type.Optional(KupoModeSchema),
 }, { additionalProperties: false });
 export type ModelSelection = Static<typeof ModelSelectionSchema>;
-export function modelSelection(controls: { modelId: string | null; modelOptions?: ModelOptions; preferredThinkingEffort?: ThinkingEffort }): ModelSelection | null {
+export function modelSelection(controls: { modelId: string | null; modelOptions?: ModelOptions; preferredThinkingEffort?: ThinkingEffort; kupoMode?: KupoMode }): ModelSelection | null {
   return controls.modelId === null ? null : { modelId: controls.modelId,
+    ...(controls.modelId === "kupo" && controls.kupoMode ? { kupoMode: controls.kupoMode } : {}),
     ...(controls.preferredThinkingEffort !== undefined ? { preferredThinkingEffort: controls.preferredThinkingEffort } : {}),
     ...(controls.modelOptions?.thinkingEffort !== undefined ? { thinkingEffort: controls.modelOptions.thinkingEffort } : {}) };
 }

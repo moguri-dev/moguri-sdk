@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { createModels, type Message } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { executeTool } from "./tools.ts";
-import { assistantMessage, parentMessage, toolCalls, usagePresent, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
+import { assistantMessage, contextMessages, parentMessage, toolCalls, usagePresent, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
 import { isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
 import { retainedToolText } from "../../../packages/protocol/src/tooling.ts";
 import { localProvider, localModelFetch } from "./local-provider.ts";
@@ -36,9 +36,9 @@ async function finish(outcome: "completed" | "stopped" | "failed" | "partial", d
 }
 async function run(start: WorkerStart): Promise<void> {
   const context: Message[] = start.context;
-  const loadedTools = new Set<string>();
-  const instructionSources = new Set<string>();
-  let kupoDraft: { stepId: string; message: ReturnType<typeof assistantMessage> } | undefined;
+  const loadedTools = new Set<string>(start.retry?.loadedTools);
+  const instructionSources = new Set<string>(start.retry?.instructionSources);
+  let kupoDraft: { stepId: string; message: ReturnType<typeof assistantMessage> } | undefined = start.retry?.kupoDraft;
   debuggerRuntime = start.readOnly ? undefined : new OwnedDebugRuntime();
   let incompleteCleanup = false, mcpDispatched = false;
   const lifecycle = async (trigger: "turn.start" | "turn.end") => {
@@ -108,11 +108,11 @@ async function run(start: WorkerStart): Promise<void> {
         abort.signal.aborted && incompleteCleanup ? "Stop arrived after filesystem work. Actual effects were retained; no rollback or complete save was inferred." : result.diagnostic);
       return;
     }
-    await lifecycle("turn.start");
+    if (!start.retry) await lifecycle("turn.start");
     const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
     models.setProvider(githubCopilotProvider());
     models.setProvider(localProvider());
-    for (let index = 0; index < 32; index++) {
+    for (let index = 0; index < (start.retry?.remainingSteps ?? 32); index++) {
       abort.signal.throwIfAborted();
       let stepId: string = randomUUID();
       const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId, loadedTools: [...loadedTools] });
@@ -126,6 +126,12 @@ async function run(start: WorkerStart): Promise<void> {
       ])];
       const redactor = new SecretStreamRedactor(secrets);
       context.push(...boundary.steers);
+      if (start.retainModelRequests && (boundary.phase === undefined || boundary.phase === "solver" || boundary.phase === "router" ||
+        boundary.phase.startsWith("kupo-"))) {
+        const retained = await request({ kind: "model.dispatch", requestId: randomUUID(), stepId, context: boundary.context ?? context,
+          loadedTools: [...loadedTools], instructionSources: [...instructionSources] });
+        if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The original model request was not durably bound. No inference was dispatched.");
+      }
       const model = { ...boundary.model, baseUrl: boundary.auth.baseUrl ?? boundary.model.baseUrl };
       let usageReported = false;
       let buffered = "";
@@ -155,7 +161,7 @@ async function run(start: WorkerStart): Promise<void> {
         flush();
         const tail = redactor.finish(); if (tail) send({ kind: "delta", stepId, text: tail });
         let message = assistantMessage(redactSecrets(await stream.result(), secrets));
-        if (boundary.phase === "kupo-draft") kupoDraft = { stepId, message };
+        if (boundary.phase === "kupo-draft" || boundary.phase === "kupo-revision" || boundary.phase === "kupo-escalation") kupoDraft = { stepId, message };
         let accepted = await request({
           kind: "model.complete", requestId: randomUUID(), stepId, message,
           usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started, stream: metrics.snapshot(),
@@ -187,7 +193,13 @@ async function run(start: WorkerStart): Promise<void> {
         }
         if ("continue" in accepted.value && accepted.value.continue === true) {
           abort.signal.throwIfAborted();
-          if (boundary.phase !== "router" && boundary.phase !== "candidate" && !boundary.phase?.startsWith("kupo-")) throw new Error("Only an owned router, reviewed Kupo response or tool-less candidate stage may request a continuation.");
+          if (boundary.phase === "compaction" && start.automaticCompaction) {
+            if (!("contextReplacement" in accepted.value) || !accepted.value.contextReplacement || message.stopReason !== "stop" || toolCalls(message).length ||
+              !usageReported || !Number.isSafeInteger(message.usage.totalTokens) || !Number.isSafeInteger(message.usage.output) ||
+              message.usage.output < 0 || message.usage.output > message.usage.totalTokens || message.usage.output > boundary.maxTokens) throw new Error("Automatic compaction needs complete bounded metering and an actual acknowledged source-bound replacement. No context was invented.");
+            const replacement = contextMessages(accepted.value.contextReplacement);
+            context.splice(0, context.length, ...replacement); instructionSources.clear(); kupoDraft = undefined;
+          } else if (boundary.phase !== "router" && boundary.phase !== "candidate" && !boundary.phase?.startsWith("kupo-")) throw new Error("Only an owned router, reviewed Kupo response, policy-authorized compaction or tool-less candidate stage may request a continuation.");
           if (boundary.phase === "candidate") {
             if (start.readOnly !== true || start.root !== null || message.stopReason !== "stop" || toolCalls(message).length) throw new Error("Candidate continuation requires a root-less read-only owner and a complete tool-less result. No next role was authorized.");
             if (!usageReported || !Number.isSafeInteger(boundary.maxTokens) || boundary.maxTokens < 1 || boundary.maxTokens > model.maxTokens ||

@@ -35,7 +35,7 @@ export class Winddowns {
   }
   capability(controls: Controls) { return winddownCapability(this.host.snapshot().settings.values.winddown, this.host.snapshot().provider.models, controls.env); }
   event(winddown: WinddownRecord): EventInput { return { event_type: "winddown.recorded", profile_id: winddown.profileId, payload: { winddown } }; }
-  forTurn(sessionId: string, turnId: string): WinddownRecord | undefined { return this.host.snapshot().winddowns.find((record) => record.sessionId === sessionId && record.turnId === turnId); }
+  forTurn(sessionId: string, turnId: string): WinddownRecord | undefined { return this.host.snapshot().winddowns.findLast((record) => record.sessionId === sessionId && record.turnId === turnId); }
   private policy(session: Session): string {
     const state = this.host.snapshot();
     return JSON.stringify({ profileId: state.profileId, sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId,

@@ -9,6 +9,7 @@ const combinedSchemaMarkers = ["model_selection_continuity_schema", "theme_catal
 const recoverySchemaMarkers = ["session_request_recovery_schema", "builtin_git_schema"] as const;
 const commandToolSchemaMarkers = ["workflow_commands_schema", "tool_preferences_schema"] as const;
 const safetyReviewSchemaMarkers = ["work_item_comments_schema", "repository_script_review_schema"] as const;
+const intakeSchemaMarkers = ["model_failure_recovery_schema", "scheduled_prompts_schema", "kupo_modes_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -59,6 +60,9 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "model.request_bound": return [input.payload.inputDigest];
+    case "model.failure_recorded": return input.payload.failure.requestDigest ? [input.payload.failure.requestDigest] : [];
+    case "prompt.schedule_recorded": return input.payload.prompt.attachments.flatMap(attachmentDigests);
     case "slash.command_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((value): value is string => value !== null);
     case "slash.live_recorded": return [input.payload.control.inputDigest];
     case "slash.continuation_chosen": return [input.payload.choice.inputDigest];
@@ -477,6 +481,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=83; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 84) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of intakeSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=84; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
@@ -511,6 +522,27 @@ export class EventStore {
         event.event_type === "tool.requested" && event.payload.approval.call.directMcp ||
         (event.event_type === "tool.started" || event.event_type === "tool.completed") && event.payload.call.directMcp)) {
         throw new Error("Actual workflow/tool delivery history cannot become a pre-82 lineage. Original state was preserved.");
+      }
+      for (const id of intakeSchemaMarkers) {
+        if (version < 84 && marker(id) !== undefined) throw new Error(`Premature recovery/scheduling/Kupo schema marker ${id}. Original state was preserved.`);
+        if (version >= 84) require(id, "recovery/scheduling/Kupo");
+      }
+      if (version >= 4 && version < 84 && this.readEvents(0, true, version < 10).some((event) =>
+        ["prompt.schedule_recorded", "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started", "routing.roles_planned", "routing.role_started"].includes(event.event_type) ||
+        event.event_type === "budget.plan_recorded" && event.payload.plan.purpose === "routing" ||
+        event.event_type === "compaction.saved" && event.payload.compaction.automatic !== undefined ||
+        event.event_type === "context.changed" && event.payload.actor === "kupo-policy" || event.event_type === "routing.context_rebound" ||
+        (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.started" || event.event_type === "tool.completed" ? event.payload.call : null)?.name === "read_tool_result" &&
+          (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.started" || event.event_type === "tool.completed" ? event.payload.call : null)?.arguments.action === "history" ||
+        (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.kupoMode !== undefined ||
+        event.event_type === "model.selection_remembered" && event.payload.selection?.kupoMode !== undefined ||
+        event.event_type === "routing.started" && event.payload.routing.mode !== undefined ||
+        event.event_type === "settings.updated" && (event.payload.settings.interactions?.idleScheduleAction !== undefined ||
+          event.payload.settings.startup?.global?.kupoMode !== undefined || event.payload.settings.startup?.profile?.kupoMode !== undefined ||
+          event.payload.settings.kupo?.workflow === "auto" && (event.payload.settings.kupo.modelProfiles !== undefined || event.payload.settings.kupo.automaticLimits !== undefined || event.payload.settings.kupo.autoCompaction !== undefined)) ||
+        event.event_type === "project.configured" && event.payload.configuration.values?.defaults?.kupoMode !== undefined ||
+        event.event_type === "global.controls_changed" && event.payload.values.kupoMode !== undefined)) {
+        throw new Error("Actual recovery/scheduling/Kupo history cannot become a pre-84 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

@@ -2,7 +2,7 @@ import { AsyncEntry } from "@napi-rs/keyring";
 import { createModels, type AuthOperationOptions, type Credential, type CredentialStore, type Model, type Api, type ModelAuth } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { isRecord, MoguriError, PROFILE_ID, type ProviderState, type ModelEvidenceReport, type ModelWindowCapability } from "../../../packages/protocol/src/index.ts";
-import { supportedThinking } from "./model-controls.ts";
+import { kupoThinkingMinimumOutput, qualifiedKupoThinking, supportedThinking } from "./model-controls.ts";
 import { readCopilotModelEvidence } from "./model-evidence.ts";
 
 export interface PreparedModel { model: Model<Api> & Pick<ModelWindowCapability, "supportedContextWindows">; auth: ModelAuth }
@@ -91,7 +91,7 @@ export class CopilotAdapter implements ProviderAdapter {
       signal.throwIfAborted();
       this.update({
         status: auth ? "connected" : "disconnected",
-        models: models.map((model) => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, endpointBoundary: "network" as const, imageInput: model.input.includes("image"), thinkingLevels: supportedThinking(model) })),
+        models: models.map((model) => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, endpointBoundary: "network" as const, imageInput: model.input.includes("image"), thinkingLevels: supportedThinking(model), kupoThinkingLevels: qualifiedKupoThinking(model), kupoThinkingMinimumOutput: kupoThinkingMinimumOutput(model) })),
         login: null, diagnostic: auth && models.length === 0 ? "No enabled, compatible Copilot models. Enable a model in your GitHub Copilot account, then reconnect." : null,
       });
     } catch {

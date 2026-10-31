@@ -132,7 +132,8 @@ Finish with the outcome and any real blocker. Do not claim access to hidden reas
 
 export const SettingsSchema = object({
   appearance: AppearanceSchema,
-  interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()) }),
+  interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()),
+    idleScheduleAction: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("send"), Type.Literal("schedule")])) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),
@@ -298,6 +299,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  object({ type: Type.Literal("routing.modes"), sessionId: id }),
   ScriptReviewQuerySchema,
   QueuedCommandQuerySchema,
   PricingQuerySchema,
@@ -392,6 +394,9 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot {
+  scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
+  modelFailures: import("./model-recovery.ts").ModelFailure[];
+  modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;
   coordinationLinks: CoordinationLink[];
   coordinationMessages: CoordinationMessage[];
   lastModelSelection: ModelSelection | null;
@@ -437,6 +442,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse
+  | { type: "routing.modes"; modes: import("./kupo-modes.ts").KupoModeAvailability[] }
   | ScriptReviewResponse
   | PricingResponse
   | KanbanResponse

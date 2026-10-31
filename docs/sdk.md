@@ -5,7 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **82** for
+Current source uses protocol **84** for
+[retained model recovery, scheduled input and evidence-qualified Kupo modes](architecture/recovery-scheduling-kupo.md),
+preserving protocol83 content/script safeguards and protocol82
 [shared workflow commands, ranked methods and direct MCP schemas](architecture/command-tool-preferences.md).
 It retains protocol81
 [exact session request recovery](architecture/session-reliability.md#explicit-selection-and-retained-request-follow-up)
@@ -42,6 +44,62 @@ the new presets; `sdk.sessions.spawnPrompt(sessionId, prompt, expectedDraftRevis
 atomically assigns an actual Manual child. `/continue` takes no prompt.
 Direct MCP aliases are model-facing discoveries, not user-supplied permission
 metadata or a new credential API.
+
+## Recovery, scheduled input and Kupo
+
+These methods use the same authenticated immutable-profile SDK and existing
+`/v1/commands`, snapshot and event authority. A command result identifies retained
+intent/admission, not successful model work. Preserve an uncertain command ID
+and inspect its original receipt rather than sending a replacement.
+
+| Surface | Contract |
+|---|---|
+| `sessions.retry(sessionId, failureId?, revision?)` | Retry the original last eligible model failure; preserve draft/context/queue and earlier effects. Read `Snapshot.modelFailures` and `modelRecoveryCycle` for actual state. |
+| `scheduledPrompts.create(sessionId, timing, draftRevision?)` | Capture and consume only the exact saved draft/attachments/controls into a durable unsent record. |
+| `scheduledPrompts.list(sessionId?)` | Read this profile's original scheduled records. `scheduled`/`blocked` stay outside model history; `queued` is claimed but not a sent prompt until `admitted`. |
+| `scheduledPrompts.sendNow(id, revision?)` / `cancel(id, revision?)` | Share one-at-most timer ownership; cancel only undispatched original input, not an unrelated turn. |
+| `routing.modes(sessionId)` | Read mode readiness and genuine unmet gates. No classification or model call. |
+| `sessions.kupoMode(sessionId, mode, revision?)` | Explicitly select `balanced`, `savings` or `performance` for automatic Kupo without changing autonomy/Env. |
+| `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
+| `tools.history(sessionId, input?)` | Page retained original public prompt/model/tool/answer sources, including after compaction; no private roles, console data, hidden thinking, drafts or queued input. |
+
+`ScheduledTiming` is `{kind:"delay",minutes,timeZone}` or
+`{kind:"at",at,timeZone,localTime,offsetMinutes}`. Use
+`scheduleLocalChoices("2030-10-27T02:30","Europe/Rome")` to review both DST
+occurrences, not guess one. Timings must be future and within one year.
+Service-owned deadlines survive UI disconnect. Overdue schedules are checked
+once after restart; no timer runs inside the client.
+
+History defaults to twenty messages and 12,000 UTF-8 bytes per page. Retain the
+returned `throughSequence`, `messageOffset`, `limitMessages` and `digest` for byte
+continuation with `nextOffset`. Only after that window ends, advance to
+`nextMessageOffset` with a new digest. Its boundary is explicitly
+`scoped-controller-public-history` in every Env, not authority to read a
+workstation/remote filesystem. Model access still needs ordinary tool policy.
+
+Common errors include `revision_conflict`, `model_retry_*`, `schedule_changed`,
+`schedule_dst`, `schedule_terminal`, `routing_effort`, `routing_frontier`,
+`routing_evaluation`, `routing_context_bound` and `budget_*`. These retain
+original input and distinguish changed authorization, unsupported transport,
+source review, unknown accounting and exhausted capacity. Do not repair/clamp
+a request, infer zero cost or treat model confidence as permission.
+
+```ts
+const sdk = await connectMoguri({ autoStart: false });
+const session = sdk.getState().snapshot!.sessions[0]!;
+const scheduled = await sdk.scheduledPrompts.create(session.id, {
+  kind: "delay", minutes: 10,
+  timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+}, session.draft.revision);
+const prompt = sdk.scheduledPrompts.list(session.id).find(p => p.id === scheduled.id)!;
+await sdk.scheduledPrompts.sendNow(prompt.id, prompt.revision);
+```
+
+Creation above requires a nonempty saved ordinary draft; it never writes replacement
+text or grants permissions. Native TUI and hidden desktop consume these same APIs.
+The independent packed consumer exercises actual installed worker retry,
+scheduling, mode readiness, history and restart alongside browser/React/Node
+imports/types and its own dependency audit.
 
 Schema 59 adds an independent transactional metadata marker. Older source
 settings normalize to no configured skill sources; ciphertext, receipts,

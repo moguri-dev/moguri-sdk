@@ -1,6 +1,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import {
   activeDecision, decisionEvidence, DecisionDocumentSchema, MoguriError, parse, projectDecision, successfulRoleEntry,
+  ordinarySolverStep,
   type CommandResult, type DecisionCommand, type DecisionDocument, type DecisionQuery, type DecisionQuestions, type DecisionRecord, type DecisionResponse,
   type DecisionSource, type EventInput, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type Usage, type BudgetLimit,
 } from "../../../packages/protocol/src/index.ts";
@@ -72,7 +73,7 @@ export class Decisions {
     const state = this.host.snapshot();
     if (!session.turnId || session.controls.autonomy !== "Autopilot Max" || session.controls.env !== "Local" || session.status === "stopping" ||
       !this.host.current(session.id, session.turnId) || !state.policy.allowedEnvs.includes("Local") ||
-      !session.usage.some((entry) => entry.stepId === source.parentStepId && ["solver", "side", "subagent"].includes(entry.role))) throw new MoguriError("decision_stale", "The original actual parent/solver, Max delegation or Local boundary ended/changed. No fallback or action.", 409);
+      !ordinarySolverStep(this.host.events(), state.profileId, session.id, session.turnId, source.parentStepId)) throw new MoguriError("decision_stale", "The original actual selected parent/solver, Max delegation or Local boundary ended/changed. Unselected router/critic/private roles cannot adopt it; no fallback or action.", 409);
     let pending: unknown;
     if (source.kind === "tool") {
       const approval = session.pendingApproval;
