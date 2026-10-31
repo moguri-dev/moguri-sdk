@@ -77,8 +77,9 @@ export * from "./scheduled-prompts.ts";
 import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
 export * from "./model-recovery.ts";
 export * from "./kupo-modes.ts";
+export * from "./owned-model-transports.ts";
 
-export const PROTOCOL_VERSION = 84;
+export const PROTOCOL_VERSION = 85;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -1001,6 +1002,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
     if (event.event_type === "sandbox.workspace_recorded") {
       const workspace = event.payload.workspace, previous = sandboxWorkspaces.get(workspace.id);
+      if (workspace.preparation?.version === 2) {
+        const owner = workspace.preparation;
+        if (owner.kind !== "scheduled" || !owner.commandId || !/^[a-f0-9]{64}$/.test(owner.commandDigest) ||
+          !Number.isSafeInteger(owner.draftRevision) || owner.draftRevision < 0 || !/^[a-f0-9]{64}$/.test(owner.draftDigest) ||
+          workspace.commandId !== owner.commandId || workspace.commandDigest !== owner.commandDigest ||
+          previous && JSON.stringify(previous.preparation) !== JSON.stringify(owner)) {
+          throw new MoguriError("sandbox_preparation_corrupt", "Scheduled native preparation lost its exact original command/draft owner. No source or prompt was replayed.", 409);
+        }
+      }
       if (workspace.repositories) {
         const repositories = sandboxRepositories(workspace.repositories), session = sessions.get(workspace.sessionId);
         if (workspace.projectId !== null || workspace.sourceWorkspaceId !== null || workspace.sourceRoot !== null || workspace.sourceHead !== null ||

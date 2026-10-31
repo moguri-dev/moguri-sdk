@@ -9,6 +9,7 @@ export type WorkerConnectionEvents = {
 export interface WorkerConnection {
   readonly events: EventEmitter<WorkerConnectionEvents>;
   readonly connected: boolean;
+  readonly roleReleased?: boolean;
   send(message: ParentMessage, callback?: (error: Error | null) => void): void;
   kill(signal: NodeJS.Signals): void;
   acknowledge?(sequence: number): void;

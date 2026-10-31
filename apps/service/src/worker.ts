@@ -1,14 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { performance } from "node:perf_hooks";
-import { createModels, type Message } from "@earendil-works/pi-ai";
-import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
+import type { Message } from "@earendil-works/pi-ai";
 import { executeTool } from "./tools.ts";
-import { assistantMessage, contextMessages, parentMessage, toolCalls, usagePresent, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
+import { assistantMessage, contextMessages, parentMessage, toolCalls, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
 import { isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
 import { retainedToolText } from "../../../packages/protocol/src/tooling.ts";
-import { localProvider, localModelFetch } from "./local-provider.ts";
-import { redactSecrets, SecretStreamRedactor } from "./secret-redactor.ts";
-import { streamMetrics } from "./stream-metrics.ts";
+import { streamWorkerModel } from "./worker-model.ts";
 import { executeUserPlan } from "./user-plan.ts";
 import { executeRemoteMcp } from "./remote-mcp-runtime.ts";
 import { executeCompoundValidation } from "./compound-validation.ts";
@@ -20,19 +16,61 @@ const abort = new AbortController();
 let authority = true;
 let terminalRequested = false;
 let debuggerRuntime: OwnedDebugRuntime | undefined;
-const pending = new Map<string, { resolve: (message: WorkerReply) => void; reject: (error: Error) => void; interruptible: boolean }>();
+const pending = new Map<string, { resolve: (message: WorkerReply) => void; reject: (error: Error) => void; interruptible: boolean; kind: WorkerRequest["kind"] }>();
+let parentStart: WorkerStart | undefined;
+let ownedModel: { id: string; abort: AbortController; done: Promise<void> } | undefined;
+const ownedModelIds = new Set<string>();
 const send = (message: WorkerRequest) => { if (process.connected) process.send?.(message); };
 async function request(message: WorkerRequest & { requestId: string }): Promise<WorkerReply> {
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
   if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
-  const interruptible = message.kind === "boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary";
+  const interruptible = message.kind === "boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary" ||
+    message.kind === "owned-model.boundary";
   if (interruptible) abort.signal.throwIfAborted();
-  return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible }); send(message); });
+  return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible, kind: message.kind }); send(message); });
 }
 async function finish(outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): Promise<void> {
+  if (ownedModel) { ownedModel.abort.abort(); await ownedModel.done; }
   if (debuggerRuntime && !await debuggerRuntime.close()) { outcome = "partial"; diagnostic = "Debugger process cleanup/retention was not acknowledged. Inspect the original target before resuming."; }
   terminalRequested = true;
   await request({ kind: "finished", requestId: randomUUID(), outcome, diagnostic });
+}
+async function runOwnedModel(id: string, signal: AbortSignal): Promise<void> {
+  let outcome: "completed" | "stopped" | "failed" | "partial" = "failed", dispatched = false;
+  try {
+    signal.throwIfAborted();
+    const stepId = randomUUID(), reply = await request({ kind: "owned-model.boundary", ownerId: id, requestId: randomUUID(), stepId });
+    if (reply.error || reply.halt || !reply.value || !("model" in reply.value)) throw new Error("Original tool-less model admission was not acknowledged.");
+    const boundary = reply.value, context = contextMessages(boundary.context);
+    if (!["decision", "steering"].includes(boundary.phase ?? "") || boundary.mode !== "read-only" || boundary.tools.length ||
+      boundary.steers.length || !Number.isSafeInteger(boundary.maxTokens) || boundary.maxTokens < 1 ||
+      boundary.maxTokens > boundary.model.maxTokens || Buffer.byteLength(JSON.stringify({ systemPrompt: boundary.systemPrompt, context })) > 128 * 1024 ||
+      context.some((message) => message.role !== "user" || typeof message.content !== "string")) {
+      throw new Error("Owned subcall cannot acquire tools, original history, filesystem context or an unbounded model envelope.");
+    }
+    signal.throwIfAborted(); dispatched = true;
+    const result = await streamWorkerModel(boundary, context, [], parentStart?.env, signal);
+    const retained = await request({ kind: "owned-model.complete", ownerId: id, requestId: randomUUID(), stepId, ...result });
+    if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) {
+      throw new Error("Original private model result was not durably acknowledged.");
+    }
+    if (signal.aborted || result.message.stopReason !== "stop" || toolCalls(result.message).length || !result.usageReported ||
+      !Number.isSafeInteger(result.message.usage.totalTokens) || !Number.isSafeInteger(result.message.usage.output) ||
+      result.message.usage.output < 0 || result.message.usage.output > result.message.usage.totalTokens ||
+      result.message.usage.output > boundary.maxTokens) throw new Error("Owned subcall has no complete within-bound metered tool-less result.");
+    outcome = "completed";
+  } catch {
+    outcome = signal.aborted ? "stopped" : dispatched ? "partial" : "failed";
+    console.error("Owned tool-less model subcall ended without an accepted complete result:", outcome);
+  }
+  try {
+    const acknowledged = await request({ kind: "owned-model.finished", ownerId: id, requestId: randomUUID(), outcome,
+      diagnostic: outcome === "completed" ? null : "The exact tool-less subcall ended incomplete or cancelled. Original result/charges remain retained; no effect, retry or success was inferred." });
+    if (acknowledged.error || !acknowledged.value || !("accepted" in acknowledged.value) || acknowledged.value.accepted !== true) {
+      throw new Error("Private terminal result was not acknowledged.");
+    }
+    send({ kind: "owned-model.released", ownerId: id, outcome });
+  } catch { console.error("Owned subcall terminal acknowledgement was lost. Its accounting/cleanup remain unconfirmed; no replay."); }
 }
 async function run(start: WorkerStart): Promise<void> {
   const context: Message[] = start.context;
@@ -109,10 +147,8 @@ async function run(start: WorkerStart): Promise<void> {
       return;
     }
     if (!start.retry) await lifecycle("turn.start");
-    const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
-    models.setProvider(githubCopilotProvider());
-    models.setProvider(localProvider());
     for (let index = 0; index < (start.retry?.remainingSteps ?? 32); index++) {
+      if (ownedModel) await ownedModel.done;
       abort.signal.throwIfAborted();
       let stepId: string = randomUUID();
       const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId, loadedTools: [...loadedTools] });
@@ -120,11 +156,6 @@ async function run(start: WorkerStart): Promise<void> {
       if (reply.error || !reply.value || !("model" in reply.value)) throw new Error(reply.error ?? "Missing model authorization.");
       const boundary: BoundaryReply = reply.value;
       if (boundary.phase?.startsWith("kupo-") && start.automaticKupo !== true) throw new Error("This worker does not own automatic Kupo response review. No model call or tool request was dispatched.");
-      const secrets = [...new Set([
-        ...(boundary.auth.apiKey && boundary.auth.headers?.Authorization !== null ? [boundary.auth.apiKey] : []),
-        ...Object.entries(boundary.auth.headers ?? {}).filter(([name, value]) => value && /authorization|api[-_]?key|auth[-_]?token/i.test(name)).flatMap(([, value]) => value ? [value, value.replace(/^Bearer\s+/i, "")] : []),
-      ])];
-      const redactor = new SecretStreamRedactor(secrets);
       context.push(...boundary.steers);
       if (start.retainModelRequests && (boundary.phase === undefined || boundary.phase === "solver" || boundary.phase === "router" ||
         boundary.phase.startsWith("kupo-"))) {
@@ -133,38 +164,17 @@ async function run(start: WorkerStart): Promise<void> {
         if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The original model request was not durably bound. No inference was dispatched.");
       }
       const model = { ...boundary.model, baseUrl: boundary.auth.baseUrl ?? boundary.model.baseUrl };
-      let usageReported = false;
-      let buffered = "";
-      const flush = () => { if (buffered) { const text = redactor.push(buffered); if (text) send({ kind: "delta", stepId, text }); buffered = ""; } };
-      const timer = setInterval(flush, 50);
-      const started = performance.now();
-      const metrics = streamMetrics(started);
-      try {
-        const stream = models.streamSimple(model, {
-          systemPrompt: boundary.systemPrompt,
-          messages: boundary.context ?? context, tools: start.readOnly || boundary.phase === "router" || boundary.phase === "kupo-gate" || boundary.phase === "kupo-critic" || boundary.phase === "compaction" || boundary.phase === "candidate" || boundary.phase === "checkpoint" ? [] : boundary.tools,
-        }, {
-          apiKey: boundary.auth.apiKey, headers: boundary.auth.headers, signal: abort.signal,
-          maxTokens: boundary.maxTokens, maxRetries: 0, timeoutMs: 120_000,
-          ...(model.provider === "moguri-local" || start.env === "Sandbox" ? { fetch: localModelFetch } : {}),
-          ...(boundary.thinkingEffort && boundary.thinkingEffort !== "off" ? { reasoning: boundary.thinkingEffort } : {}),
-          sessionId: process.env.MOGURI_TURN_ID,
-          onProviderStreamEvent: (event) => { usageReported ||= usagePresent(event); metrics.provider(event); },
-        });
-        for await (const event of stream) {
-          metrics.output(event);
-          if (event.type === "text_delta") {
-            buffered += event.delta;
-            if (buffered.length > 16_384) flush();
-          }
-        }
-        flush();
-        const tail = redactor.finish(); if (tail) send({ kind: "delta", stepId, text: tail });
-        let message = assistantMessage(redactSecrets(await stream.result(), secrets));
+      {
+        const streamed = await streamWorkerModel(boundary, boundary.context ?? context,
+          start.readOnly || boundary.phase === "router" || boundary.phase === "kupo-gate" || boundary.phase === "kupo-critic" ||
+          boundary.phase === "compaction" || boundary.phase === "candidate" || boundary.phase === "checkpoint" ? [] : boundary.tools,
+          start.env, abort.signal, (text) => send({ kind: "delta", stepId, text }));
+        const usageReported = streamed.usageReported;
+        let message = streamed.message;
         if (boundary.phase === "kupo-draft" || boundary.phase === "kupo-revision" || boundary.phase === "kupo-escalation") kupoDraft = { stepId, message };
         let accepted = await request({
           kind: "model.complete", requestId: randomUUID(), stepId, message,
-          usageReported: usageReported && !["error", "aborted", "pending", "deferred"].includes(message.stopReason), generationMs: performance.now() - started, stream: metrics.snapshot(),
+          usageReported, generationMs: streamed.generationMs, stream: streamed.stream,
         });
         if (accepted.halt && accepted.error) { await finish(abort.signal.aborted ? "stopped" : "partial", accepted.error); return; }
         if (accepted.error) throw new Error(accepted.error);
@@ -294,7 +304,7 @@ async function run(start: WorkerStart): Promise<void> {
             return;
           }
         }
-      } finally { clearInterval(timer); flush(); }
+      }
     }
     await finish("partial", "The 32-step safety limit was reached. Review the session before continuing.");
   } catch (error) {
@@ -318,7 +328,28 @@ async function run(start: WorkerStart): Promise<void> {
 let started = false;
 process.on("message", (raw: unknown) => {
   const message = parentMessage(raw);
-  if (message.kind === "start" && !started) { started = true; void run(message); }
+  if (message.kind === "start" && !started) { started = true; parentStart = message; void run(message); }
+  else if (message.kind === "owned-model.start") {
+    const gate = pending.get(message.parentRequestId);
+    if (!started || !authority || terminalRequested || !parentStart?.ownedModelCalls || ownedModel || ownedModelIds.has(message.ownerId) ||
+      ownedModelIds.size >= 16 || !gate || !["boundary", "approval", "delegate"].includes(gate.kind)) {
+      console.error("Owned model subcall rejected: no exact waiting parent, bounded original owner or transport authority.");
+      void request({ kind: "owned-model.finished", ownerId: message.ownerId, requestId: randomUUID(), outcome: "failed",
+        diagnostic: "The exact parent gate ended, changed or did not authorize this tool-less subcall. No inference or replay was dispatched." }).then((reply) => {
+        if (reply.error || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error("Rejected subcall terminal result was not acknowledged.");
+        send({ kind: "owned-model.released", ownerId: message.ownerId, outcome: "failed" });
+      }).catch(() => { console.error("Rejected owned subcall terminal acknowledgement was lost; no replay."); });
+      return;
+    }
+    ownedModelIds.add(message.ownerId);
+    const roleAbort = new AbortController(), signal = AbortSignal.any([abort.signal, roleAbort.signal]);
+    const done = Promise.resolve().then(() => runOwnedModel(message.ownerId, signal)).finally(() => {
+      if (ownedModel?.id === message.ownerId) ownedModel = undefined;
+    });
+    ownedModel = { id: message.ownerId, abort: roleAbort, done };
+  } else if (message.kind === "owned-model.stop") {
+    if (ownedModel?.id === message.ownerId) { ownedModel.abort.abort(); send({ kind: "owned-model.ack", ownerId: message.ownerId }); }
+  }
   else if (message.kind === "reply") {
     const waiter = pending.get(message.requestId);
     pending.delete(message.requestId);

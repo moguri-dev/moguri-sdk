@@ -1,9 +1,10 @@
 import type { Message } from "@earendil-works/pi-ai";
 import {
   activeDecision, decisionEvidence, DecisionDocumentSchema, MoguriError, parse, projectDecision, successfulRoleEntry,
-  ordinarySolverStep,
+  ordinarySolverStep, decisionCleanup,
   type CommandResult, type DecisionCommand, type DecisionDocument, type DecisionQuery, type DecisionQuestions, type DecisionRecord, type DecisionResponse,
   type DecisionSource, type EventInput, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type Usage, type BudgetLimit,
+  type OwnedModelTransport,
 } from "../../../packages/protocol/src/index.ts";
 import { decisionAdvice, decisionState } from "./decision-contracts.ts";
 import { decisionCapability } from "./decision-policy.ts";
@@ -17,6 +18,7 @@ import { assistantMessage, WorkerRequestSchema, type ParentMessage, type WorkerR
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { authorizeTool } from "./permissions.ts";
 import { sourceRootSync } from "./repository-source.ts";
+import type { PreparedModel } from "./provider.ts";
 
 interface Host {
   snapshot(): Snapshot; events(): StoredEvent[]; commit(events: EventInput[]): void;
@@ -26,6 +28,9 @@ interface Host {
   globalLimit(): BudgetLimit | null;
   artifact(session: Session, text: string): RetainedArtifact;
   usage(sessionId: string, request: Extract<WorkerRequest, { kind: "model.complete" }>): Usage;
+  transport(session: Session): OwnedModelTransport;
+  ownedWorker(session: Session, ownerId: string, source: DecisionSource, request: (request: WorkerRequest) => Promise<void>): WorkerConnection;
+  prepareModel(session: Session, modelId: string, signal: AbortSignal): Promise<PreparedModel>;
 }
 interface Live {
   id: string; child: WorkerConnection; abort: AbortController; chain: Promise<void>; exited: boolean; finished: boolean;
@@ -51,14 +56,17 @@ export class Decisions {
     if (document.sessionId !== record.sessionId || document.turnId !== record.turnId || digest(JSON.stringify(document.source)) !== record.sourceDigest ||
       JSON.stringify(document.source) !== JSON.stringify(record.source) || document.bindingDigest !== record.bindingDigest ||
       document.policyDigest !== record.policyDigest || digest(document.policyJson) !== record.policyDigest ||
-      document.inputBound !== record.inputBound || document.outputBound !== record.outputBound) throw new MoguriError("decision_corrupt", "Original source/owner, exact policy/model and complete decision envelope disagree. No replay.", 409);
+      document.inputBound !== record.inputBound || document.outputBound !== record.outputBound || document.version !== record.version ||
+      document.version === 2 && (record.version !== 2 || JSON.stringify(document.transport) !== JSON.stringify(record.transport))) throw new MoguriError("decision_corrupt", "Original source/owner, exact policy/model and complete decision envelope disagree. No replay.", 409);
     return document;
   }
   private policy(session: Session): string {
     const state = this.host.snapshot();
     return JSON.stringify({ profileId: state.profileId, permissionRevision: state.settings.permissionRevision, decisions: state.settings.values.decisions,
       permissions: state.settings.values.permissions, localModels: state.settings.values.localModels, allowedEnvs: state.policy,
-      budgetPolicy: state.budgetPolicy, globalLimit: this.host.globalLimit(), budgets: state.settings.values.budgets, projectRevision: this.host.projectRevision(session) });
+      budgetPolicy: state.budgetPolicy, globalLimit: this.host.globalLimit(), budgets: state.settings.values.budgets, projectRevision: this.host.projectRevision(session),
+      ...(session.controls.env === "Local" ? {} : { env: session.controls.env, remote: state.settings.values.remote,
+        sandbox: state.settings.values.sandbox, sandboxManagement: state.settings.values.sandboxManagement }) });
   }
   private root(sessionId: string): DecisionDocument["root"] {
     const path = this.host.root(sessionId);
@@ -71,9 +79,9 @@ export class Decisions {
   }
   private binding(session: Session, source: DecisionSource): string {
     const state = this.host.snapshot();
-    if (!session.turnId || session.controls.autonomy !== "Autopilot Max" || session.controls.env !== "Local" || session.status === "stopping" ||
-      !this.host.current(session.id, session.turnId) || !state.policy.allowedEnvs.includes("Local") ||
-      !ordinarySolverStep(this.host.events(), state.profileId, session.id, session.turnId, source.parentStepId)) throw new MoguriError("decision_stale", "The original actual selected parent/solver, Max delegation or Local boundary ended/changed. Unselected router/critic/private roles cannot adopt it; no fallback or action.", 409);
+    if (!session.turnId || session.controls.autonomy !== "Autopilot Max" || session.status === "stopping" ||
+      !this.host.current(session.id, session.turnId) || !state.policy.allowedEnvs.includes(session.controls.env) ||
+      !ordinarySolverStep(this.host.events(), state.profileId, session.id, session.turnId, source.parentStepId)) throw new MoguriError("decision_stale", "The original actual selected parent/solver, Max delegation or execution boundary ended/changed. Unselected router/critic/private roles cannot adopt it; no fallback or action.", 409);
     let pending: unknown;
     if (source.kind === "tool") {
       const approval = session.pendingApproval;
@@ -100,12 +108,17 @@ export class Decisions {
       pending = source;
     }
     return digest(JSON.stringify({ sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, turnId: session.turnId,
-      root: this.root(session.id), controls: session.controls, mode: session.mode, pendingMode: session.pendingMode, queueRevision: session.queueRevision, pending }));
+      root: session.controls.env === "Local" ? this.root(session.id) : null,
+      ...(session.controls.env === "Local" ? {} : { transport: this.host.transport(session) }),
+      controls: session.controls, mode: session.mode, pendingMode: session.pendingMode, queueRevision: session.queueRevision, pending }));
   }
   private checked(id: string) {
     const record = this.record(id), document = this.document(record), state = this.host.snapshot(), session = state.sessions.find((session) => session.id === record.sessionId);
     if (!session || session.turnId !== record.turnId || this.policy(session) !== document.policyJson || this.binding(session, record.source) !== record.bindingDigest)
       throw new MoguriError("decision_stale", "The exact original request/context/delegation/policy changed or the human intervened. No stale model action.", 409);
+    if (record.version === 2 && JSON.stringify(record.transport) !== JSON.stringify(this.host.transport(session))) {
+      throw new MoguriError("decision_transport", "The actual original peer/root/guest transport changed. No controller or replacement worker was adopted.", 409);
+    }
     const capability = this.capability(session.controls.env);
     const accounting = this.host.budgets.status(session.id, capability.model.id);
     if (accounting.diagnostics.length) throw new MoguriError("decision_budget", accounting.diagnostics.join(" "), 409);
@@ -128,15 +141,19 @@ export class Decisions {
       snapshot.decisions.filter((record) => record.sessionId === session.id && record.turnId === session.turnId && record.stepId === null).length;
     if (calls >= capability.settings.maxCallsPerTurn) throw new MoguriError("decision_call_limit", "This parent reached its explicit total decision/steering call bound. Ask the actual user; no paid retry or limit reset.", 409);
     const text = decisionState(state);
-    const document: DecisionDocument = { format: "moguri-owned-decision", version: 1, sessionId, turnId: session.turnId, root: this.root(session.id), source, state: text, questions,
+    const origin = session.controls.env === "Local" ? { version: 1 as const, root: this.root(session.id) } :
+      { version: 2 as const, root: null, transport: this.host.transport(session) };
+    const document: DecisionDocument = { format: "moguri-owned-decision", ...origin, sessionId, turnId: session.turnId, source, state: text, questions,
       settings: capability.settings, modelJson: JSON.stringify(capability.model), systemPrompt: capability.systemPrompt, inputBound: 0, outputBound: capability.settings.outputTokens,
       bindingDigest, policyDigest: digest(policyJson), policyJson };
     document.inputBound = estimateModelContext({ systemPrompt: document.systemPrompt, messages: this.context(document), tools: [] });
     parse(DecisionDocumentSchema, document);
     if (document.inputBound + document.outputBound + 4096 >= capability.model.contextWindow) throw new MoguriError("decision_context", "The whole named request/output cannot fit the actual model window. Nothing was truncated, substituted or approved.", 409);
     const artifact = this.host.artifact(session, JSON.stringify(document)), owner = this.host.budgets.owner(session), timestamp = now();
-    const record: DecisionRecord = { version: 1, id: artifact.id, profileId: snapshot.profileId, sessionId, turnId: session.turnId, ownerSessionId: owner.id,
-      ownerTurnId: owner.id === session.id ? session.turnId : owner.turnId, projectId: session.projectId, workspaceId: session.workspaceId, env: "Local", kind: source.kind, source, sourceDigest,
+    const boundary = session.controls.env === "Local" ? { version: 1 as const, env: "Local" as const } :
+      { version: 2 as const, env: session.controls.env, transport: this.host.transport(session) };
+    const record: DecisionRecord = { ...boundary, id: artifact.id, profileId: snapshot.profileId, sessionId, turnId: session.turnId, ownerSessionId: owner.id,
+      ownerTurnId: owner.id === session.id ? session.turnId : owner.turnId, projectId: session.projectId, workspaceId: session.workspaceId, kind: source.kind, source, sourceDigest,
       bindingDigest, policyDigest: document.policyDigest, inputDigest: artifact.contentDigest, modelId: capability.model.id, providerId: capability.model.providerId, apiModelId: capability.model.apiModelId,
       role: source.kind === "steering" ? "steering" : "decision", inputBound: document.inputBound, outputBound: document.outputBound,
       revision: 0, createdAt: timestamp, updatedAt: timestamp, status: "pending", stepId: null, actualInputDigest: null, resultDigest: null, adviceDigest: null, modelOutcome: null,
@@ -145,7 +162,25 @@ export class Decisions {
     this.host.commit([{ event_type: "artifact.revised", profile_id: snapshot.profileId, project_id: session.projectId, payload: { artifact } }, this.event(record)]);
     let resolve!: Live["resolve"], reject!: Live["reject"];
     const promise = new Promise<DecisionRecord | null>((done, fail) => { resolve = done; reject = fail; });
-    const child = localWorker(this.workerPath, record.id), live: Live = { id: record.id, child, abort: new AbortController(), chain: Promise.resolve(), exited: false, finished: false,
+    let live: Live;
+    let child: WorkerConnection;
+    try {
+      signal.throwIfAborted();
+      child = record.version === 1 ? localWorker(this.workerPath, record.id) : this.host.ownedWorker(session, record.id, source, async (request) => {
+        live.chain = live.chain.then(() => this.message(live, request)).catch((error: unknown) => {
+          live.error = error instanceof Error ? error : new Error("Owned model transport failed.");
+          console.error("Owned decision exchange failed:", error instanceof MoguriError ? error.code : "decision_transport");
+          this.cancel(record.id, "The original owned subcall exchange failed; no result or replay can authorize an action.");
+        });
+        await live.chain;
+      });
+    } catch (error) {
+      console.error("Original decision transport could not be admitted:", error instanceof MoguriError ? error.code : "decision_transport");
+      this.update(record, { status: "rejected", diagnostic: error instanceof MoguriError ? error.message :
+        "The original decision transport could not start. Its retained intent was not replayed and no fallback was selected." });
+      return null;
+    }
+    live = { id: record.id, child, abort: new AbortController(), chain: Promise.resolve(), exited: false, finished: false,
       promise, resolve, reject, detach: () => signal.removeEventListener("abort", cancelled) };
     const cancelled = () => { try { this.cancel(record.id, "The actual parent or human intervention cancelled this advice. No result can authorize an action."); } catch (error) { this.persistence(live, error); } };
     this.live.set(record.id, live);
@@ -165,7 +200,7 @@ export class Decisions {
     });
     live.deadline = setTimeout(() => { try { this.cancel(record.id, "The explicit bounded decision deadline expired. No retry or automatic answer; real/unknown charges remain retained."); } catch (error) { this.persistence(live, error); } }, capability.settings.timeoutMs);
     if (signal.aborted) cancelled();
-    else this.send(live, { kind: "start", root: null, context: [], readOnly: true, env: "Local" });
+    else this.send(live, { kind: "start", root: null, context: [], readOnly: true, env: record.env });
     return promise;
   }
   private send(live: Live, message: ParentMessage): void {
@@ -228,7 +263,7 @@ export class Decisions {
       try {
         let checked = this.checked(live.id); live.abort.signal.throwIfAborted();
         if (checked.record.status !== "pending" || checked.record.stepId) throw new MoguriError("decision_replay", "Only one original bounded decision call is allowed.", 409);
-        const prepared = await this.host.models.prepare(checked.record.modelId, live.abort.signal);
+        const prepared = await this.host.prepareModel(checked.session, checked.record.modelId, live.abort.signal);
         checked = this.checked(live.id); live.abort.signal.throwIfAborted();
         if (prepared.model.id !== checked.record.apiModelId || prepared.model.contextWindow !== checked.capability.model.contextWindow || prepared.model.maxTokens !== checked.capability.model.maxTokens) throw new MoguriError("decision_model", "Prepared decision identity/capacity differs from the exact configured model. No fallback.", 409);
         const context = this.context(checked.document), configured = modelRequest({ ...prepared.model, maxTokens: checked.record.outputBound }, undefined,
@@ -282,14 +317,15 @@ export class Decisions {
     let diagnostic = record.diagnostic ?? (live.error instanceof MoguriError ? live.error.message : live.error ? "The original bounded decision transport/admission failed. No retry." : null);
     let status: DecisionRecord["status"] = "ready";
     if (live.abort.signal.aborted) diagnostic ??= "Decision cancelled or superseded. The actual human/policy wins; no automatic action.";
-    if (!live.finished || code !== 0 || signal || record.workerOutcome !== "completed") diagnostic ??= "Original decision worker did not acknowledge complete bounded cleanup. No automatic result or retry.";
+    if (!live.finished || code !== 0 || signal || record.workerOutcome !== "completed" || record.version === 2 && live.child.roleReleased !== true) diagnostic ??= "Original decision worker/role did not acknowledge complete bounded cleanup. No automatic result or retry.";
     if (!record.adviceDigest || !successfulRoleEntry(entry)) diagnostic ??= "The exact complete advice or known within-bound accounting is unavailable. No free/automatic action.";
     if (!diagnostic) try { this.checked(record.id); } catch (error) {
       if (!(error instanceof MoguriError)) throw error;
       diagnostic = error.message;
     }
     if (diagnostic) status = record.stepId && (!successfulRoleEntry(entry) || !live.finished || live.abort.signal.aborted) ? "partial" : "rejected";
-    const next = this.update(record, { status, diagnostic, cleanup: "owned-worker-stopped",
+    const cleanup = record.version === 1 || live.child.roleReleased ? decisionCleanup(record) : "unconfirmed";
+    const next = this.update(record, { status, diagnostic, cleanup,
       cancellation: live.abort.signal.aborted && record.cancellation !== "acknowledged" ? "unconfirmed" : record.cancellation }, entry?.status === "reserved" ? [{
       event_type: "budget.recorded", profile_id: record.profileId, payload: { entry: { ...entry, status: "unknown", outcome: "unconfirmed",
         diagnostic: "Owned decision worker ended without acknowledged metering. Original full capacity remains held; no zero charge or retry." } },
@@ -337,7 +373,7 @@ export class Decisions {
   reject(id: string, diagnostic: string): void { const record = this.record(id); if (record.status === "ready") this.update(record, { status: "rejected", diagnostic }); }
   recover(): EventInput[] {
     return this.host.snapshot().decisions.filter(activeDecision).map((record) => this.event(projectDecision(record, { ...record, revision: record.revision + 1, updatedAt: now(),
-      status: record.status === "ready" || !record.stepId ? "rejected" : "partial", cleanup: record.cleanup === "owned-worker-stopped" ? record.cleanup : "unconfirmed",
+      status: record.status === "ready" || !record.stepId ? "rejected" : "partial", cleanup: record.cleanup === decisionCleanup(record) ? record.cleanup : "unconfirmed",
       diagnostic: "Control plane restarted with original decision intent/result. Cleanup and undisclosed usage remain unconfirmed; no advice, paid call or effect was replayed." })));
   }
   query(query: DecisionQuery): DecisionResponse {
@@ -354,7 +390,7 @@ export class Decisions {
       const accounting = this.host.budgets.status(session.id, capability.model.id);
       if (accounting.diagnostics.length) throw new MoguriError("decision_budget", accounting.diagnostics.join(" "), 409);
       return { type: query.type, ready: true, provider: capability.settings.provider, modelId: capability.model.id, outputBound: capability.settings.outputTokens,
-        reason: "Explicit bounded-model System One-compatible transport. Local one-shot root-less advice only inside exact existing user delegation; confidence is not calibrated permission. No Jev or Remote/native substitution." };
+        reason: `Explicit bounded-model alternative at ${session.controls.env}. Tool-less advice only inside exact existing user delegation and its owned transport; confidence is not calibrated permission. This is not Jev/System One.` };
     } catch (error) {
       if (!(error instanceof MoguriError)) throw error;
       return { type: query.type, ready: false, provider: state.settings.values.decisions.provider, modelId: state.settings.values.decisions.modelId, outputBound: null, reason: error.message };

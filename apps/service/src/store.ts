@@ -10,6 +10,7 @@ const recoverySchemaMarkers = ["session_request_recovery_schema", "builtin_git_s
 const commandToolSchemaMarkers = ["workflow_commands_schema", "tool_preferences_schema"] as const;
 const safetyReviewSchemaMarkers = ["work_item_comments_schema", "repository_script_review_schema"] as const;
 const intakeSchemaMarkers = ["model_failure_recovery_schema", "scheduled_prompts_schema", "kupo_modes_schema"] as const;
+const ownedTransportSchemaMarkers = ["scheduled_native_preparation_schema", "owned_model_transport_schema", "transport_finishing_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -488,6 +489,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=84; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 85) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of ownedTransportSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=85; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
@@ -543,6 +551,16 @@ export class EventStore {
         event.event_type === "project.configured" && event.payload.configuration.values?.defaults?.kupoMode !== undefined ||
         event.event_type === "global.controls_changed" && event.payload.values.kupoMode !== undefined)) {
         throw new Error("Actual recovery/scheduling/Kupo history cannot become a pre-84 lineage. Original state was preserved.");
+      }
+      for (const id of ownedTransportSchemaMarkers) {
+        if (version < 85 && marker(id) !== undefined) throw new Error(`Premature owned transport schema marker ${id}. Original state was preserved.`);
+        if (version >= 85) require(id, "scheduled native/owned model/finishing transport");
+      }
+      if (version >= 4 && version < 85 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "sandbox.workspace_recorded" && event.payload.workspace.preparation?.version === 2 ||
+        event.event_type === "decision.recorded" && Object.hasOwn(event.payload.decision, "transport") ||
+        event.event_type === "winddown.recorded" && Object.hasOwn(event.payload.winddown, "transport"))) {
+        throw new Error("Actual scheduled native/owned model/finishing history cannot become a pre-85 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

@@ -56,6 +56,7 @@ const GroupInputSchema = Type.Object({
 }, { additionalProperties: false });
 const InputSchema = Type.Union([ReviewedInputSchema, AutomaticInputSchema, GroupInputSchema]);
 type StaticGroupRepository = Static<typeof GroupInputSchema>["repositories"][number];
+type PreparationOwner = NonNullable<SandboxWorkspace["preparation"]>;
 interface Host {
   snapshot(): Pick<Snapshot, "profileId" | "sessions" | "settings" | "policy" | "sandboxWorkspaces" | "sandboxExecutions">; project(session: Session, repository?: string): Project;
   settings(projectId: string | null): { revision: number; values: ProjectSettings };
@@ -183,9 +184,43 @@ export class SandboxWorkspaces {
     }
     if (this.active.has(sessionId)) throw new MoguriError("sandbox_busy", "This session already owns native workspace preparation.", 409);
     const abort = new AbortController(), signal = AbortSignal.any([requested, abort.signal]);
-    const task = (session.repositories ? this.prepareGroupOnce(session, turnId, signal) : this.prepareAutomaticOnce(session, turnId, signal)).finally(() => this.active.delete(sessionId));
+    const owner: PreparationOwner = { version: 1, kind: "automatic", turnId };
+    const task = Promise.resolve().then(() => session.repositories ? this.prepareGroupOnce(session, owner, signal) :
+      this.prepareAutomaticOnce(session, owner, signal)).finally(() => this.active.delete(sessionId));
     this.active.set(sessionId, { abort, task });
     return task;
+  }
+  async prepareScheduled(sessionId: string, commandId: string, commandDigest: string, draft: Session["draft"], requested: AbortSignal) {
+    const session = this.session(sessionId);
+    if (session.turnId || this.active.has(sessionId)) throw new MoguriError("sandbox_busy", "The original idle session already owns execution or private preparation. Its draft was preserved.", 409);
+    const owner: PreparationOwner = { version: 2, kind: "scheduled", commandId, commandDigest,
+      draftRevision: draft.revision, draftDigest: digest(JSON.stringify(draft)) };
+    const previous = (this.host.snapshot().sandboxWorkspaces ?? []).find((workspace) => workspace.commandId === commandId &&
+      workspace.sessionId === sessionId && workspace.preparation?.version === 2);
+    if (previous && (JSON.stringify(previous.preparation) !== JSON.stringify(owner) || previous.status !== "ready" ||
+      session.sandboxWorkspaceId !== previous.id)) {
+      throw new MoguriError("sandbox_preparation_partial", "This original scheduled preparation is changed, partial or unbound. Inspect its retained intent; no copy, model or scheduled prompt was replayed.", 409);
+    }
+    const abort = new AbortController(), signal = AbortSignal.any([requested, abort.signal]);
+    const task = Promise.resolve().then(async () => {
+      signal.throwIfAborted();
+      if (session.sandboxWorkspaceId) {
+        const workspace = await this.assert(session); signal.throwIfAborted(); return workspace;
+      }
+      if (!this.automatic()) throw new MoguriError("sandbox_workspace", "Review and prepare the exact native source first, or explicitly enable managed private preparation. Scheduling cannot grant that policy.", 409);
+      return session.repositories ? this.prepareGroupOnce(session, owner, signal, draft) : this.prepareAutomaticOnce(session, owner, signal, draft);
+    }).finally(() => this.active.delete(sessionId));
+    this.active.set(sessionId, { abort, task }); return task;
+  }
+  private preparationCurrent(sessionId: string, owner: PreparationOwner, authorityDigest: string, signal: AbortSignal): Session {
+    signal.throwIfAborted();
+    const actual = this.session(sessionId);
+    const owning = owner.version === 1 ? actual.turnId === owner.turnId :
+      actual.turnId === null && actual.draft.revision === owner.draftRevision && digest(JSON.stringify(actual.draft)) === owner.draftDigest;
+    if (!owning || !this.automatic() || this.authority(actual) !== authorityDigest) {
+      throw new MoguriError("sandbox_stale", "The exact preparation owner, saved draft, source or policy changed. No model or scheduled prompt was admitted.", 409);
+    }
+    return actual;
   }
   private groupBindings(session: Session, heads: ReadonlyMap<string, string | null> = new Map()): SandboxRepository[] {
     if (!session.repositories) throw new MoguriError("sandbox_repository_scope", "This native group has no original captured repository set.", 409);
@@ -199,18 +234,18 @@ export class SandboxWorkspaces {
     return Boolean(session.repositories && repositories && JSON.stringify(session.repositories) === JSON.stringify(
       sandboxRepositories(repositories).map(({ projectId, name, root }) => ({ projectId, name, root }))));
   }
-  private async prepareGroupOnce(session: Session, turnId: string, signal: AbortSignal) {
+  private async prepareGroupOnce(session: Session, owner: PreparationOwner, signal: AbortSignal, draft?: Session["draft"]) {
     const authorityDigest = this.authority(session), config = this.native.assertReady(), bindings = this.groupBindings(session);
     const current = () => {
-      signal.throwIfAborted();
-      const actual = this.session(session.id);
-      if (actual.turnId !== turnId || !this.automatic() || this.authority(actual) !== authorityDigest || !this.sameGroup(actual, bindings)) {
+      const actual = this.preparationCurrent(session.id, owner, authorityDigest, signal);
+      if (!this.sameGroup(actual, bindings)) {
         throw new MoguriError("sandbox_stale", "The captured group, actual source/policy or owned turn changed before native admission. No first-root or Local fallback.", 409);
       }
       return actual;
     };
     current();
     const previous = (this.host.snapshot().sandboxWorkspaces ?? []).find((workspace) => workspace.id === session.sandboxWorkspaceId);
+    if (owner.version === 2 && previous) throw new MoguriError("sandbox_workspace", "Scheduling cannot replace or restore an existing native group stage. Review its exact retained state first.", 409);
     if (previous && !this.sameGroup(session, previous.repositories)) throw new MoguriError("sandbox_repository_scope", "The retained private stage belongs to another original root set. No legacy or empty workspace was relabelled.", 409);
     if (previous?.stage && previous.status === "ready" && previous.authorityDigest === authorityDigest) {
       try { await inspectNativeStage(previous.stage); current(); return { ...previous, stage: previous.stage }; }
@@ -223,12 +258,14 @@ export class SandboxWorkspaces {
     if (original && (original.version !== 3 || JSON.stringify(original.repositories.map(({ binding }) => binding)) !== JSON.stringify(session.repositories))) {
       throw new MoguriError("sandbox_repository_history", "Retained group input has no exact version-3 source lineage. No v1/v2 receipt was reinterpreted.", 409);
     }
+    const workId = owner.version === 1 ? owner.turnId : owner.commandId;
     const id = randomUUID(), workspace: SandboxWorkspace = { id, sessionId: session.id, projectId: null, sourceWorkspaceId: null,
       sourceRoot: null, sourceHead: null, repositories: bindings, stage: null, authorityDigest, configDigest: frameDigest(config),
-      revision: 0, createdAt: new Date().toISOString(), commandId: turnId,
-      commandDigest: frameDigest(["moguri-native-group-automatic-v1", this.host.snapshot().profileId, session.id, turnId, authorityDigest]),
-      preparation: { version: 1, kind: "automatic", turnId }, status: "preparing", diagnostic: null,
-      inputDigest: this.store.putBlob(JSON.stringify({ format: "moguri-native-preparation-intent", version: 2, sessionId: session.id, turnId,
+      revision: 0, createdAt: new Date().toISOString(), commandId: workId,
+      commandDigest: owner.version === 2 ? owner.commandDigest : frameDigest(["moguri-native-group-automatic-v1", this.host.snapshot().profileId, session.id, workId, authorityDigest]),
+      preparation: owner, status: "preparing", diagnostic: null,
+      inputDigest: this.store.putBlob(JSON.stringify({ format: "moguri-native-preparation-intent", version: owner.version === 1 ? 2 : 3,
+        sessionId: session.id, ...(owner.version === 1 ? { turnId: owner.turnId } : { owner, draft }),
         repositories: bindings, previousExecutionId: last?.id ?? null, authorityDigest })) };
     this.host.commit([this.event(workspace)]);
     try {
@@ -280,18 +317,14 @@ export class SandboxWorkspaces {
       throw error;
     }
   }
-  private async prepareAutomaticOnce(session: Session, turnId: string, signal: AbortSignal) {
+  private async prepareAutomaticOnce(session: Session, owner: PreparationOwner, signal: AbortSignal, draft?: Session["draft"]) {
     const authorityDigest = this.authority(session), config = this.native.assertReady();
     const current = () => {
-      signal.throwIfAborted();
-      const actual = this.session(session.id);
-      if (actual.turnId !== turnId || !this.automatic() || this.authority(actual) !== authorityDigest) {
-        throw new MoguriError("sandbox_stale", "Owning turn, workspace or policy changed during automatic preparation. No worker or model was admitted.", 409);
-      }
-      return actual;
+      return this.preparationCurrent(session.id, owner, authorityDigest, signal);
     };
     current();
     const previous = (this.host.snapshot().sandboxWorkspaces ?? []).find((value) => value.id === session.sandboxWorkspaceId);
+    if (owner.version === 2 && previous) throw new MoguriError("sandbox_workspace", "Scheduling cannot replace or restore an existing native stage. Review its exact retained state first.", 409);
     if (previous?.stage && previous.status === "ready" && previous.authorityDigest === authorityDigest) {
       try { await inspectNativeStage(previous.stage); current(); return { ...previous, stage: previous.stage }; }
       catch (error) { if (!(error instanceof MoguriError && error.code === "native_stage")) throw error; }
@@ -305,13 +338,14 @@ export class SandboxWorkspaces {
       throw new MoguriError("sandbox_workspace", "The original private workspace belongs to another actual source binding. Retained work was not discarded or moved.", 409);
     }
     const project = session.projectId ? this.host.project(session) : null;
-    const id = randomUUID(), preparation = { version: 1 as const, kind: "automatic" as const, turnId };
+    const id = randomUUID(), workId = owner.version === 1 ? owner.turnId : owner.commandId;
     const workspace: SandboxWorkspace = { id, sessionId: session.id, projectId: session.projectId, sourceWorkspaceId: session.workspaceId,
       sourceRoot: project?.path ?? null, sourceHead: null, stage: null, authorityDigest, configDigest: frameDigest(config),
-      revision: 0, createdAt: new Date().toISOString(), commandId: turnId,
-      commandDigest: frameDigest(["moguri-native-automatic-v1", this.host.snapshot().profileId, session.id, turnId, authorityDigest]),
-      preparation, status: "preparing", diagnostic: null,
-      inputDigest: this.store.putBlob(JSON.stringify({ format: "moguri-native-preparation-intent", version: 1, sessionId: session.id, turnId,
+      revision: 0, createdAt: new Date().toISOString(), commandId: workId,
+      commandDigest: owner.version === 2 ? owner.commandDigest : frameDigest(["moguri-native-automatic-v1", this.host.snapshot().profileId, session.id, workId, authorityDigest]),
+      preparation: owner, status: "preparing", diagnostic: null,
+      inputDigest: this.store.putBlob(JSON.stringify({ format: "moguri-native-preparation-intent", version: owner.version === 1 ? 1 : 3,
+        sessionId: session.id, ...(owner.version === 1 ? { turnId: owner.turnId } : { owner, draft }),
         previousExecutionId: last?.id ?? null, authorityDigest })) };
     this.host.commit([this.event(workspace)]);
     try {

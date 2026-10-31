@@ -33,6 +33,7 @@ import {
   defaultKupoAutomaticLimits,
   type RoutingResponseReservation,
   ordinarySolverStep,
+  OwnedModelTransportSchema, type OwnedModelTransport,
 } from "../../../packages/protocol/src/index.ts";
 import { SessionIntake } from "./session-intake.ts";
 import { retainedModelRequest, transientModelFailure, type RetainedModelRequest } from "./model-recovery.ts";
@@ -67,7 +68,7 @@ import { SessionContextSchema, SessionControlSchema, SessionMessageSchema, WaitS
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
 import { approvedWebAccess, authorizeTool, rememberToolApproval, toolWebTarget, validateSettings } from "./permissions.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
-import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, type BoundaryReply, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
+import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, isOwnedModelRequest, type OwnedModelRequest, type BoundaryReply, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext, readTools } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateKupoThinking, validateModelOptions, validateContextSize } from "./model-controls.ts";
@@ -78,6 +79,7 @@ import { automaticPlan, automaticPool, automaticReview, AUTOMATIC_CRITIC_PROMPT,
 import { reportedModelUsage, modelOutputExceeded } from "./budgets.ts";
 import { McpKeychain } from "./gateway.ts";
 import { localWorker, type WorkerConnection, type WorkerFrame } from "./worker-connection.ts";
+import { OwnedModelConnection } from "./owned-model-connection.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { BridgeFrame, BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { normalizeStreamObservation } from "./stream-metrics.ts";
@@ -218,6 +220,7 @@ export class ControlPlane extends EventEmitter {
   private deletingSessions = new Set<string>();
   private deletingProjects = new Set<string>();
   private questionWaits = new Map<string, { run: Run; requestId: string }>();
+  private ownedModels = new Map<string, { run: Run; connection: OwnedModelConnection; chain: Promise<void> }>();
   readonly provider: ModelRegistry;
   readonly remote: RemoteRuntime;
   readonly sandbox: SandboxRuntime;
@@ -508,6 +511,16 @@ export class ControlPlane extends EventEmitter {
       globalLimit: () => this.profileHooks?.globalBudget().limit ?? null,
       projectRevision: (session) => session.projectId ? this.platform.sessions.projects.configuration(session.projectId).revision : 0,
       artifact: (session, text) => this.platform.artifacts.decision(session, text),
+      transport: (session) => this.ownedModelTransport(session),
+      ownedWorker: (session, id, source, handler) => this.ownedModelConnection(session, id, source, handler),
+      prepareModel: (session, modelId, signal) => {
+        if (session.controls.env === "Local") return this.provider.prepare(modelId, signal);
+        const run = this.runs.get(session.id);
+        if (!run || run.done || run.abort.signal.aborted || session.turnId !== run.turnId) {
+          throw new MoguriError("decision_transport", "The actual parent transport ended before private model preparation. No controller model was used.", 409);
+        }
+        return this.prepareWorkerModel(run, modelId, signal);
+      },
       usage: (id, request) => this.modelUsage(this.session(id), request),
     });
     this.candidateCleanup = new CandidateCleanupRuntime({
@@ -3388,8 +3401,13 @@ export class ControlPlane extends EventEmitter {
     return { event_type: "prompt.schedule_recorded", profile_id: this.profileId, project_id: prompt.projectId,
       session_id: prompt.sessionId, payload: { prompt } };
   }
-  private scheduledBinding(session: Session): string {
-    return frameDigest(["scheduled-prompt-v1", this.profileId, this.admissionSignature(session), this.commandBinding(session), session.homeRoot,
+  private scheduledBinding(session: Session, nativePreparation = false): string {
+    const source = nativePreparation ? frameDigest(["scheduled-native-source-v1", session.id, session.controls, session.mode, session.pendingMode,
+      session.workspaceId, session.projectId, session.repositories,
+      session.repositories?.map((binding) => this.platform.sessions.projects.configuration(binding.projectId).revision),
+      session.projectId ? this.platform.sessions.projects.configuration(session.projectId).revision : null,
+      this.projection.policy.revision, this.projection.settings.permissionRevision]) : this.admissionSignature(session);
+    return frameDigest(["scheduled-prompt-v1", this.profileId, source, this.commandBinding(session), session.homeRoot,
       this.platform.prompt(session), session.controls.modelId === KUPO_MODEL_ID ? this.projection.settings.values.kupo : null,
       session.controls.autonomy === "Autopilot Max" ? this.projection.settings.values.decisions : null,
       this.provider.state.models.filter((model) => session.controls.modelId === KUPO_MODEL_ID || model.id === session.controls.modelId)
@@ -3418,7 +3436,7 @@ export class ControlPlane extends EventEmitter {
       return [];
     });
   }
-  private scheduleCommand(command: ScheduledPromptCommand, finish: WorkspaceFinish): CommandResult {
+  private async scheduleCommand(command: ScheduledPromptCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     let session = this.session(command.sessionId);
     if (command.type === "prompt.schedule") {
       if (!finish.intent) throw new MoguriError("schedule_owner", "Scheduling requires its original actual-user command receipt. No model or replacement owner was inferred.", 409);
@@ -3428,13 +3446,23 @@ export class ControlPlane extends EventEmitter {
         session.draft.text.startsWith("/") || !session.draft.text.trim() && !session.draft.attachments.length) {
         throw new MoguriError("schedule_input", "Schedule a nonempty ordinary prompt in an active chat. Slash commands, private roles and archived sessions keep their original delivery rules.", 409);
       }
+      const now = this.intake.clock.now(), timing = scheduledInstant(command.timing, now);
+      if (session.controls.env === "Sandbox") {
+        const original = structuredClone(session.draft), binding = this.scheduledBinding(session, true);
+        await this.sandboxWorkspaces.prepareScheduled(session.id, finish.intent.id, finish.intent.digest, original, AbortSignal.timeout(120_000));
+        session = this.session(session.id);
+        if (session.turnId || this.removingSession(session.id) || session.status === "archived" ||
+          session.draft.revision !== original.revision || frameDigest(session.draft) !== frameDigest(original) ||
+          this.scheduledBinding(session, true) !== binding) {
+          throw new MoguriError("schedule_changed", "The original saved input, model/account, native source or policy changed during private preparation. Original stage/drafts were retained; no scheduled prompt or model was admitted.", 409);
+        }
+      }
       if (this.projection.scheduledPrompts.filter((prompt) => prompt.sessionId === session.id && ["scheduled", "blocked", "queued"].includes(prompt.status)).length >= 100) {
         throw new MoguriError("schedule_limit", "This chat already has 100 unadmitted scheduled prompts. Cancel or send an original prompt first.", 409);
       }
       this.attachments(session, session.draft.attachments);
       const home = homeChat(session) && session.controls.env === "Local" && !session.homeRoot ? this.platform.sessions.homeRoot() : undefined;
       if (home) session = { ...session, homeRoot: home };
-      const now = this.intake.clock.now(), timing = scheduledInstant(command.timing, now);
       const prompt: ScheduledPrompt = { id: randomUUID(), revision: 0, profileId: this.profileId, sessionId: session.id,
         projectId: session.projectId, commandId: finish.intent.id, commandDigest: finish.intent.digest, draftRevision: session.draft.revision,
         bindingDigest: this.scheduledBinding(session), text: session.draft.text, attachments: structuredClone(session.draft.attachments),
@@ -3725,7 +3753,9 @@ export class ControlPlane extends EventEmitter {
         const pool = current.controls.modelId === KUPO_MODEL_ID ? policy.workflow === "auto" ?
           automaticPool(policy, this.provider.state.models, "Sandbox", 0, this.automaticConstraints(current)) :
           kupoPool(policy, this.provider.state.models, "Sandbox") : null;
-        const models = [...new Set(pool ? [...(pool.classifier ? [pool.classifier.id] : []), ...pool.candidates.map((model) => model.id)] : [current.controls.modelId!])];
+        const decisions = this.projection.settings.values.decisions;
+        const models = [...new Set([...(pool ? [...(pool.classifier ? [pool.classifier.id] : []), ...pool.candidates.map((model) => model.id)] : [current.controls.modelId!]),
+          ...(current.controls.autonomy === "Autopilot Max" && decisions.enabled && decisions.provider === "bounded-model" && decisions.modelId ? [decisions.modelId] : [])])];
         if (models.length > 16) throw new MoguriError("sandbox_provider_scope", "This native turn exceeds sixteen already approved provider candidates. No extra provider was selected.", 409);
         const urls: string[] = [];
         for (const id of models) {
@@ -3847,6 +3877,17 @@ export class ControlPlane extends EventEmitter {
         }
         child.events.on("stderr", (data) => { run.stderr = (run.stderr + data).slice(-4096); });
         child.events.on("message", (message: unknown, frame) => {
+          if (isOwnedModelRequest(message)) {
+            const owned = this.ownedModels.get(message.ownerId);
+            const previous = owned?.chain ?? Promise.resolve();
+            const next = previous.then(() => this.ownedModelFrame(run, message, frame)).catch((error: unknown) => {
+              console.error("Owned model transport protocol failed:", error instanceof MoguriError ? error.code : "owned_model_frame");
+              this.finishRun(run, "partial", "The original private model frame/receipt could not be retained. Accounting and cleanup remain unconfirmed; no role was replayed.");
+              run.child.kill("SIGTERM");
+            });
+            if (owned) owned.chain = next;
+            return;
+          }
           run.chain = run.chain.then(async () => {
             if (run.done) return;
             const request = parse(WorkerRequestSchema, message);
@@ -3886,6 +3927,9 @@ export class ControlPlane extends EventEmitter {
             this.projection.settings.values.kupo.workflow === "auto" && this.projection.settings.values.kupo.autoCompaction?.enabled ? { automaticCompaction: true as const } : {}),
           ...(hooks.length ? { hooks } : {}),
           ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl ? { retainModelRequests: true as const } : {}),
+          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl &&
+            current.controls.env !== "Local" && current.controls.autonomy === "Autopilot Max" &&
+            this.projection.settings.values.decisions.enabled && this.projection.settings.values.decisions.provider === "bounded-model" ? { ownedModelCalls: true as const } : {}),
           ...(retry ? { retry: { loadedTools: retry.input.loadedTools, instructionSources: retry.input.instructionSources,
             ...(retry.input.kupo?.draft ? { kupoDraft: { stepId: retry.input.kupo.draft.stepId, message: assistantMessage(JSON.parse(this.store.blob(retry.input.kupo.draft.contextDigest))) } } : {}),
             remainingSteps: 32 - this.history.filter((event) => event.session_id === current.id && event.turn_id === turnId && event.event_type === "model.started").length } } : {}),
@@ -4002,10 +4046,77 @@ export class ControlPlane extends EventEmitter {
     run.granted.add(callId);
     run.scopedReadPolicies.set(callId, this.scopedReadPolicy());
   }
-  private reply(run: Run, message: ParentMessage): void {
+  private reply(run: Run, message: ParentMessage, callback?: (error: Error | null) => void): void {
     if (run.child.connected) run.child.send(message, (error) => {
+      callback?.(error);
       if (error && !run.done) this.finishRun(run, "partial", "The worker control channel failed. Cleanup is unconfirmed.");
     });
+  }
+  private ownedModelTransport(session: Session): OwnedModelTransport {
+    const run = this.runs.get(session.id);
+    if (!run || run.done || run.abort.signal.aborted || session.turnId !== run.turnId || session.controls.env === "Local") {
+      throw new MoguriError("decision_transport", "This source has no exact active Remote/native parent. No Local role or retained execution was adopted.", 409);
+    }
+    if (run.executionId) {
+      const execution = this.projection.executions.find((entry) => entry.id === run.executionId);
+      if (!execution || execution.status !== "running" || execution.workerDigest !== this.remote.readiness.workerDigest ||
+        execution.workspace !== this.remoteWorkspace(session) || remoteFingerprint(execution.target) !== this.remote.readiness.hostFingerprint) {
+        throw new MoguriError("decision_transport", "The captured SSH peer/root/build ended or changed. No alias or controller root was substituted.", 409);
+      }
+      return parse(OwnedModelTransportSchema, { env: "Remote", executionId: execution.id, workerDigest: execution.workerDigest,
+        peerFingerprint: remoteFingerprint(execution.target), hostKey: execution.target.hostKey, root: execution.workspace });
+    }
+    const execution = this.projection.sandboxExecutions?.find((entry) => entry.id === run.sandboxExecutionId);
+    if (!execution || execution.status !== "running" || !execution.nativeSessionId || !execution.planDigest || !execution.signerFingerprint ||
+      execution.workspaceId !== session.sandboxWorkspaceId || execution.workerDigest !== this.sandbox.assertReady().qualification.workerDigest) {
+      throw new MoguriError("decision_transport", "The original native guest/root/build is not active and verified. No replacement guest was launched for advice.", 409);
+    }
+    this.assertNativePolicy(execution);
+    return parse(OwnedModelTransportSchema, { env: "Sandbox", executionId: execution.id, workerDigest: execution.workerDigest,
+      workspaceId: execution.workspaceId, nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest,
+      signerFingerprint: execution.signerFingerprint, sourceDigest: execution.stage.sourceDigest, image: execution.image, root: execution.root });
+  }
+  private ownedModelConnection(session: Session, id: string, source: DecisionSource, handler: (request: WorkerRequest) => Promise<void>): WorkerConnection {
+    this.ownedModelTransport(session);
+    const run = this.runs.get(session.id)!;
+    const parentRequestId = source.kind === "question" ? this.questionWaits.get(source.questionId)?.requestId :
+      source.kind === "tool" ? run.approval?.requestId : source.boundaryId;
+    if (!parentRequestId || this.ownedModels.has(id) || [...this.ownedModels.values()].some((owned) => owned.run === run)) {
+      throw new MoguriError("decision_transport", "Only one exact waiting parent owns a tool-less subcall. No second role or source was started.", 409);
+    }
+    const frame = this.workerFrame.getStore();
+    if (frame && !frame.recorded) this.commit([]);
+    const connection = new OwnedModelConnection(id, parentRequestId, run.child, (message, callback) => this.reply(run, message, callback), handler,
+      () => { if (!run.done) this.stop(run.sessionId); },
+      () => { if (this.ownedModels.get(id)?.connection === connection) this.ownedModels.delete(id); });
+    this.ownedModels.set(id, { run, connection, chain: Promise.resolve() });
+    return connection;
+  }
+  private async ownedModelFrame(run: Run, request: OwnedModelRequest, frame?: WorkerFrame): Promise<void> {
+    const handle = async () => {
+      const owner = this.ownedModels.get(request.ownerId);
+      if (!owner || owner.run !== run) throw new MoguriError("owned_model_owner", "The private frame has no exact original report/parent owner. It was not adopted.", 409);
+      await owner.connection.receive(request);
+    };
+    if (!frame) throw new MoguriError("owned_model_transport", "A non-Local private result has no actual owned transport frame. No controller receipt was relabeled.", 409);
+    const execution = frame.env === "Sandbox" ? this.projection.sandboxExecutions?.find((entry) => entry.id === run.sandboxExecutionId) :
+      this.projection.executions.find((entry) => entry.id === run.executionId);
+    if (!execution || frame.executionId !== execution.id || frameDigest(request) !== frame.digest) throw new MoguriError("owned_model_transport", "The private frame changed its actual execution or bytes.", 409);
+    if (frame.sequence <= execution.lastSequence) {
+      const known = this.history.find((event) => (event.event_type === "execution.frame_recorded" || event.event_type === "sandbox.frame_recorded") &&
+        event.payload.executionId === execution.id && event.payload.sequence === frame.sequence);
+      if (!(known?.event_type === "execution.frame_recorded" || known?.event_type === "sandbox.frame_recorded") || known.payload.digest !== frame.digest) {
+        throw new MoguriError("owned_model_transport", "A replay changed the original retained private frame.", 409);
+      }
+      if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId,
+        ...(request.kind === "owned-model.complete" || request.kind === "owned-model.finished" ? { value: { accepted: true } } :
+          { error: "The original private boundary was already recorded. No model call was replayed." }) });
+    } else {
+      if (frame.sequence !== execution.lastSequence + 1) throw new MoguriError("owned_model_cursor", "The actual private execution sequence has a gap. No frame was replayed.", 409);
+      const context = { frame, recorded: false };
+      await this.workerFrame.run(context, async () => { await handle(); if (!context.recorded) this.commit([]); });
+    }
+    run.child.acknowledge?.(frame.sequence);
   }
   private cancelledQuestions(session: Session, diagnostic: string): EventInput[] {
     return this.projection.questions.filter((question) => question.sessionId === session.id && question.status === "open").map((question) => ({
@@ -4456,27 +4567,30 @@ export class ControlPlane extends EventEmitter {
     run.modelInput = captured; run.modelInputDigest = inputDigest;
     this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
   }
-  private async prepareWorkerModel(run: Run, modelId: string): Promise<PreparedModel> {
+  private async prepareWorkerModel(run: Run, modelId: string, requested: AbortSignal = run.abort.signal): Promise<PreparedModel> {
+    const signal = requested === run.abort.signal ? requested : AbortSignal.any([requested, run.abort.signal]);
+    signal.throwIfAborted();
     if (run.executionId && !modelId.startsWith("remote.") && !this.projection.settings.values.remote?.allowCopilot) throw new MoguriError("remote_credential", "Explicitly allow scoped Copilot access on this verified host before dispatching it.", 403);
     if (run.nativeProviderEpoch !== undefined && run.nativeProviderEpoch !== this.providerEpoch) run.nativePrepared?.clear();
     const cached = run.nativePrepared?.get(modelId); run.nativePrepared?.delete(modelId);
-    const prepared = cached ?? await this.provider.prepare(modelId, run.abort.signal);
+    const prepared = cached ?? await this.provider.prepare(modelId, signal);
     if (run.sandboxExecutionId) {
       const native = this.sandboxExecution(run.sandboxExecutionId);
       this.assertNativePolicy(native);
       await this.sandboxWorkspaces.assert(this.session(run.sessionId));
-      run.abort.signal.throwIfAborted();
+      signal.throwIfAborted();
       sandboxProviderDestination(native.config, prepared.auth.baseUrl ?? prepared.model.baseUrl);
       const catalog = await this.sandbox.connection(native.id).query({ type: "catalog", catalog: {
         url: prepared.auth.baseUrl ?? prepared.model.baseUrl, key: prepared.auth.apiKey ?? null, headers: prepared.auth.headers,
-      } }, run.abort.signal);
+      } }, signal);
       if (catalog.type !== "catalog" || catalog.status < 200 || catalog.status >= 300) throw new MoguriError("sandbox_provider", "The exact native-side provider discovery failed. No model call, alternate provider or Local fallback was used.", 409);
       let models: unknown;
       try { models = JSON.parse(Buffer.from(catalog.body, "base64").toString("utf8")); }
       catch { throw new MoguriError("sandbox_provider", "Native provider discovery returned invalid JSON. No inference or fallback.", 409); }
       if (!isRecord(models) || !Array.isArray(models.data) || !models.data.some((entry) => isRecord(entry) && entry.id === prepared.model.id)) throw new MoguriError("sandbox_provider", "This exact model is not advertised inside the verified guest. No provider/model was substituted.", 409);
     }
-    if (run.executionId && !modelId.startsWith("remote.")) await this.remote.verifyCopilot(prepared, run.abort.signal);
+    if (run.executionId && !modelId.startsWith("remote.")) await this.remote.verifyCopilot(prepared, signal);
+    signal.throwIfAborted();
     return prepared;
   }
   private async retryBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>): Promise<void> {
@@ -4530,6 +4644,7 @@ export class ControlPlane extends EventEmitter {
       steers: [], phase: input.phase, maxTokens: input.maxTokens, thinkingEffort: input.thinkingEffort, mode: input.mode, folders: input.folders } });
   }
   private async workerMessage(run: Run, request: WorkerRequest): Promise<void> {
+    if (isOwnedModelRequest(request)) throw new MoguriError("owned_model_owner", "Private frames require their independent original report/transport path; they cannot adopt ordinary tool or solver authority.", 409);
     const session = this.session(run.sessionId);
     if (request.kind === "ack") {
       if (run.abort.signal.aborted) {
