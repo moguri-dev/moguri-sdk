@@ -21,7 +21,7 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): "present" | "abse
     throw error;
   }
 }
-const groupExists = (pid: number) => signalGroup(pid, 0) !== "absent";
+export const groupExists = (pid: number) => signalGroup(pid, 0) !== "absent";
 export async function stopGroup(pid: number): Promise<boolean> {
   if (!Number.isInteger(pid) || pid <= 1) throw new MoguriError("process_ownership", "An owned process group must have a PID greater than one.");
   if (signalGroup(pid, "SIGTERM") === "absent") return true;

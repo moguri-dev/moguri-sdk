@@ -8,6 +8,7 @@ const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_s
 const combinedSchemaMarkers = ["model_selection_continuity_schema", "theme_catalog_schema", ...workspaceSchemaMarkers, "theme_model_workspace_convergence_schema"] as const;
 const recoverySchemaMarkers = ["session_request_recovery_schema", "builtin_git_schema"] as const;
 const commandToolSchemaMarkers = ["workflow_commands_schema", "tool_preferences_schema"] as const;
+const safetyReviewSchemaMarkers = ["work_item_comments_schema", "repository_script_review_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -62,6 +63,7 @@ function references(input: EventInput): string[] {
     case "slash.live_recorded": return [input.payload.control.inputDigest];
     case "slash.continuation_chosen": return [input.payload.choice.inputDigest];
     case "tool.completed": return input.payload.rawDigest ? [input.payload.rawDigest] : [];
+    case "script.review_recorded": return [input.payload.review.source.digest];
     case "candidate.owner_bound": {
       const evidence = input.payload.owner.generationEvidence;
       return evidence ? [evidence.inputDigest, evidence.resultDigest, evidence.proposalDocumentDigest] : [];
@@ -468,6 +470,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=82; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 83) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of safetyReviewSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=83; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
@@ -481,6 +490,17 @@ export class EventStore {
       for (const id of commandToolSchemaMarkers) {
         if (version < 82 && marker(id) !== undefined) throw new Error(`Premature command/tool preference schema marker ${id}. Original state was preserved.`);
         if (version >= 82) require(id, "command/tool preference");
+      }
+      for (const id of safetyReviewSchemaMarkers) {
+        if (version < 83 && marker(id) !== undefined) throw new Error(`Premature content/script review schema marker ${id}. Original state was preserved.`);
+        if (version >= 83) require(id, "content/script review");
+      }
+      if (version >= 4 && version < 83 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "script.review_recorded" ||
+        (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && event.payload.item.command?.name === "script-review" ||
+        (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.started" || event.event_type === "tool.completed" ? event.payload.call : null)?.name === "review_script" ||
+        (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.started" || event.event_type === "tool.completed" ? event.payload.call : null)?.name === "run_script")) {
+        throw new Error("Actual content/script review history cannot become a pre-83 lineage. Original state was preserved.");
       }
       if (version >= 4 && version < 82 && this.readEvents(0, true, version < 10).some((event) =>
         event.event_type === "session.resumed" && event.payload.continuation ||

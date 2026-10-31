@@ -1,32 +1,43 @@
 import { constants } from "node:fs";
 import { isUtf8 } from "node:buffer";
 import { open, realpath, lstat, stat, readdir, rename, unlink } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { MAX_TEXT, MoguriError } from "../../../packages/protocol/src/core.ts";
 
-const protectedPart = (part: string) => part === ".git" || part === ".moguri" || part.startsWith(".moguri-dependencies-") || part === "node_modules" ||
-  [".ssh", ".aws", ".azure", ".kube", ".docker", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "Moguri"].includes(part) ||
-  /^\.env(?:\.|$)/i.test(part) || /\.(?:pem|key|p12|pfx)$/i.test(part) ||
-  /^(?:credentials|id_rsa|id_ed25519)(?:\.|$)/i.test(part);
+const protectedPart = (part: string) => {
+  const name = part.toLowerCase();
+  return name === ".git" || name === ".moguri" || name.startsWith(".moguri-dependencies-") || name === "node_modules" ||
+    [".ssh", ".aws", ".azure", ".kube", ".docker", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "moguri"].includes(name) ||
+    /^\.env(?:\.|$)/i.test(name) || /\.(?:pem|key|p12|pfx)$/i.test(name) ||
+    /^(?:credentials|id_rsa|id_ed25519)(?:\.|$)/i.test(name);
+};
 export const isProtectedProjectPath = (input: string): boolean => input.split(/[\\/]/).some(protectedPart);
 export async function scopedPath(root: string, input: string, allowMissing = false): Promise<string> {
   root = await realpath(root);
+  const assertScoped = (path: string, allowRoot = false) => {
+    const rel = relative(root, path);
+    if (!rel && !allowRoot || isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`) || isProtectedProjectPath(rel)) {
+      throw new MoguriError("path_denied", "Choose an unprotected file inside the exact approved project; path aliases cannot acquire another root.");
+    }
+  };
   const requested = resolve(root, input);
+  assertScoped(requested);
+  let parent = root;
+  for (const part of relative(root, dirname(requested)).split(sep).filter(Boolean)) {
+    parent = join(parent, part);
+    if ((await lstat(parent)).isSymbolicLink()) throw new MoguriError("path_denied", "Symlink folder access is not supported. Select the real project path.");
+  }
   const canonicalParent = await realpath(dirname(requested));
+  assertScoped(canonicalParent, true);
   const path = join(canonicalParent, basename(requested));
-  const rel = relative(root, path);
-  if (!rel || isAbsolute(rel) || rel === ".." || rel.startsWith("../") || rel.split(/[\\/]/).some(protectedPart)) {
-    throw new MoguriError("path_denied", "Choose an unprotected file inside the approved project.");
-  }
-  const parentRel = relative(root, canonicalParent);
-  if (isAbsolute(parentRel) || parentRel === ".." || parentRel.startsWith("../") || parentRel.split(/[\\/]/).some(protectedPart)) {
-    throw new MoguriError("path_denied", "Symlinks cannot escape the approved project or enter protected paths.");
-  }
+  assertScoped(path);
   try {
     if ((await lstat(path)).isSymbolicLink()) throw new MoguriError("path_denied", "Symlink file access is not supported. Select the real project file.");
     const canonical = await realpath(path);
-    if (canonical !== path && (process.platform !== "darwin" || canonical.toLowerCase() !== path.toLowerCase())) throw new MoguriError("path_denied", "Symlink file access is not supported. Select the real project file.");
+    assertScoped(canonical);
+    if (canonical !== path && (process.platform !== "darwin" || canonical.normalize("NFC").toLowerCase() !== path.normalize("NFC").toLowerCase())) throw new MoguriError("path_denied", "Symlink file access is not supported. Select the real project file.");
+    return canonical;
   } catch (error) {
     if (!(allowMissing && error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
   }

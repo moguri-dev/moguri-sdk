@@ -30,6 +30,8 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  if (installedProtocol >= 83) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-content-review.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
@@ -80,6 +82,12 @@ try {
       void stopCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
+      ${installedProtocol >= 83 ? `
+      const sourceReview=await sdk.scriptReviews.read("generated-session","generated-review");
+      void sourceReview.review.advice?.source.modelId;void sourceReview.review.source.rootDigest;
+      await sdk.scriptReviews.force("generated-session","generated-review","a".repeat(64),1,0,"generated-explicit-force");
+      void sdk.getState().snapshot?.scriptReviews[0]?.attempt?.owner;
+      ` : ""}
       ${installedProtocol >= 82 ? `
       const ranked:ToolPreferences={order:["cli","rest","mcp-direct","mcp-gateway"]};
       void ToolPreferencesSchema;void defaultToolPreferences;void effectiveToolPreferences(ranked);
@@ -1471,9 +1479,9 @@ try {
         const compact=await beta.sessions.create(null,"Generated installed compaction",{modelId:generatedModel.id,autonomy:"Manual"});
         for(let turn=0;turn<3;turn++){
           const current=beta.getState().snapshot.sessions.find(value=>value.id===compact.id);
-          await beta.command({type:"draft.save",sessionId:compact.id,expectedRevision:current.draft.revision,text:"Generated installed retained turn "+turn+". "+"Generated retained compaction detail. ".repeat(32),attachments:[]});
+          await beta.command({type:"draft.save",sessionId:compact.id,expectedRevision:current.draft.revision,text:"Generated installed retained turn "+turn+". "+"Generated retained compaction detail. ".repeat(16),attachments:[]});
           const sizing=(await beta.sessions.context(compact.id)).context;
-          assert.ok(sizing.estimatedTokens+4096<generatedModel.contextWindow,"The generated compaction fixture must fit the unchanged input/headroom bound before dispatch.");
+          assert.ok(sizing.estimatedTokens+4096<generatedModel.contextWindow,"The generated compaction fixture must fit the unchanged input/headroom bound before dispatch: estimated="+sizing.estimatedTokens+", window="+generatedModel.contextWindow+".");
           await beta.command({type:"message.send",sessionId:compact.id,expectedRevision:current.draft.revision+1,delivery:"queue"});
           for(let n=0;n<400&&beta.getState().snapshot.sessions.find(value=>value.id===compact.id).turnId;n++)await new Promise(resolve=>setTimeout(resolve,20));
           const settled=beta.getState().snapshot.sessions.find(value=>value.id===compact.id);

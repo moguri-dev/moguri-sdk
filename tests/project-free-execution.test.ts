@@ -134,12 +134,13 @@ test("an ordinary Home chat's model can reread its actual Agent command but neve
 });
 
 test("a project-free Home command can create a generated PR through one explicitly targeted GitHub CLI without selecting or inferring a project", { skip: process.platform !== "darwin" }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-chat-github-")), script = join(directory, "generated-gh.mjs");
-  await writeFile(script, `const args = process.argv.slice(2);
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-chat-github-")), script = join(directory, "generated-gh-cli");
+  await writeFile(script, `#!${process.execPath}
+const args = process.argv.slice(2);
 if (JSON.stringify(args) !== JSON.stringify(["pr","create","--repo","generated-owner/generated-repo","--title","Generated PR"])) process.exit(9);
-process.stdout.write(JSON.stringify({repository: args[3], cwd: process.cwd(), url: "https://github.com/generated-owner/generated-repo/pull/42"}) + "\\n");\n`);
+process.stdout.write(JSON.stringify({repository: args[3], cwd: process.cwd(), url: "https://github.com/generated-owner/generated-repo/pull/42"}) + "\\n");\n`, { mode: 0o700 });
   const fixture = await setupFixture({ toolCall: { name: "run_command", args: {
-    command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)} pr create --repo generated-owner/generated-repo --title 'Generated PR'`, timeoutMs: 2000,
+    command: `${JSON.stringify(script)} pr create --repo generated-owner/generated-repo --title 'Generated PR'`, timeoutMs: 2000,
   } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const created = await sdk.sessions.create(null, "Generated explicit repository PR", { modelId: fixture.modelId });

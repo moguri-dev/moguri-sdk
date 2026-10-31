@@ -1,6 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { request } from "node:https";
 import { load } from "cheerio";
+import { isUtf8 } from "node:buffer";
 import { MoguriError } from "../../../packages/protocol/src/index.ts";
 import { publicAddress } from "./public-network.ts";
 import { boundedBody } from "./network.ts";
@@ -44,7 +45,7 @@ export async function fetchNativePage(input: string, signal: AbortSignal, access
   const source = await fetchNativeSource(input, signal, 0, access);
   return pageText(new URL(source.url), source.body, source.type);
 }
-export async function fetchPublicSource(input: string, signal: AbortSignal, redirects = 0, access?: WebAccess): Promise<{ url: string; body: string; type: string }> {
+export async function fetchPublicSource(input: string, signal: AbortSignal, redirects = 0, access?: WebAccess, maximum = 1024 * 1024): Promise<{ url: string; body: string; type: string }> {
   const url = new URL(input);
   if (url.protocol !== "https:" || url.username || url.password || redirects > 3) throw new MoguriError("web_destination", "Only public HTTPS pages with at most three safe redirects are supported.");
   assertWebAccess(access, url.href);
@@ -61,16 +62,20 @@ export async function fetchPublicSource(input: string, signal: AbortSignal, redi
       let bytes = 0;
       response.on("data", (data: Buffer) => {
         bytes += data.length;
-        if (bytes > 1024 * 1024) { req.destroy(new MoguriError("web_limit", "Page exceeded the 1 MiB fetch limit.")); return; }
+        if (bytes > maximum) { req.destroy(new MoguriError("web_limit", `Source exceeded its ${maximum}-byte fetch limit. Nothing was truncated.`)); return; }
         chunks.push(data);
       });
       response.on("error", reject);
-      response.on("end", () => resolve({ status: response.statusCode ?? 0, location: response.headers.location, body: Buffer.concat(chunks).toString("utf8"), type: response.headers["content-type"] ?? "" }));
+      response.on("end", () => {
+        const bytes = Buffer.concat(chunks);
+        if (!isUtf8(bytes)) { reject(new MoguriError("web_encoding", "The complete source is not valid UTF-8. No replacement characters or text conversion were accepted.")); return; }
+        resolve({ status: response.statusCode ?? 0, location: response.headers.location, body: bytes.toString("utf8"), type: response.headers["content-type"] ?? "" });
+      });
     });
     req.on("error", reject);
     req.end();
   });
-  if ([301, 302, 303, 307, 308].includes(response.status) && response.location) return fetchPublicSource(new URL(response.location, url).toString(), signal, redirects + 1, access);
+  if ([301, 302, 303, 307, 308].includes(response.status) && response.location) return fetchPublicSource(new URL(response.location, url).toString(), signal, redirects + 1, access, maximum);
   if (response.status < 200 || response.status >= 300) throw new MoguriError("web_failed", `Page returned HTTP ${response.status}.`);
   return { url: url.href, body: response.body, type: response.type };
 }

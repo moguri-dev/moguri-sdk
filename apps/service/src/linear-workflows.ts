@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stripMarkdownComments } from "../../../packages/protocol/src/markdown.ts";
 import { Value } from "typebox/value";
 import { defaultBoard, isRecord, MoguriError, parse, type CommandResult, type EventInput, type IssueBoard, type LocalIssue, type Snapshot } from "../../../packages/protocol/src/index.ts";
 import {
@@ -133,7 +134,7 @@ function parseProject(value: unknown, identity: LinearIdentity, teamId: string):
   if (!teamIds.includes(teamId) || !Number.isInteger(data.priority) || Number(data.priority) < 0 || Number(data.priority) > 4) invalid();
   const url = link(data.url, identity.workspaceKey), parts = new URL(url).pathname.split("/");
   if (parts[2] !== "project" || !parts[3]) invalid();
-  return { kind: "project", id: entityId(data.id), name: text(data.name), description: text(data.description, 255, true), content: data.content === null ? "" : text(data.content, 64 * 1024, true),
+  return { kind: "project", id: entityId(data.id), name: text(data.name), description: stripMarkdownComments(text(data.description, 255, true)), content: data.content === null ? "" : stripMarkdownComments(text(data.content, 64 * 1024, true)),
     url, updatedAt: time(data.updatedAt), archivedAt: nullableTime(data.archivedAt),
     teamIds, leadId: ref(data.lead), startDate: day(data.startDate), targetDate: day(data.targetDate), priority: Number(data.priority) };
 }
@@ -161,7 +162,7 @@ function parseIssue(value: unknown, identity: LinearIdentity, teamId: string): L
   const identifier = text(data.identifier, 80), url = link(data.url, identity.workspaceKey);
   if (new URL(url).pathname.split("/")[2] !== "issue" || new URL(url).pathname.split("/")[3] !== identifier) invalid();
   return { kind: "issue", id: entityId(data.id), identifier, url,
-    title: text(data.title, 512), description: data.description === null ? "" : text(data.description, 64 * 1024, true),
+    title: text(stripMarkdownComments(text(data.title, 512)), 512), description: data.description === null ? "" : stripMarkdownComments(text(data.description, 64 * 1024, true)),
     updatedAt: time(data.updatedAt), archivedAt: nullableTime(data.archivedAt), teamId, stateId: entityId(record(data.state).id),
     projectId: ref(data.project), cycleId: ref(data.cycle), priority, estimate, assigneeId: ref(data.assignee),
     labelIds: complete(data.labels).map((entry) => entityId(record(entry).id)).sort(), parentId: ref(data.parent), dueDate: day(data.dueDate) };
@@ -171,9 +172,16 @@ function parseComment(value: unknown, identity: LinearIdentity, teamId: string, 
   const owner = entityId(issue.id); if (issueId && owner !== issueId) invalid();
   const url = link(data.url, identity.workspaceKey, true), parts = new URL(url).pathname.split("/");
   if (parts[2] !== "issue" || !parts[3]) invalid();
-  return { kind: "comment", id: entityId(data.id), issueId: owner, body: text(data.body, 64 * 1024, true), updatedAt: time(data.updatedAt),
+  return { kind: "comment", id: entityId(data.id), issueId: owner, body: stripMarkdownComments(text(data.body, 64 * 1024, true)), updatedAt: time(data.updatedAt),
     url, userId: ref(data.user) };
 }
+function visibleEntity(value: LinearEntity): LinearEntity {
+  if (value.kind === "issue") return { ...value, title: stripMarkdownComments(value.title), description: stripMarkdownComments(value.description) };
+  if (value.kind === "comment") return { ...value, body: stripMarkdownComments(value.body) };
+  if (value.kind === "project") return { ...value, description: stripMarkdownComments(value.description), content: stripMarkdownComments(value.content) };
+  return value;
+}
+const visibleLocal = (value: LocalIssue | null) => value ? { ...value, title: stripMarkdownComments(value.title), body: stripMarkdownComments(value.body) } : null;
 function parseRelation(value: unknown, teamId: string, issueId?: string): LinearRelation {
   const data = record(value), issue = record(data.issue), related = record(data.relatedIssue);
   team(issue.team, teamId); team(related.team, teamId);
@@ -482,7 +490,13 @@ export class LinearWorkflows {
           document.input.action !== operation.action) throw new MoguriError("linear_retained_corrupt", "The original Linear input snapshot or ownership is invalid. State was preserved.", 409);
         const result = operation.resultDigest ? JSON.parse(this.store.blob(operation.resultDigest)) as LinearResult : null;
         if (result && (result.format !== "moguri-linear-result" || result.version !== 1 || result.operationId !== operation.id || result.action !== operation.action)) throw new MoguriError("linear_retained_corrupt", "The retained Linear receipt does not match its original intent.", 409);
-        return { type: query.type, operation, document, result, job: this.host.snapshot().jobs.find((entry) => entry.id === operation.jobId) ?? null };
+        const viewDocument = { ...document, remote: document.remote.map(visibleEntity), local: visibleLocal(document.local), localAfter: visibleLocal(document.localAfter) };
+        const viewResult = result ? { ...result, remote: result.remote.map(visibleEntity), local: visibleLocal(result.local) } : null;
+        const documentChanged = canonical(viewDocument) !== canonical(document), resultChanged = canonical(viewResult) !== canonical(result);
+        return { type: query.type, operation, document: viewDocument, result: viewResult, job: this.host.snapshot().jobs.find((entry) => entry.id === operation.jobId) ?? null,
+          ...(documentChanged || resultChanged ? { commentFilter: { kind: "work-item-comments-v1" as const,
+            ...(documentChanged ? { document: { sourceDigest: operation.inputDigest, viewDigest: digest(canonical(viewDocument)) } } : {}),
+            ...(resultChanged && operation.resultDigest ? { result: { sourceDigest: operation.resultDigest, viewDigest: digest(canonical(viewResult)) } } : {}) } } : {}) };
       }
     }
   }

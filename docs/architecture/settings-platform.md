@@ -4,6 +4,95 @@ This contract extends the executable alpha. Requested controls are not evidence
 that their native capability is installed or qualified. `docs/setup.md` remains
 the inventory of available behavior.
 
+## Registered-project selection and active-session follow-up
+
+The presentation-only commits `ccfd724`, `0f0ec2d` and `3bcaa87` reuse React and
+Electron (MIT), Playwright (Apache-2.0), the existing browser-safe SDK, shared
+session indicators, revision-bound project configuration, retained drafts and
+native navigation menus. That slice adds no dependency, service capability,
+event, durable field or migration. Its original protocol-82 observations below
+remain historical. The combined follow-up uses the separately documented
+[protocol-83 content-review contract and qualification](content-review.md);
+no earlier worker/native receipt is relabeled.
+
+The project configuration dropdown lists only the active profile's registered
+projects. Its exact selected ID is independent of the current conversation.
+An empty profile selects nothing. A disappeared target stays explicitly
+unavailable, never replaced with the first project; pending editor text remains
+available read-only until explicitly discarded. Busy/dirty edits block target
+changes, and writes keep the existing configuration revision check. Selection
+does not move a session, change its captured execution root or start work.
+Settings search alone has no copy-value control. Non-secret configuration
+fields retain their existing copy affordances.
+
+Project-group menus expand/collapse their actual member projects (the attached
+folders), not an invented recursive folder hierarchy. They preserve unrelated
+groups, configuration, drafts and pagination. Expanding also opens the selected
+outer group. Collapse state remains renderer presentation, using the existing
+profile-reset lifecycle rather than becoming execution or persistence authority.
+
+Private-update setup is a visible explicit button for the fixed updater source,
+`mbianchidev/moguri`, independent of the browsed project. GitHub's documented
+fine-grained PAT URL supports `target_name`, `contents=read`, name, description
+and expiration, **not repository selection**. Visible instructions require
+**Only select repositories / moguri**; the link is not described as an already
+repository-scoped grant. Users review and generate tokens themselves. Clicking
+does not inspect credentials, authenticate or start an update. See GitHub's
+[supported prefill parameters](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#supported-query-parameters).
+
+Dashboard's My work page prioritizes current active sessions ahead of historical
+charts. Existing SDK snapshots/events and shared status labels supply actual
+running, waiting and stopping states. Date ranges never hide current activity;
+the explicit project filter still applies. Held queues are not running work.
+Connection loss labels last-observed activity stale and disables navigation
+instead of claiming that no work exists. Navigation uses the existing exact
+session/profile and draft-flush path; it does not answer, approve, resume or
+consume queued prompts.
+
+Before feature integration on macOS arm64, the six generated Phase 0 checks
+passed: OAuth/streaming **1,091.09 ms**, cancellation **30.59 ms**; 1,000-event
+WAL append p95 **0.053 ms**, rebuild **0.509 ms**; nested PTY cancellation
+**152.53 ms**, no known-group survivors; 60 TUI frames **17.00 ms/update**;
+hidden Electron cold start **201.84 ms**, **437.22 MiB**, scroll frame
+**11.23 ms**; 2,000-file search **0.97 ms**, Git status **6.23 ms**.
+Independent retention retained 250 artifacts across 500 events in **133.51 ms**;
+hidden Ghostty input/108-column resize passed in **23.60 ms**. Generated
+model-option forwarding/sizing passed in **62.07 ms**. Live credentials,
+Linux/Rust, native isolation and release qualification are not established by
+these generated checks. Main CI run `41019712786` never started its steps:
+GitHub annotations require account billing/spending-limit action, not a workflow
+change or another run.
+
+### Generated qualification
+
+The six new hidden Electron scenarios in
+`tests/e2e/settings-dashboard.spec.ts` passed twice (**12/12 in 13.7 s**).
+The final focused client regression run passed **37/37 in 1.2 min**; the
+associated SDK/service checks passed **46/46 in 5.95 s**. They exercise actual
+keyboard/context-menu selection, empty/foreign-profile and deleted project
+targets, concurrent configuration revisions, unchanged ordinary copy controls,
+current group membership, the intercepted supported GitHub setup URL, live
+waiting/running/stopping activity, refreshed work counts, stale connections,
+exact-session focus and preserved drafts/questions/held queues.
+
+`npm ci --no-fund`, typecheck, build and the packed external consumer
+`npm run verify:sdk` passed; both dependency audits reported zero vulnerabilities.
+These original protocol-82 measurements retain their genuine migration/restart
+history and existing SDK/CLI/TUI paths. The packed consumer also retains its
+real worker, profile, budget, cancellation and restart probes. These were
+targeted source checks, not whole-suite or release qualification. The later
+[combined protocol-83 evidence](content-review.md#final-generated-qualification)
+records the full Node/desktop results and exact current payload identities;
+live GitHub authentication and unqualified native boundaries remain separate.
+
+Generated Dashboard screenshots are retained in the Playwright output as
+`active-sessions.png` and `active-sessions-filtered.png`. No real account,
+authorization page, customer data or model endpoint was used. Existing Vite
+chunks above 500 kB still produce a size warning; the packed consumer reports
+the upstream `whatwg-encoding`/`node-domexception` deprecations and explicitly
+reviews this package's install script before rebuilding. No warning was hidden
+or validation disabled.
+
 ## Scope and navigation
 
 Settings are grouped as General, Models, Integrations, Execution & permissions,
@@ -33,9 +122,9 @@ Copilot connection status is visible only under Settings / Models / Providers;
 the left footer does not contain a provider badge or connection button.
 
 The [protocol-59 experience](workspace-experience.md) keeps profile name, mascot
-Ask Moguri and icon-only Settings on one footer row. Non-secret input/textarea
-controls throughout Settings share hover/focus copy affordances; password
-fields are explicitly excluded. Long explanatory prose uses focusable
+Ask Moguri and icon-only Settings on one footer row. Non-secret configuration
+input/textarea controls share hover/focus copy affordances; password fields
+and Settings search are explicitly excluded. Long explanatory prose uses focusable
 information tooltips. Consequential warnings, actual status, errors and source
 review acknowledgements stay visible. Editing, revision conflicts and dirty
 navigation guards are unchanged.

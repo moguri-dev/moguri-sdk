@@ -93,6 +93,8 @@ import { isActivityQuery } from "../../../packages/protocol/src/activity.ts";
 import { cloneProject, prepareProjectClone } from "./project-clone.ts";
 import { SkillGateway, type SkillGatewayOptions } from "./skill-gateway.ts";
 import { selectedSkillEvents } from "./skill-selection.ts";
+import { ScriptReviews, type ScriptReviewOptions, type ScriptReviewScope } from "./script-reviews.ts";
+import { SCRIPT_REVIEW_GUIDANCE } from "../../../packages/protocol/src/script-reviews.ts";
 import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gateway.ts";
 import { dashboardOverview } from "./dashboard.ts";
 import { homeChat, homeWorkspace } from "./chat-workspace.ts";
@@ -120,6 +122,7 @@ export interface PlatformHost {
   invalidateApprovals(sessionId?: string): void;
   externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }): Promise<string>;
   webAccess?(session: Session, call: ToolCall): WebAccess | undefined;
+  scriptScope?(session: Session, path: string, repository?: string): ScriptReviewScope;
   repositoryScope(session: Session): RepositoryScope;
   repositoryGit(session: Session, signal: AbortSignal): Promise<string | null>;
   remoteRepository(session: Session, repository: string, signal: AbortSignal): Promise<RepositoryApiMetadata>;
@@ -179,8 +182,9 @@ export interface PlatformHost {
   cloneRootBusy(root: string, exceptJobId?: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions }
 export class PlatformRuntime {
+  readonly scriptReviews: ScriptReviews;
   readonly browser: BrowserBroker;
   readonly knowledge: TieredKnowledge;
   readonly extensions: Extensions;
@@ -214,6 +218,11 @@ export class PlatformRuntime {
     stream?: { frames: Uint8Array[]; sequence: number; bytes: number; text: string; revision: number; finishing: boolean; wake: ReturnType<typeof Promise.withResolvers<void>> } }>();
   private readonly memoryIndexes = new Map<string, string>();
   constructor(private readonly store: EventStore, readonly stateDir: string, private readonly host: Omit<PlatformHost, "finish">, private readonly options: PlatformOptions = {}) {
+    this.scriptReviews = new ScriptReviews(store, { snapshot: () => this.snapshot(), events: host.events,
+      commit: (events) => host.commit(events), scope: (session, path, repository) => {
+        if (!host.scriptScope) throw new MoguriError("script_review_scope", "This host has no exact session-bound script root resolver. No fallback root was used.", 409);
+        return host.scriptScope(session, path, repository);
+      } }, options.scriptReviews);
     this.browser = new BrowserBroker(() => this.snapshot());
     this.knowledge = new TieredKnowledge(store, { snapshot: () => this.snapshot(), events: host.events, sandbox: host.sandboxStatus });
     this.extensions = new Extensions(store, { snapshot: () => this.snapshot(), events: host.events,
@@ -608,6 +617,9 @@ export class PlatformRuntime {
     return `${snapshot.settings.values.systemPrompt}
 ${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}${guidanceText(snapshot.settings.values.guidance, project ? this.sessions.projects.values(project.id).guidance : undefined)}${session?.controls.verbosity && verbosityGuidance[session.controls.verbosity] ? `\n<response-verbosity>${verbosityGuidance[session.controls.verbosity]}</response-verbosity>` : ""}
 
+<moguri-content-review-contract>
+${SCRIPT_REVIEW_GUIDANCE}
+</moguri-content-review-contract>
 <moguri-product-context>
 Moguri is the local-first AI coding application hosting this conversation. Its OpenTUI/React TUI and Electron/React desktop share one local service and SDK. Execution Env does not identify which client is attached.
 Official source: https://github.com/mbianchidev/moguri
@@ -694,6 +706,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }));
   }
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
+    if (query.type === "script.review.read") return this.scriptReviews.read(query);
     if (isQueuedCommandQuery(query)) {
       if (!this.host.commandQuery) throw new MoguriError("command_query_unavailable", "This host has no exact queued-command result reader. No input or result was reconstructed.", 409);
       return this.host.commandQuery(query);
@@ -1115,6 +1128,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     return { id: request.id, token: lease.token, ...(request.streaming ? { streaming: true } : {}) };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (command.type === "script.review.force") throw new MoguriError("script_force_owner", "An actual user force must go through its original control-plane owner, not a script/plugin delegate.", 403);
     if (isQueuedCommandCommand(command)) throw new MoguriError("command_authority", "Queued command clients require their actual owning controller. No replacement profile authority was used.", 403);
     if (isPricingCommand(command)) {
       const revision = this.snapshot().providerPriceRevision;

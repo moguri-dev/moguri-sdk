@@ -234,7 +234,7 @@ async function run(start: WorkerStart): Promise<void> {
             try {
               result = await executeTool(approval.value.root === undefined ? start.root : approval.value.root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
                 (pid) => send({ kind: "process", stepId, callId: call.id, pid }),
-                (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders, env: start.env, homeRoot: approval.value.homeRoot, webAccess: approval.value.webAccess }, boundary.toolCatalog ?? boundary.tools,
+                (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders, env: start.env, homeRoot: approval.value.homeRoot, webAccess: approval.value.webAccess, scriptExecution: approval.value.scriptExecution }, boundary.toolCatalog ?? boundary.tools,
                 debuggerRuntime ? { runtime: debuggerRuntime, ended: async (pid, outcome) => {
                   const reply = await request({ kind: "process.ended", requestId: randomUUID(), stepId, callId: call.id, pid, outcome });
                   if (reply.error || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error(reply.error ?? "Process cleanup observation was not retained.");

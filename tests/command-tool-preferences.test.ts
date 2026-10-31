@@ -6,7 +6,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, ToolPreferencesSchema, defaultToolPreferences, effectiveToolPreferences, parse, toolPreferenceGuidance, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { removeCommandToolFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeCommandToolFixtureMarkers, removeContentReviewFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("tool ranking is a complete validated permutation with the exact requested factory order", () => {
   const defaults = defaultToolPreferences();
@@ -83,6 +83,7 @@ test("actual ranked preference history cannot be downgraded and missing current 
       sdk.disconnect(); await f.service.close();
       const raw = new DatabaseSync(path);
       try {
+        if (mode === "downgrade") removeContentReviewFixtureMarkers(raw, f.service.controller.events(0));
         raw.exec("DELETE FROM retention_metadata WHERE id='tool_preferences_schema';");
         if (mode === "downgrade") raw.exec("DELETE FROM retention_metadata WHERE id='workflow_commands_schema'; PRAGMA user_version=81;");
       } finally { raw.close(); }

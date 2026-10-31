@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { stripMarkdownComments } from "../../../packages/protocol/src/markdown.ts";
 import { constants } from "node:fs";
 import { lstat, mkdtemp, open, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
@@ -104,9 +105,11 @@ function items(value: unknown, field?: string): unknown[] {
 }
 function item(value: unknown, kind: GithubItem["kind"]): GithubItem {
   const data = record(value), head = record(data.head), base = record(data.base), author = record(data.user ?? data.author ?? data.actor);
+  const workItem = ["issue", "pull", "comment", "review"].includes(kind);
   return {
     kind, id: numeric(data.id), ...(numeric(data.number) ? { number: numeric(data.number) } : {}),
-    title: string(data.title ?? data.name ?? data.context), body: string(data.body), state: string(data.state ?? data.status),
+    title: workItem ? stripMarkdownComments(string(data.title ?? data.name ?? data.context)) : string(data.title ?? data.name ?? data.context),
+    body: workItem ? stripMarkdownComments(string(data.body)) : string(data.body), state: string(data.state ?? data.status),
     url: string(data.html_url ?? data.details_url ?? data.target_url) || null,
     updatedAt: string(data.updated_at ?? data.submitted_at ?? data.completed_at) || null, author: string(author.login) || null,
     headSha: string(data.head_sha ?? data.commit_id ?? head.sha) || null, conclusion: string(data.conclusion) || null,
@@ -114,6 +117,17 @@ function item(value: unknown, kind: GithubItem["kind"]): GithubItem {
     ...(kind === "pull" ? { base: string(base.ref), head: string(head.ref), draft: data.draft === true,
       ...(string(record(head.repo).full_name) ? { headRepository: string(record(head.repo).full_name) } : {}) } : {}),
   };
+}
+const visibleItem = (value: GithubItem): GithubItem => ["issue", "pull", "comment", "review"].includes(value.kind) ?
+  { ...value, title: stripMarkdownComments(value.title), body: stripMarkdownComments(value.body) } : value;
+function visibleResource(resource: GithubReviewDocument["resource"]): GithubReviewDocument["resource"] {
+  if (!resource) return null;
+  let value: unknown;
+  try { value = JSON.parse(resource.content); }
+  catch { throw new MoguriError("github_corrupt", "The original reviewed GitHub source is not valid structured content. No unfiltered or replacement source was used.", 409); }
+  const content = stable(JSON.parse(JSON.stringify(value, (key, value: unknown) =>
+    (key === "title" || key === "body") && typeof value === "string" ? stripMarkdownComments(value) : value)));
+  return content === resource.content ? resource : { ...resource, content, contentViewDigest: digest(content) };
 }
 export function githubCiState(values: GithubItem[]): "no-checks" | "pending" | "failure" | "success" {
   if (!values.length) return "no-checks";
@@ -779,7 +793,7 @@ export class GitHubWorkflows {
     if (document.targetSha && !sha.test(document.targetSha)) throw new MoguriError("github_head", "Git did not return an exact target object; nothing was dispatched.", 409);
     if (githubAction(action)) {
       document.accountId = await this.account(root, action.account, signal);
-      document.resource = await this.resource(root, action, signal);
+      document.resource = visibleResource(await this.resource(root, action, signal));
       if (await this.account(root, action.account, signal) !== document.accountId) throw new MoguriError("github_account", "The exact authenticated account changed during resource review. No different-account result was adopted.", 409);
       document.warnings.push(warning);
       if (action.kind !== "github.pr.merge" && mutation(action)) document.warnings.push("Remote revisions are rechecked immediately before dispatch and If-Match is sent when available. GitHub does not guarantee compare-and-swap for every edit/comment/release/thread endpoint: a concurrent server edit after that check can still race. There are no automatic write retries.");
@@ -831,7 +845,14 @@ export class GitHubWorkflows {
       document.action.kind !== operation.kind || stable(document.root) !== stable(operation.root)) throw new MoguriError("github_corrupt", "The retained original review does not belong to this exact operation/profile/root. No fallback input was adopted.", 409);
     const result = operation.resultDigest ? parse(GithubOperationResultSchema, JSON.parse(this.store.blob(operation.resultDigest))) : null;
     if (result && (result.operationId !== operation.id || result.kind !== operation.kind)) throw new MoguriError("github_corrupt", "The retained result belongs to different original work.", 409);
-    return { type: query.type, operation, document, result };
+    const viewDocument = document.resource ? { ...document, resource: visibleResource(document.resource) } : document;
+    const viewResult = result?.resource ? { ...result, resource: visibleItem(result.resource) } : result;
+    const documentChanged = stable(viewDocument) !== stable(document), resultChanged = stable(viewResult) !== stable(result);
+    return { type: query.type, operation, document: viewDocument, result: viewResult, ...(documentChanged || resultChanged ? {
+      commentFilter: { kind: "work-item-comments-v1" as const,
+        ...(documentChanged ? { document: { sourceDigest: operation.reviewDigest, viewDigest: digest(stable(viewDocument)) } } : {}),
+        ...(resultChanged && operation.resultDigest ? { result: { sourceDigest: operation.resultDigest, viewDigest: digest(stable(viewResult)) } } : {}) },
+    } : {}) };
   }
   private async browse(scope: GithubScope, input: GithubBrowse, signal: AbortSignal): Promise<Extract<GithubResponse, { type: "github.browse" }>> {
     parse(GithubBrowseSchema, input);
@@ -868,7 +889,7 @@ export class GitHubWorkflows {
         if (next && input.page === 100) throw new MoguriError("github_limit", "Review-thread pagination reached its explicit 100-page bound; remaining work was not silently omitted.", 409);
         const values: GithubItem[] = selected.map((value) => {
           const thread = record(value), last = record(items(record(thread.comments), "nodes").at(-1));
-          return { kind: "comment", id: numeric(last.databaseId), nodeId: string(thread.id), title: string(thread.id), body: string(last.body),
+          return { kind: "comment", id: numeric(last.databaseId), nodeId: string(thread.id), title: string(thread.id), body: stripMarkdownComments(string(last.body)),
             state: thread.isResolved === true ? "resolved" : "unresolved", url: null, updatedAt: string(last.updatedAt) || null,
             author: string(record(last.author).login) || null, headSha: head, conclusion: thread.isOutdated === true ? "outdated" : null };
         });
@@ -1262,7 +1283,7 @@ export class GitHubWorkflows {
   private async githubWrite(id: string, document: GithubReviewDocument, action: Extract<GithubAction, { repository: string }>, signal: AbortSignal): Promise<GithubOperationResult> {
     const root = document.root.root, base = `repos/${action.repository}`, resource = document.resource!;
     if (await this.account(root, action.account, signal) !== document.accountId) throw new MoguriError("github_account", "The exact authenticated account changed before mutation.", 409);
-    const latest = await this.resource(root, action, signal);
+    const latest = visibleResource(await this.resource(root, action, signal));
     if (stable(latest) !== stable(resource)) throw new MoguriError("github_review", "The remote resource revision changed immediately before mutation. Review the live resource again; nothing was dispatched.", 409);
     const actualGit = await this.gitState(root, signal);
     if (stable(actualGit) !== stable(document.git)) throw new MoguriError("github_review", "The reviewed Git/index/worktree changed immediately before the GitHub mutation. No effect was dispatched.", 409);

@@ -33,6 +33,8 @@ import { CoordinationCommandSchema, CoordinationQuerySchema, type CoordinationRe
 export * from "./coordination.ts";
 import { WorkflowCommandSchema } from "./workflows.ts";
 export * from "./workflows.ts";
+import { ScriptReviewCommandSchema, ScriptReviewQuerySchema, type ScriptReviewResponse, type ScriptReviewsSnapshot } from "./script-reviews.ts";
+export * from "./script-reviews.ts";
 import { QueuedCommandCommandSchema, QueuedCommandQuerySchema, type QueuedCommandResponse, type QueuedCommandsSnapshot } from "./queued-commands.ts";
 import { BrowserCommandSchema, BrowserQuerySchema, type BrowserResponse } from "./browser.ts";
 export * from "./browser.ts";
@@ -232,6 +234,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  ScriptReviewCommandSchema,
   QueuedCommandCommandSchema,
   ModelPreferenceCommandSchema,
   PricingCommandSchema,
@@ -295,6 +298,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  ScriptReviewQuerySchema,
   QueuedCommandQuerySchema,
   PricingQuerySchema,
   KanbanQuerySchema,
@@ -387,7 +391,7 @@ export interface CapabilityJob {
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
-export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot {
+export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot {
   coordinationLinks: CoordinationLink[];
   coordinationMessages: CoordinationMessage[];
   lastModelSelection: ModelSelection | null;
@@ -433,6 +437,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse
+  | ScriptReviewResponse
   | PricingResponse
   | KanbanResponse
   | SkillGatewayResponse

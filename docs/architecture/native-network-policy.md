@@ -6,6 +6,9 @@ approved hosts still require actual approval or existing user delegation.
 Explicit Autopilot/Max retains automatic approval, never hard-policy overrides.
 Explicit deny, read-only scope, protected paths, writer ownership, budgets and
 actual execution boundaries remain authoritative.
+The [canonical file-access contract](file-access.md) records normalized rule
+matching, conservative macOS deny/review aliases, protected filename variants
+and exact-root/symlink enforcement. Native automatic approval cannot bypass it.
 
 ## Reuse and authority
 

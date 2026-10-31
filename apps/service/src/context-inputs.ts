@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { stripMarkdownComments, workItemSnapshotView } from "../../../packages/protocol/src/markdown.ts";
 import { isUtf8 } from "node:buffer";
 import { lstat, realpath, readdir } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
@@ -236,7 +237,7 @@ export class ContextInputs {
       if (short) return this.github(session, `https://github.com/${match[1]}/pull/${match[3]}`, access);
       throw new MoguriError("attachment_github", "This reference is a pull request. Select its /pull/ URL so its type is explicit.");
     }
-    const text = JSON.stringify({ url: canonical, repository: match[1], number: result.number, type: match[2] === "pull" ? "pull-request" : "issue", title: result.title, body: result.body ?? "", state: result.state, updatedAt: result.updated_at }, null, 2);
+    const text = JSON.stringify({ url: canonical, repository: match[1], number: result.number, type: match[2] === "pull" ? "pull-request" : "issue", title: stripMarkdownComments(result.title), body: stripMarkdownComments(result.body ?? ""), state: result.state, updatedAt: result.updated_at }, null, 2);
     const bytes = Buffer.byteLength(text);
     if (bytes > MAX_TEXT_BYTES) throw new MoguriError("attachment_reference_limit", "This reference exceeds 2 MiB; no content was silently truncated.");
     return { text, preview: { kind: match[2] === "pull" ? "github_pr" : "github_issue", label: `${match[1]}#${result.number} (${match[2] === "pull" ? "PR" : "issue"})`, bytes, digest: digest(text), files: [], excluded: [], text, source: { kind: access === "gh-cli" ? "github-cli" : "github-public", location: canonical, revision: result.updated_at } } };
@@ -306,8 +307,12 @@ export class ContextInputs {
     const attachment = this.retainedAttachments(query.sessionId).find((attachment) => attachment.id === query.attachmentId);
     if (!attachment) throw new MoguriError("attachment_scope", "This attachment has no content grant in the selected session.");
     if (attachment.kind === "document") return { type: query.type, attachment, content: { kind: "document", summary: this.documentData(attachment).summary } };
-    const content = this.store.blob(attachment.digest);
-    return { type: query.type, attachment, content: attachment.kind === "image" ? { kind: "image", data: content, mimeType: attachment.mimeType } : { kind: "text", text: content } };
+    const original = this.store.blob(attachment.digest);
+    if (attachment.kind === "image") return { type: query.type, attachment, content: { kind: "image", data: original, mimeType: attachment.mimeType } };
+    const content = attachment.kind === "github_issue" || attachment.kind === "github_pr" ? workItemSnapshotView(original) : original;
+    return { type: query.type, attachment, content: { kind: "text", text: content, ...(content !== original ? {
+      filter: { kind: "work-item-comments-v1", sourceDigest: attachment.digest, viewDigest: digest(content), viewBytes: Buffer.byteLength(content) },
+    } : {}) } };
   }
   private async image(data: Buffer, name: string, source: { kind: string; location: string }): Promise<Attachment> {
     if (data.length > MAX_IMAGE_BYTES) throw new MoguriError("attachment_image_limit", "Image input is limited to 8 MiB.");

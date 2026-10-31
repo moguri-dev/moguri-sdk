@@ -2,6 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
 import { ModelAdviceSourceSchema } from "./questions.ts";
+import type { WorkItemCommentFilter } from "./markdown.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -112,7 +113,7 @@ export const GithubReviewDocumentSchema = object({
     path: Type.String({ minLength: 1, maxLength: 2048 }), digest: hash,
     etag: Type.Union([Type.String({ minLength: 1, maxLength: 512 }), Type.Null()]),
     headSha: maybeGit, state: Type.Union([Type.String({ maxLength: 100 }), Type.Null()]),
-    content: Type.String({ maxLength: 256 * 1024 }),
+    content: Type.String({ maxLength: 256 * 1024 }), contentViewDigest: Type.Optional(hash),
   }), Type.Null()]),
   accountId: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
   warnings: Type.Array(Type.String({ minLength: 1, maxLength: 4000 }), { maxItems: 12 }),
@@ -300,7 +301,7 @@ export type GithubResponse =
   | { type: "github.preview"; preview: GithubPreview }
   | { type: "github.browse"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string; repository: string; resource: GithubBrowse["resource"];
       page: number; perPage: number; nextPage: number | null; items: GithubItem[]; warning: string }
-  | { type: "github.read"; operation: GithubOperation; document: GithubReviewDocument; result: GithubOperationResult | null }
+  | { type: "github.read"; operation: GithubOperation; document: GithubReviewDocument; result: GithubOperationResult | null; commentFilter?: WorkItemCommentFilter }
   | { type: "github.history"; operations: GithubOperation[]; total: number };
 export type GitReadData =
   | { action: "status"; status: string }
