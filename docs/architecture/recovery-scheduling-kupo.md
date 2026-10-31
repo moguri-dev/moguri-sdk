@@ -204,3 +204,14 @@ source paging and restart. Its install can show existing deprecated
 allow-list notice before the harness reviews the exact archive script.
 Renderer chunk-size and OpenTUI experimental FFI warnings remain visible,
 not suppressed.
+
+Final local qualification on 2026-10-31: build and type checks pass; the full
+serial suite passes **2,093**, skips **17**, and fails **0**; hidden Electron
+passes **308**, skips **3**, and fails **0**. The independently installed SDK
+runtime/types/imports and its audit pass with **0 vulnerabilities**, as does the
+current root audit. Skipped cases are not counted as native or Linux release
+proof. Separately, actual SendBox 0.2.4 qualification passes at
+`.native/qualification/current-sendbox-LlAQEB/qualification.json`, and both new
+physical prepared-workspace/Stop and blocked-rollback tests pass. Original
+history/receipts are preserved; generated model usage proves accounting
+mechanics, not real billed costs or routing quality.
