@@ -38,14 +38,15 @@ test(`actual native finite ${behavior === "hold-checkpoint" ? "fixed-model" : "K
       await waitFor(() => checkpointStreamed, 30000);
       await sdk.winddown.stop(service.controller.snapshot().winddowns[0]!.id);
     }
-    await waitFor(() => !session().turnId && ["completed", "partial", "failed"].includes(session().status), 30000).catch((error: unknown) => {
+    await waitFor(() => !session().turnId && ["completed", "partial", "failed", "stopped"].includes(session().status), 30000).catch((error: unknown) => {
       const state = service.controller.snapshot();
       throw new Error(`Generated native finishing gate: ${JSON.stringify({ status: session().status, error: session().lastError, records: state.winddowns,
         entries: state.budgetEntries.map((entry) => ({ env: entry.env, role: entry.role, status: entry.status })) })}`, { cause: error });
     });
     await tightened;
     const state = service.controller.snapshot(), record = state.winddowns[0]!, execution = state.sandboxExecutions![0]!;
-    assert.equal(session().status, "partial", session().lastError ?? ""); assert.equal(record.status, behavior ? "partial" : "ready");
+    assert.equal(session().status, behavior === "hold-checkpoint" ? "stopped" : "partial", session().lastError ?? "");
+    assert.equal(record.status, behavior ? "partial" : "ready");
     assert.equal(record.version, 2); assert.equal(record.env, "Sandbox"); assert.equal(record.version === 2 && record.transport?.executionId, execution.id);
     assert.equal(state.sandboxExecutions!.length, 1); assert.equal(execution.cleanup, "owned-guest-stopped"); assert.equal(provider.requests.length, 0);
     assert.deepEqual(state.budgetEntries.map((entry) => [entry.env, entry.role, entry.reportedTokens]), [["Sandbox", "solver", 42], ["Sandbox", "checkpoint", behavior ? null : 42]]);

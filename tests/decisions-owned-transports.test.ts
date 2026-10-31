@@ -33,6 +33,36 @@ for (const kupo of [false, true]) test(`the actual SSH ${kupo ? "Balanced Kupo" 
   } finally { await fixture.close(); }
 });
 
+test("inline SSH steering acknowledges only the current durable contiguous cursor, never an older waiting-parent frame", { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+  const fixture = await remoteDecisions(), launch = fixture.service.controller.remote.launch.bind(fixture.service.controller.remote), cursors: number[] = [];
+  try {
+    t.mock.method(fixture.service.controller.remote, "launch", (...args: Parameters<typeof launch>) => {
+      const connection = launch(...args);
+      if (!connection.acknowledge) throw new Error("The generated SSH parent has no durable cursor acknowledgement.");
+      const acknowledge = connection.acknowledge.bind(connection);
+      return { events: connection.events, get connected() { return connection.connected; },
+        send: connection.send.bind(connection), kill: connection.kill.bind(connection),
+        acknowledge: (sequence: number) => { cursors.push(sequence); acknowledge(sequence); } };
+    });
+    const settings = structuredClone(fixture.sdk.settings.get()!.values);
+    settings.decisions.technicalQuestions = []; settings.decisions.steering = true;
+    settings.decisions.steeringChoices = [{ id: "refocus", text: "Generated exact SSH technical focus." }];
+    await fixture.sdk.settings.update(settings, fixture.sdk.settings.get()!.revision);
+    fixture.options.respond = (request) => JSON.stringify(request.messages).includes('"role":"tool"') ? { text: "Generated ordinary answer." } :
+      { tool: { name: "read_file", args: { path: "fixture.txt" } } };
+    fixture.solverOptions.replyText = JSON.stringify({ answers: { action: { type: "choice", choice: "refocus", confidence: 0.98,
+      probabilities: { continue: 0.01, refocus: 0.98, askUser: 0.01 } } } });
+    await fixture.send("Generated original inline steering task.");
+    await waitFor(() => !fixture.session().turnId && ["completed", "failed", "partial"].includes(fixture.session().status), 20000);
+    assert.equal(fixture.session().status, "completed", fixture.session().lastError ?? "");
+    assert.equal(fixture.service.controller.snapshot().decisions[0]?.kind, "steering");
+    assert.equal(fixture.service.controller.snapshot().decisions[0]?.status, "applied");
+    assert.ok(cursors.length > 1); assert.ok(cursors.every((value, index) => index === 0 || value >= cursors[index - 1]!));
+    assert.deepEqual(fixture.service.controller.snapshot().budgetEntries.map((entry) => entry.role), ["solver", "steering", "solver"]);
+    assert.equal(fixture.solver.requests.length, 1); assert.equal(fixture.requests.length, 2);
+  } finally { await fixture.close(); t.mock.restoreAll(); }
+});
+
 for (const boundary of ["owned-model.complete", "owned-model.finished"] as const) test(`SSH private ${boundary} reply loss retains exact cleanup/accounting and never answers its parent`, { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
   const fixture = await remoteDecisions(), launch = fixture.service.controller.remote.launch.bind(fixture.service.controller.remote);
   let replyId: string | undefined, dropped = false;

@@ -3926,7 +3926,7 @@ export class ControlPlane extends EventEmitter {
                 const context = { frame, recorded: false };
                 await this.workerFrame.run(context, async () => { await this.workerMessage(run, request); if (!context.recorded) this.commit([]); });
               }
-              child.acknowledge?.(frame.sequence);
+              this.acknowledgeFrame(run, frame);
             } else await this.workerMessage(run, request);
           }).catch((error: unknown) => {
             console.error("Moguri worker protocol failure:", error instanceof MoguriError ? `${error.code}: ${error.message}` : "worker_error");
@@ -4073,6 +4073,15 @@ export class ControlPlane extends EventEmitter {
       if (error && !run.done) this.finishRun(run, "partial", "The worker control channel failed. Cleanup is unconfirmed.");
     });
   }
+  private acknowledgeFrame(run: Run, frame: WorkerFrame): void {
+    const execution = frame.env === "Sandbox" ? this.projection.sandboxExecutions?.find((entry) => entry.id === run.sandboxExecutionId) :
+      this.projection.executions.find((entry) => entry.id === run.executionId);
+    if (!execution || execution.id !== frame.executionId || execution.lastSequence < frame.sequence) {
+      throw new MoguriError("owned_frame_ack", "The exact original frame is not durably retained. No cursor or result was acknowledged.", 409);
+    }
+    // An inline private role may have committed later contiguous frames before its parent returns.
+    run.child.acknowledge?.(execution.lastSequence);
+  }
   private ownedModelTransport(session: Session): OwnedModelTransport {
     const run = this.runs.get(session.id);
     if (!run || run.done || run.abort.signal.aborted || session.turnId !== run.turnId || session.controls.env === "Local") {
@@ -4200,7 +4209,7 @@ export class ControlPlane extends EventEmitter {
       const context = { frame, recorded: false };
       await this.workerFrame.run(context, async () => { await handle(); if (!context.recorded) this.commit([]); });
     }
-    run.child.acknowledge?.(frame.sequence);
+    this.acknowledgeFrame(run, frame);
   }
   private cancelledQuestions(session: Session, diagnostic: string): EventInput[] {
     return this.projection.questions.filter((question) => question.sessionId === session.id && question.status === "open").map((question) => ({
