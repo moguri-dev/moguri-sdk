@@ -192,6 +192,21 @@ test("a complete retry without recorded usage stays partial, retains unknown cha
   } finally { await fixture.close(); }
 });
 
+test("a later non-model failure cannot expose an older upstream failure as the primary Retry action", { skip: process.platform !== "darwin" }, async (t) => {
+  const clock = new GeneratedIntakeClock(), fixture = await setupFixture({ httpFailure: upstream(), responseMode: "text", maxOutputTokens: 128, platform: { intakeClock: clock } });
+  try {
+    await fixture.configure(); await fixture.send("Generated earlier retained model failure."); await failed(fixture, 1);
+    assert.ok(retryFailure(fixture.session(), fixture.service.controller.snapshot().modelFailures));
+    await fixture.service.controller.dispatch({ id: "generated-explicit-inspection-before-new-prompt", profileId: "default",
+      command: { type: "session.resume", sessionId: fixture.sessionId } });
+    t.mock.method(fixture.provider, "prepare", async () => { throw new Error("Generated later preparation failure before any model call."); });
+    await fixture.send("Generated separate later prompt."); await fixture.terminal();
+    assert.equal(retryFailure(fixture.session(), fixture.service.controller.snapshot().modelFailures), undefined);
+    assert.equal(fixture.session().lastModelFailureId, undefined); assert.equal(fixture.requests.length, 1);
+    clock.advanceBy(30000); assert.equal(fixture.requests.length, 1);
+  } finally { t.mock.restoreAll(); await fixture.close(); }
+});
+
 test("earliest recovery means the oldest currently failed prompt, not an earlier completed prompt in that session", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
   const clock = new GeneratedIntakeClock(), configuration: GeneratedProviderOptions & { platform: { intakeClock: GeneratedIntakeClock } } = {
     responseMode: "text", maxOutputTokens: 128, platform: { intakeClock: clock },
@@ -213,5 +228,11 @@ test("earliest recovery means the oldest currently failed prompt, not an earlier
     assert.equal(state.modelFailures.find((failure) => failure.id === target.failureId)?.sessionId, second);
     assert.equal(state.modelFailures.find((failure) => failure.sessionId === fixture.sessionId)?.attemptCount, 2);
     assert.equal(state.modelFailures.find((failure) => failure.sessionId === second)?.attemptCount, 3);
+    await sdk.refresh(); await sdk.sessions.autonomy(second, "Guided");
+    clock.advanceBy(60000); await failed(fixture, 9);
+    const final = fixture.service.controller.snapshot();
+    assert.equal(final.modelFailures.find((failure) => failure.id === final.modelRecoveryCycle!.targets[0]!.failureId)?.sessionId, fixture.sessionId);
+    assert.equal(final.modelFailures.find((failure) => failure.sessionId === second)?.status, "blocked");
+    assert.equal(final.modelFailures.find((failure) => failure.sessionId === fixture.sessionId)?.attemptCount, 3);
   } finally { sdk.disconnect(); await fixture.close(); }
 });

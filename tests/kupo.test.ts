@@ -195,7 +195,7 @@ test("an Unlimited automatic Kupo session cannot lift a finite profile policy or
   try {
     await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
     await sdk.budgets.policy({ basis: "estimate", tokens: 50_000 }, sdk.getState().snapshot!.budgetPolicy.revision, true);
-    await assert.rejects(() => fixture.send("Generated finite-policy automatic Kupo draft."), /finite reservations|hard cap/i);
+    await assert.rejects(() => fixture.send("Generated finite-policy automatic Kupo draft."), { code: "routing_budget" });
     assert.equal(fixture.session().draft.text, "Generated finite-policy automatic Kupo draft.");
     assert.equal(fixture.requests.length, 0);
     assert.equal(fixture.service.controller.snapshot().budgetPolicy.limit?.tokens, 50_000);
@@ -339,7 +339,8 @@ test("Remote automatic Cascade keeps selected tools and model calls on the pinne
       { pattern: "cascade", modelId: fixture.solverId, escalationId: fixture.modelId, complexity: "moderate", confidence: 0.95, reason: "Generated SSH automatic route." } :
       { verdict: "pass", reason: "Generated SSH gate cannot grant file access." }) });
     await fixture.select(); await fixture.send("generated write through automatic SSH Kupo");
-    await fixture.terminal(); await fixture.sdk.refresh();
+    await waitFor(() => !fixture.session().turnId && ["completed", "failed", "partial"].includes(fixture.session().status), 20_000);
+    await fixture.sdk.refresh();
     assert.equal(fixture.session().pendingApproval, null);
     assert.equal(fixture.session().status, "completed");
     assert.ok(fixture.workspace);

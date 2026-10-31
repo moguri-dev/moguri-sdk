@@ -39,7 +39,8 @@ export function recoveryDueRound(cycle: RecoveryCycle | null, now: number): numb
 export function retryFailure(session: Session, failures: readonly ModelFailure[]): ModelFailure | undefined {
   if (session.status !== "failed" || session.turnId) return;
   const last = failures.findLast((failure) => failure.sessionId === session.id);
-  return last?.requestDigest && last.retryable && last.lastRetryable && ["pending", "exhausted", "blocked"].includes(last.status) ? last : undefined;
+  return last?.id === session.lastModelFailureId && last?.requestDigest && last.retryable && last.lastRetryable &&
+    ["pending", "exhausted", "blocked"].includes(last.status) ? last : undefined;
 }
 export function projectModelFailure(previous: ModelFailure | undefined, next: ModelFailure): ModelFailure {
   const transitions: Record<ModelFailure["status"], ModelFailure["status"][]> = {

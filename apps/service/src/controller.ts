@@ -2925,7 +2925,9 @@ export class ControlPlane extends EventEmitter {
         const projectId = command.projectId ?? null;
         if (command.folderProjects && !command.projectFolderId) throw new MoguriError("repository_scope", "Captured folder members require their exact owning folder.");
         if (projectId !== null) this.projectRequired(projectId);
-        const startup = this.startup(projectId, command.overrides);
+        const overrides = command.overrides?.modelId === KUPO_MODEL_ID && command.overrides.kupoMode === undefined &&
+          this.projection.settings.values.kupo.workflow === "auto" ? { ...command.overrides, kupoMode: "balanced" as const } : command.overrides;
+        const startup = this.startup(projectId, overrides);
         if (command.overrides?.modelId) this.available(startup.controls, false);
         let repositories: import("../../../packages/protocol/src/sessions.ts").SessionRepository[] | undefined;
         if (command.projectFolderId) {
@@ -3005,7 +3007,9 @@ export class ControlPlane extends EventEmitter {
             const preferred = controls.preferredThinkingEffort ?? (requested !== undefined && requested !== session.controls.modelOptions?.thinkingEffort ?
               requested : session.controls.preferredThinkingEffort ?? session.controls.modelOptions?.thinkingEffort ?? requested);
             const window = controls.modelOptions?.contextWindow;
+            const mode = controls.kupoMode;
             controls = selectModelControls({ ...controls, ...(preferred !== undefined ? { preferredThinkingEffort: preferred } : {}) }, model ?? null);
+            if (model?.id === KUPO_MODEL_ID && this.projection.settings.values.kupo.workflow !== "auto" && mode === undefined) delete controls.kupoMode;
             if (window !== undefined && model && !model.synthetic) controls.modelOptions = { ...controls.modelOptions, contextWindow: window };
           }
         } else if (controls.preferredThinkingEffort === session.controls.preferredThinkingEffort &&
@@ -3332,11 +3336,11 @@ export class ControlPlane extends EventEmitter {
   }
   private recoveryRound(cycle: RecoveryCycle, round: number): void {
     if (this.projection.modelRecoveryCycle?.revision !== cycle.revision) return;
-    let failures = this.projection.modelFailures.filter((failure) => failure.status === "pending")
+    const failures = this.projection.modelFailures.filter((failure) => failure.status === "pending")
       .sort((a, b) => a.promptSequence - b.promptSequence || a.id.localeCompare(b.id));
-    if (round >= 2) failures = failures.slice(0, 1);
     const targets: RecoveryCycle["targets"] = [], events: EventInput[] = [];
     for (const failure of failures) {
+      if (round >= 2 && targets.length) break;
       const attemptId = randomUUID();
       try { events.push(...this.retryEvents(failure, "automatic", attemptId)); targets.push({ failureId: failure.id, attemptId }); }
       catch (error) {
@@ -5525,7 +5529,7 @@ export class ControlPlane extends EventEmitter {
       ["pending", "blocked", "exhausted", "cancelled"].includes(failure.status));
     const knownEffects = !run.granted.size && !run.calls.size && !session.processes.some((process) => process.turnId === run.turnId && ["running", "partial", "unconfirmed"].includes(process.outcome)) &&
       !this.history.some((event) => event.session_id === session.id && event.turn_id === run.turnId && event.event_type === "tool.completed" && ["partial", "unconfirmed"].includes(event.payload.outcome));
-    const modelFailureId = knownEffects && !run.abort.signal.aborted && (run.modelFailureDiagnostic && failedModel?.requestDigest ? failedModel.id :
+    const modelFailureId = knownEffects && !run.abort.signal.aborted && (run.modelFailureDiagnostic && failedModel?.requestDigest && failedModel.retryable && failedModel.lastRetryable ? failedModel.id :
       retry && !run.retry!.boundaryUsed ? retry.id : undefined);
     if (modelFailureId) { outcome = "failed"; diagnostic = failedModel?.diagnostic ?? diagnostic; }
     const compactionEvents: EventInput[] = [];

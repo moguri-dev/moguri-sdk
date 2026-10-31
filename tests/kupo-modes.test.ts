@@ -55,6 +55,10 @@ test("new Balanced uses actual medium effort and the full qualified context with
     await sdk.refresh(); await sdk.sessions.selectModel(fixture.sessionId, fixture.modelId);
     assert.equal(fixture.session().controls.modelOptions, undefined);
     assert.equal(sdk.routing.history(fixture.sessionId)[0]?.mode, "balanced");
+    const created = await sdk.sessions.create(fixture.session().projectId, "Generated explicit Kupo creation", { modelId: KUPO_MODEL_ID });
+    const fresh = sdk.getState().snapshot!.sessions.find((session) => session.id === created.id)!;
+    assert.equal(fresh.controls.kupoMode, "balanced");
+    assert.equal(fresh.defaults?.sources.kupoMode, "session");
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

@@ -228,6 +228,7 @@ export interface Session {
   pendingApproval: Approval | null;
   pendingQuestionId: string | null;
   lastError: string | null;
+  lastModelFailureId?: string;
   localFinishing: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1696,6 +1697,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         session.finishedAt = event.timestamp;
         if (event.payload.outcome === "completed") session.completedAt = event.timestamp;
         session.lastError = event.payload.diagnostic; session.localFinishing = false;
+        session.lastModelFailureId = event.payload.modelFailureId;
         for (const usage of session.usage) if (usage.outcome === "running") usage.outcome = "unconfirmed";
         for (const process of session.processes) if (process.outcome === "running") process.outcome = "unconfirmed";
         if (event.payload.diagnostic) session.messages.push({

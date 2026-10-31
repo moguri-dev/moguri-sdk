@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { MoguriSdk, type EventInput } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { COMPACTION_PROMPT } from "../apps/service/src/compaction-context.ts";
@@ -10,7 +11,7 @@ import { compactionFixture } from "./fixtures/compaction-service.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema 18 upgrades without rewriting ciphertext, scoped receipts, grants or charges and never invents compaction history", async () => {
-  const f = await setupFixture();
+  const f = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)) });
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     await f.configure(); await f.send("Generated preserved pre-compaction ledger."); await f.terminal();

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { MoguriSdk, type EventInput } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
@@ -16,7 +17,7 @@ function legacyTelemetry(events: EventInput[]): EventInput[] {
 }
 
 test("schema-17 accounting gains only provable category metadata without rewriting charges, prices or ciphertext history", { skip: process.platform !== "darwin" }, async (t) => {
-  const fixture = await setupFixture({ maxOutputTokens: 128, stream: { chunks: ["Generated ", "legacy ", "report."], delayMs: 25 },
+  const fixture = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)), maxOutputTokens: 128, stream: { chunks: ["Generated ", "legacy ", "report."], delayMs: 25 },
     usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42, prompt_tokens_details: { cached_tokens: 10 } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
