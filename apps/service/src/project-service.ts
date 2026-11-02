@@ -19,11 +19,11 @@ export interface ReviewedGitCommit { branch: string; base: string; commit: strin
 interface ReviewedGitHooks {
   beforeCommit?: () => void;
   publishIntent?: (value: ReviewedGitCommit) => Promise<void>;
-  committed?: (value: ReviewedGitCommit) => void;
+  committed?: (value: ReviewedGitCommit) => void | Promise<void>;
 }
 
 export class ProjectService {
-  constructor(private readonly snapshot: () => Snapshot, private readonly stateDir: string) {}
+  constructor(private readonly snapshot: () => Pick<Snapshot, "projects" | "projectConfigurations" | "settings">, private readonly stateDir: string) {}
   values(id: string | null | undefined): ProjectSettings { return id ? this.configuration(id).values : defaultProjectSettings(); }
   configuration(id: string): ProjectConfiguration {
     if (!this.snapshot().projects.some((project) => project.id === id)) throw new MoguriError("project_missing", "Project is outside this profile.", 404);
@@ -67,7 +67,7 @@ export class ProjectService {
     return { type: "project.repositories" as const, ...await repositoryLayout(project.path, this.configuration(project.id).values.deniedFolders, signal) };
   }
   private git(project: Project, args: string[], signal: AbortSignal, env?: NodeJS.ProcessEnv, extra: string[] = []) {
-    return runProgram("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsync=all", ...extra, "--literal-pathspecs", ...args], { cwd: project.path, signal, env, label: "Project Git operation", timeoutMs: 30_000, maxBytes: 512 * 1024 });
+    return runProgram("git", ["--no-pager", "--no-replace-objects", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsync=all", ...extra, "--literal-pathspecs", ...args], { cwd: project.path, signal, env, label: "Project Git operation", timeoutMs: 30_000, maxBytes: 512 * 1024 });
   }
   async gitView(project: Project, includeDiff: boolean, signal: AbortSignal, checkoutFilters?: string[]): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
     const settings = this.configuration(project.id).values;
@@ -123,7 +123,7 @@ export class ProjectService {
     if ((await this.git(bound, ["rev-parse", "--verify", "HEAD"], signal)).trim() !== captured.base) throw new MoguriError("artifact_base", "Repository HEAD changed during commit preparation. No branch was created.", 409);
     hooks.beforeCommit?.(); signal.throwIfAborted();
     await this.git(bound, ["update-ref", `refs/heads/${captured.branch}`, commit, "0".repeat(commit.length)], signal);
-    hooks.committed?.({ ...result }); signal.throwIfAborted();
+    await hooks.committed?.({ ...result }); signal.throwIfAborted();
     if ((await this.git(bound, ["rev-parse", "--verify", `refs/heads/${captured.branch}`], signal)).trim() !== commit) throw new MoguriError("reviewed_commit_changed", "The published checkpoint reference changed. Inspect its actual outcome; no successful commit was acknowledged.", 409);
     hooks.beforeCommit?.(); signal.throwIfAborted();
     return result;
@@ -133,6 +133,26 @@ export class ProjectService {
     const blob = (await this.git(project, ["rev-parse", "--verify", `${expected.commit}:${path}`], signal)).trim();
     const file = (await this.git(project, ["hash-object", "--no-filters", "--", path], signal)).trim();
     if (ref !== expected.commit || blob !== file) throw new MoguriError("artifact_commit_changed", "The reviewed local branch or committed artifact copy changed. Stored documents were preserved.", 409);
+  }
+  async inspectReviewedCommit(project: Project, files: ReviewedGitFile[], expected: { branch: string; base: string; commit: string | null }, signal: AbortSignal): Promise<string | null> {
+    await this.git(project, ["check-ref-format", `refs/heads/${expected.branch}`], signal);
+    const refs = (await this.git(project, ["for-each-ref", "--format=%(refname) %(objectname)", `refs/heads/${expected.branch}`], signal))
+      .trim().split("\n").filter(Boolean);
+    const actual = refs.find((ref) => ref.startsWith(`refs/heads/${expected.branch} `))?.slice(`refs/heads/${expected.branch} `.length) ?? null;
+    if (actual === null) return null;
+    if (!expected.commit || actual !== expected.commit ||
+      (await this.git(project, ["rev-list", "--parents", "-n", "1", actual], signal)).trim() !== `${actual} ${expected.base}`) {
+      throw new MoguriError("checkpoint_ref_changed", "The current checkpoint ref/base differs from its original retained prepared object. No branch or result was adopted.", 409);
+    }
+    const changed = (await this.git(project, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", actual], signal)).split("\0").filter(Boolean);
+    if (changed.some((path) => !files.some((file) => file.path === path))) throw new MoguriError("checkpoint_files_changed", "The actual checkpoint includes unreviewed paths. No inspection or source cleanup was acknowledged.", 409);
+    for (const file of files) {
+      await this.verifyArtifactCommit(project, file.path, { branch: expected.branch, commit: actual }, signal);
+      const tree = await this.git(project, ["ls-tree", "-z", actual, "--", file.path], signal);
+      const mode = tree.slice(0, tree.indexOf(" "));
+      if (mode !== (file.mode ?? "100644") || !tree.endsWith(`\t${file.path}\0`)) throw new MoguriError("checkpoint_mode_changed", "The actual checkpoint file mode/path differs from its exact accepted source.", 409);
+    }
+    return actual;
   }
   private async commitFiles(project: Project, files: ReviewedGitFile[], base: string, message: string, signal: AbortSignal): Promise<string> {
     const temporary = await mkdtemp(join(this.stateDir, "repo-commit-"));

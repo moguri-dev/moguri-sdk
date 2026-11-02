@@ -175,6 +175,7 @@ test("a hard cap applied during classification retains the router charge but blo
 test("classifier cancellation propagates through the same owned worker and holds unreported cost without running the solver", native, async () => {
   const fixture = await routedFixture();
   try {
+    fixture.options.respond = () => ({ text: "Generated owned classifier held.", hold: true });
     await fixture.select(); await fixture.send("generated slow actual router cancellation");
     await waitFor(() => fixture.requests.length === 1);
     await fixture.sdk.command({ type: "session.stop", sessionId: fixture.sessionId }); await fixture.terminal(); await fixture.sdk.refresh();
@@ -239,7 +240,7 @@ test("a steer arriving during classification cannot reuse the old task plan or s
 test("a classifier cannot ask questions or execute tools even with a valid-looking confidence", native, async () => {
   const fixture = await routedFixture();
   try {
-    fixture.options.responseMode = "auto";
+    fixture.options.toolCall = { name: "ask_user", args: { question: "Generated invalid classifier question.", choices: ["Generated one", "Generated two"], allowFreeform: false } };
     await fixture.select(); await fixture.send("generated structured question from an invalid router"); await fixture.terminal(); await fixture.sdk.refresh();
     assert.equal(fixture.session().status, "partial"); assert.equal(fixture.solver.requests.length, 0);
     assert.equal(fixture.sdk.getState().snapshot!.questions.length, 0);

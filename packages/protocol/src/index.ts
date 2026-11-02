@@ -34,9 +34,11 @@ import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import { BudgetPlanSchema, projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 import type { RoutingTurn, RoutingPlan, KupoResponsePhase, KupoObservation } from "./routing.ts";
+import { RoutingResponseReservationSchema, type RoutingResponseReservation } from "./routing.ts";
 export { routingModelReady, routingWorkingWindow } from "./routing.ts";
 export type { BoundedRoutingModel } from "./routing.ts";
 import type { ContextCompaction } from "./compaction.ts";
+import { AutomaticCompactionOriginSchema } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
@@ -70,8 +72,14 @@ export * from "./audio.ts";
 export * from "./shortcuts.ts";
 export * from "./queued-commands.ts";
 import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
+import { ScheduledPromptCommandSchema, projectScheduledPrompt, type ScheduledPrompt } from "./scheduled-prompts.ts";
+export * from "./scheduled-prompts.ts";
+import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
+export * from "./model-recovery.ts";
+export * from "./kupo-modes.ts";
+export * from "./owned-model-transports.ts";
 
-export const PROTOCOL_VERSION = 83;
+export const PROTOCOL_VERSION = 86;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -97,6 +105,8 @@ export const CommandSchema = object({
     object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema) }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
     object({ type: Type.Literal("session.resume"), ...sessionId }),
+    object({ type: Type.Literal("session.retry"), ...sessionId, failureId: id, expectedRevision: revision }),
+    ScheduledPromptCommandSchema,
     object({ type: Type.Literal("draft.save"), ...sessionId, expectedRevision: revision, text, attachments }),
     object({ type: Type.Literal("draft.paste"), ...sessionId, expectedRevision: revision, text, attachments, pastedText: text,
       start: Type.Integer({ minimum: 0, maximum: MAX_TEXT }), end: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }),
@@ -193,6 +203,7 @@ export interface QueueItem {
   sidePromptOrigin?: { sessionId: string; commandDigest: string };
   spawnPromptOrigin?: { sessionId: string; commandDigest: string };
   command?: QueuedSlash;
+  scheduledPromptId?: string;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; stepId?: string; outcome: string; env?: Controls["env"] }
@@ -218,6 +229,7 @@ export interface Session {
   pendingApproval: Approval | null;
   pendingQuestionId: string | null;
   lastError: string | null;
+  lastModelFailureId?: string;
   localFinishing: boolean;
   createdAt: string;
   updatedAt: string;
@@ -252,7 +264,7 @@ export interface Session {
   sideContext?: SideContext & { turnId: string; capturedAt: string };
   activeCompactionId?: string | null;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
+export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];
@@ -340,10 +352,19 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
     | { purpose: "plan.save"; saveId: string; controls: Controls; policyRevision: number; intentDigest: string };
   "plan.save_recorded": { save: RemotePlanSave };
   "compaction.saved": { compaction: ContextCompaction };
-  "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string };
+  "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string } |
+    { activeCompactionId: string; actor: "kupo-policy"; sourceDigest: string; ownerTurnId: string; policyDigest: string };
+  "routing.context_rebound": { routingId: string; compactionId: string; contextDigest: string };
+  "routing.roles_planned": { routingId: string; reservation: RoutingResponseReservation };
+  "routing.role_started": { routingId: string; reservationId: string; planId: string; stepId: string };
   "steer.applied": { item: QueueItem };
   "steering.applied": { decisionId: string; modelId: string; providerId: string; sourceStepId: string; text: string; decisionOrigin: DecisionEvidence };
   "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole; kupoPhase?: KupoResponsePhase };
+  "model.request_bound": { inputDigest: string; modelId: string; nativeRestaging?: true };
+  "model.authorization_changed": { providerId: string; actor: "user"; commandId: string; commandDigest: string };
+  "model.failure_recorded": { failure: ModelFailure };
+  "recovery.cycle_recorded": { cycle: RecoveryCycle };
+  "turn.retry_started": { failureId: string; attemptId: string; actor: "user" | "automatic" };
   "routing.started": { routing: RoutingTurn };
   "routing.planned": { routingId: string; classifierStepId: string | null; plan: RoutingPlan };
   "routing.finished": { routingId: string; status: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
@@ -364,7 +385,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "task.plan_updated": { plan: TaskPlan };
   "turn.stop_requested": { holdQueue?: true };
   "turn.stop_acknowledged": Record<string, never>;
-  "turn.finished": { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null; workspaceEffects?: "none" | "possible" };
+  "turn.finished": { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null; workspaceEffects?: "none" | "possible"; modelFailureId?: string };
   "policy.updated": { policy: Policy; finishingTurnIds: string[] };
   "provider.changed": { status: ProviderState["status"]; diagnostic: string | null };
   "mcp.oauth_changed": { authorization: McpAuthorization };
@@ -428,6 +449,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "turn.prompt_bound": { promptDigest: string };
   "queue.released": { messageId: string };
   "queue.held": { messageIds: string[] };
+  "prompt.schedule_recorded": { prompt: ScheduledPrompt };
 }
 export type EventType = keyof EventPayloads;
 interface EventMetadata {
@@ -449,6 +471,8 @@ export type StoredEvent = EventInput & {
   artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
+  "prompt.schedule_recorded",
+  "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
   "coordination.linked", "coordination.message", "coordination.delivered", "command.inspected", "process.ended",
   "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
@@ -465,7 +489,7 @@ export const eventTypes: readonly EventType[] = [
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
   "budget.recorded", "budget.plan_recorded", "budget.policy_changed", "budget.blocked", "operation.recorded", "operation.coverage_started",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
-  "routing.started", "routing.planned", "routing.finished", "routing.response_selected",
+  "routing.started", "routing.planned", "routing.finished", "routing.response_selected", "routing.context_rebound", "routing.roles_planned", "routing.role_started",
   "turn.control_started", "compaction.saved", "context.changed", "plan.save_recorded", "repository.recorded", "mcp.remote_recorded",
   "candidate.saved", "candidate.generation_recorded", "candidate.owner_bound", "candidate.cleanup_recorded", "candidate.usage_retained", "role.sequence_recorded", "compound.recorded", "winddown.recorded", "decision.recorded",
   "knowledge.saved", "knowledge.forgotten",
@@ -514,6 +538,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const candidates = new Map<string, CandidateRecord>();
   const questions = new Map<string, UserQuestion>();
   const routings = new Map<string, RoutingTurn>();
+  const scheduledPrompts = new Map<string, ScheduledPrompt>();
+  const modelFailures = new Map<string, ModelFailure>();
+  const authorizationCommands = new Set<string>();
+  let modelRecoveryCycle: RecoveryCycle | null = null;
   const kupoResults = new Map<string, Extract<StoredEvent, { event_type: "model.completed" }>>();
   const compactions = new Map<string, ContextCompaction>();
   const planSaves = new Map<string, RemotePlanSave>();
@@ -551,6 +579,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   }
   for (const event of events) {
     if (event.profile_id !== profileId) continue;
+    if (event.event_type === "model.authorization_changed") {
+      if (event.session_id || event.project_id || event.turn_id || event.step_id || event.artifact_id ||
+        !Value.Check(ModelAuthorizationChangeSchema, event.payload) || authorizationCommands.has(event.payload.commandId)) {
+        throw new MoguriError("model_authorization_corrupt", "An authorization epoch lost its actual user command, profile-root ownership or unique intent. No account change or grant was inferred.", 409);
+      }
+      authorizationCommands.add(event.payload.commandId);
+    }
+    if (event.event_type === "recovery.cycle_recorded") {
+      if (event.session_id || event.project_id || event.turn_id || event.step_id || event.artifact_id || event.payload.cycle.profileId !== profileId) {
+        throw new MoguriError("model_recovery_corrupt", "Recovery timing left its original immutable profile authority.", 409);
+      }
+      modelRecoveryCycle = projectRecoveryCycle(modelRecoveryCycle, event.payload.cycle);
+    }
     if (event.event_type === "candidate.cleanup_recorded") {
       const cleanup = projectCandidateCleanup(candidateCleanups.get(event.payload.cleanup.id), event.payload.cleanup);
       if (event.project_id || event.session_id || event.turn_id || event.step_id || event.artifact_id || cleanup.profileId !== profileId) {
@@ -572,7 +613,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         !source && !retainedSource || source && source.projectId !== event.payload.sourceProjectId ||
         selection !== null && !Value.Check(ModelSelectionSchema, selection) ||
         source && (selection?.modelId !== actual?.modelId || selection?.thinkingEffort !== actual?.thinkingEffort ||
-          selection?.preferredThinkingEffort !== actual?.preferredThinkingEffort)) {
+          selection?.preferredThinkingEffort !== actual?.preferredThinkingEffort || selection?.kupoMode !== actual?.kupoMode)) {
         throw new MoguriError("model_preference_corrupt", "Remembered model selection lost its exact profile/user/source controls. No inferred choice or model fallback was used.", 409);
       }
       lastModelSelection = selection ? structuredClone(selection) : null;
@@ -690,7 +731,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       budgetPlans.set(plan.id, plan);
     }
     if (event.event_type === "budget.policy_changed") budgetPolicy = structuredClone(event.payload);
-    if (event.event_type === "compaction.saved") compactions.set(event.payload.compaction.id, structuredClone(event.payload.compaction));
+    if (event.event_type === "compaction.saved") {
+      const entry = event.payload.compaction, previous = compactions.get(entry.id);
+      if (previous?.automatic && !entry.automatic || entry.automatic && (!Value.Check(AutomaticCompactionOriginSchema, entry.automatic) || entry.automatic.ownerTurnId !== entry.turnId ||
+        event.session_id !== entry.sessionId || event.project_id !== entry.projectId || event.turn_id !== entry.turnId ||
+        previous && JSON.stringify(previous.automatic) !== JSON.stringify(entry.automatic) ||
+        !previous && (entry.status !== "running" || entry.revision !== 0 || sessions.get(entry.sessionId)?.turnId !== entry.turnId ||
+          settings.values.kupo.workflow !== "auto" || !settings.values.kupo.autoCompaction?.enabled ||
+          settings.revision !== entry.automatic.settingsRevision || settings.permissionRevision !== entry.automatic.permissionRevision ||
+          policy.revision !== entry.automatic.policyRevision))) throw new MoguriError("compaction_corrupt", "Automatic compaction lost its exact actual-user policy, session/turn or retained origin. No context was applied.", 409);
+      compactions.set(entry.id, structuredClone(entry));
+    }
     if (event.event_type === "plan.save_recorded") planSaves.set(event.payload.save.id, structuredClone(event.payload.save));
     if (event.event_type === "routing.started") routings.set(event.payload.routing.id, structuredClone(event.payload.routing));
     if (event.event_type === "routing.planned") {
@@ -951,6 +1002,27 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
     if (event.event_type === "sandbox.workspace_recorded") {
       const workspace = event.payload.workspace, previous = sandboxWorkspaces.get(workspace.id);
+      if (workspace.preparation?.version === 2) {
+        const owner = workspace.preparation;
+        if (owner.kind !== "scheduled" || !owner.commandId || !/^[a-f0-9]{64}$/.test(owner.commandDigest) ||
+          !Number.isSafeInteger(owner.draftRevision) || owner.draftRevision < 0 || !/^[a-f0-9]{64}$/.test(owner.draftDigest) ||
+          workspace.commandId !== owner.commandId || workspace.commandDigest !== owner.commandDigest ||
+          previous && JSON.stringify(previous.preparation) !== JSON.stringify(owner)) {
+          throw new MoguriError("sandbox_preparation_corrupt", "Scheduled native preparation lost its exact original command/draft owner. No source or prompt was replayed.", 409);
+        }
+      }
+      if (workspace.preparation?.version === 3) {
+        const owner = workspace.preparation, failure = modelFailures.get(owner.failureId);
+        const execution = sandboxExecutions.get(owner.executionId), origin = sandboxExecutions.get(owner.originExecutionId);
+        if (owner.kind !== "retry" || !failure || failure.sessionId !== workspace.sessionId || failure.turnId !== owner.turnId ||
+          failure.requestDigest !== owner.requestDigest || !previous && (failure.attemptId !== owner.attemptId || failure.status !== "retrying") ||
+          !execution || !origin || execution.sessionId !== workspace.sessionId || execution.turnId !== owner.turnId ||
+          origin.sessionId !== workspace.sessionId || origin.turnId !== owner.turnId || execution.cleanup !== "owned-guest-stopped" ||
+          execution.resultDigest !== owner.resultDigest || !/^[a-f0-9]{64}$/.test(owner.afterId) ||
+          previous && JSON.stringify(previous.preparation) !== JSON.stringify(owner)) {
+          throw new MoguriError("sandbox_preparation_corrupt", "Native retry staging lost its exact original request, attempt or verified snapshot owner. No root or effect was transferred.", 409);
+        }
+      }
       if (workspace.repositories) {
         const repositories = sandboxRepositories(workspace.repositories), session = sessions.get(workspace.sessionId);
         if (workspace.projectId !== null || workspace.sourceWorkspaceId !== null || workspace.sourceRoot !== null || workspace.sourceHead !== null ||
@@ -1162,11 +1234,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       chatWriters.set(writer.id, structuredClone(writer));
     }
-    if (event.event_type === "turn.finished" && event.payload.workspaceEffects !== "none" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) {
+    if (event.event_type === "turn.finished" && event.payload.modelFailureId) {
+      const failure = modelFailures.get(event.payload.modelFailureId);
+      if (!failure || failure.sessionId !== event.session_id || failure.turnId !== event.turn_id ||
+        !["pending", "blocked", "exhausted", "cancelled"].includes(failure.status) || event.payload.outcome !== "failed") {
+        throw new MoguriError("model_recovery_corrupt", "The model-only failure lost its exact owning failed turn.", 409);
+      }
+      blockedSessions.add(failure.sessionId);
+    }
+    if (event.event_type === "turn.finished" && !event.payload.modelFailureId && event.payload.workspaceEffects !== "none" && ["partial", "failed"].includes(event.payload.outcome) && event.project_id) {
       const workspaceId = event.session_id ? sessions.get(event.session_id)?.workspaceId : null;
       if (workspaceId) blockedWorkspaces.add(workspaceId); else blockedProjects.add(event.project_id);
     }
-    if (event.event_type === "turn.finished" && event.payload.workspaceEffects !== "none" && ["partial", "failed"].includes(event.payload.outcome) && !event.project_id && event.session_id) blockedSessions.add(event.session_id);
+    if (event.event_type === "turn.finished" && !event.payload.modelFailureId && event.payload.workspaceEffects !== "none" && ["partial", "failed"].includes(event.payload.outcome) && !event.project_id && event.session_id) blockedSessions.add(event.session_id);
     if (event.event_type === "session.resumed" && event.project_id) {
       const workspaceId = event.session_id ? sessions.get(event.session_id)?.workspaceId : null;
       if (workspaceId) blockedWorkspaces.delete(workspaceId); else blockedProjects.delete(event.project_id);
@@ -1285,6 +1365,80 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       timestamp: event.timestamp, attachments: item.attachments.length ? structuredClone(item.attachments) : undefined,
     });
     switch (event.event_type) {
+      case "routing.roles_planned": {
+        const routing = routings.get(event.payload.routingId), reservation = event.payload.reservation;
+        if (!routing || routing.policy.workflow !== "auto" || !routing.mode || !routing.plan || routing.sessionId !== session.id ||
+          routing.turnId !== session.turnId || event.turn_id !== session.turnId || !["ready", "running"].includes(routing.status) ||
+          !Value.Check(RoutingResponseReservationSchema, reservation) || reservation.roles.some((role) => role.stepId !== null) ||
+          routing.responseReservations?.some((entry) => entry.id === reservation.id) ||
+          new Set(reservation.roles.map((role) => role.planId)).size !== reservation.roles.length ||
+          reservation.roles.some((role) => {
+            const plan = budgetPlans.get(role.planId), actual = role.phase === "gate" || role.phase === "critic" ? "critic" :
+              role.phase === "solver" && session.kind === "side" ? "side" : role.phase;
+            return !plan || plan.purpose !== "routing" || plan.status !== "held" || plan.profileId !== profileId ||
+              plan.sessionId !== session.id || plan.turnId !== session.turnId || plan.authorityDigest !== reservation.authorityDigest ||
+              plan.modelId !== role.modelId || plan.role !== actual || plan.inputBound !== role.inputBound || plan.outputBound !== role.outputBound;
+          })) throw new MoguriError("routing_reservation_corrupt", "The complete Kupo role set lost its exact profile/turn, policy or atomic all-role capacity. No role was dispatched.", 409);
+        routing.responseReservations = [...routing.responseReservations ?? [], structuredClone(reservation)];
+        break;
+      }
+      case "routing.role_started": {
+        const routing = routings.get(event.payload.routingId), reservation = routing?.responseReservations?.find((entry) => entry.id === event.payload.reservationId);
+        const role = reservation?.roles.find((role) => role.planId === event.payload.planId), plan = budgetPlans.get(event.payload.planId);
+        const entry = budgetEntries.get(event.payload.stepId);
+        if (!routing || routing.sessionId !== session.id || routing.turnId !== session.turnId || event.turn_id !== session.turnId ||
+          !role || role.stepId || !plan || plan.status !== "consumed" || plan.consumedStepId !== event.payload.stepId ||
+          !entry || entry.planId !== role.planId || entry.modelId !== role.modelId || entry.sessionId !== session.id || entry.turnId !== session.turnId) {
+          throw new MoguriError("routing_reservation_corrupt", "A Kupo role lost its exact once-only planned transfer and actual model entry. Unknown/consumed work was not replayed.", 409);
+        }
+        role.stepId = event.payload.stepId;
+        break;
+      }
+      case "model.failure_recorded": {
+        const failure = event.payload.failure;
+        if (failure.profileId !== profileId || failure.sessionId !== session.id || failure.projectId !== session.projectId ||
+          event.project_id !== session.projectId || !session.usage.some((usage) => usage.stepId === failure.sourceStepId && usage.outcome === "error")) {
+          throw new MoguriError("model_recovery_corrupt", "A model failure lost its actual original request/usage and profile/session owner.", 409);
+        }
+        modelFailures.set(failure.id, projectModelFailure(modelFailures.get(failure.id), failure));
+        break;
+      }
+      case "turn.retry_started": {
+        const failure = modelFailures.get(event.payload.failureId);
+        if (!failure || failure.status !== "retrying" || failure.attemptId !== event.payload.attemptId ||
+          failure.sessionId !== session.id || failure.turnId !== event.turn_id || session.turnId || session.status === "archived") {
+          throw new MoguriError("model_recovery_corrupt", "Retry admission lost its exact original failure/attempt or duplicated a running turn.", 409);
+        }
+        session.turnId = failure.turnId; session.status = "queued"; session.lastError = null; session.pendingApproval = null; session.pendingQuestionId = null;
+        const routing = routings.get(failure.turnId);
+        if (routing) { routing.status = routing.plan ? "running" : "planning"; routing.diagnostic = null; }
+        blockedSessions.delete(session.id);
+        break;
+      }
+      case "routing.context_rebound": {
+        const routing = routings.get(event.payload.routingId), entry = compactions.get(event.payload.compactionId);
+        if (!routing || routing.turnId !== session.turnId || routing.sessionId !== session.id || entry?.status !== "applied" ||
+          entry.id !== session.activeCompactionId || entry.automatic?.ownerTurnId !== session.turnId || event.turn_id !== session.turnId) {
+          throw new MoguriError("compaction_corrupt", "A route handover lost its exact applied automatic source and owning turn. No reclassification was inferred.", 409);
+        }
+        routing.contextDigest = event.payload.contextDigest;
+        routing.contextHandovers = [...routing.contextHandovers ?? [], { compactionId: entry.id, sourceDigest: entry.sourceDigest, contextDigest: event.payload.contextDigest }];
+        break;
+      }
+      case "prompt.schedule_recorded": {
+        const prompt = event.payload.prompt, previous = scheduledPrompts.get(prompt.id);
+        if (prompt.profileId !== profileId || prompt.sessionId !== session.id || prompt.projectId !== session.projectId ||
+          event.project_id !== session.projectId || !previous && (prompt.draftRevision !== session.draft.revision ||
+            prompt.text !== session.draft.text || JSON.stringify(prompt.attachments) !== JSON.stringify(session.draft.attachments))) {
+          throw new MoguriError("schedule_corrupt", "Scheduled input lost its exact owning profile/session/draft. State was preserved.", 409);
+        }
+        if (prompt.status === "admitted" && (session.turnId !== prompt.admittedTurnId ||
+          !session.messages.some((message) => message.id === prompt.id && message.turnId === prompt.admittedTurnId))) {
+          throw new MoguriError("schedule_corrupt", "A scheduled prompt has no exact original admitted turn. No sent message was inferred.", 409);
+        }
+        scheduledPrompts.set(prompt.id, projectScheduledPrompt(previous, prompt));
+        break;
+      }
       case "question.asked": session.pendingQuestionId = event.payload.question.id; session.status = "waiting_input"; break;
       case "question.answered":
       case "question.cancelled":
@@ -1340,7 +1494,22 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "session.browser_changed": session.browserUrl = event.payload.url; session.revision++; break;
       case "session.workspace_bound": session.workspaceId = event.payload.workspaceId; session.revision++; break;
       case "session.sandbox_bound": session.sandboxWorkspaceId = event.payload.workspaceId; session.revision++; break;
-      case "context.changed": session.activeCompactionId = event.payload.activeCompactionId; session.revision++; break;
+      case "context.changed": {
+        if (event.payload.actor === "kupo-policy") {
+          const entry = compactions.get(event.payload.activeCompactionId), origin = entry?.automatic;
+          const usage = session.usage.find((usage) => usage.stepId === entry?.stepId);
+          if (!entry || !origin || entry.status !== "applied" || !entry.replacementDigest || entry.sourceDigest !== event.payload.sourceDigest ||
+            origin.ownerTurnId !== session.turnId || event.payload.ownerTurnId !== session.turnId || event.turn_id !== session.turnId ||
+            origin.policyDigest !== event.payload.policyDigest || origin.settingsRevision !== settings.revision ||
+            origin.permissionRevision !== settings.permissionRevision || origin.policyRevision !== policy.revision ||
+            session.controls.modelId !== "kupo" || !session.controls.kupoMode || settings.values.kupo.workflow !== "auto" ||
+            !settings.values.kupo.autoCompaction?.enabled || usage?.role !== "compaction" || usage.outcome !== "stop" || usage.quality !== "provider-reported" ||
+            usage.totalTokens === null || !Number.isSafeInteger(usage.totalTokens) || !entry.afterTokens || entry.afterTokens >= entry.beforeTokens) {
+            throw new MoguriError("compaction_corrupt", "A model summary lacks complete metered source, actual-user policy or strictly smaller context. No user answer, permission or context application was fabricated.", 409);
+          }
+        }
+        session.activeCompactionId = event.payload.activeCompactionId; session.revision++; break;
+      }
       case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
       case "session.resumed": session.status = session.queue.some((item) => !item.command) ? "queued" : "idle"; session.lastError = null; break;
@@ -1354,8 +1523,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         session.draft = { ...event.payload, revision: session.draft.revision + 1 }; break;
       }
       case "queue.enqueued":
+        if (event.payload.item.scheduledPromptId) {
+          const item = event.payload.item, prompt = scheduledPrompts.get(item.scheduledPromptId!);
+          if (!prompt || prompt.sessionId !== session.id || prompt.status !== "queued" || item.id !== prompt.id ||
+            item.text !== prompt.text || JSON.stringify(item.attachments) !== JSON.stringify(prompt.attachments) ||
+            JSON.stringify(session.controls) !== JSON.stringify(prompt.controls) || session.queue.some((queued) => queued.id === item.id)) {
+            throw new MoguriError("schedule_corrupt", "Scheduled intake lost its exact original input, controls or single queue claim.", 409);
+          }
+        }
         session.queue.push(structuredClone(event.payload.item)); session.queueRevision++;
-        if (!session.turnId && !event.payload.item.command) session.status = "queued";
+        if (!session.turnId && !event.payload.item.command && ![...modelFailures.values()].some((failure) =>
+          failure.sessionId === session.id && ["pending", "blocked", "exhausted"].includes(failure.status))) session.status = "queued";
         break;
       case "queue.edited": {
         const item = session.queue.find((item) => item.id === event.payload.messageId);
@@ -1423,6 +1601,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       }
       case "model.started":
+        if (session.status === "queued") session.status = "running";
         for (const routing of routings.values()) if (routing.turnId === event.turn_id && routing.status === "ready" && event.payload.role !== "router") routing.status = "running";
         session.messages.push({ id: event.step_id ?? event.id, turnId: event.turn_id ?? "", role: event.payload.kupoPhase || roleSequenceTurns.has(event.turn_id ?? "") || ["router", "compaction", "draft", "checkpoint", "decision", "steering"].includes(event.payload.role ?? "") ? "notice" : "assistant",
           text: event.payload.kupoPhase ? `Kupo ${event.payload.kupoPhase}: proposed tool requests remain unexecuted until response selection and normal permissions.` : roleSequenceTurns.has(event.turn_id ?? "") ? "An owned role is producing untrusted data, not a user answer or approval." : event.payload.role === "router" ? "Kupo is evaluating the eligible model pool." : event.payload.role === "compaction" ? "Generating a reviewed context proposal; original context is unchanged." : event.payload.role === "draft" ? "Generating an unaccepted code proposal; source and staging files are unchanged." : event.payload.role === "checkpoint" ? "Reserved metadata-only budget checkpoint; no source or Git approval." : ["decision", "steering"].includes(event.payload.role ?? "") ? "Bounded decision-provider advice inside explicit policy. Human intervention and deterministic authority win." : "", timestamp: event.timestamp });
@@ -1455,6 +1634,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const response = source?.payload.kupo?.response, verdict = review?.payload.kupo, plan = routing?.plan;
         const sourceModel = plan?.pattern === "cascade" && source?.payload.kupo?.phase === "escalation" ? plan.escalationId : plan?.modelId;
         const reviewModel = plan?.pattern === "cascade" ? plan.escalationId : plan?.pattern === "critique" ? plan.criticId : null;
+        const passed = routing?.mode !== undefined && source && review && verdict?.verdict === "pass" &&
+          verdict.responseStepId === sourceStepId && sourceStepId !== reviewStepId && source.seq < review.seq &&
+          (plan?.pattern === "cascade" && verdict.phase === "gate" && ["draft", "escalation"].includes(source.payload.kupo!.phase) ||
+            plan?.pattern === "critique" && verdict.phase === "critic" && ["draft", "revision"].includes(source.payload.kupo!.phase));
+        const legacySelection = routing?.mode === undefined && (source?.payload.kupo?.phase === "draft" && verdict?.responseStepId === sourceStepId && verdict.verdict === "pass" ||
+          source?.payload.kupo?.phase === "escalation" && plan?.pattern === "cascade" && verdict?.phase === "gate" && verdict.verdict === "escalate" && verdict.responseStepId === source.payload.kupo.responseStepId ||
+          source?.payload.kupo?.phase === "revision" && plan?.pattern === "critique" && verdict?.phase === "critic" && verdict.verdict === "revise" && verdict.responseStepId === source.payload.kupo.responseStepId);
         if (!routing || routing.policy.workflow !== "auto" || routing.status !== "running" || routing.turnId !== event.turn_id ||
           routing.sessionId !== session.id || !response || response.id !== sourceStepId || response.role !== "assistant" ||
           source?.session_id !== session.id || source.turn_id !== event.turn_id || source.step_id !== sourceStepId || source.payload.contextDigest !== contextDigest ||
@@ -1462,9 +1648,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           verdict?.routingId !== routingId || routing.selectedStepIds?.includes(sourceStepId) ||
           source.payload.usage.quality !== "provider-reported" || review.payload.usage.quality !== "provider-reported" ||
           source.payload.usage.modelId !== sourceModel || review.payload.usage.modelId !== reviewModel || review.payload.usage.role !== "critic" ||
-          !(source.payload.kupo.phase === "draft" && verdict.responseStepId === sourceStepId && verdict.verdict === "pass" ||
-            source.payload.kupo.phase === "escalation" && plan?.pattern === "cascade" && verdict.phase === "gate" && verdict.verdict === "escalate" && verdict.responseStepId === source.payload.kupo.responseStepId ||
-            source.payload.kupo.phase === "revision" && plan?.pattern === "critique" && verdict.phase === "critic" && verdict.verdict === "revise" && verdict.responseStepId === source.payload.kupo.responseStepId)) {
+          !(passed || legacySelection)) {
           throw new MoguriError("routing_corrupt", "A selected Kupo response lost its original metered model, review or owning turn. No response or tool authority was reconstructed.", 409);
         }
         routing.selectedStepIds = [...routing.selectedStepIds ?? [], sourceStepId];
@@ -1535,6 +1719,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         session.finishedAt = event.timestamp;
         if (event.payload.outcome === "completed") session.completedAt = event.timestamp;
         session.lastError = event.payload.diagnostic; session.localFinishing = false;
+        session.lastModelFailureId = event.payload.modelFailureId;
         for (const usage of session.usage) if (usage.outcome === "running") usage.outcome = "unconfirmed";
         for (const process of session.processes) if (process.outcome === "running") process.outcome = "unconfirmed";
         if (event.payload.diagnostic) session.messages.push({
@@ -1564,7 +1749,9 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   return { projects: [...projects.values()], sessions: [...sessions.values()], policy, blockedProjects: [...blockedProjects], blockedSessions: [...blockedSessions], blockedWorkspaces: [...blockedWorkspaces],
     coordinationLinks: [...coordinationLinks.values()].filter((link) => sessions.has(link.parentId) && sessions.has(link.childId)),
     coordinationMessages: [...coordinationMessages.values()].filter((message) => sessions.has(message.toSessionId)),
-    settings, lastModelSelection, chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
+    settings, lastModelSelection, scheduledPrompts: [...scheduledPrompts.values()].filter((prompt) => sessions.has(prompt.sessionId)),
+    modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
+    chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],

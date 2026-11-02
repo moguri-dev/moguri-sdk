@@ -3,7 +3,9 @@
 Status: introduced with protocol/database 39 and included in the
 [protocol-40 full source sweep](../setup.md#final-protocol-40-source-acceptance).
 This is not a new qualified archive or completed milestone. Local Max has
-its separate bounded-provider policy; Remote/native finishing remains blocked.
+its separate bounded-provider policy. Protocol85's
+[owned transport continuation](owned-model-transports.md) adds selected-parent
+SSH/native metadata finishing; accepted-work Git below remains explicitly Local.
 
 Reuse maintained pi-ai, TypeBox, Node/abort/crypto and the existing event store,
 worker, ledger, filesystem capture and job supervisor (MIT). Reuse the
@@ -14,10 +16,10 @@ credential or filesystem authority is added.
 ## Explicit policy and complete capacity
 
 `settings.winddown` starts disabled, with no selected model. The user selects
-one exact available Local concrete model, separate hosted/network metadata
+one exact available concrete model at its selected boundary, separate hosted/network metadata
 consent, a positive complete output-token bound and deadline. This does not
 select a generative model, change autonomy, lift limits or grant Git.
-Remote/native finishing remains unavailable, never a Local fallback.
+SSH/native metadata calls use that original parent, never a Local fallback.
 
 Finite kupo needs that qualified policy. Ordinary configured finite Local
 turns can use it too. Admission captures the original profile/session/turn,
@@ -43,7 +45,7 @@ an affordable output prefix or refunding unknown work.
 When the actual next ordinary call or complete route batch cannot fit, stop
 ordinary work. Transfer only the original finishing hold, atomically with
 its actual entry/start, to one tool-less `checkpoint` role. Recheck the exact
-owner, mode, Local boundary, model, privacy, prices and complete envelope.
+owner, mode, actual selected boundary, model, privacy, prices and complete envelope.
 Unknown/over-limit ordinary work blocks an additional finishing request.
 
 The finishing model receives only canonical all-role count/token aggregates,
@@ -62,6 +64,9 @@ The original task ends visibly interrupted, not falsely completed.
 Unused undispatched holds release only when the canonical owner ends.
 Source deletion/restart cannot refund consumed or unknown work. Restart
 retains partial observations, never invokes a replacement finishing model.
+Original v2 transport inspection may fill an unconfirmed step's exact late raw
+result and reconcile charges without changing its partial terminal outcome,
+diagnostic or source authority. It cannot make that metadata a Git checkpoint.
 
 ## Separate actual-user Git review
 

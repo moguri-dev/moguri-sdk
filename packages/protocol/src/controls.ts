@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { ModelOptionsSchema, supportedThinkingEffort, ThinkingEffortSchema, type ModelSelection, type ThinkingEffort } from "./model.ts";
 import { SessionBudgetSchema } from "./budgets.ts";
 import { VerbositySchema } from "./preferences.ts";
+import { KupoModeSchema } from "./kupo-modes.ts";
 
 export const ControlsSchema = Type.Object({
   env: Type.Union([Type.Literal("Local"), Type.Literal("Sandbox"), Type.Literal("Remote")]),
@@ -12,18 +13,19 @@ export const ControlsSchema = Type.Object({
   modelOptions: Type.Optional(ModelOptionsSchema),
   preferredThinkingEffort: Type.Optional(ThinkingEffortSchema),
   verbosity: Type.Optional(VerbositySchema),
+  kupoMode: Type.Optional(KupoModeSchema),
 }, { additionalProperties: false });
 export type Controls = Static<typeof ControlsSchema>;
 export const ControlDefaultsSchema = Type.Partial(ControlsSchema);
 export type ControlDefaults = Static<typeof ControlDefaultsSchema>;
 export type DefaultSource = "factory" | "last-used" | "global" | "profile" | "project" | "session";
 export interface DefaultsSnapshot {
-  sources: Record<Exclude<keyof Controls, "verbosity" | "automaticApprovals" | "preferredThinkingEffort">, DefaultSource> & { verbosity?: DefaultSource; automaticApprovals?: DefaultSource; preferredThinkingEffort?: DefaultSource };
+  sources: Record<Exclude<keyof Controls, "verbosity" | "automaticApprovals" | "preferredThinkingEffort" | "kupoMode">, DefaultSource> & { verbosity?: DefaultSource; automaticApprovals?: DefaultSource; preferredThinkingEffort?: DefaultSource; kupoMode?: DefaultSource };
   settingsRevision: number;
   projectRevision: number | null;
 }
 export interface ResolvedControls { controls: Controls; defaults: DefaultsSnapshot }
-export const controlKeys = ["env", "modelId", "autonomy", "automaticApprovals", "budget", "modelOptions", "preferredThinkingEffort", "verbosity"] as const;
+export const controlKeys = ["env", "modelId", "autonomy", "automaticApprovals", "budget", "modelOptions", "preferredThinkingEffort", "verbosity", "kupoMode"] as const;
 export const factoryControls = (): Controls => ({ env: "Local", modelId: null, autonomy: "Manual", budget: { kind: "unlimited" } });
 export const selectAutonomyControls = (controls: Controls, autonomy: Controls["autonomy"]): Controls => ({
   ...controls, autonomy, automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max",
@@ -33,6 +35,7 @@ export function selectModelControls(controls: Controls, model: { id: string; syn
   const effort = preferred && model && !model.synthetic ? supportedThinkingEffort(preferred, model.thinkingLevels ?? []) : undefined;
   const { modelOptions: _, preferredThinkingEffort: __, ...other } = controls;
   return { ...other, modelId: model?.id ?? null,
+    ...(model?.id === "kupo" && model.synthetic ? { kupoMode: controls.kupoMode ?? "balanced" } : {}),
     ...(effort !== undefined ? { modelOptions: { thinkingEffort: effort } } : {}),
     ...(preferred !== undefined && preferred !== effort ? { preferredThinkingEffort: preferred } : {}) };
 }
@@ -51,6 +54,9 @@ export function resolveControls(layers: { source: Exclude<DefaultSource, "factor
   }
   if (sources.modelId === "factory" && lastModelSelection) {
     controls.modelId = lastModelSelection.modelId; sources.modelId = "last-used";
+    if (lastModelSelection.modelId === "kupo" && lastModelSelection.kupoMode && sources.kupoMode === undefined) {
+      controls.kupoMode = lastModelSelection.kupoMode; sources.kupoMode = "last-used";
+    }
     if (sources.modelOptions === "factory" && lastModelSelection.thinkingEffort !== undefined) {
       controls.modelOptions = { thinkingEffort: lastModelSelection.thinkingEffort }; sources.modelOptions = "last-used";
     }

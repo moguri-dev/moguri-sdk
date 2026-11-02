@@ -69,7 +69,7 @@ export class ModelRegistry implements ProviderAdapter {
       for (const model of endpoint.models) {
         const modelId = this.modelId(endpoint.id, model.id), advertised = entry?.models.find((value) => value.id === modelId);
         const info: ModelInfo = { ...model, id: modelId, providerId: id, source: "local", apiModelId: model.id, endpointBoundary: modelEndpointBoundary(endpoint.baseUrl),
-          thinkingLevels: [], environments: this.options.localEnvironments?.(endpoint) ?? this.options.environments ?? ["Local"] };
+          thinkingLevels: [], kupoThinkingLevels: [], environments: this.options.localEnvironments?.(endpoint) ?? this.options.environments ?? ["Local"] };
         offerings.push({ model: advertised ? { ...advertised, environments: info.environments } : info, available: enabled && entry?.connection.status === "connected" && Boolean(advertised) });
       }
     }
@@ -121,7 +121,7 @@ export class ModelRegistry implements ProviderAdapter {
     const ids = new Set(catalog.data.filter(isRecord).map((entry) => entry.id));
     const models = endpoint.models.filter((model) => ids.has(model.id)).map((model) => ({
       id: this.modelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput, ...(model.toolInput !== undefined ? { toolInput: model.toolInput } : {}),
-      providerId: `${this.prefix}.${endpoint.id}`, source: "local" as const, apiModelId: model.id, endpointBoundary: modelEndpointBoundary(endpoint.baseUrl), thinkingLevels: [], environments: this.options.environments ?? ["Local"],
+      providerId: `${this.prefix}.${endpoint.id}`, source: "local" as const, apiModelId: model.id, endpointBoundary: modelEndpointBoundary(endpoint.baseUrl), thinkingLevels: [], kupoThinkingLevels: [], environments: this.options.environments ?? ["Local"],
     }));
     if (!models.length) throw new MoguriError("local_model_catalog", "None of this endpoint's explicitly configured models is advertised. Check IDs and limits; no model was guessed.");
     return { models, key };

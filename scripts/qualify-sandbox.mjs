@@ -19,6 +19,7 @@ import { readNativeCompletion, readNativeNetwork } from "../apps/service/src/nat
 import { defaultSandboxManagement, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { nativeApiFixture } from "../tests/fixtures/native-api.ts";
 import { reviewNativeTools, waitFor } from "../tests/fixture.ts";
+import { cacheRuntimeFiles } from "./build-cache.mjs";
 
 const { values } = parseArgs({ options: {
   distribution: { type: "string" }, workload: { type: "string" }, archive: { type: "string" },
@@ -45,7 +46,8 @@ const report = { format: "moguri-sandbox-qualification", version: 1, status: "RU
   gates: {} };
 for (const path of ["scripts/qualify-sandbox.mjs", "scripts/worker-image/qualification-network.mjs", "apps/service/src/native-evidence.ts",
   "tests/fixtures/native-api.ts", "tests/fixtures/native-target.ts", "tests/fixtures/native-provider.mjs", "tests/fixtures/native-group-provider.mjs",
-  "tests/sandbox-managed-groups.test.ts", "tests/fixture.ts"]) {
+  "tests/fixtures/native-retry-provider.mjs", "tests/fixtures/native-checkpoint-provider.mjs", "tests/fixtures/native-checkpoint.ts",
+  "tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts", "tests/sandbox-managed-groups.test.ts", "tests/fixture.ts"]) {
   report.source.harness[path] = hash(await readFile(path));
 }
 const owned = [];
@@ -109,7 +111,7 @@ await gate("artifacts", [], async () => {
   assert.equal(workload.payload.version, JSON.parse(await readFile("package.json", "utf8")).version);
   assert.equal(workload.image, distribution.worker.image);
   assert.equal(workload.digest, workload.image.slice(workload.image.lastIndexOf("@") + 1));
-  const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs"], current = {};
+  const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", ...cacheRuntimeFiles], current = {};
   assert.deepEqual(Object.keys(workload.payload.files).sort(), [...inputs].sort());
   for (const path of inputs) {
     current[path] = hash(await readFile(path)); assert.equal(current[path], workload.payload.files[path], `Current payload changed: ${path}`);
@@ -343,6 +345,26 @@ await gate("groupedWorkspace", ["installedRuntime", "providerScope"], async () =
     resultSha256: hash(JSON.stringify(result.result)), directory: result.directory, explicitPublications: result.explicitPublications.map((record) =>
       ({ id: record.id, repositoryId: record.repositoryId, status: record.status, acceptance: record.acceptance })),
     scope: execution.networkScope, metaSha256: meta.published_scope.sha256, sourceCopiesVerified: true, ownedGuestAbsent: true };
+});
+await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace"], async () => {
+  const suites = ["tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts"], log = join(directory, "snapshot-retry-checkpoint-test.log");
+  let child;
+  try {
+    child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", ...suites], {
+      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: join(directory, "group-installation.json"), MOGURI_NATIVE_WORKLOAD: resolve(values.workload) },
+      encoding: "utf8", timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
+  }
+  await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
+  for (const [key, count] of [["tests", 5], ["pass", 5], ["fail", 0], ["skipped", 0]]) {
+    assert.match(child.stdout, new RegExp(`# ${key} ${count}(?:\\r?\\n|$)`), "Private-snapshot retry and accepted-native-work checkpoints require actual current-image execution, not skips.");
+  }
+  return { suites, cases: 5, skipped: 0, logSha256: hash(child.stdout + child.stderr),
+    snapshotOnly: true, explicitRetryPolicy: true, currentRootPolicy: true, originalUnknownChargesRetained: true,
+    preparationStopRestartNoReplay: true, separatelyAcceptedNativeSource: true, publicationEnv: "Local", preservedSourceHeadIndex: true,
+    partialUserInspectionNeverCompletesJob: true };
 });
 await gate("teardown", ["installedRuntime", "groupedWorkspace"], async () => {
   const remaining = [];

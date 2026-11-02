@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MoguriSdk, kanbanPreferences, ProjectWorkReadSchema, sessionChildBindings } from "../packages/sdk/src/index.ts";
+import { defaultKupoSettings, MoguriSdk, kanbanPreferences, ProjectWorkReadSchema, sessionChildBindings } from "../packages/sdk/src/index.ts";
 import { githubApplicationFixture } from "./github-workflows-fixture.ts";
 import { fixtureProvider, setupFixture, waitFor } from "./fixture.ts";
 import { Value } from "typebox/value";
+import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
 
 test("each project has one shared lazily opened Kanban chat and hiding it preserves cards", async () => {
   const fixture = await githubApplicationFixture();
@@ -234,6 +235,9 @@ test("automatic Kupo publishes only its selected original task response and stop
     await fixture.sdk.settings.update(settings, fixture.sdk.settings.get()!.revision); await fixture.sdk.models.refresh();
     const model = fixture.sdk.getState().snapshot!.provider.models.find((model) => model.source === "local");
     assert.ok(model); solverId = model.id;
+    const draft = await generatedKupoProfile(fixture.sdk, solverId, { category: "economy", score: 0.3, price: 0 });
+    const gate = await generatedKupoProfile(fixture.sdk, router.modelId, { category: "frontier", score: 0.8, price: 5 });
+    await fixture.sdk.routing.configure({ ...defaultKupoSettings(), modelProfiles: [draft, gate] }, fixture.sdk.settings.get()!.revision);
     await fixture.sdk.sessions.selectModel(fixture.sessionId, "kupo");
     const card = await fixture.sdk.issues.create(fixture.projectId, { title: "Generated selected Kupo task", body: "", kind: "feature", phaseId: "backlog", pullRequestUrl: null });
     const start = await fixture.sdk.kanban.continue(fixture.sessionId, card.id!);

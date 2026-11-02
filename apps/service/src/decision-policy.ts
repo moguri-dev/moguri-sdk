@@ -10,11 +10,10 @@ export function decisionCapability(value: unknown, models: ModelInfo[], env: Con
   const settings = parse(DecisionSettingsSchema, value);
   if (!settings.enabled || !settings.modelId) throw new MoguriError("decision_unavailable", "Explicitly configure a compatible bounded decision provider before Autopilot Max. No self-approval or model fallback.", 409);
   if (settings.provider === "jev") throw new MoguriError("decision_output_limit", "The documented Jev /v1/systemone request has no enforceable output-token-limit field. This owned all-role admission cannot invent max_tokens, lift finite policy or substitute a generative model. Jev stays unqualified.", 409);
-  if (env !== "Local") throw new MoguriError("decision_env", "This decision owner/worker transport is explicitly Local. Remote/native Max cannot execute on the controller or fall back.", 409);
   const model = models.find((model) => model.id === settings.modelId);
-  if (!model || model.synthetic || !model.providerId || !model.apiModelId || !model.environments?.includes("Local") ||
+  if (!model || model.synthetic || !model.providerId || !model.apiModelId || !model.environments?.includes(env) ||
     !model.maxTokens || !Number.isSafeInteger(model.maxTokens) || model.maxTokens < settings.outputTokens ||
-    !Number.isSafeInteger(model.contextWindow) || (modelContextWindows(model).values[0] ?? 0) < settings.outputTokens + 4096) throw new MoguriError("decision_model", "The exact configured decision model lacks concrete identity, Local capability or complete positive output/window bounds. No replacement.", 409);
+    !Number.isSafeInteger(model.contextWindow) || (modelContextWindows(model).values[0] ?? 0) < settings.outputTokens + 4096) throw new MoguriError("decision_model", "The exact configured decision model lacks concrete identity, selected-environment capability or complete positive output/window bounds. No replacement.", 409);
   if (!(model.source === "local" && model.endpointBoundary === "loopback") && !settings.allowHosted) throw new MoguriError("decision_privacy", "Hosted/network decision inputs need separate explicit approval. A local provider label is not a loopback boundary.", 403);
   if (new Set(settings.technicalQuestions.map((entry) => entry.id)).size !== settings.technicalQuestions.length ||
     new Set(settings.steeringChoices.map((entry) => entry.id)).size !== settings.steeringChoices.length ||

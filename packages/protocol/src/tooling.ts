@@ -116,8 +116,15 @@ const resultCursor = object({ sequence: Type.Integer({ minimum: 0 }), id: hash }
 const resultList = {
   before: Type.Optional(resultCursor), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
 };
+export const HistoryReadInputSchema = object({
+  throughSequence: Type.Optional(Type.Integer({ minimum: 0 })), messageOffset: Type.Optional(Type.Integer({ minimum: 0 })),
+  limitMessages: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })), offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 8 * 1024 * 1024 })),
+  expectedDigest: Type.Optional(hash),
+});
+export type HistoryReadInput = Static<typeof HistoryReadInputSchema>;
 export const ReadToolResultSchema = Type.Union([
   ReadToolSourceSchema, object({ action: Type.Literal("list"), ...resultList }),
+  object({ action: Type.Literal("history"), ...HistoryReadInputSchema.properties }),
 ]);
 export type ReadToolSource = Static<typeof ReadToolSourceSchema>;
 export interface RetainedToolSource {
@@ -133,6 +140,7 @@ export interface RetainedToolSummary extends RetainedToolSource {
   name: string; sequence: number; outcome: string; rawComplete: boolean; digest: string;
 }
 export const ToolingQuerySchema = Type.Union([
+  object({ type: Type.Literal("tooling.history"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), input: HistoryReadInputSchema }),
   object({ type: Type.Literal("tooling.results"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), ...resultList }),
   object({ type: Type.Literal("tooling.catalog"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), query: Type.String({ maxLength: 200 }), offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 512 })) }),
   object({ type: Type.Literal("tooling.result"), sessionId: Type.String({ minLength: 1, maxLength: 128 }), input: ReadToolSourceSchema }),
@@ -148,6 +156,11 @@ export const ToolingCommandSchema = Type.Union([object({
 export interface ToolingCatalog { type: "tooling.catalog"; tools: { name: string; description: string; parameters: unknown; schemaDigest: string }[]; offset: number; nextOffset: number | null; total: number; query: string }
 export interface ToolingResult { type: "tooling.result"; source: RetainedToolSource; text: string; nextOffset: number | null; offset: number; bytes: number; rawComplete: boolean; digest: string; outcome: string }
 export interface ToolingResults { type: "tooling.results"; sources: RetainedToolSummary[]; nextBefore: { sequence: number; id: string } | null }
+export interface HistoryRead {
+  type: "tooling.history"; text: string; bytes: number; offset: number; nextOffset: number | null; eof: boolean; digest: string;
+  profileId: string; sourceSessionId: string; throughSequence: number; messageOffset: number; limitMessages: number; totalMessages: number;
+  nextMessageOffset: number | null; complete: boolean; boundary: "scoped-controller-public-history"; authority: string;
+}
 export interface CommandJobRead {
   id: string; status: CapabilityJob["status"]; env: "Local"; root: string; text: string | null;
   source: "live-owned-command-tail" | "unavailable" | "retained-command-result"; nextOffset: number | null;
@@ -155,4 +168,4 @@ export interface CommandJobRead {
   inspectionDigest?: string; diagnostic?: string; digest?: string; bytes?: number; offset?: number; eof?: boolean;
   exitCode?: number; signal?: number | null; cleanup?: "known-group-stopped" | "unconfirmed";
 }
-export type ToolingResponse = ToolingCatalog | ToolingResult | ToolingResults | { type: "tooling.command"; data: CommandJobRead } | { type: "tooling.state"; data: unknown };
+export type ToolingResponse = ToolingCatalog | ToolingResult | ToolingResults | HistoryRead | { type: "tooling.command"; data: CommandJobRead } | { type: "tooling.state"; data: unknown };

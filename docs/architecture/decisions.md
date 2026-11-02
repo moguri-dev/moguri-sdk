@@ -52,12 +52,57 @@ These decisions define the implementation stack and constraints for the [impleme
 | D28 | Plan checklist completion is periodically observed; long-task owning-model estimates stay separate, untrusted advice without hidden inference. | Plan/root ownership, stale reports, cancellation, recovery or cross-client comparison fails. |
 | D29 | Document attachments reuse scoped encrypted snapshots and bounded inspection; PDF.js and streamed ZIP/strict XML parse in restricted resource-bounded processes. | Parser content/resource qualification, grant retention, provenance, worker transport or browser-safe packed SDK checks fail. |
 | D30 | Lazy typed discovery and compact recoverable views reuse the owned worker; deterministic utilities, structured authoring/SQL and root-bound parent/child coordination extend the same SDK/policy/budget authority. | Required evidence becomes unreachable, actual actor/root/cap ownership fails, or representative task-quality evaluation regresses. |
+| D31 | Profile-owned retained-request backoff, one-time scheduled input and evidence-qualified Kupo modes share the existing SDK/worker/ledger; compaction is explicit opt-in and all-role finite holds retain exact owners. | Deadline/order, source/account identity, cancellation/restart, model/effort/context evidence, packed-client or exact native-byte qualification fails. |
+| D32 | Model-free native schedule preparation uses the existing managed capture; bounded decision/metadata-finishing roles remain on the exact SSH/native parent with separate private-role release, all-role holds and terminal no-replay. | Source/policy/draft scope, actual transport/cancellation, atomic failed/late receipts, client/packed SDK or exact native-byte qualification fails. |
 
 D28's [task progress contract](task-progress.md) records generated checklist and
 hidden-client qualification. D29's [document contract](document-attachments.md)
 records parser licenses, limits and measured Phase 0 results before integration.
 Neither decision expands unrelated roadmap, model authority or unqualified
 execution transports.
+
+D31's [recovery/scheduling/Kupo contract](recovery-scheduling-kupo.md) begins at
+genuine merged83 `023fa014`, adds three independent protocol84 markers atomically
+and preserves all combined80/81/82/83 ciphertext, source reviews and receipts.
+The user chose current-profile recovery, oldest currently failed prompt order,
+reset only on a complete metered recovered response, unchanged manual-retry
+countdowns, overdue one-time scheduled admission and explicitly enabled
+automatic text compaction. None is a permission or source-acceptance grant.
+Model/authorization/root changes and unknown effects remain authoritative.
+
+The supplied [HyDRA v1](https://arxiv.org/html/2605.17106v1) informs separation of
+requirements, benchmark profiles and pricing, not a claim of provided weights,
+calibrated quality, Cascade/Critique specification or a qualified System One
+adapter. New modes select actual supported effort and maximum context; budgeted
+or alias-clamped High cannot become Performance. Finite automatic Local response
+sets use the existing `planBatch`/exact transfer plus reserved checkpoint, with
+distinct `routing` plan purpose and no refund of consumed/unknown work.
+The cache API is unchanged; its patched closure and exact third-party notices
+are built into distributed Node runtimes so packed consumers do not inherit
+development-root overrides. Current worker/native bytes still need their own
+physical receipt. Missing Jev output bounds, Remote/native wind-down and other
+real gates were not qualified by protocol84.
+
+D32's [owned model transport contract](owned-model-transports.md) extends
+genuine84 with separate `scheduled_native_preparation_schema`,
+`owned_model_transport_schema` and `transport_finishing_schema` markers in one
+atomic85 migration. It retains the original `d6aeae4` installer/receipt identity,
+not a relabeled Local model or previous guest qualification. A tool-less role
+inside a rooted parent is not a rootless OS process. Raw late data/accounting
+may improve one originally admitted step without changing terminal work,
+cleanup, delegation or source acceptance. Jev remains upstream-unqualified.
+
+D32's [snapshot retry/checkpoint continuation](native-retry-checkpoints.md)
+adds protocol86's independent `native_retry_restaging_schema` and
+`transport_checkpoint_schema` markers. The actual user permits restaging only
+the complete byte-verified original private snapshot under an explicit off-by-
+default retry policy, never a changed live-source capture or substituted owner.
+The user separately chose new-branch Git publication at the original Local
+repository after native-source acceptance; current Local and Sandbox policy
+both apply. Remote accepted-work Git stays on its pinned SSH peer/root.
+Separate source acceptance, Git review and partial-effect inspection never turn
+metadata into acceptance, replay work, clear unknown charges or relabel a
+partial job as completed.
 
 The owner-requested [shared themes and TUI follow-up](themes-and-tui.md) retains
 OpenTUI/React and the existing profile settings/event authority. Protocol 78 adds

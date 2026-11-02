@@ -32,6 +32,12 @@ try {
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
   if (installedProtocol >= 83) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-content-review.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 84) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-session-intake.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 85 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-owned-transports.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 90_000 });
+  if (installedProtocol >= 86) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-startup.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 35_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
@@ -65,6 +71,8 @@ try {
     ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
     ${installedProtocol >= 77 ? 'import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "moguri";' : ""}
     ${installedProtocol >= 82 ? 'import {ToolPreferencesSchema,defaultToolPreferences,effectiveToolPreferences,type ToolPreferences,type WorkflowKind} from "moguri";' : ""}
+    ${installedProtocol >= 84 ? 'import {type KupoMode,type ScheduledTiming,type ModelFailure,type KupoModelProfileInput,scheduleLocalChoices,RECOVERY_DELAYS_MS} from "moguri";' : ""}
+    ${installedProtocol >= 85 ? 'import {type OwnedModelTransport,type DecisionRecord,type WinddownRecord,type SandboxWorkspace} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -72,6 +80,33 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 84 ? `
+      const typedIntake = async (client:MoguriSdk,id:string,mode:KupoMode,timing:ScheduledTiming,failure:ModelFailure,profile:KupoModelProfileInput) => {
+        await client.sessions.kupoMode(id,mode);await client.routing.modes(id);await client.routing.profileDraft(profile);
+        await client.sessions.retry(id,failure.id,failure.revision);await client.scheduledPrompts.create(id,timing);
+        const prompt=client.scheduledPrompts.list(id)[0];if(prompt){await client.scheduledPrompts.sendNow(prompt.id,prompt.revision);await client.scheduledPrompts.cancel(prompt.id);}
+        await client.tools.history(id,{limitMessages:1});void scheduleLocalChoices;void RECOVERY_DELAYS_MS;
+      };void typedIntake;
+      ` : ""}
+      ${installedProtocol >= 85 ? `
+      const ownedData=(decision:DecisionRecord,finishing:WinddownRecord,workspace:SandboxWorkspace)=>{
+        if(decision.version===2){const actual:OwnedModelTransport=decision.transport;void actual.executionId;void decision.env;}
+        if(finishing.version===2){void finishing.scopeDigest;void finishing.transport?.workerDigest;void finishing.source;}
+        if(workspace.preparation?.version===2){void workspace.preparation.commandDigest;void workspace.preparation.draftDigest;}
+      };void ownedData;
+      ` : ""}
+      ${installedProtocol >= 86 ? `
+      const privateRetryPolicy:UserSettings["interactions"]["nativeRetryRestaging"]=true;void privateRetryPolicy;
+      const transportCheckpoint=async(client:MoguriSdk,id:string,sessionId:string)=>{
+        const source=await client.winddown.sourcePreview(id,["generated.ts"]);
+        await client.winddown.acceptSource(id,["generated.ts"],source.preview.revision,source.preview.digest,true);
+        const inspection=await client.winddown.inspectCommit(id);void inspection.inspection.review.document.actualCommit;
+        await client.winddown.reconcileCommit(id,inspection.inspection.review.revision,inspection.inspection.review.digest,true);
+        const native=await client.winddown.commitPreview({winddownId:id,sessionId,candidateIds:[],nativePublicationIds:["generated-publication"],branch:"moguri/generated-native",message:"Generated accepted native source"});
+        const remote=await client.winddown.commitPreview({winddownId:id,sessionId,candidateIds:[],remoteAccepted:true,branch:"moguri/generated-peer",message:"Generated accepted peer source"});
+        const retained=await client.winddown.read(id);void retained.commitInspection?.operationSettled;void native.preview.document.version;void remote.preview.document.source;
+      };void transportCheckpoint;
+      ` : ""}
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
       const upgradeReview = async (review:ServiceUpgradeReview):Promise<boolean> => {void review.fingerprint;void review.observedProtocol;return false;};
@@ -1864,7 +1899,7 @@ try {
     console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/CLI/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
   `);
   try {
-    execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 90_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
+    execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 240_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
   } catch (error) {
     const root = resolve(".native/qualification"); await mkdir(root, { recursive: true, mode: 0o700 });
     const retained = await mkdtemp(join(root, "sdk-failure-"));

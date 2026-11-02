@@ -5,7 +5,11 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **82** for
+Current source uses protocol **85** for
+[owned SSH/native decisions, metadata finishing and model-free scheduled preparation](architecture/owned-model-transports.md).
+It preserves protocol84
+[retained model recovery, scheduled input and evidence-qualified Kupo modes](architecture/recovery-scheduling-kupo.md),
+preserving protocol83 content/script safeguards and protocol82
 [shared workflow commands, ranked methods and direct MCP schemas](architecture/command-tool-preferences.md).
 It retains protocol81
 [exact session request recovery](architecture/session-reliability.md#explicit-selection-and-retained-request-follow-up)
@@ -42,6 +46,62 @@ the new presets; `sdk.sessions.spawnPrompt(sessionId, prompt, expectedDraftRevis
 atomically assigns an actual Manual child. `/continue` takes no prompt.
 Direct MCP aliases are model-facing discoveries, not user-supplied permission
 metadata or a new credential API.
+
+## Recovery, scheduled input and Kupo
+
+These methods use the same authenticated immutable-profile SDK and existing
+`/v1/commands`, snapshot and event authority. A command result identifies retained
+intent/admission, not successful model work. Preserve an uncertain command ID
+and inspect its original receipt rather than sending a replacement.
+
+| Surface | Contract |
+|---|---|
+| `sessions.retry(sessionId, failureId?, revision?)` | Retry the original last eligible model failure; preserve draft/context/queue and earlier effects. Read `Snapshot.modelFailures` and `modelRecoveryCycle` for actual state. |
+| `scheduledPrompts.create(sessionId, timing, draftRevision?)` | Capture and consume only the exact saved draft/attachments/controls into a durable unsent record. |
+| `scheduledPrompts.list(sessionId?)` | Read this profile's original scheduled records. `scheduled`/`blocked` stay outside model history; `queued` is claimed but not a sent prompt until `admitted`. |
+| `scheduledPrompts.sendNow(id, revision?)` / `cancel(id, revision?)` | Share one-at-most timer ownership; cancel only undispatched original input, not an unrelated turn. |
+| `routing.modes(sessionId)` | Read mode readiness and genuine unmet gates. No classification or model call. |
+| `sessions.kupoMode(sessionId, mode, revision?)` | Explicitly select `balanced`, `savings` or `performance` for automatic Kupo without changing autonomy/Env. |
+| `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
+| `tools.history(sessionId, input?)` | Page retained original public prompt/model/tool/answer sources, including after compaction; no private roles, console data, hidden thinking, drafts or queued input. |
+
+`ScheduledTiming` is `{kind:"delay",minutes,timeZone}` or
+`{kind:"at",at,timeZone,localTime,offsetMinutes}`. Use
+`scheduleLocalChoices("2030-10-27T02:30","Europe/Rome")` to review both DST
+occurrences, not guess one. Timings must be future and within one year.
+Service-owned deadlines survive UI disconnect. Overdue schedules are checked
+once after restart; no timer runs inside the client.
+
+History defaults to twenty messages and 12,000 UTF-8 bytes per page. Retain the
+returned `throughSequence`, `messageOffset`, `limitMessages` and `digest` for byte
+continuation with `nextOffset`. Only after that window ends, advance to
+`nextMessageOffset` with a new digest. Its boundary is explicitly
+`scoped-controller-public-history` in every Env, not authority to read a
+workstation/remote filesystem. Model access still needs ordinary tool policy.
+
+Common errors include `revision_conflict`, `model_retry_*`, `schedule_changed`,
+`schedule_dst`, `schedule_terminal`, `routing_effort`, `routing_frontier`,
+`routing_evaluation`, `routing_context_bound` and `budget_*`. These retain
+original input and distinguish changed authorization, unsupported transport,
+source review, unknown accounting and exhausted capacity. Do not repair/clamp
+a request, infer zero cost or treat model confidence as permission.
+
+```ts
+const sdk = await connectMoguri({ autoStart: false });
+const session = sdk.getState().snapshot!.sessions[0]!;
+const scheduled = await sdk.scheduledPrompts.create(session.id, {
+  kind: "delay", minutes: 10,
+  timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+}, session.draft.revision);
+const prompt = sdk.scheduledPrompts.list(session.id).find(p => p.id === scheduled.id)!;
+await sdk.scheduledPrompts.sendNow(prompt.id, prompt.revision);
+```
+
+Creation above requires a nonempty saved ordinary draft; it never writes replacement
+text or grants permissions. Native TUI and hidden desktop consume these same APIs.
+The independent packed consumer exercises actual installed worker retry,
+scheduling, mode readiness, history and restart alongside browser/React/Node
+imports/types and its own dependency audit.
 
 Schema 59 adds an independent transactional metadata marker. Older source
 settings normalize to no configured skill sources; ciphertext, receipts,
@@ -819,10 +879,40 @@ another parent turn. There is deliberately no public `evaluate`, `answer`,
 `bounded-model` policy and available canonical model ID, then separately choose
 Autopilot Max in session controls. Fixed and kupo Single model selection stays
 independent. Hosted inputs require separate consent; the root-less Local worker
-still uses actual all-role token/USD admission and existing finishing holds.
+uses actual all-role token/USD admission and existing finishing holds.
+Protocol85 additionally binds tool-less subcalls to the original SSH/native
+parent using version-2 `DecisionRecord`/`DecisionDocument` and
+`OwnedModelTransport`. Their `env`, exact execution/worker/peer or guest/root
+identity and `owned-role-acknowledged` cleanup cannot become a Local record or
+proof of parent exit. An unchanged readiness read starts no inference.
 The dedicated Jev contract remains unqualified because the current API cannot
 enforce a positive output-token bound. Remote/native Max never executes on the
 Local controller as a fallback.
+
+Existing `scheduledPrompts.create` can perform model-free native source
+preparation under the explicitly enabled managed policy before its atomic
+ghost/draft admission. `SandboxWorkspace.preparation.version === 2` binds the
+original scheduling command/digest and saved draft revision/digest; it never
+claims a model turn or restores a failed stage.
+
+Version-2 `WinddownRecord`/`WinddownDocument` keeps planned scope separate from
+the actual transport bound once at hold transfer/model start. `winddown.read`
+returns its original aggregate-only model input/result. SSH/native reports
+cannot acquire Local Git fields or `completed` publication state. A changed
+current session Env cannot adopt them through `commitPreview`.
+Exact late inspection may fill an admitted partial step's raw observation and
+settle its original charge, but cannot change terminal outcome/cleanup, validate
+advice or restart the parent. Deleted reports are not reconstructed.
+
+| Error | Meaning and recovery |
+| --- | --- |
+| `decision_transport` | No exact active pinned parent or qualified provider scope; review the selected Env, never substitute a controller worker. |
+| `decision_late_owner` | Original model/role/peer/root or settled owner does not match inspection; preserve the original unknown hold and inspect its actual owner. |
+| `winddown_late_owner` | Original complete finishing hold/start/transport is absent or changed; no new hold, model or Git effect is inferred. |
+
+These use the existing authenticated, immutable-profile query/command and
+receipt surface; no public paid-evaluate, replay or authority-grant endpoint is
+added. See [owned model transports](architecture/owned-model-transports.md).
 
 Shared `/decisions status|list|read ID|stop ID confirm-stop|set POLICY_JSON`
 and CLI `moguri decisions status --session ID`, `list`, `read ID`, `stop ID`,
@@ -1168,16 +1258,16 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
 | `roleSequences` | Read exact independently retained role intent, original input and one selected raw role input/result; never start a model, grant acceptance or resume partial work. |
 | `compound` | Explicit Local source/cost preview/start/read, focused validation preview, actual-user stage/test review/deny and exact stop. Real conditional Cascade/Critique uses the existing root-less worker and all-role ledger. `lineageDraft` prepares an unpersisted exact model/source claim with browser-safe hashing; it does not inspect providers, save policy or prove training/quality. Source application stays in `candidates`. |
-| `winddown` | Canonical readiness, independently retained finishing holds/model input/results, exact stop/decline, and separate actual-user accepted-work/new-local-branch preview/commit/wait. Finite Local Single/Compound use the same all-role ledger; summaries grant no source or Git authority and never resume ordinary work. |
-| `decisions` | Service-derived compatible-provider readiness, independently retained exact request/model/rubric/raw evidence, all-role accounting and exact one-shot stop. No public evaluate, paid retry, answer or approval command. Local Max acts only inside separate explicit user delegation and preserves the real decision-provider actor. |
+| `winddown` | Canonical readiness and independent selected-boundary finishing holds/input/results/stop. Separate accepted-source/new-branch Git review preserves the original Local or SSH root; native-model work discloses its separately accepted original Local-Git boundary. Exact effect inspection/acknowledgement never completes or replays a partial job. All roles share one ledger; summaries grant no source/Git authority or ordinary continuation. |
+| `decisions` | Exact request/model/rubric/raw evidence, actual Local or original SSH/native parent transport, all-role accounting and one-shot stop. No public evaluate, paid retry, answer or approval endpoint. Only separate explicit delegation can use the real decision-provider actor. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
 | `activity` | Exact session-scoped operation metadata and lazy original arguments/results; public response copy and original owning-turn information. No private reasoning, terminal buffers or recovery from a deleted source. |
 | `agentTerminals` | Original agent `run_command` requests/results and bounded UTF-8 output/tails. No private User/Global console access, stdin, new execution or implicit persistent shell. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
-| `compactions` | Source/model-bound preview, explicit metered generation, actual history/content review, revision-checked apply/discard and original-context restore. Same Local/SSH worker and ledger; no automatic compaction, history deletion or user-answer/permission promotion. |
-| `routing` | Automatic configured-model policy, service-owned `capabilities(env?)`, exact policy/configure CAS and ordinary routing/selected-response history. Explicit Single and reviewed worktree Compound policies remain available. Finite automatic budgets, images and synthetic tuning stay blocked. |
+| `compactions` | Source/model-bound reviewed generation/apply/restore and explicit opt-in bounded automatic text compaction through the same worker/ledger. Originals/images remain retained; no history deletion or answer/permission promotion. |
+| `routing` | Actual mode/capability/profile readiness, revision-bound policy and original classifier/role/selected-response history. Explicit Single/Compound stays separate. Finite automatic work requires complete selected-boundary holds/finishing; unsupported image/effort/model combinations stay blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
 | `slash` / `slashCommands` | One browser-safe low-level dispatcher/catalogue. Frontend text uses `commands.submit`, not eager `slash` dispatch. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
@@ -1187,6 +1277,41 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `models` | Profile-owned `catalogue()`, `setProviderEnabled`, `setEnabled` and exclusive `selectSource`, plus explicit refresh, informational `evidence(modelId)`, always-visible Kupo and resource-bound endpoint keys. Selection and admission use only enabled, available, chosen sources; disabled inventory remains inspectable. No sign-in, inference, host scan, automatic evidence read or substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
+
+### Native snapshot retries and transport checkpoint review
+
+Protocol86 adds `settings.values.interactions.nativeRetryRestaging`, factory
+off. `sessions.retry` still admits only the last exact retained failure;
+enabled native retries restore its signed private snapshot and cannot capture
+new live-source bytes, change Env/model/profile, replay effects or refund
+unknown calls.
+
+`winddown.sourcePreview(id, paths)` reads complete exact SSH source: at most
+20 distinct paths, each up to 4,096 characters, subject to the actual host's
+filesystem limits and the complete 128-KiB source/Git review bound. It never
+uses the shorter artifact-ID bound for file paths or truncates a review.
+`acceptSource(id, paths, revision, digest, true)` binds actual-user source
+acceptance, not Git permission. `commitPreview`/`commit` use `remoteAccepted:true`
+for that peer or exact `nativePublicationIds` for already separately accepted
+native output. The former performs Git only on the captured peer; the latter
+explicitly uses Local Git at the original source repository and requires current
+Local policy. New branch, base, bytes/modes and message are separately reviewed.
+
+`inspectCommit(id)` is read-only and returns exact current source/ref/receipt
+review data. `reconcileCommit(id, revision, digest, true)` is separate actual-user
+acknowledgement of an ended original writer, never an answer, approval, effect
+replay or partial-to-success transition. `read(id).commitInspection` retains that
+observation independently of the session. Unknown or changed source/ref/cleanup
+cannot release its quarantine or erase its report.
+
+CLI uses `winddown source-preview/source-accept`, `preview/commit`,
+`inspect/reconcile`; acceptance/reconciliation require exact `--revision`,
+`--digest` and `--confirm-review`, while Git requires `--confirm-git`.
+The shared TUI commands are `/winddown source-preview ID PATHS_JSON`, the
+returned `source-accept ... confirm-source` command, `commit-preview JSON` and
+its exact Git command, then `inspect ID` and its `reconcile ... confirm-inspection`
+command when partial. All surfaces use this SDK authority.
+See the [retry/checkpoint contract](architecture/native-retry-checkpoints.md).
 
 ### Owned Local and Remote user consoles
 
@@ -1629,6 +1754,14 @@ without stopping anything. Newer/unverified owners are never offered as an
 automatic downgrade/restart. Without a callback, callers receive the actionable
 mismatch and may choose an explicit lifecycle operation themselves.
 `autoStart: false` stays strict and never invokes upgrade/launch effects.
+
+Cold auto-start waits up to 60 seconds for matching authenticated health rather
+than timing out after ten seconds during encrypted-history recovery. A process
+that exits without another retained writer reports its exit code/signal and
+exact private log path promptly. Competing launch clients may still connect only
+to the verified owner; a writer-lock file alone is not authentication. A deadline
+leaves the original initializing owner and all state intact, with no automatic
+retry, force-stop or replacement.
 
 Native desktop exit calls `stopMoguriService(capturedStateDir,
 {expectedConnection: capturedConnection})`, not a freshly inferred default root.

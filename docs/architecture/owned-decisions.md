@@ -1,9 +1,15 @@
 # Owned decisions and Autopilot Max
 
-Status: protocol/database 40 shared service/SDK, CLI, actual TUI and desktop
+Historical qualification: protocol/database 40 shared service/SDK, CLI, actual TUI and desktop
 source integration, included in the final generated full/packed/native sweep.
 Existing qualified archives are unchanged. This is not live Jev access,
 calibrated decision quality or completed first-milestone acceptance.
+
+Protocol85's [owned model transport continuation](owned-model-transports.md)
+adds actual SSH/native parent-bound tool-less roles, versioned provenance and
+private-role acknowledgement. The Local v1/rootless worker below is unchanged;
+it is not used as a fallback or relabeled as a remote guest. Exact terminal
+late observations cannot validate advice, alter cleanup or resume work.
 
 Reuse maintained pi-ai, TypeBox, Node HTTP/IPC/abort/crypto and the existing
 worker, model registry, authorizer, encrypted event store and all-role ledger
@@ -15,7 +21,7 @@ System One-style advice; it is not Jev and never substitutes for Jev.
 ## Explicit provider and immutable request
 
 `settings.decisions` defaults off with no selected model. The user explicitly
-chooses `bounded-model`, an available concrete Local model, a positive output
+chooses `bounded-model`, an available concrete model at the selected Env, a positive output
 bound, independent deadline, total calls per turn and separate confidence
 and selected-probability thresholds. Network/hosted inputs need their own
 `allowHosted` consent. A local provider label is not a loopback boundary, and
@@ -27,8 +33,8 @@ The controller cannot invent `max_tokens`, lift finite policy, reserve zero
 output or silently select a generative alternative. The dedicated generated
 Jev wire/schema prerequisite remains in
 [decision-primitives.md](decision-primitives.md); it is not a production
-adapter. Remote/native Max is also blocked rather than executing its model
-on the Local controller.
+adapter. SSH/native uses only the separately qualified bounded-model contract
+inside its original parent; it never executes a Jev substitute on the controller.
 
 [Laya's optional-provider evaluation](decisions.md#laya-optional-provider-evaluation)
 describes a separately installed loopback or user-managed HTTP alternative.
@@ -50,7 +56,7 @@ Confidence is not permission, calibrated reliability or a user fact.
 
 ## One bounded owned worker
 
-The existing worker runs once with Local, null root, read-only mode and no
+The Local v1 worker runs once with Local, null root, read-only mode and no
 tools. It cannot request a process, validation, another role, filesystem
 access or private owned-role continuation. Its real reservation, started
 entry and original request transition commit atomically before dispatch.
@@ -70,8 +76,9 @@ provider or free usage is inferred. Invalid advice still retains valid
 reported usage. Missing/stopped/deferred results retain their original full
 unknown hold.
 
-No advice applies until the exact worker has acknowledged its terminal
-result and actually exited. The original source, model, policy, delegation
+No Local advice applies until the exact worker has acknowledged its terminal
+result and actually exited. Non-Local v2 requires the original tool-less role's
+terminal acknowledgement/release, not fabricated parent exit. The original source, model, policy, delegation
 and human interaction are rechecked after preparation and before effects.
 User cancellation synchronously signals the owned worker even if stop-intent
 persistence fails. Provider-side completion or cancellation is not proved

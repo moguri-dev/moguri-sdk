@@ -19,6 +19,7 @@ import { probeTerminalBuild } from "./terminal-build.ts";
 import { readRepositoryCli } from "./repository-metadata.ts";
 import { captureRepositorySource, SourceRequestSchema, validateRepositorySource } from "./repository-source.ts";
 import { PrivateControl } from "./private-control.ts";
+import { remoteCheckpoint } from "./remote-checkpoint.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -253,6 +254,15 @@ async function frontend(): Promise<void> {
         if (!init.workspace || !info.root) throw new MoguriError("remote_workspace_read", "Remote workspace reads need the exact approved root and read policy.");
         const result = await readWorkspace(info.root, init.workspace, abort.signal);
         outer.send({ kind: "workspace", info, result }, () => outer.end()); return;
+      }
+      if (init.action === "checkpoint" || init.action === "checkpoint-inspect") {
+        await privateDirectory(init.stateDir);
+        const stopped = () => abort.abort(new Error("Original remote checkpoint control ended."));
+        process.once("SIGTERM", stopped); process.once("SIGHUP", stopped);
+        try {
+          const result = await remoteCheckpoint(init, info, abort.signal);
+          outer.send(result, () => outer.end()); return;
+        } finally { process.off("SIGTERM", stopped); process.off("SIGHUP", stopped); }
       }
       if (init.action === "repository") {
         if (!info.root || !init.repository) throw new MoguriError("repository_binding", "Repository metadata needs its exact approved SSH root and repository identity.", 409);

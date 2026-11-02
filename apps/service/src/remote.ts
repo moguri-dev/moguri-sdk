@@ -20,6 +20,7 @@ import { remoteTerminalPeer, terminalOwnerScope } from "./terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES } from "./terminal-protocol.ts";
 import { repositoryIdentity, type RepositoryApiMetadata } from "./repository-metadata.ts";
 import { RepositorySourceCapture, SOURCE_FRAME_BYTES, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
+import type { WinddownCommitDocument } from "../../../packages/protocol/src/winddown.ts";
 
 export function validateRemoteTarget(target: RemoteTarget | null): void {
   if (!target) return;
@@ -63,6 +64,28 @@ export class RemoteRuntime {
     validateRemoteTarget(target); return structuredClone(target);
   }
   async workerDigest(): Promise<string> { return createHash("sha256").update(await readFile(this.workerPath)).digest("hex"); }
+  async checkpoint(execution: RemoteExecution, id: string, document: Extract<WinddownCommitDocument, { version: 3 }>, settings: ProjectSettings, signal: AbortSignal, beforeDispatch: () => void) {
+    if (await this.vault.read(id, signal)) throw new MoguriError("checkpoint_no_replay", "The original peer checkpoint key already exists. Inspect that exact operation; no Git request was replayed.", 409);
+    const key = randomBytes(32).toString("hex"); await this.vault.write(id, key, signal); signal.throwIfAborted();
+    beforeDispatch(); signal.throwIfAborted();
+    const response = await this.query(execution.target, { action: "checkpoint", protocol: PROTOCOL_VERSION, workerDigest: execution.workerDigest,
+      stateDir: execution.target.stateDir, root: execution.workspace, runId: id, key, checkpoint: { document, settings } }, signal);
+    if (response.kind !== "checkpoint" || response.info.root !== execution.workspace || response.info.workerDigest !== execution.workerDigest ||
+      response.result.version !== 3 || JSON.stringify(response.result.transport) !== JSON.stringify(document.transport)) {
+      throw new MoguriError("checkpoint_transport", "The exact peer checkpoint did not return its original source/build/transport result. No Local Git or successful publication was inferred.", 409);
+    }
+    return response.result;
+  }
+  async inspectCheckpoint(execution: RemoteExecution, id: string, document: Extract<WinddownCommitDocument, { version: 3 }>, settings: ProjectSettings, signal: AbortSignal) {
+    const key = await this.vault.read(id, signal);
+    if (!key || !/^[a-f0-9]{64}$/.test(key)) throw new MoguriError("checkpoint_key", "The original peer checkpoint key is missing. No replacement key or operation was created.", 409);
+    const response = await this.query(execution.target, { action: "checkpoint-inspect", protocol: PROTOCOL_VERSION, workerDigest: execution.workerDigest,
+      stateDir: execution.target.stateDir, root: execution.workspace, runId: id, key, checkpoint: { document, settings } }, signal);
+    if (response.kind !== "checkpoint-inspection" || response.info.root !== execution.workspace || response.info.workerDigest !== execution.workerDigest) {
+      throw new MoguriError("checkpoint_transport", "The original peer checkpoint inspection changed its root/build. No receipt or effect was adopted.", 409);
+    }
+    return response;
+  }
   async mcpTools(target: RemoteIdentity, root: string, workerDigest: string, request: RemoteMcpToolsRequest, signal: AbortSignal): Promise<McpToolInfo[]> {
     const result = await this.query(target, { action: "mcp-tools", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir, root, mcpTools: request }, signal);
     if (result.kind !== "mcp-tools" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.helperDigest !== request.helperDigest) throw new MoguriError("remote_mcp_response", "Remote MCP metadata did not match its exact helper/root request. No alternative catalog was used.", 409);
@@ -130,7 +153,7 @@ export class RemoteRuntime {
     const connection = await this.connect(target, signal, init.action === "memory" ? SOURCE_FRAME_BYTES : MAX_WORKER_FRAME);
     try {
       return await new Promise<BridgeEnvelope>((resolve, reject) => {
-        const deadline = setTimeout(() => reject(new MoguriError("remote_timeout", "Remote qualification/query timed out. No fallback or duplicate worker was started.", 409)), 15_000);
+        const deadline = setTimeout(() => reject(new MoguriError("remote_timeout", "Remote qualification/query timed out. No fallback or duplicate worker was started.", 409)), init.action === "checkpoint" ? 60_000 : 15_000);
         const settle = (value?: BridgeEnvelope, error?: Error) => { clearTimeout(deadline); if (error) reject(error); else if (value) resolve(value); };
         connection.child.once("error", () => settle(undefined, new MoguriError("ssh_start", "Could not start OpenSSH. Install its client explicitly.", 503)));
         connection.child.once("exit", () => settle(undefined, new MoguriError("ssh_connection", connection.diagnostic(), 409)));
@@ -138,7 +161,7 @@ export class RemoteRuntime {
         connection.wire.on("message", (raw) => {
           if (!Value.Check(BridgeEnvelopeSchema, raw)) { settle(undefined, new MoguriError("remote_protocol", "Remote worker protocol/build is incompatible.", 409)); return; }
           if (raw.kind === "error") settle(undefined, new MoguriError(raw.code ?? "remote_bootstrap", raw.message, 409));
-          else if (["probe", "catalog", "context", "workspace", "repository", "memory-validation", "mcp-tools", "inspection"].includes(raw.kind)) settle(raw);
+          else if (["probe", "catalog", "context", "workspace", "repository", "memory-validation", "mcp-tools", "inspection", "checkpoint", "checkpoint-inspection"].includes(raw.kind)) settle(raw);
         });
         signal.throwIfAborted();
         connection.wire.send(init);

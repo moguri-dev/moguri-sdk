@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import {
-  activeCompound, activeDecision, canonicalModelResponse, decisionEvidence, legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
+  activeCompound, activeDecision, activeWinddown, canonicalModelResponse, decisionEvidence, legacyArtifact, normalizeArtifact, parse, ArtifactMaterializationSchema, MoguriError, type ArtifactCommand, type ArtifactExport, type ArtifactKind, type ArtifactQuery,
   type ArtifactResponse, type ArtifactSource, type ArtifactSourcePreview, type CommandResult, type EventInput, type ProjectArtifactChoice,
   type ProjectArtifactPreview, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type ArtifactMaterializationPreview, type ArtifactMaterialization,
   type ArtifactMaterializeOptions, type CapabilityJob, type Project, type CandidatePatch, type SandboxPublication,
@@ -305,7 +305,8 @@ export class ArtifactRuntime {
       const winddownEvents = this.winddownHistory(artifact.id), winddownHashes = new Set<string>();
       for (const event of winddownEvents) {
         if (event.event_type === "winddown.recorded") for (const hash of [event.payload.winddown.inputDigest, event.payload.winddown.step.inputDigest,
-          event.payload.winddown.step.resultDigest, event.payload.winddown.commitDocumentDigest, event.payload.winddown.commit?.resultDigest]) if (hash) winddownHashes.add(hash);
+          event.payload.winddown.step.resultDigest, event.payload.winddown.commitDocumentDigest, event.payload.winddown.commit?.resultDigest, event.payload.winddown.commit?.inspection?.inputDigest,
+          ...(event.payload.winddown.version !== 1 ? [event.payload.winddown.remoteAcceptance?.inputDigest] : [])]) if (hash) winddownHashes.add(hash);
         if (event.event_type === "job.finished" && event.payload.resultDigest) winddownHashes.add(event.payload.resultDigest);
       }
       const winddownResults = [...winddownHashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
@@ -354,7 +355,7 @@ export class ArtifactRuntime {
   }
   async removal(projectId: string, choice?: ProjectArtifactChoice): Promise<{ events: EventInput[]; forget: string[] }> {
     if (this.host.snapshot().decisions.some((record) => record.projectId === projectId && activeDecision(record))) throw new MoguriError("decision_busy", "Stop and settle the exact decision owner before reviewing independent project retention/removal. No pending advice or held charge was erased.", 409);
-    if (this.host.snapshot().winddowns.some((record) => record.projectId === projectId && ["held", "running", "committing"].includes(record.status))) throw new MoguriError("winddown_busy", "Settle the actual reserved role/Git owner before reviewing project retention/removal. No capacity, ref or report was erased.", 409);
+    if (this.host.snapshot().winddowns.some((record) => record.projectId === projectId && activeWinddown(record))) throw new MoguriError("winddown_busy", "Settle the actual reserved role/Git owner and inspect partial publication before reviewing project retention/removal. No capacity, ref or report was erased.", 409);
     if (this.host.snapshot().compoundWorkflows.some((workflow) => workflow.projectId === projectId && activeCompound(workflow))) throw new MoguriError("compound_busy", "Stop and settle the actual public workflow before reviewing independent project retention/removal.", 409);
     if ((this.host.snapshot().sandboxPublications ?? []).some((publication) => publication.projectId === projectId && publication.status === "publishing")) throw new MoguriError("sandbox_publication_busy", "Stop and settle original native source publication before reviewing its independent retention or project removal.", 409);
     if ((this.host.snapshot().sandboxExecutions ?? []).some((execution) => execution.projectId === projectId &&
@@ -516,7 +517,7 @@ export class ArtifactRuntime {
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === artifact.id);
     const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === artifact.id);
     const compound = this.host.snapshot().compoundWorkflows.find((workflow) => workflow.id === artifact.id);
-    const winddown = this.host.snapshot().winddowns.find((record) => record.id === artifact.id), winddownBusy = winddown && ["held", "running", "committing"].includes(winddown.status);
+    const winddown = this.host.snapshot().winddowns.find((record) => record.id === artifact.id), winddownBusy = winddown && activeWinddown(winddown);
     const decision = this.host.snapshot().decisions.find((record) => record.id === artifact.id);
     const native = (this.host.snapshot().sandboxExecutions ?? []).find((execution) => execution.id === artifact.id);
     const nativeBusy = native && (!["owned-guest-stopped", "acknowledged"].includes(native.cleanup) || native.inspectionIntent?.status === "running");

@@ -5,9 +5,10 @@ import { spawn, execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
+import { cacheRuntimeFiles } from "./build-cache.mjs";
 
 const { values } = parseArgs({ options: { build: { type: "boolean" }, tag: { type: "string" }, receipt: { type: "string" } } });
-const files = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs"];
+const files = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", ...cacheRuntimeFiles];
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const containerfile = await readFile("scripts/worker-image/Containerfile", "utf8");
 const base = containerfile.match(/^FROM (docker\.io\/library\/node@sha256:[a-f0-9]{64})$/m)?.[1];

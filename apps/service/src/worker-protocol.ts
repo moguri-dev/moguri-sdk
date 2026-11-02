@@ -9,10 +9,30 @@ import type { CompoundValidationOperation } from "./compound-validation.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import type { DirectMcpTool } from "./direct-mcp-tools.ts";
 import type { ScriptExecution } from "../../../packages/protocol/src/script-reviews.ts";
+import { WinddownCommitDocumentSchema, WinddownCommitResultSchema } from "../../../packages/protocol/src/winddown.ts";
 
 const toolCall = ToolCallSchema;
+export const OwnedModelRequestSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("owned-model.boundary"), ownerId: Type.String(), requestId: Type.String(), stepId: Type.String() }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("owned-model.complete"), ownerId: Type.String(), requestId: Type.String(), stepId: Type.String(),
+    message: Type.Unknown(), usageReported: Type.Boolean(), generationMs: Type.Number({ minimum: 0 }), stream: ModelStreamObservationSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("owned-model.finished"), ownerId: Type.String(), requestId: Type.String(),
+    outcome: Type.Union([Type.Literal("completed"), Type.Literal("stopped"), Type.Literal("failed"), Type.Literal("partial")]),
+    diagnostic: Type.Union([Type.String(), Type.Null()]) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("owned-model.ack"), ownerId: Type.String() }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("owned-model.released"), ownerId: Type.String(),
+    outcome: Type.Union([Type.Literal("completed"), Type.Literal("stopped"), Type.Literal("failed"), Type.Literal("partial")]) }, { additionalProperties: false }),
+]);
+export type OwnedModelRequest = Static<typeof OwnedModelRequestSchema>;
+export const isOwnedModelRequest = (value: unknown): value is OwnedModelRequest => Value.Check(OwnedModelRequestSchema, value);
 export const WorkerRequestSchema = Type.Union([
+  ...OwnedModelRequestSchema.anyOf,
+  Type.Object({ kind: Type.Literal("checkpoint.phase"), phase: Type.Union([Type.Literal("intent"), Type.Literal("prepared"), Type.Literal("published"), Type.Literal("result"), Type.Literal("settled")]),
+    document: Type.Optional(WinddownCommitDocumentSchema), commit: Type.Optional(Type.String({ pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" })),
+    result: Type.Optional(WinddownCommitResultSchema) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("boundary"), requestId: Type.String(), stepId: Type.String(), loadedTools: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 64, uniqueItems: true })) }),
+  Type.Object({ kind: Type.Literal("model.dispatch"), requestId: Type.String(), stepId: Type.String(), context: Type.Unknown(),
+    loadedTools: Type.Array(Type.String(), { maxItems: 64, uniqueItems: true }), instructionSources: Type.Array(Type.String(), { maxItems: 4096, uniqueItems: true }) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("model.complete"), requestId: Type.String(), stepId: Type.String(), message: Type.Unknown(), usageReported: Type.Boolean(), generationMs: Type.Number({ minimum: 0 }), stream: Type.Optional(ModelStreamObservationSchema) }),
   Type.Object({ kind: Type.Literal("approval"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("hook"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
@@ -40,25 +60,44 @@ export const UserMcpOperationSchema = Type.Object({
   kind: Type.Literal("mcp.call"), stepId: Type.String({ minLength: 1, maxLength: 128 }), call: toolCall,
 }, { additionalProperties: false });
 export type UserMcpOperation = Static<typeof UserMcpOperationSchema>;
-export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; automaticKupo?: true; operation?: UserPlanOperation | UserMcpOperation; hooks?: HookBinding[] }
+export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; automaticKupo?: true; operation?: UserPlanOperation | UserMcpOperation; hooks?: HookBinding[];
+  retainModelRequests?: true; automaticCompaction?: true; ownedModelCalls?: true; retry?: { loadedTools: string[]; instructionSources: string[]; remainingSteps: number; kupoDraft?: { stepId: string; message: AssistantMessage } } }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; toolCatalog?: Tool[]; directMcpTools?: DirectMcpTool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate" | "checkpoint" | "decision" | "steering" | `kupo-${import("../../../packages/protocol/src/index.ts").KupoResponsePhase}`; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean; endTurn?: true };
-export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy; root?: string | null; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution } | { accepted: boolean; source?: import("../../../packages/protocol/src/tooling.ts").RetainedToolSource; continue?: true; validation?: CompoundValidationOperation; selectedResponse?: { stepId: string; message: AssistantMessage } } | DelegatedResult | RemoteMcpAuthorization; error?: string; halt?: true };
-export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" };
+export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy; root?: string | null; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution } | { accepted: boolean; source?: import("../../../packages/protocol/src/tooling.ts").RetainedToolSource; continue?: true; contextReplacement?: Message[]; validation?: CompoundValidationOperation; selectedResponse?: { stepId: string; message: AssistantMessage } } | DelegatedResult | RemoteMcpAuthorization; error?: string; halt?: true };
+export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" } |
+  { kind: "owned-model.start"; ownerId: string; parentRequestId: string } | { kind: "owned-model.stop"; ownerId: string };
 export function parentMessage(value: unknown): ParentMessage {
   if (!isRecord(value)) throw new Error("Invalid parent message.");
   if (value.kind === "stop") return { kind: "stop" };
   if (value.kind === "control-lost") return { kind: "control-lost" };
+  if ((value.kind === "owned-model.start" || value.kind === "owned-model.stop") && typeof value.ownerId === "string" && value.ownerId.length > 0 &&
+    value.ownerId.length <= 128 && (value.kind === "owned-model.stop" || typeof value.parentRequestId === "string" && value.parentRequestId.length > 0)) {
+    return value.kind === "owned-model.stop" ? { kind: value.kind, ownerId: value.ownerId } :
+      { kind: value.kind, ownerId: value.ownerId, parentRequestId: String(value.parentRequestId) };
+  }
   if (value.kind === "reply" && typeof value.requestId === "string" &&
     (value.halt === undefined || value.halt === true) &&
     (value.error === undefined || typeof value.error === "string") &&
     (value.value === undefined || isRecord(value.value))) return value as ParentMessage;
   if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) {
+    if (value.ownedModelCalls !== undefined && (value.ownedModelCalls !== true || value.operation !== undefined ||
+      value.publicCompound !== undefined || value.readOnly !== false || value.env !== "Remote" && value.env !== "Sandbox")) {
+      throw new Error("Tool-less subcalls need an explicit existing Remote/native parent owner. No Local process, private compound or user operation was adopted.");
+    }
+    if (value.automaticCompaction !== undefined && (value.automaticCompaction !== true || value.automaticKupo !== true ||
+      value.operation !== undefined || value.publicCompound !== undefined)) throw new Error("Automatic compaction needs an ordinary Kupo owner with actual-user policy. No private role can apply context.");
+    if (value.retainModelRequests !== undefined && value.retainModelRequests !== true ||
+      value.retry !== undefined && (!isRecord(value.retry) || !Array.isArray(value.retry.loadedTools) || !value.retry.loadedTools.every((tool) => typeof tool === "string") ||
+        !Array.isArray(value.retry.instructionSources) || !value.retry.instructionSources.every((source) => typeof source === "string") ||
+        !Number.isSafeInteger(value.retry.remainingSteps) || Number(value.retry.remainingSteps) < 1 || Number(value.retry.remainingSteps) > 32 ||
+        value.retry.kupoDraft !== undefined && (!isRecord(value.retry.kupoDraft) || typeof value.retry.kupoDraft.stepId !== "string" || !isAssistantMessage(value.retry.kupoDraft.message)) ||
+        value.operation !== undefined || value.publicCompound !== undefined)) throw new Error("Model retry needs its exact bounded ordinary worker owner. No lifecycle effect was replayed.");
     if (value.hooks !== undefined && (!Value.Check(Type.Array(HookBindingSchema, { maxItems: 16 }), value.hooks) || value.readOnly !== false ||
       value.root === null || value.operation !== undefined || value.publicCompound !== undefined)) throw new Error("Lifecycle hooks need an explicit writable root and ordinary turn owner. Tool-less roles cannot acquire hook execution.");
     if (value.publicCompound !== undefined && (value.publicCompound !== true || value.root !== null || value.readOnly !== true || value.env !== "Local" || value.operation !== undefined)) throw new Error("Public compound models need an explicit Local, root-less, read-only owner. Private roles cannot adopt validation authority.");
     if (value.automaticKupo !== undefined && (value.automaticKupo !== true || value.publicCompound !== undefined ||
-      value.operation !== undefined || value.env !== "Local" && value.env !== "Remote")) throw new Error("Automatic Kupo needs an explicit ordinary Local/Remote owner, not private candidate, compound-validation or user-operation authority.");
+      value.operation !== undefined || value.env !== "Local" && value.env !== "Remote" && value.env !== "Sandbox")) throw new Error("Automatic Kupo needs an explicit ordinary qualified execution owner, not private candidate, compound-validation or user-operation authority.");
     if (value.env !== undefined && !["Local", "Remote", "Sandbox"].includes(String(value.env))) throw new Error("Invalid explicit worker execution environment. No fallback.");
     if (value.operation !== undefined && (!(Value.Check(UserPlanOperationSchema, value.operation) || Value.Check(UserMcpOperationSchema, value.operation)) || value.root === null || value.context.length || value.readOnly !== false)) throw new Error("Invalid owned user operation. No model or filesystem effect was started.");
     return value as ParentMessage;

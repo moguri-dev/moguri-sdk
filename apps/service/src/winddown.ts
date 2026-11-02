@@ -5,6 +5,8 @@ import {
   ModelRoleSchema, MoguriError, parse, projectWinddown, successfulRoleEntry, WinddownDocumentSchema, WinddownCommitDocumentSchema, type CommandResult,
   type Controls, type EventInput, type Project, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type Usage, type WinddownCommand,
   type WinddownDocument, type WinddownMetadata, type WinddownQuery, type WinddownRecord, type WinddownResponse,
+  type OwnedModelTransport,
+  WinddownCommitInspectionSchema,
 } from "../../../packages/protocol/src/index.ts";
 import { reportedModelUsage, modelOutputExceeded, type BudgetRuntime } from "./budgets.ts";
 import { sourceRootSync } from "./repository-source.ts";
@@ -17,39 +19,51 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 import { digest, type EventStore } from "./store.ts";
 import type { BoundaryReply } from "./worker-protocol.ts";
 import { WinddownCommits, type WinddownCommitHost } from "./winddown-commits.ts";
+import type { PreparedModel } from "./provider.ts";
 
 interface Host {
   snapshot(): Snapshot; events(): StoredEvent[]; commit(events: EventInput[]): void;
   budgets: BudgetRuntime; models: ModelRegistry; repositories: RepositoryTelemetry;
-  root(session: Session): Project | null; projects(): ProjectService;
+  root(session: Session, repository?: string): Project | null; projects(): ProjectService;
   assertRoot(session: Session, signal: AbortSignal): Promise<void>; rootBusy(root: string, exceptJobId?: string): boolean;
   job: WinddownCommitHost["job"]; stopJob(id: string): void;
   artifact(session: Session, text: string): RetainedArtifact;
   stop(sessionId: string, turnId: string): void;
+  scopeDigest(session: Session): string;
+  transport(session: Session): OwnedModelTransport;
+  remote: WinddownCommitHost["remote"];
+  prepareModel(session: Session, modelId: string, signal: AbortSignal): Promise<PreparedModel>;
 }
 export class Winddowns {
   private readonly commits: WinddownCommits;
   constructor(private readonly store: EventStore, private readonly host: Host) {
     this.commits = new WinddownCommits(store, { snapshot: host.snapshot, commit: host.commit, root: host.root, assertRoot: host.assertRoot, rootBusy: host.rootBusy,
-      projects: host.projects, job: host.job, record: (id) => this.record(id), input: (record) => this.document(record), event: (record) => this.event(record) });
+      projects: host.projects, job: host.job, remote: host.remote, record: (id) => this.record(id), input: (record) => this.document(record), event: (record) => this.event(record) });
   }
   capability(controls: Controls) { return winddownCapability(this.host.snapshot().settings.values.winddown, this.host.snapshot().provider.models, controls.env); }
   event(winddown: WinddownRecord): EventInput { return { event_type: "winddown.recorded", profile_id: winddown.profileId, payload: { winddown } }; }
-  forTurn(sessionId: string, turnId: string): WinddownRecord | undefined { return this.host.snapshot().winddowns.find((record) => record.sessionId === sessionId && record.turnId === turnId); }
+  writeRoot(id: string): string { return this.commits.writeRoot(id); }
+  forTurn(sessionId: string, turnId: string): WinddownRecord | undefined { return this.host.snapshot().winddowns.findLast((record) => record.sessionId === sessionId && record.turnId === turnId); }
   private policy(session: Session): string {
     const state = this.host.snapshot();
     return JSON.stringify({ profileId: state.profileId, sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId,
       env: session.controls.env, modelId: session.controls.modelId, autonomy: session.controls.autonomy, mode: session.mode, pendingMode: session.pendingMode,
       allowedEnvs: state.policy, permissionRevision: state.settings.permissionRevision, permissions: state.settings.values.permissions,
-      winddown: state.settings.values.winddown, localModels: state.settings.values.localModels });
+      winddown: state.settings.values.winddown, localModels: state.settings.values.localModels,
+      ...(session.controls.env === "Local" ? {} : { remote: state.settings.values.remote, sandbox: state.settings.values.sandbox,
+        sandboxManagement: state.settings.values.sandboxManagement }) });
   }
   prepare(session: Session, turnId: string, originId: string, taskDigest: string, extra: Parameters<BudgetRuntime["planBatch"]>[1] = []) {
     const finite = this.host.budgets.status(session.id).limits.length > 0, settings = this.host.snapshot().settings.values.winddown;
     if (!finite || !settings.enabled) return null;
-    const capability = this.capability(session.controls), root = this.host.root(session);
+    const capability = this.capability(session.controls), root = session.controls.env === "Local" ? this.host.root(session) : null;
     const source = root && session.projectId ? { projectId: session.projectId, workspaceId: session.workspaceId, ...sourceRootSync(root.path) } : null;
-    const policyJson = this.policy(session), authorityDigest = digest(JSON.stringify({ profileId: this.host.snapshot().profileId, sessionId: session.id, turnId, source, taskDigest, policyJson }));
-    const document: WinddownDocument = { format: "moguri-budget-winddown", version: 1, sessionId: session.id, turnId, source, taskDigest,
+    const scopeDigest = session.controls.env === "Local" ? null : this.host.scopeDigest(session);
+    const policyJson = this.policy(session), authorityDigest = digest(JSON.stringify({ profileId: this.host.snapshot().profileId, sessionId: session.id, turnId, source, taskDigest, policyJson,
+      ...(scopeDigest ? { scopeDigest } : {}) }));
+    const scope = session.controls.env === "Local" ? { version: 1 as const, source } :
+      { version: 3 as const, source: null, env: session.controls.env, scopeDigest: scopeDigest! };
+    const document: WinddownDocument = { format: "moguri-budget-winddown", ...scope, sessionId: session.id, turnId, taskDigest,
       settings: capability.settings, modelJson: JSON.stringify(capability.model), systemPrompt: capability.systemPrompt, inputBound: capability.inputBound,
       outputBound: capability.outputBound, authorityDigest, policyDigest: digest(policyJson), policyJson };
     parse(WinddownDocumentSchema, document);
@@ -59,9 +73,11 @@ export class Winddowns {
     const planned = this.host.budgets.planBatch(session, [...extra, { id: planId, turnId, role: "checkpoint", modelId: capability.model.id,
       providerId: capability.model.providerId, apiModelId: capability.model.apiModelId, authorityDigest, inputEstimate: capability.inputBound, maxOutputTokens: capability.outputBound }]);
     const plan = planned.plans.find((plan) => plan.id === planId)!;
-    const now = new Date().toISOString(), record: WinddownRecord = { version: 1, id: artifact.id, profileId: this.host.snapshot().profileId, sessionId: session.id, turnId,
-      ownerSessionId: plan.ownerSessionId, ownerTurnId: plan.ownerTurnId, projectId: session.projectId, workspaceId: session.workspaceId, folderId: plan.folderId, env: "Local",
-      source, inputDigest: artifact.contentDigest, authorityDigest, policyDigest: document.policyDigest, originId, revision: 0, createdAt: now, updatedAt: now,
+    const origin = session.controls.env === "Local" ? { version: 1 as const, env: "Local" as const, source } :
+      { version: 3 as const, env: session.controls.env, source: null, scopeDigest: scopeDigest!, transport: null };
+    const now = new Date().toISOString(), record: WinddownRecord = { ...origin, id: artifact.id, profileId: this.host.snapshot().profileId, sessionId: session.id, turnId,
+      ownerSessionId: plan.ownerSessionId, ownerTurnId: plan.ownerTurnId, projectId: session.projectId, workspaceId: session.workspaceId, folderId: plan.folderId,
+      inputDigest: artifact.contentDigest, authorityDigest, policyDigest: document.policyDigest, originId, revision: 0, createdAt: now, updatedAt: now,
       status: "held", diagnostic: null, commitDocumentDigest: null, commit: null,
       step: { planId, role: "checkpoint", modelId: plan.modelId, providerId: plan.providerId, apiModelId: plan.apiModelId, inputBound: plan.inputBound, outputBound: plan.outputBound,
         state: "pending", stepId: null, inputDigest: null, resultDigest: null, outcome: null, diagnostic: null } };
@@ -78,13 +94,16 @@ export class Winddowns {
     const document = parse(WinddownDocumentSchema, JSON.parse(this.store.blob(record.inputDigest)));
     if (document.sessionId !== record.sessionId || document.turnId !== record.turnId || document.authorityDigest !== record.authorityDigest ||
       document.policyDigest !== record.policyDigest || digest(document.policyJson) !== record.policyDigest ||
-      JSON.stringify(document.source) !== JSON.stringify(record.source) || document.inputBound !== record.step.inputBound || document.outputBound !== record.step.outputBound) throw new MoguriError("winddown_corrupt", "Original wind-down owner, source, policy or envelope changed. No replay.", 409);
+      JSON.stringify(document.source) !== JSON.stringify(record.source) || document.inputBound !== record.step.inputBound || document.outputBound !== record.step.outputBound ||
+      document.version !== record.version || document.version !== 1 && (record.version === 1 || document.scopeDigest !== record.scopeDigest ||
+        document.env !== record.env)) throw new MoguriError("winddown_corrupt", "Original wind-down owner, source, policy or envelope changed. No replay.", 409);
     return document;
   }
   private checked(id: string) {
     const record = this.record(id), document = this.document(record), state = this.host.snapshot(), session = state.sessions.find((session) => session.id === record.sessionId);
-    if (!session || session.turnId !== record.turnId || session.controls.env !== "Local" || !state.policy.allowedEnvs.includes("Local") ||
-      session.status === "stopping" || this.policy(session) !== document.policyJson) throw new MoguriError("winddown_scope", "The actual original owner, Local boundary, mode, privacy or permissions changed/stopped. No finishing fallback.", 409);
+    if (!session || session.turnId !== record.turnId || session.controls.env !== record.env || !state.policy.allowedEnvs.includes(record.env) ||
+      session.status === "stopping" || this.policy(session) !== document.policyJson ||
+      record.version !== 1 && record.scopeDigest !== this.host.scopeDigest(session)) throw new MoguriError("winddown_scope", "The actual original owner, execution boundary, mode, privacy or permissions changed/stopped. No finishing fallback.", 409);
     const capability = this.capability(session.controls);
     if (JSON.stringify(capability.model) !== document.modelJson || capability.inputBound !== record.step.inputBound || capability.outputBound !== record.step.outputBound) throw new MoguriError("winddown_model", "The exact reviewed wind-down model or complete envelope changed. No replacement.", 409);
     return { record, document, session, capability };
@@ -99,7 +118,8 @@ export class Winddowns {
       if (!Number.isSafeInteger(knownTokens)) throw new MoguriError("winddown_metadata", "Canonical reported token aggregation exceeds safe precision. No rounded or zero-valued summary.");
       return { role: role.const, calls: entries.length, knownTokens, unknownCalls: 0 };
     });
-    return { version: 1, turnId: record.turnId, env: "Local", purpose: "budget-wind-down", taskDigest: document.taskDigest, calls: calls.length,
+    const origin = record.version === 1 ? { version: 1 as const, env: "Local" as const } : { version: 2 as const, env: record.env };
+    return { ...origin, turnId: record.turnId, purpose: "budget-wind-down", taskDigest: document.taskDigest, calls: calls.length,
       callSetDigest: digest(JSON.stringify(calls.map(({ id, role, modelId, status, reportedTokens, outcome }) => ({ id, role, modelId, status, reportedTokens, outcome })))),
       byRole, basis: "canonical-aggregate-only-no-history-or-code" };
   }
@@ -107,7 +127,7 @@ export class Winddowns {
     let checked = this.checked(id);
     if (checked.record.status !== "held" || checked.record.step.state !== "pending") throw new MoguriError("winddown_dispatched", "This exact wind-down envelope was already dispatched or ended. No replay.", 409);
     const metadata = this.metadata(checked.record, checked.document), context = winddownContext(metadata);
-    const prepared = await this.host.models.prepare(checked.record.step.modelId, signal);
+    const prepared = await this.host.prepareModel(checked.session, checked.record.step.modelId, signal);
     checked = this.checked(id); signal.throwIfAborted();
     const model = checked.capability.model;
     if (prepared.model.id !== model.apiModelId || prepared.model.contextWindow !== model.contextWindow || prepared.model.maxTokens !== model.maxTokens) throw new MoguriError("winddown_model", "Prepared model identity/capacity differs from its exact held wind-down binding.", 409);
@@ -121,6 +141,7 @@ export class Winddowns {
       modelId: model.id, providerId: model.providerId, apiModelId: model.apiModelId, authorityDigest: checked.record.authorityDigest,
       inputEstimate: configured.estimatedTokens, maxOutputTokens: checked.record.step.outputBound, repositoryCapture: this.host.repositories.finalize(checked.session, attribution) });
     const next = projectWinddown(checked.record, { ...checked.record, revision: checked.record.revision + 1, updatedAt: new Date().toISOString(), status: "running",
+      ...(checked.record.version !== 1 ? { transport: this.host.transport(checked.session) } : {}),
       step: { ...checked.record.step, state: "started", stepId, inputDigest: this.store.putBlob(JSON.stringify({ systemPrompt: checked.document.systemPrompt, messages: context })) } });
     this.host.commit([...transfer.events, this.event(next), { event_type: "model.started", profile_id: next.profileId, project_id: next.projectId, session_id: next.sessionId,
       turn_id: next.turnId, step_id: stepId, payload: { modelId: model.id, providerId: model.providerId, apiModelId: model.apiModelId, role: "checkpoint",
@@ -182,19 +203,30 @@ export class Winddowns {
         return events;
       });
   }
+  lateResult(record: WinddownRecord, resultDigest: string, outcome: string): EventInput[] {
+    if (record.version === 1 || record.status !== "partial" || !record.step.stepId || record.step.state !== "unconfirmed") {
+      if (record.step.resultDigest === resultDigest && record.step.outcome === outcome) return [];
+      throw new MoguriError("winddown_late_owner", "Only the exact original unconfirmed non-Local finishing step can gain late data. No held role, result replacement or Git work was adopted.", 409);
+    }
+    return [this.event(projectWinddown(record, { ...record, revision: record.revision + 1, updatedAt: new Date().toISOString(),
+      step: { ...record.step, state: "recorded", resultDigest, outcome } }))];
+  }
   async query(query: WinddownQuery): Promise<WinddownResponse> {
+    if (query.type === "winddown.source.preview") return { type: query.type, preview: await this.commits.sourcePreview(query.winddownId, query.paths) };
+    if (query.type === "winddown.commit.inspect") return { type: query.type, inspection: await this.commits.inspect(query.winddownId) };
     if (query.type === "winddown.status") {
       const state = this.host.snapshot(), session = state.sessions.find((session) => session.id === query.sessionId);
       if (!session) throw new MoguriError("winddown_scope", "Choose an exact existing session in this immutable profile for finishing readiness.", 404);
       try {
         if (!state.policy.allowedEnvs.includes(session.controls.env)) throw new MoguriError("winddown_env", "Current user-only allowed-env policy blocks this execution boundary. No Local fallback.", 403);
+        if (session.controls.env !== "Local") this.host.scopeDigest(session);
         const capability = this.capability(session.controls), policy = state.settings.values.kupo;
         const ids = [...new Set([capability.model.id, ...(session.controls.modelId === "kupo" ? [policy.classifierModelId, ...policy.approvedModelIds] : [session.controls.modelId])].filter((id): id is string => id !== null))];
         const accounting = this.host.budgets.status(session.id, capability.model.id);
         const usdReady = ids.every((id) => this.host.budgets.status(session.id, id).rate !== null) && accounting.totals.unpricedCalls === 0 &&
           (accounting.totals.plannedHolds === 0 || accounting.totals.plannedHeldUsd !== null);
         return { type: query.type, ready: true, modelId: capability.model.id, inputBound: capability.inputBound, outputBound: capability.outputBound, usdReady,
-          reason: "Explicit Local reserved metadata-only finishing model. Actual all-role capacity and current caps are rechecked at admission/transfer. Source acceptance and Git confirmation remain separate." };
+          reason: `Explicit ${session.controls.env} reserved metadata-only finishing model. Actual all-role capacity, captured transport and current caps are rechecked at admission/transfer. Source acceptance and Git confirmation remain separate.` };
       } catch (error) {
         if (!(error instanceof MoguriError)) throw error;
         return { type: query.type, ready: false, modelId: state.settings.values.winddown.modelId, inputBound: null, outputBound: null, usdReady: false, reason: error.message };
@@ -204,10 +236,13 @@ export class Winddowns {
     const winddown = this.record(query.winddownId);
     return { type: query.type, winddown, input: this.document(winddown), roleInput: winddown.step.inputDigest ? this.store.blob(winddown.step.inputDigest) : null,
       result: winddown.step.resultDigest ? this.store.blob(winddown.step.resultDigest) : null,
-      commitDocument: winddown.commitDocumentDigest ? parse(WinddownCommitDocumentSchema, JSON.parse(this.store.blob(winddown.commitDocumentDigest))) : null };
+      commitDocument: winddown.commitDocumentDigest ? parse(WinddownCommitDocumentSchema, JSON.parse(this.store.blob(winddown.commitDocumentDigest))) : null,
+      commitInspection: winddown.commit?.inspection ? parse(WinddownCommitInspectionSchema, JSON.parse(this.store.blob(winddown.commit.inspection.inputDigest))) : null };
   }
   async execute(command: WinddownCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     const record = this.record(command.winddownId);
+    if (command.type === "winddown.source.accept") return this.commits.acceptSource(command, finish);
+    if (command.type === "winddown.commit.reconcile") return this.commits.reconcile(command, finish);
     if (command.type === "winddown.commit") return this.commits.execute(command, finish);
     if (command.type === "winddown.stop") {
       try {

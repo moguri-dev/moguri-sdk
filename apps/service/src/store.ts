@@ -9,6 +9,9 @@ const combinedSchemaMarkers = ["model_selection_continuity_schema", "theme_catal
 const recoverySchemaMarkers = ["session_request_recovery_schema", "builtin_git_schema"] as const;
 const commandToolSchemaMarkers = ["workflow_commands_schema", "tool_preferences_schema"] as const;
 const safetyReviewSchemaMarkers = ["work_item_comments_schema", "repository_script_review_schema"] as const;
+const intakeSchemaMarkers = ["model_failure_recovery_schema", "scheduled_prompts_schema", "kupo_modes_schema"] as const;
+const ownedTransportSchemaMarkers = ["scheduled_native_preparation_schema", "owned_model_transport_schema", "transport_finishing_schema"] as const;
+const retryCheckpointSchemaMarkers = ["native_retry_restaging_schema", "transport_checkpoint_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -59,6 +62,9 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "model.request_bound": return [input.payload.inputDigest];
+    case "model.failure_recorded": return input.payload.failure.requestDigest ? [input.payload.failure.requestDigest] : [];
+    case "prompt.schedule_recorded": return input.payload.prompt.attachments.flatMap(attachmentDigests);
     case "slash.command_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((value): value is string => value !== null);
     case "slash.live_recorded": return [input.payload.control.inputDigest];
     case "slash.continuation_chosen": return [input.payload.choice.inputDigest];
@@ -117,7 +123,8 @@ function references(input: EventInput): string[] {
     case "compound.recorded": return [input.payload.workflow.inputDigest, ...input.payload.workflow.steps.flatMap((step) => [step.inputDigest, step.resultDigest]),
       ...input.payload.workflow.validations.flatMap((validation) => [validation.documentDigest, validation.resultDigest])].filter((hash): hash is string => hash !== null);
     case "winddown.recorded": return [input.payload.winddown.inputDigest, input.payload.winddown.step.inputDigest, input.payload.winddown.step.resultDigest,
-      input.payload.winddown.commitDocumentDigest, input.payload.winddown.commit?.resultDigest ?? null].filter((hash): hash is string => hash !== null);
+      input.payload.winddown.commitDocumentDigest, input.payload.winddown.commit?.resultDigest ?? null, input.payload.winddown.commit?.inspection?.inputDigest ?? null,
+      ...(input.payload.winddown.version !== 1 && input.payload.winddown.remoteAcceptance ? [input.payload.winddown.remoteAcceptance.inputDigest] : [])].filter((hash): hash is string => hash !== null);
     case "decision.recorded": return [input.payload.decision.inputDigest, input.payload.decision.actualInputDigest, input.payload.decision.resultDigest, input.payload.decision.adviceDigest].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
@@ -477,6 +484,27 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=83; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 84) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of intakeSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=84; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      if (version < 85) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of ownedTransportSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=85; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      if (version < 86) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of retryCheckpointSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=86; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
@@ -511,6 +539,48 @@ export class EventStore {
         event.event_type === "tool.requested" && event.payload.approval.call.directMcp ||
         (event.event_type === "tool.started" || event.event_type === "tool.completed") && event.payload.call.directMcp)) {
         throw new Error("Actual workflow/tool delivery history cannot become a pre-82 lineage. Original state was preserved.");
+      }
+      for (const id of intakeSchemaMarkers) {
+        if (version < 84 && marker(id) !== undefined) throw new Error(`Premature recovery/scheduling/Kupo schema marker ${id}. Original state was preserved.`);
+        if (version >= 84) require(id, "recovery/scheduling/Kupo");
+      }
+      if (version >= 4 && version < 84 && this.readEvents(0, true, version < 10).some((event) =>
+        ["prompt.schedule_recorded", "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started", "routing.roles_planned", "routing.role_started"].includes(event.event_type) ||
+        event.event_type === "budget.plan_recorded" && event.payload.plan.purpose === "routing" ||
+        event.event_type === "compaction.saved" && event.payload.compaction.automatic !== undefined ||
+        event.event_type === "context.changed" && event.payload.actor === "kupo-policy" || event.event_type === "routing.context_rebound" ||
+        (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.started" || event.event_type === "tool.completed" ? event.payload.call : null)?.name === "read_tool_result" &&
+          (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.started" || event.event_type === "tool.completed" ? event.payload.call : null)?.arguments.action === "history" ||
+        (event.event_type === "session.created" || event.event_type === "session.configured") && event.payload.controls.kupoMode !== undefined ||
+        event.event_type === "model.selection_remembered" && event.payload.selection?.kupoMode !== undefined ||
+        event.event_type === "routing.started" && event.payload.routing.mode !== undefined ||
+        event.event_type === "settings.updated" && (event.payload.settings.interactions?.idleScheduleAction !== undefined ||
+          event.payload.settings.startup?.global?.kupoMode !== undefined || event.payload.settings.startup?.profile?.kupoMode !== undefined ||
+          event.payload.settings.kupo?.workflow === "auto" && (event.payload.settings.kupo.modelProfiles !== undefined || event.payload.settings.kupo.automaticLimits !== undefined || event.payload.settings.kupo.autoCompaction !== undefined)) ||
+        event.event_type === "project.configured" && event.payload.configuration.values?.defaults?.kupoMode !== undefined ||
+        event.event_type === "global.controls_changed" && event.payload.values.kupoMode !== undefined)) {
+        throw new Error("Actual recovery/scheduling/Kupo history cannot become a pre-84 lineage. Original state was preserved.");
+      }
+      for (const id of ownedTransportSchemaMarkers) {
+        if (version < 85 && marker(id) !== undefined) throw new Error(`Premature owned transport schema marker ${id}. Original state was preserved.`);
+        if (version >= 85) require(id, "scheduled native/owned model/finishing transport");
+      }
+      if (version >= 4 && version < 85 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "sandbox.workspace_recorded" && event.payload.workspace.preparation?.version === 2 ||
+        event.event_type === "decision.recorded" && Object.hasOwn(event.payload.decision, "transport") ||
+        event.event_type === "winddown.recorded" && Object.hasOwn(event.payload.winddown, "transport"))) {
+        throw new Error("Actual scheduled native/owned model/finishing history cannot become a pre-85 lineage. Original state was preserved.");
+      }
+      for (const id of retryCheckpointSchemaMarkers) {
+        if (version < 86 && marker(id) !== undefined) throw new Error(`Premature native retry/checkpoint schema marker ${id}. Original state was preserved.`);
+        if (version >= 86) require(id, "native retry/transport checkpoint");
+      }
+      if (version >= 4 && version < 86 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "model.request_bound" && event.payload.nativeRestaging ||
+        event.event_type === "sandbox.workspace_recorded" && event.payload.workspace.preparation?.version === 3 ||
+        event.event_type === "settings.updated" && event.payload.settings.interactions?.nativeRetryRestaging !== undefined ||
+        event.event_type === "winddown.recorded" && (event.payload.winddown.version === 3 || event.payload.winddown.commit?.inspection))) {
+        throw new Error("Actual native retry/checkpoint history cannot become a pre-86 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

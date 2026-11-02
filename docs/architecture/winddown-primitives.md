@@ -3,6 +3,9 @@
 Current source integration is documented separately in
 [owned budget wind-down](budget-winddown.md). Measurements and unavailable
 features below describe this historical prerequisite, not the current source.
+Protocol85 selected-parent SSH/native metadata roles and their retained original
+hold/late-result contracts are in [owned model transports](owned-model-transports.md);
+this does not expand the Local accepted-work Git helper.
 
 Measured at **0.23 development**, protocol/database **29**, before the
 [protocol-30 planned-hold foundation](budget-plans.md). These are private D11

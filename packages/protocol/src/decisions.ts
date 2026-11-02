@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
 import { successfulRoleEntry } from "./role-sequences.ts";
 import type { BudgetEntry } from "./budgets.ts";
+import { OwnedModelTransportSchema } from "./owned-model-transports.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const name = Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }), text = Type.String({ minLength: 1, maxLength: 4096 });
@@ -48,7 +49,7 @@ export const DecisionSourceSchema = Type.Union([
   object({ kind: Type.Literal("steering"), parentStepId: id, boundaryId: id, queueRevision: revision, delegationId: id }),
 ]);
 export type DecisionSource = Static<typeof DecisionSourceSchema>;
-export const DecisionDocumentSchema = object({
+const LocalDecisionDocumentSchema = object({
   format: Type.Literal("moguri-owned-decision"), version: Type.Literal(1), sessionId: id, turnId: id, source: DecisionSourceSchema,
   root: Type.Union([object({ root: Type.String({ minLength: 1, maxLength: 4096 }), device: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }), inode: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }) }), Type.Null()]),
   state: Type.String({ maxLength: 65536 }), questions: DecisionQuestionsSchema, settings: DecisionSettingsSchema,
@@ -56,8 +57,10 @@ export const DecisionDocumentSchema = object({
   inputBound: revision, outputBound: Type.Integer({ minimum: 1, maximum: 4096 }),
   bindingDigest: hash, policyDigest: hash, policyJson: Type.String({ minLength: 1, maxLength: 128 * 1024 }),
 });
+export const DecisionDocumentSchema = Type.Union([LocalDecisionDocumentSchema,
+  object({ ...LocalDecisionDocumentSchema.properties, version: Type.Literal(2), root: Type.Null(), transport: OwnedModelTransportSchema })]);
 export type DecisionDocument = Static<typeof DecisionDocumentSchema>;
-export const DecisionRecordSchema = object({
+const LocalDecisionRecordSchema = object({
   version: Type.Literal(1), id, profileId: id, sessionId: id, turnId: id, ownerSessionId: id, ownerTurnId: maybeId,
   projectId: maybeId, workspaceId: maybeId, env: Type.Literal("Local"), kind: Type.Union([Type.Literal("tool"), Type.Literal("question"), Type.Literal("steering")]),
   source: DecisionSourceSchema, sourceDigest: hash, bindingDigest: hash, policyDigest: hash, inputDigest: hash,
@@ -71,7 +74,13 @@ export const DecisionRecordSchema = object({
   cleanup: Type.Union([Type.Literal("pending"), Type.Literal("owned-worker-stopped"), Type.Literal("unconfirmed")]),
   applied: Type.Union([object({ actor: Type.Literal("decision-provider"), choice: name, effectDigest: hash, at: time }), Type.Null()]), diagnostic,
 });
+export const DecisionRecordSchema = Type.Union([LocalDecisionRecordSchema, object({
+  ...LocalDecisionRecordSchema.properties, version: Type.Literal(2), env: Type.Union([Type.Literal("Remote"), Type.Literal("Sandbox")]),
+  transport: OwnedModelTransportSchema,
+  cleanup: Type.Union([Type.Literal("pending"), Type.Literal("owned-role-acknowledged"), Type.Literal("unconfirmed")]),
+})]);
 export type DecisionRecord = Static<typeof DecisionRecordSchema>;
+export const decisionCleanup = (record: DecisionRecord) => record.version === 1 ? "owned-worker-stopped" as const : "owned-role-acknowledged" as const;
 export function decisionEvidence(record: DecisionRecord): DecisionEvidence {
   if (!["ready", "applied"].includes(record.status) || !record.stepId || !record.actualInputDigest || !record.resultDigest || !record.adviceDigest)
     throw new MoguriError("decision_evidence", "The original complete model step/input/result/advice evidence is missing. No actor or authority was inferred.", 409);
@@ -82,23 +91,29 @@ function corrupt(message: string): never { throw new MoguriError("decision_corru
 export function projectDecision(previous: DecisionRecord | undefined, value: unknown): DecisionRecord {
   if (!Value.Check(DecisionRecordSchema, value)) corrupt("Owned decision has an unsupported shape/version.");
   const next = value;
+  if (next.version === 2 && next.transport.env !== next.env) corrupt("Actual decision transport does not match its recorded environment.");
   if (next.kind !== next.source.kind || next.role !== (next.kind === "steering" ? "steering" : "decision") ||
     ![next.createdAt, next.updatedAt].every((value) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value) ||
     next.projectId === null && next.workspaceId !== null || next.outputBound < 1 || !Number.isSafeInteger(next.inputBound + next.outputBound)) corrupt("Decision source, actual role, bounds or observations disagree.");
   if ((next.stepId === null) !== (next.actualInputDigest === null) || next.stepId === null && (next.resultDigest !== null || next.adviceDigest !== null || next.modelOutcome !== null) ||
     (next.resultDigest === null) !== (next.modelOutcome === null) || next.adviceDigest !== null && next.resultDigest === null ||
     ["ready", "applied"].includes(next.status) && (!next.stepId || !next.resultDigest || !next.adviceDigest || next.modelOutcome !== "stop" ||
-      next.workerOutcome !== "completed" || next.cleanup !== "owned-worker-stopped" || next.cancellation !== "none" || next.diagnostic !== null) ||
+      next.workerOutcome !== "completed" || next.cleanup !== decisionCleanup(next) || next.cancellation !== "none" || next.diagnostic !== null) ||
     next.status === "applied" && !next.applied || next.status !== "applied" && next.applied !== null ||
     ["rejected", "failed", "partial"].includes(next.status) && !next.diagnostic) corrupt("Decision outcome contradicts actual bounded result, worker cleanup or applied actor.");
   if (!previous) {
     if (next.revision !== 0 || next.status !== "pending" || next.createdAt !== next.updatedAt || next.stepId || next.workerOutcome || next.cancellation !== "none" ||
       next.cleanup !== "pending" || next.diagnostic) corrupt("A decision must begin with exact undispatched original request intent.");
   } else {
+    const lateResult = previous.version === 2 && ["rejected", "failed", "partial"].includes(previous.status) && next.status === previous.status &&
+      previous.stepId !== null && previous.resultDigest === null && next.resultDigest !== null && next.adviceDigest === null &&
+      next.workerOutcome === previous.workerOutcome && next.cancellation === previous.cancellation && next.cleanup === previous.cleanup &&
+      next.diagnostic === previous.diagnostic;
     const immutable = ["version", "id", "profileId", "sessionId", "turnId", "ownerSessionId", "ownerTurnId", "projectId", "workspaceId", "env", "kind",
       "sourceDigest", "bindingDigest", "policyDigest", "inputDigest", "modelId", "providerId", "apiModelId", "role", "inputBound", "outputBound", "createdAt"] as const;
-    if (!activeDecision(previous) || next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
+    if (!activeDecision(previous) && !lateResult || next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
       JSON.stringify(previous.source) !== JSON.stringify(next.source) ||
+      (previous.version === 2 || next.version === 2) && (previous.version !== 2 || next.version !== 2 || JSON.stringify(previous.transport) !== JSON.stringify(next.transport)) ||
       (["stepId", "actualInputDigest", "resultDigest", "adviceDigest", "modelOutcome", "workerOutcome"] as const).some((key) => previous[key] !== null && previous[key] !== next[key]) ||
       previous.cancellation !== "none" && next.cancellation === "none" ||
       previous.cleanup !== "pending" && previous.cleanup !== next.cleanup) corrupt("Original decision owner/request/model, observations or terminal work changed/replayed.");
@@ -113,7 +128,7 @@ export function validateDecisionLedger(records: DecisionRecord[], entries: Budge
     if (record.stepId === null) continue;
     const entry = entries.find((entry) => entry.id === record.stepId);
     if (used.has(record.stepId) || !entry || entry.sessionId !== record.sessionId || entry.turnId !== record.turnId || entry.ownerSessionId !== record.ownerSessionId ||
-      (entry.ownerTurnId ?? null) !== record.ownerTurnId || entry.projectId !== record.projectId || entry.env !== "Local" || entry.role !== record.role ||
+      (entry.ownerTurnId ?? null) !== record.ownerTurnId || entry.projectId !== record.projectId || entry.env !== record.env || entry.role !== record.role ||
       entry.modelId !== record.modelId || entry.providerId !== record.providerId || entry.apiModelId !== record.apiModelId ||
       entry.inputEstimate === null || entry.inputEstimate > record.inputBound || entry.outputLimit !== record.outputBound ||
       ["ready", "applied"].includes(record.status) && !successfulRoleEntry(entry)) corrupt("Actual decision has no matching original bounded profile-owned model entry.");

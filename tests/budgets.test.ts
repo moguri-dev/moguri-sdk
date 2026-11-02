@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { BudgetRuntime } from "../apps/service/src/budgets.ts";
 import { MoguriSdk, type Session, type Snapshot } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
@@ -177,7 +178,7 @@ test("a provider that ignores the actual output bound is partial and cannot sile
 });
 
 test("schema-12 accounting imports exact legacy usage without rewriting identities, inventing historical USD or double charging restart", { skip: process.platform !== "darwin" }, async () => {
-  const fixture = await setupFixture();
+  const fixture = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)) });
   let upgraded: Awaited<ReturnType<typeof startService>> | undefined, restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     await fixture.configure(); await fixture.send("Generated legacy accounting."); await fixture.terminal();

@@ -1,0 +1,57 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { fixtureProvider, waitFor } from "../fixture.ts";
+import { GeneratedIntakeClock } from "./intake-clock.ts";
+
+const installed = process.argv[2];
+if (!installed) throw new Error("Provide the actual independently installed package root.");
+const { createRuntime, connectMoguri } = await import(pathToFileURL(join(installed, "dist/sdk/node.mjs")).href);
+const { PROTOCOL_VERSION, KUPO_MODEL_ID, scheduleLocalChoices } = await import(pathToFileURL(join(installed, "dist/sdk/index.mjs")).href);
+assert.ok(PROTOCOL_VERSION >= 84);
+assert.equal(scheduleLocalChoices("2030-10-27T02:30", "Europe/Rome").length, 2);
+assert.ok((await readFile(join(installed, "dist/cache-NOTICES.txt"), "utf8")).includes("cacache"));
+const clock = new GeneratedIntakeClock(), generated = await fixtureProvider({ responseMode: "text", maxOutputTokens: 128,
+  httpFailure: { status: 408, message: "Generated installed upstream timeout.", remaining: 1 } });
+const root = await mkdtemp(join(tmpdir(), "moguri-installed-intake-")), project = join(root, "project"), stateDir = join(root, "state");
+await mkdir(project); await writeFile(join(project, "generated.txt"), "Generated installed project bytes.\n");
+const options = { stateDir, retentionKey: Buffer.alloc(32, 0x49), provider: generated.provider, platform: { intakeClock: clock } };
+let runtime, sdk;
+try {
+  runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
+  const added = await sdk.projects.add(project), created = await sdk.sessions.create(added.id, "Generated installed intake", { modelId: generated.modelId });
+  const id = created.id, current = () => sdk.getState().snapshot.sessions.find((session) => session.id === id);
+  await sdk.command({ type: "draft.save", sessionId: id, expectedRevision: 0, text: "Generated installed original failure.", attachments: [] });
+  await sdk.command({ type: "message.send", sessionId: id, expectedRevision: current().draft.revision, delivery: "queue" });
+  await waitFor(() => current()?.status === "failed" && !current().turnId);
+  const original = sdk.getState().snapshot.modelFailures[0];
+  assert.equal(original.lastRetryable, true); assert.equal(generated.requests.length, 1);
+  await sdk.command({ type: "draft.save", sessionId: id, expectedRevision: current().draft.revision, text: "Generated installed newer draft.", attachments: [] });
+  await sdk.sessions.retry(id, original.id, original.revision);
+  await waitFor(() => current()?.status === "completed" && !current().turnId);
+  assert.equal(current().draft.text, "Generated installed newer draft.");
+  assert.equal(generated.requests.length, 2); assert.deepEqual(generated.requests[0].messages, generated.requests[1].messages);
+  await sdk.command({ type: "draft.save", sessionId: id, expectedRevision: current().draft.revision, text: "Generated installed scheduled input.", attachments: [] });
+  const scheduled = await sdk.scheduledPrompts.create(id, { kind: "delay", minutes: 5, timeZone: "UTC" });
+  assert.equal(sdk.scheduledPrompts.list(id)[0].status, "scheduled"); assert.equal(current().messages.filter((message) => message.role === "user").length, 1);
+  await sdk.command({ type: "draft.save", sessionId: id, expectedRevision: current().draft.revision, text: "Generated installed untouched new draft.", attachments: [] });
+  clock.advanceBy(300000);
+  await waitFor(() => sdk.scheduledPrompts.list(id)[0]?.status === "admitted" && current()?.status === "completed");
+  assert.equal(sdk.scheduledPrompts.list(id)[0].id, scheduled.id); assert.equal(generated.requests.length, 3);
+  assert.equal(current().draft.text, "Generated installed untouched new draft.");
+  const source = await sdk.tools.history(id, { limitMessages: 1 });
+  assert.equal(source.profileId, sdk.profileId); assert.ok(source.text.includes("Generated installed original failure."));
+  await sdk.sessions.selectModel(id, KUPO_MODEL_ID);
+  assert.equal(current().controls.kupoMode, "balanced");
+  const { modes } = await sdk.routing.modes(id);
+  assert.equal(modes.find((mode) => mode.mode === "balanced").available, true);
+  assert.equal(modes.find((mode) => mode.mode === "performance").available, false);
+  sdk.disconnect(); await runtime.close(); runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
+  assert.equal(sdk.scheduledPrompts.list(id)[0].status, "admitted"); assert.equal(current().controls.kupoMode, "balanced");
+  assert.equal(current().draft.text, "Generated installed untouched new draft."); assert.equal(generated.requests.length, 3);
+  assert.equal(sdk.getState().snapshot.budgetEntries[0].status, "unknown");
+  assert.ok(sdk.getState().snapshot.budgetEntries[0].reservedTokens > 0);
+  console.log("Installed protocol84 SDK/actual worker: exact original-request retry, retained unknown charges, scheduled timer/ghost ownership, new-draft preservation, source history, mode readiness and restart/no-replay passed with generated inference only.");
+} finally { sdk?.disconnect(); await runtime?.close(); await generated.close(); await rm(root, { recursive: true, force: true }); }

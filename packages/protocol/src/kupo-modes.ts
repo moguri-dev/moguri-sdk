@@ -1,0 +1,66 @@
+import { Type, type Static } from "typebox";
+import type { ModelInfo, ThinkingEffort } from "./index.ts";
+
+export const KupoModeSchema = Type.Union([Type.Literal("balanced"), Type.Literal("savings"), Type.Literal("performance")]);
+export type KupoMode = Static<typeof KupoModeSchema>;
+export const kupoModes = [
+  { id: "balanced", name: "Balanced", description: "Balance declared capabilities, reviewed evaluations and reference cost" },
+  { id: "savings", name: "Savings", description: "Reviewed non-frontier models; prefer execution-host local models; no xhigh/max" },
+  { id: "performance", name: "Performance", description: "Reviewed frontier models for substantive tasks; supported xhigh/max only" },
+] as const satisfies readonly { id: KupoMode; name: string; description: string }[];
+const score = Type.Number({ minimum: 0, maximum: 1 });
+export const KupoScoresSchema = Type.Object({ reasoning: score, code: score, debugging: score, tools: score }, { additionalProperties: false });
+const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
+export const KupoModelProfileInputSchema = Type.Object({
+  modelId: Type.String({ minLength: 1, maxLength: 256 }),
+  category: Type.Union([Type.Literal("economy"), Type.Literal("standard"), Type.Literal("frontier")]),
+  costClass: Type.String({ minLength: 1, maxLength: 64 }),
+  evaluationSet: hash, scores: KupoScoresSchema,
+  referencePrice: Type.Object({ inputUsdPerMillion: Type.Number({ minimum: 0 }), outputUsdPerMillion: Type.Number({ minimum: 0 }),
+    basis: Type.Union([Type.Literal("provider-api-equivalent"), Type.Literal("local-no-api-fee")]) }, { additionalProperties: false }),
+  sourceUrl: Type.String({ minLength: 1, maxLength: 4096 }), sourceText: Type.String({ minLength: 1, maxLength: 32768 }),
+  observedAt: Type.String({ minLength: 20, maxLength: 32 }), validUntil: Type.String({ minLength: 20, maxLength: 32 }),
+  limitations: Type.String({ minLength: 1, maxLength: 2000 }),
+}, { additionalProperties: false });
+export type KupoModelProfileInput = Static<typeof KupoModelProfileInputSchema>;
+export const KupoModelProfileSchema = Type.Object({
+  ...KupoModelProfileInputSchema.properties, version: Type.Literal(1), id: Type.String({ minLength: 1, maxLength: 128 }),
+  profileId: Type.String({ minLength: 1, maxLength: 128 }), actor: Type.Literal("user"),
+  modelBindingDigest: hash, sourceDigest: hash, reviewedAt: Type.String({ minLength: 20, maxLength: 32 }),
+}, { additionalProperties: false });
+export type KupoModelProfile = Static<typeof KupoModelProfileSchema>;
+export const KupoAutomaticLimitsSchema = Type.Object({
+  maxEscalations: Type.Integer({ minimum: 1, maximum: 3 }), maxRevisions: Type.Integer({ minimum: 0, maximum: 3 }),
+  maxResultBytes: Type.Optional(Type.Integer({ minimum: 512, maximum: 65536 })),
+}, { additionalProperties: false });
+export type KupoAutomaticLimits = Static<typeof KupoAutomaticLimitsSchema>;
+export const defaultKupoAutomaticLimits = (): KupoAutomaticLimits => ({ maxEscalations: 1, maxRevisions: 1 });
+export const KupoCompactionSettingsSchema = Type.Object({
+  enabled: Type.Boolean(), modelId: Type.Union([Type.String({ minLength: 1, maxLength: 256 }), Type.Null()]),
+  triggerFraction: Type.Number({ minimum: 0.5, maximum: 0.9 }), keepRecentTurns: Type.Integer({ minimum: 1, maximum: 20 }),
+  maxCallsPerTurn: Type.Integer({ minimum: 1, maximum: 4 }), outputTokens: Type.Integer({ minimum: 32, maximum: 4096 }),
+}, { additionalProperties: false });
+export const defaultKupoCompaction = (): Static<typeof KupoCompactionSettingsSchema> => ({
+  enabled: false, modelId: null, triggerFraction: 0.75, keepRecentTurns: 2, maxCallsPerTurn: 1, outputTokens: 1024,
+});
+export function kupoModelBindingText(model: ModelInfo): string {
+  return JSON.stringify(model);
+}
+export interface KupoModeAvailability { mode: KupoMode; available: boolean; reason: string; modelIds: string[] }
+export function kupoEfforts(model: ModelInfo, mode: KupoMode, outputTokens = model.maxTokens ?? 0): Array<ThinkingEffort | "provider"> {
+  const levels = model.kupoThinkingLevels ?? (mode === "balanced" ? model.thinkingLevels : undefined);
+  if (levels === undefined) return mode === "balanced" ? ["provider"] : [];
+  if (!levels.length) return mode === "performance" || Boolean(model.thinkingLevels?.length) ? [] : ["provider"];
+  return levels.filter((effort) => (model.kupoThinkingMinimumOutput?.[effort] ?? 0) <= outputTokens &&
+    (mode === "performance" ? ["xhigh", "max"].includes(effort) :
+      mode === "savings" ? ["low", "medium", "high"].includes(effort) : effort !== "off"));
+}
+export function kupoThinking(model: ModelInfo, mode: KupoMode, complexity: "simple" | "moderate" | "complex" | null, outputTokens?: number): Exclude<ThinkingEffort, "off"> | undefined {
+  const allowed = kupoEfforts(model, mode, outputTokens);
+  const desired: Array<Exclude<ThinkingEffort, "off"> | "provider"> = mode === "performance" ? complexity === "complex" ? ["max", "xhigh"] : ["xhigh", "max"] :
+    complexity === "simple" ? ["low", "minimal", "medium", "high", "xhigh", "max", "provider"] :
+      complexity === "complex" && mode === "balanced" ? ["xhigh", "high", "max", "medium", "low", "minimal", "provider"] :
+        complexity === "complex" ? ["high", "medium", "low", "provider"] : ["medium", "high", "low", "minimal", "xhigh", "max", "provider"];
+  const selected = desired.find((effort) => allowed.includes(effort));
+  return selected === "provider" ? undefined : selected;
+}

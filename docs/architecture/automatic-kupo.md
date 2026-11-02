@@ -2,6 +2,16 @@
 
 ## Scope and sources
 
+The owner-requested protocol84 [modes/recovery/compaction follow-up](recovery-scheduling-kupo.md)
+uses the actual supplied HyDRA arXiv **2605.17106v1**, not the older unrelated
+sensor-fusion reference below. New automatic selections expose
+Balanced/Savings/Performance, actual supported effort and maximum context,
+reviewed evaluation/reference-price profiles, bounded re-review and explicitly
+enabled text compaction. Finite Local roles use complete existing-ledger plans.
+The original protocol61 contract and measurements below remain their historical
+source, not proof of live quality, current native bytes or an installed System
+One provider.
+
 Kupo is a synthetic model in the ordinary composer, not a provider or a second
 agent runtime. The user explicitly chose automatic orchestration inside the
 normal loop, with only the selected response's tool requests reaching existing
@@ -24,6 +34,15 @@ are MIT-licensed. No dependency, agent framework, hidden database, live model
 benchmark, extra authentication or provider metadata request is added.
 
 ## Selection and capability inventory
+
+New modes use current reviewed profiles for Savings/Performance; Balanced may
+use declared support without invented scores. Reviewed Cascade pairs require
+comparable capability dominance and nondecreasing reference prices; Critique
+also requires an exact different-lineage review and matching reviewed cost
+class. Supported transport levels and complete future escaped context are
+filtered before role dispatch. Performance never silently maps xhigh/max to
+High or drops a thinking budget to fit a small ceiling. Legacy explicit
+selections keep their original bounded contract until an actual user selection.
 
 Kupo always appears in the shared model catalogue, including when disconnected
 or unavailable in the selected environment. Its unavailable reason must remain
@@ -79,6 +98,16 @@ executing. Already executed, previously selected operations are not rolled
 back or replayed. Their ordinary partial-effect and cleanup rules still apply.
 
 ## Persistence and clients
+
+Protocol84 additionally retains exact model-input/auth-scope recovery, one-time
+scheduled ghost input, all-role response plans and policy-authored compaction
+handover in the same authority. Authentication change intent is not successful
+login. Original failed request/tool/role receipts and unknown charges survive.
+Only an original, complete metered recovered response resets the backoff.
+Only an explicitly enabled user policy can apply a bounded automatic text
+summary; original public history and scoped document/tool resources stay
+available, and restored history does not replay paid work. Unqualified
+Remote/native wind-down and System One transports stay unavailable.
 
 Protocol/schema 61 adds the automatic policy, exact capability/model snapshots
 and selected-response events to the existing append-only authority. Every

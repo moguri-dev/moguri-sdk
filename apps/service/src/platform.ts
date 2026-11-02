@@ -117,6 +117,7 @@ export interface PlatformHost {
   snapshot(): Snapshot;
   events(): StoredEvent[];
   commandQuery?(query: QueuedCommandQuery): QueuedCommandResponse;
+  routingModes?(sessionId: string): import("../../../packages/protocol/src/index.ts").KupoModeAvailability[];
   commit(events: EventInput[], forget?: ForgetRequest): void;
   finish: WorkspaceFinish;
   invalidateApprovals(sessionId?: string): void;
@@ -182,7 +183,7 @@ export interface PlatformHost {
   cloneRootBusy(root: string, exceptJobId?: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock }
 export class PlatformRuntime {
   readonly scriptReviews: ScriptReviews;
   readonly browser: BrowserBroker;
@@ -706,6 +707,10 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }));
   }
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
+    if (query.type === "routing.modes") {
+      if (!this.host.routingModes) throw new MoguriError("routing_authority", "This host has no qualified shared mode reader. No eligibility was guessed.", 409);
+      return { type: "routing.modes", modes: this.host.routingModes(query.sessionId) };
+    }
     if (query.type === "script.review.read") return this.scriptReviews.read(query);
     if (isQueuedCommandQuery(query)) {
       if (!this.host.commandQuery) throw new MoguriError("command_query_unavailable", "This host has no exact queued-command result reader. No input or result was reconstructed.", 409);
@@ -719,7 +724,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       if (!this.host.coordinationQuery) throw new MoguriError("coordination_authority", "The scoped coordination authority is unavailable.");
       return this.host.coordinationQuery(query);
     }
-    if (query.type === "tooling.catalog" || query.type === "tooling.result" || query.type === "tooling.results" || query.type === "tooling.command" || query.type === "tooling.state") {
+    if (query.type === "tooling.catalog" || query.type === "tooling.result" || query.type === "tooling.results" || query.type === "tooling.command" || query.type === "tooling.state" || query.type === "tooling.history") {
       if (!this.host.toolingQuery) throw new MoguriError("tooling_authority", "The scoped service tooling authority is unavailable.");
       return this.host.toolingQuery(query);
     }
@@ -1488,8 +1493,10 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (call.name === "read_tool_result") {
       if (!this.host.toolingQuery) throw new MoguriError("tooling_authority", "The scoped result authority is unavailable.");
       const args = parse(ReadToolResultSchema, call.arguments);
-      const result = await this.host.toolingQuery("action" in args ? { type: "tooling.results", sessionId: session.id, ...args } :
-        { type: "tooling.result", sessionId: session.id, input: args });
+      let query: ToolingQuery;
+      if ("action" in args && args.action === "history") { const { action: _, ...input } = args; query = { type: "tooling.history", sessionId: session.id, input }; }
+      else query = "action" in args ? { type: "tooling.results", sessionId: session.id, ...args } : { type: "tooling.result", sessionId: session.id, input: args };
+      const result = await this.host.toolingQuery(query);
       return { text: JSON.stringify(result), isError: false, outcome: "completed" };
     }
     if (call.name === "use_skill" && session.controls.env === "Local") {

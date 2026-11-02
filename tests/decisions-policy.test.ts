@@ -10,6 +10,9 @@ test("Autopilot Max requires a separately configured bounded compatible decision
   const configured = { ...settings.decisions, enabled: true, modelId: model.id };
   assert.throws(() => decisionCapability(configured, [model], "Local"), { code: "decision_privacy" });
   assert.equal(decisionCapability({ ...configured, allowHosted: true }, [model], "Local").model.id, model.id);
-  assert.throws(() => decisionCapability({ ...configured, allowHosted: true }, [model], "Remote"), { code: "decision_env" });
+  assert.throws(() => decisionCapability({ ...configured, allowHosted: true }, [model], "Remote"), { code: "decision_model" });
+  for (const env of ["Remote", "Sandbox"] as const) {
+    assert.equal(decisionCapability({ ...configured, allowHosted: true }, [{ ...model, environments: [env] }], env).model.id, model.id);
+  }
   assert.throws(() => decisionCapability({ ...configured, provider: "jev", modelId: "jev-0.0.1", allowHosted: true }, [model], "Local"), { code: "decision_output_limit" });
 });
