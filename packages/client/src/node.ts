@@ -90,12 +90,23 @@ export async function ensureConnection(options: { stateDir?: string; runtime?: s
       ...(process.env.MOGURI_LOCATION_DIR ? { MOGURI_LOCATION_DIR: process.env.MOGURI_LOCATION_DIR } : {}) },
   });
   let launchError: Error | undefined;
+  let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
   child.on("error", (error) => { launchError = error; });
+  child.once("exit", (code, signal) => { exited = { code, signal }; });
   child.unref();
   await log.close();
-  for (let attempt = 0; attempt < 100; attempt++) {
+  const deadline = performance.now() + 60_000, logPath = join(stateDir, "service.log");
+  while (performance.now() < deadline) {
     if (launchError) throw new Error(`Could not launch the Moguri service: ${launchError.message}`);
-    try { return await probe(); } catch (error) { if (!unavailable(error)) throw error; await new Promise((resolve) => setTimeout(resolve, 100)); }
+    try { return await probe(); } catch (error) { if (!unavailable(error)) throw error; }
+    if (exited) {
+      try { await lstat(join(stateDir, "service.lock")); }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+        throw new Error(`Moguri service exited with ${exited.signal ? `signal ${exited.signal}` : `code ${exited.code ?? "unknown"}`} before becoming ready. Inspect ${logPath}. No state was deleted or service automatically retried.`);
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(0, deadline - performance.now()))));
   }
-  throw new Error("Moguri service did not become ready. Inspect service.log in the private state directory.");
+  throw new Error(`Moguri service startup was not confirmed within 60 seconds. It may still be initializing; inspect ${logPath} and reconnect after it is ready. No state was deleted or replacement service started.`);
 }

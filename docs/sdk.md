@@ -1755,6 +1755,14 @@ automatic downgrade/restart. Without a callback, callers receive the actionable
 mismatch and may choose an explicit lifecycle operation themselves.
 `autoStart: false` stays strict and never invokes upgrade/launch effects.
 
+Cold auto-start waits up to 60 seconds for matching authenticated health rather
+than timing out after ten seconds during encrypted-history recovery. A process
+that exits without another retained writer reports its exit code/signal and
+exact private log path promptly. Competing launch clients may still connect only
+to the verified owner; a writer-lock file alone is not authentication. A deadline
+leaves the original initializing owner and all state intact, with no automatic
+retry, force-stop or replacement.
+
 Native desktop exit calls `stopMoguriService(capturedStateDir,
 {expectedConnection: capturedConnection})`, not a freshly inferred default root.
 The private registry fingerprint and authenticated PID/protocol must still match

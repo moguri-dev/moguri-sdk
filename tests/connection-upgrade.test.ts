@@ -5,9 +5,66 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { ensureConnection, ServiceProtocolMismatch, stopMoguriService } from "../packages/sdk/src/node.ts";
+import { ensureConnection, readConnection, ServiceProtocolMismatch, stopMoguriService } from "../packages/sdk/src/node.ts";
 import { defaultNotificationWav, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+
+test("cold service startup waits beyond ten seconds and authenticates the real recovered owner without resetting its retained draft", { timeout: 25000 }, async () => {
+  const fixture = await setupFixture(), directory = join(fixture.directory, "state"), previous = await new MoguriSdk(fixture.service.connection).ready();
+  let connection: Awaited<ReturnType<typeof ensureConnection>> | undefined, current: MoguriSdk | undefined;
+  try {
+    await previous.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "Generated slow-start retained draft.", attachments: [] });
+    previous.disconnect(); await fixture.service.close();
+    await writeFile(join(directory, "generated-startup-delay.json"), "11000", { mode: 0o600 });
+    const began = performance.now();
+    connection = await ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts") });
+    assert.ok(performance.now() - began >= 11000);
+    current = await new MoguriSdk(connection).ready();
+    assert.equal(connection.protocolVersion, PROTOCOL_VERSION);
+    assert.equal(current.getState().snapshot!.sessions[0]!.draft.text, "Generated slow-start retained draft.");
+    assert.equal(fixture.requests.length, 0);
+  } finally {
+    previous.disconnect(); current?.disconnect();
+    if (!connection) {
+      const deadline = performance.now() + 15000;
+      while (performance.now() < deadline) {
+        try { connection = await readConnection(directory); break; }
+        catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    if (!connection) throw new Error("Generated slow startup did not publish its owned service; its fixture directory was retained for inspection.");
+    await stopMoguriService(directory, { expectedConnection: connection }); await fixture.close();
+  }
+});
+
+test("a service that exits before readiness reports its exact exit and log path promptly without retrying or erasing retained input", { timeout: 15000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-startup-exit-")), input = join(directory, "generated-retained-input.txt");
+  await writeFile(input, "Generated retained startup input.\n", { mode: 0o600 });
+  try {
+    const began = performance.now();
+    await assert.rejects(() => ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-failure.mjs") }),
+      (error: unknown) => error instanceof Error && /exited.*17/.test(error.message) && error.message.includes(join(directory, "service.log")));
+    assert.ok(performance.now() - began < 5000);
+    assert.equal(await readFile(input, "utf8"), "Generated retained startup input.\n");
+    const log = await readFile(join(directory, "service.log"), "utf8");
+    assert.equal(log.match(/Generated startup failure/g)?.length, 1);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("competing cold-start clients wait for the same authenticated service even when one launch loses the writer lock", { timeout: 10000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-startup-clients-"));
+  let connections: Awaited<ReturnType<typeof ensureConnection>>[] = [];
+  try {
+    await writeFile(join(directory, "generated-startup-delay.json"), "500", { mode: 0o600 });
+    connections = await Promise.all([ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts") }),
+      ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts") })]);
+    assert.deepEqual(connections[0], connections[1]);
+  } finally {
+    const owner = connections[0] ?? await readConnection(directory);
+    await stopMoguriService(directory, { expectedConnection: owner }); await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("Finder-style service startup preserves the original PATH and exposes standard macOS tools without forwarding ambient values", { skip: process.platform !== "darwin" }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-launch-path-"));

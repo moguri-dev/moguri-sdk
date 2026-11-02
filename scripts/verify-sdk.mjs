@@ -36,6 +36,8 @@ try {
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 85 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-owned-transports.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 90_000 });
+  if (installedProtocol >= 86) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-startup.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 35_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
