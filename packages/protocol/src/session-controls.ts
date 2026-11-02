@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import type { Session, StoredEvent } from "./index.ts";
+import type { EventInput, Session } from "./index.ts";
 
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const revision = Type.Integer({ minimum: 0 });
@@ -49,7 +49,7 @@ export type SessionControlsResponse =
   | { type: "session.wait.preview"; preview: SessionWaitPreview }
   | { type: "sessions.bulk.preview"; preview: BulkSessionPreview };
 
-export function hasSessionControlsHistory(events: readonly StoredEvent[]): boolean {
+export function hasSessionControlsHistory(events: readonly EventInput[]): boolean {
   const tools = new Set(["goto_definition", "find_references", "find_in_array", "order_asc", "order_desc", "find_bigger", "find_smaller",
     "click", "type", "wait", "take_screenshot", "render_html", "playwright", "browser_wait", "browser_screenshot"]);
   return events.some((event) => {

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { realpath } from "node:fs/promises";
 import {
   appearanceColors, colorContrast, defaultBoard, defaultProjectConfiguration, MoguriSdk, sessionIndicator, sessionIndicatorColors,
-  sessionPrScope, sessionPullRequest, sessionPullRequestUrl, projectEvents, type EventInput, type PullRequestLink, type Session,
+  sessionPrScope, sessionPullRequest, sessionPullRequestUrl, sessionPriority, compareSessionPriority, projectEvents, type EventInput, type PullRequestLink, type Session,
   type SessionPrObservation, type Snapshot, type StoredEvent,
 } from "../packages/sdk/src/index.ts";
 import { ProjectIntegrations, type IntegrationOptions } from "../apps/service/src/project-integrations.ts";
@@ -67,6 +67,31 @@ test("session indicators distinguish actual work, questions, approvals, completi
     assert.equal(sessionIndicator(session, snapshot).kind, "running", "notification opt-out cannot hide actual work");
     assert.equal(fixture.requests.length, 0);
   } finally { await fixture.close(); }
+});
+
+test("pins override authoritative question/finished/error/running priority while stored order breaks ties", async () => {
+  const f = await setupFixture();
+  try {
+    const snapshot = structuredClone(f.service.controller.snapshot()), original = snapshot.sessions[0]!;
+    const make = (id: string, changes: Partial<Session>): Session => ({ ...original, id, pinned: false, ...changes });
+    const pinned = make("generated-pinned", { pinned: true, order: 100 });
+    const question = make("generated-actual-question", { pendingQuestionId: "generated-owned-question" });
+    const complete = make("generated-complete", { status: "completed" });
+    const error = make("generated-error", { status: "failed" });
+    const running = make("generated-running", { status: "running", turnId: "generated-running-turn" });
+    const first = make("generated-tie-first", { order: 1 });
+    const second = make("generated-tie-second", { order: 2 });
+    assert.deepEqual([second, running, complete, pinned, error, question, first].sort((a, b) => compareSessionPriority(a, b, snapshot)).map((session) => session.id),
+      [pinned.id, question.id, complete.id, error.id, running.id, first.id, second.id]);
+    first.prUrl = url();
+    first.prObservation = observation(first, snapshot, { state: "open", draft: false, readyToMerge: true, headSha: "a".repeat(40) });
+    assert.equal(sessionPriority(first, snapshot), 1);
+    first.prObservation.pullRequest.checkedAt = new Date(Date.now() - 121000).toISOString();
+    assert.equal(sessionPriority(first, snapshot), 5, "stale readiness does not move an idle session into the ready group");
+    snapshot.attention.push({ id: "generated-heuristic", sessionId: first.id, projectId: first.projectId, kind: "question",
+      reason: "question", source: "heuristic", messageId: null, acknowledged: false, active: true, createdAt: new Date().toISOString() });
+    assert.equal(sessionPriority(first, snapshot), 5, "heuristic text is not an actual unanswered question");
+  } finally { await f.close(); }
 });
 
 test("active work and real input take precedence over a verified merge; unknown draft and stale scope never imply ready", async () => {

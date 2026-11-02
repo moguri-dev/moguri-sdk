@@ -7,7 +7,7 @@ import { setupFixture } from "./fixture.ts";
 import { removePost77FixtureMarkers, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema 54 upgrades model defaults atomically without rewriting ciphertext, receipts or existing defaults", async () => {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let store: EventStore | undefined;
   try {
     await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: fixture.session().draft.revision, text: "Generated retained model-default migration draft.", attachments: [] });

@@ -146,3 +146,20 @@ test("real owned Playwright Electron actions produce actual retained screenshot 
     assert.equal(f.requests.length, 0);
   } finally { sdk.disconnect(); await f.close(); }
 });
+
+test("a dispatched app selector failure preserves acknowledged actions, closes the known target and never reports batch success", { skip: process.platform !== "darwin" }, async () => {
+  const f = await setupFixture(), temporary = `${f.directory}/generated-partial-app-profile`;
+  try {
+    await mkdir(temporary, { mode: 0o700 });
+    await writeFile(`${f.project}/generated-app.mjs`, await readFile(new URL("./fixtures/owned-playwright-app.mjs", import.meta.url), "utf8"));
+    const result = await runOwnedPlaywright(f.project, { launch: { kind: "electron", executable: createRequire(import.meta.url)("electron"), entry: "generated-app.mjs" },
+      actions: [{ action: "type", selector: "#name", text: "Generated single dispatch" }, { action: "click", selector: "#go" },
+        { action: "snapshot" }, { action: "wait", selector: "#generated-missing", milliseconds: 25 }] }, temporary);
+    assert.equal(result.outcome, "partial");
+    assert.equal(result.closedKnownTarget, true);
+    assert.match(result.diagnostic!, /No action was replayed/);
+    assert.equal(result.observations.length, 3);
+    assert.ok(result.observations.some((value) => typeof value === "object" && value !== null && "text" in value && String(value.text).includes("Hello Generated single dispatch")));
+    assert.equal(f.requests.length, 0);
+  } finally { await f.close(); }
+});

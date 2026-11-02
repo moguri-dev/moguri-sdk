@@ -34,7 +34,7 @@ for (const schema of ["current", "automatic-61"] as const) test(`actual ${schema
         child.once("error", reject);
         child.once("exit", () => reject(new Error(`Generated Kupo controller exited before the owned phase: ${errors}`)));
       });
-      child.send({ phase }); const value = await ready;
+      child.send({ phase, legacySessionControlsJournal: schema === "automatic-61" }); const value = await ready;
       assert.ok(isRecord(value) && typeof value.directory === "string" && typeof value.project === "string" &&
         typeof value.sessionId === "string" && typeof value.turnId === "string" && typeof value.originalCalls === "number");
       directory = value.directory;

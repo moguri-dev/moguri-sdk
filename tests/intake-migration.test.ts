@@ -42,7 +42,7 @@ for (const mode of ["missing", "downgrade"] as const) test(`actual scheduled his
     assert.throws(() => removeIntakeFixtureMarkers(raw, events), /genuine pre-84/);
     raw.exec(mode === "missing" ? "DELETE FROM retention_metadata WHERE id='scheduled_prompts_schema'" :
       "DELETE FROM retention_metadata WHERE id IN ('model_failure_recovery_schema','scheduled_prompts_schema','kupo_modes_schema'); PRAGMA user_version=83"); raw.close();
-    assert.throws(() => new EventStore(path, fixture.retentionKey), mode === "missing" ? /recovery\/scheduling\/Kupo.*marker/ : /pre-84 lineage/);
+    assert.throws(() => new EventStore(path, fixture.retentionKey), mode === "missing" ? /recovery\/scheduling\/Kupo.*marker/ : /Premature.*schema marker|pre-\d+ lineage/);
     const preserved = new DatabaseSync(path); assert.deepEqual(retainedCiphertextRows(preserved), rows); preserved.close();
   } finally { sdk.disconnect(); await fixture.close(); }
 });

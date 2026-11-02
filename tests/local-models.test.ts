@@ -93,7 +93,7 @@ test("local model configuration rejects unsafe endpoints/limits, never advertise
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 test("startup preferences preserve precedence/provenance and existing sessions across schema-6 recovery", async () => {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const settings = sdk.settings.get()!;

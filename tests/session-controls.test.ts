@@ -227,3 +227,53 @@ test("a wait admitted during an original-turn retry never adopts the earlier fai
     assert.equal(f.requests.length, 2);
   } finally { sdk.disconnect(); await f.close(); }
 });
+
+test("cross-project bulk selection and changed drafts reject the entire set before lifecycle publication", async () => {
+  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const a = (await sdk.sessions.create(f.session().projectId, "Generated bulk source")).id!;
+    const otherProject = (await sdk.projects.add(f.home)).id!;
+    const other = (await sdk.sessions.create(otherProject, "Generated foreign-project session")).id!;
+    await assert.rejects(() => sdk.sessions.bulkPreview({ action: "archive", sessionIds: [a, other] }), { code: "session_bulk_project" });
+    const input = { action: "archive" as const, sessionIds: [f.sessionId, a] };
+    const preview = (await sdk.sessions.bulkPreview(input)).preview;
+    await sdk.command({ type: "draft.save", sessionId: a, expectedRevision: 0, text: "Generated newer draft", attachments: [] });
+    await assert.rejects(() => sdk.sessions.bulk(preview, true), { code: "session_bulk_stale" });
+    assert.equal(sdk.sessions.get(a)?.status, "idle");
+    assert.equal(sdk.sessions.get(f.sessionId)?.status, "idle");
+    assert.equal(sdk.sessions.get(other)?.projectId, otherProject);
+    assert.equal(f.service.controller.events(0).some((event) => event.event_type === "session.archived" || event.event_type === "session.deleted"), false);
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("an unconfirmed selected tool outcome prevents all bulk deletion and preserves independent artifacts", async () => {
+  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const a = (await sdk.sessions.create(f.session().projectId, "Generated clear session")).id!;
+    const artifact = (await sdk.artifacts.create(a, { kind: "report", name: "Generated independent report", text: "Generated retained bytes." })).id!;
+    f.service.store.commit([{ event_type: "tool.completed", profile_id: sdk.profileId, project_id: f.session().projectId, session_id: f.sessionId,
+      payload: { call: { id: "generated-lost-tool-receipt", name: "read_file", arguments: { path: "fixture.txt" } },
+        text: "Generated fault injection: original external completion was not acknowledged.", isError: true, outcome: "unconfirmed" } }]);
+    f.service.controller.refreshProfile(); await sdk.refresh();
+    const preview = (await sdk.sessions.bulkPreview({ action: "delete", sessionIds: [a, f.sessionId] })).preview;
+    await assert.rejects(() => sdk.sessions.bulk(preview, true), { code: "cleanup_unconfirmed" });
+    assert.ok(sdk.sessions.get(a)); assert.ok(sdk.sessions.get(f.sessionId));
+    assert.equal((await sdk.artifacts.read(artifact)).text, "Generated retained bytes.");
+    assert.equal(f.service.controller.events(0).some((event) => event.event_type === "session.deleted"), false);
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("deleting a captured queued prerequisite blocks its exact dependent without selecting future work", async () => {
+  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const target = (await sdk.sessions.create(f.session().projectId, "Generated deleted prerequisite")).id!;
+    await sdk.command({ type: "draft.save", sessionId: target, text: "/session-id", attachments: [], expectedRevision: 0 });
+    await sdk.commands.submit(target, { client: "cli", expectedDraftRevision: sdk.sessions.get(target)!.draft.revision, delivery: "queue", held: true });
+    await sdk.sessions.waitFor((await sdk.sessions.waitPreview(f.sessionId, target)).preview, true);
+    await sdk.command({ type: "session.delete", sessionId: target, expectedRevision: sdk.sessions.get(target)!.revision, confirm: true });
+    await waitFor(() => f.session().wait?.status === "blocked");
+    assert.match(f.session().wait!.diagnostic!, /removed\/archived/);
+    assert.equal(f.requests.length, 0);
+    assert.equal(sdk.sessions.get(target), undefined);
+  } finally { sdk.disconnect(); await f.close(); }
+});

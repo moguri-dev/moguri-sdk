@@ -824,6 +824,8 @@ export class ControlPlane extends EventEmitter {
     this.platform?.browser.synchronize();
     this.projectWork?.changed(appended);
     this.intake?.changed();
+    if (this.projection.sessions.some((session) => session.wait?.status === "waiting") &&
+      appended.some((event) => event.event_type !== "session.wait_recorded")) this.wake();
   }
   private commandFinish(id: string, commandDigest: string, owner?: CommandOwner): WorkspaceFinish {
     return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {
