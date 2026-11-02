@@ -3,6 +3,8 @@ import test from "node:test";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 import { previewSessionBulk } from "../apps/service/src/session-bulk.ts";
+import { MoguriSdk, retryFailure } from "../packages/sdk/src/index.ts";
+import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
 
 test("exact peer review permits messages without granting ancestry, execution or an automatic paid reply", async () => {
   const f = await setupFixture();
@@ -114,4 +116,114 @@ test("bulk archive and delete settle selected roots and commit one complete life
     assert.equal(f.service.controller.snapshot().sessions.some((session) => [a, b].includes(session.id)), false);
     assert.ok(f.service.controller.snapshot().sessions.some((session) => session.id === f.sessionId));
   } finally { await f.close(); }
+});
+
+test("explicit Stop cancels only the user's live dependency and holds its undispatched prompt", async () => {
+  const f = await setupFixture({ responseMode: "text" });
+  try {
+    await f.configure();
+    const target = (await f.service.controller.dispatch(envelope({ type: "session.create", projectId: f.session().projectId }))).id!;
+    const state = () => f.service.controller.snapshot().sessions.find((session) => session.id === target)!;
+    await f.service.controller.dispatch(envelope({ type: "draft.save", sessionId: target, expectedRevision: 0, text: "Generated held prerequisite", attachments: [] }));
+    await f.service.controller.dispatch(envelope({ type: "message.send", sessionId: target, expectedRevision: state().draft.revision, held: true, delivery: "queue" }));
+    const read = await f.service.controller.platform.query({ type: "session.wait.preview", sessionId: f.sessionId, targetSessionId: target });
+    if (read.type !== "session.wait.preview") assert.fail();
+    await f.service.controller.dispatch(envelope({ type: "session.wait", sessionId: f.sessionId, targetSessionId: target, expectedDigest: read.preview.digest, confirm: true }));
+    await f.send("Generated blocked dependent prompt");
+    await f.service.controller.dispatch(envelope({ type: "session.stop", sessionId: f.sessionId }));
+    assert.equal(f.session().wait?.status, "cancelled");
+    assert.equal(f.session().queue.length, 1);
+    assert.equal(f.session().queue[0]?.held, true);
+    assert.equal(state().queue[0]?.held, true);
+    assert.equal(f.requests.length, 0);
+  } finally { await f.close(); }
+});
+
+for (const outcome of ["failed", "stopped"] as const) test(`a genuinely ${outcome} prerequisite never releases the dependent task`, async () => {
+  const f = await setupFixture({ responseMode: "text" });
+  try {
+    await f.configure();
+    const target = (await f.service.controller.dispatch(envelope({ type: "session.create", projectId: f.session().projectId,
+      overrides: { ...f.session().controls } }))).id!;
+    const state = () => f.service.controller.snapshot().sessions.find((session) => session.id === target)!;
+    await f.service.controller.dispatch(envelope({ type: "draft.save", sessionId: target, expectedRevision: 0,
+      text: outcome === "failed" ? "generated provider failure" : "generated delayed", attachments: [] }));
+    await f.service.controller.dispatch(envelope({ type: "message.send", sessionId: target, expectedRevision: state().draft.revision, held: true, delivery: "queue" }));
+    const read = await f.service.controller.platform.query({ type: "session.wait.preview", sessionId: f.sessionId, targetSessionId: target });
+    if (read.type !== "session.wait.preview") assert.fail();
+    await f.service.controller.dispatch(envelope({ type: "session.wait", sessionId: f.sessionId, targetSessionId: target, expectedDigest: read.preview.digest, confirm: true }));
+    await f.send("Generated dependent must not run");
+    await f.service.controller.dispatch(envelope({ type: "queue.release", sessionId: target, expectedRevision: state().queueRevision, messageId: state().queue[0]!.id }));
+    if (outcome === "stopped") {
+      await waitFor(() => f.requests.length === 1);
+      await f.service.controller.dispatch(envelope({ type: "session.stop", sessionId: target }));
+    }
+    await waitFor(() => f.session().wait?.status === "blocked");
+    assert.match(f.session().wait!.diagnostic!, new RegExp(`ended ${outcome}`));
+    assert.equal(f.session().queue.length, 1);
+    assert.equal(f.session().turnId, null);
+    assert.equal(f.requests.length, 1);
+  } finally { await f.close(); }
+});
+
+test("a captured headless queued command releases its dependent only after the exact command completes", async () => {
+  const f = await setupFixture({ responseMode: "text" }), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    await f.configure();
+    const target = (await sdk.sessions.create(f.session().projectId, "Generated command prerequisite")).id!;
+    await sdk.command({ type: "draft.save", sessionId: target, text: "/session-id", attachments: [], expectedRevision: 0 });
+    await sdk.commands.submit(target, { client: "cli", expectedDraftRevision: sdk.sessions.get(target)!.draft.revision, delivery: "queue", held: true });
+    const read = await sdk.sessions.waitPreview(f.sessionId, target);
+    await sdk.sessions.waitFor(read.preview, true);
+    await f.send("Generated dependent after exact command");
+    assert.equal(f.requests.length, 0);
+    const queued = sdk.sessions.get(target)!;
+    await sdk.prompts.release(target, queued.queue[0]!.id, queued.queueRevision);
+    await waitFor(() => f.session().wait?.status === "released");
+    await f.terminal();
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.service.controller.snapshot().commandExecutions.find((execution) => execution.sessionId === target)?.status, "completed");
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("manual and automatic model retries cannot bypass an exact session wait or refund unknown usage", async () => {
+  const clock = new GeneratedIntakeClock(), f = await setupFixture({ httpFailure: { status: 408, message: "Generated waiting retry." },
+    responseMode: "text", maxOutputTokens: 128, platform: { intakeClock: clock } });
+  const sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    await f.configure(); await f.send("Generated original request."); await f.terminal();
+    const target = (await sdk.sessions.create(f.session().projectId, "Generated held command")).id!;
+    await sdk.command({ type: "draft.save", sessionId: target, text: "/session-id", attachments: [], expectedRevision: 0 });
+    await sdk.commands.submit(target, { client: "cli", expectedDraftRevision: sdk.sessions.get(target)!.draft.revision, delivery: "queue", held: true });
+    await sdk.sessions.waitFor((await sdk.sessions.waitPreview(f.sessionId, target)).preview, true);
+    const original = f.service.controller.snapshot().modelFailures[0]!;
+    await assert.rejects(() => sdk.sessions.retry(f.sessionId, original.id, original.revision), { code: "model_retry_blocked" });
+    assert.equal(retryFailure(f.session(), f.service.controller.snapshot().modelFailures), undefined);
+    clock.advanceBy(30000);
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.session().wait?.status, "waiting");
+    assert.equal(f.service.controller.snapshot().budgetEntries[0]?.status, "unknown");
+    assert.ok(f.service.controller.snapshot().budgetEntries[0]!.reservedTokens! > 0);
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("a wait admitted during an original-turn retry never adopts the earlier failed completion", async () => {
+  const f = await setupFixture({ httpFailure: { status: 408, message: "Generated original retry prerequisite.", remaining: 1 },
+    maxOutputTokens: 128, respond: () => ({ text: "Generated incomplete retry.", hold: true }) });
+  const sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    await f.configure(); await f.send("Generated original retry turn."); await f.terminal();
+    const source = (await sdk.sessions.create(f.session().projectId, "Generated waiting source")).id!;
+    const original = f.service.controller.snapshot().modelFailures[0]!;
+    await sdk.sessions.retry(f.sessionId, original.id, original.revision);
+    await waitFor(() => f.requests.length === 2);
+    await sdk.sessions.waitFor((await sdk.sessions.waitPreview(source, f.sessionId)).preview, true);
+    f.service.controller.wake();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(sdk.sessions.get(source)?.wait?.status, "waiting");
+    await sdk.command({ type: "session.stop", sessionId: f.sessionId });
+    await waitFor(() => sdk.sessions.get(source)?.wait?.status === "blocked");
+    assert.match(sdk.sessions.get(source)!.wait!.diagnostic!, /ended stopped/);
+    assert.equal(f.requests.length, 2);
+  } finally { sdk.disconnect(); await f.close(); }
 });

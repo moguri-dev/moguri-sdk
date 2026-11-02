@@ -1,17 +1,25 @@
-import { lstat } from "node:fs/promises";
-import { join, isAbsolute, relative } from "node:path";
+import { lstat, realpath } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { _electron, chromium, type Browser, type ElectronApplication, type Page } from "playwright-core";
 import { parse, MoguriError } from "../../../packages/protocol/src/core.ts";
 import { PlaywrightToolSchema } from "../../../packages/protocol/src/playwright-tools.ts";
 import { browserUrl } from "../../../packages/protocol/src/browser.ts";
 import { webAccessAllows, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import type { ToolDelivery } from "../../../packages/protocol/src/chat-outputs.ts";
+import { scopedPath } from "./files.ts";
 
 export async function runOwnedPlaywright(root: string, input: Record<string, unknown>, temporary: string, access?: WebAccess) {
   const args = parse(PlaywrightToolSchema, input), deadline = Date.now() + 25000;
   if (!isAbsolute(args.launch.executable)) throw new MoguriError("playwright_executable", "Choose one exact installed executable path. No browser download, PATH search or fallback.");
+  const executable = await lstat(args.launch.executable);
+  if (!executable.isFile() || executable.isSymbolicLink() || !(executable.mode & 0o111)) throw new MoguriError("playwright_executable", "Choose the exact regular executable, not an alias, app directory or non-executable file.");
   const owner = await lstat(temporary);
   if (!owner.isDirectory() || owner.isSymbolicLink() || owner.uid !== process.getuid?.()) throw new MoguriError("playwright_owner", "The parent-owned temporary profile changed. No directory was adopted.");
+  const canonicalRoot = await realpath(root), rootOwner = await lstat(canonicalRoot);
+  if (!rootOwner.isDirectory() || rootOwner.isSymbolicLink()) throw new MoguriError("playwright_entry", "The approved app root is not a canonical directory.");
+  if (args.launch.kind === "electron" && isAbsolute(args.launch.entry)) throw new MoguriError("playwright_entry", "Use an explicit relative entry in the approved root, not another absolute app path.");
+  const entry = args.launch.kind === "electron" ? args.launch.entry === "." ? canonicalRoot : await scopedPath(canonicalRoot, args.launch.entry) : undefined;
+  if (args.actions.some((action) => action.action === "type" && (!action.text.isWellFormed() || action.text.includes("\0")))) throw new MoguriError("playwright_input", "App typing requires complete lossless text without NUL. No input was dispatched.");
   let electron: ElectronApplication | undefined, browser: Browser | undefined, page: Page | undefined;
   let dispatched = false, closed = false;
   const observations: unknown[] = [], deliveries: ToolDelivery[] = [];
@@ -19,12 +27,13 @@ export async function runOwnedPlaywright(root: string, input: Record<string, unk
   const timeout = () => Math.max(1, Math.min(10000, deadline - Date.now()));
   try {
     if (args.launch.kind === "electron") {
-      const entry = args.launch.entry === "." ? root : join(root, args.launch.entry);
-      const scoped = relative(root, entry);
-      if (isAbsolute(args.launch.entry) || scoped === ".." || scoped.startsWith("../")) throw new MoguriError("playwright_entry", "Electron entrypoints must remain in the approved root. No personal app was adopted.");
+      if (!entry) throw new MoguriError("playwright_entry", "The exact approved Electron entry is unavailable.");
+      const currentRoot = await lstat(canonicalRoot);
+      if (await realpath(root) !== canonicalRoot || currentRoot.dev !== rootOwner.dev || currentRoot.ino !== rootOwner.ino ||
+        args.launch.entry !== "." && await scopedPath(canonicalRoot, args.launch.entry) !== entry) throw new MoguriError("playwright_entry", "The exact reviewed app root/entry changed. No replacement app was launched.");
       dispatched = true;
       electron = await _electron.launch({ executablePath: args.launch.executable, args: [entry, `--user-data-dir=${temporary}`],
-        cwd: root, timeout: timeout(), env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: temporary, TMPDIR: temporary, NO_COLOR: "1" } });
+        cwd: canonicalRoot, timeout: timeout(), env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: temporary, TMPDIR: temporary, NO_COLOR: "1" } });
       page = await electron.firstWindow({ timeout: timeout() });
     } else {
       const url = browserUrl(args.launch.url);
@@ -32,8 +41,19 @@ export async function runOwnedPlaywright(root: string, input: Record<string, unk
       dispatched = true;
       browser = await chromium.launch({ executablePath: args.launch.executable, headless: true, timeout: timeout(),
         env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: temporary, TMPDIR: temporary, NO_COLOR: "1" } });
-      const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: false });
+      const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: false, serviceWorkers: "block" });
+      await context.addInitScript(() => {
+        for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection", "WebTransport", "Worker", "SharedWorker"]) {
+          Object.defineProperty(globalThis, name, { value: undefined, writable: false, configurable: false });
+        }
+      });
       await context.route("**/*", (route) => webAccessAllows(access!, route.request().url()) ? route.continue() : route.abort("blockedbyclient"));
+      await context.routeWebSocket("**/*", (socket) => {
+        const url = new URL(socket.url());
+        url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+        if (webAccessAllows(access!, url.href)) socket.connectToServer();
+        else socket.close({ code: 1008, reason: "Outside the exact approved website scope." });
+      });
       page = await context.newPage(); await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: timeout() });
     }
     page.on("dialog", (dialog) => { void dialog.dismiss().catch((error: unknown) => console.error("Owned app dialog dismissal failed:", error instanceof Error ? error.message : "unconfirmed dialog")); });

@@ -1,4 +1,4 @@
-import { isRecord, parse } from "../../../packages/protocol/src/core.ts";
+import { isRecord, MoguriError, parse } from "../../../packages/protocol/src/core.ts";
 import { WebAccessSchema } from "../../../packages/protocol/src/web-policy.ts";
 import { runOwnedPlaywright } from "./playwright-data.ts";
 
@@ -13,6 +13,7 @@ process.once("message", (request: unknown) => {
     if (Buffer.byteLength(JSON.stringify(value)) > 12 * 1024 * 1024) throw new Error("Owned app result exceeds its complete byte bound.");
     process.send?.({ ok: true, value, maxRssKiB: process.resourceUsage().maxRSS });
   }).catch((error: unknown) => {
-    process.send?.({ ok: false, code: "tool_partial", message: error instanceof Error ? error.message.slice(0, 2000) : "Original owned app outcome is unconfirmed." });
+    process.send?.({ ok: false, code: error instanceof MoguriError ? error.code : "tool_partial",
+      message: error instanceof Error ? error.message.slice(0, 2000) : "Original owned app outcome is unconfirmed." });
   }).finally(() => { if (process.connected) process.disconnect?.(); });
 });

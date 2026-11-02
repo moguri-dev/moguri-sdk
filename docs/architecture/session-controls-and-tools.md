@@ -18,7 +18,7 @@ Nemotron model remains revision `1c8deaecc64b91f034d73e08dd8b64625eb3395d`,
 `a5c435f294eea8f88ce68dd27b8c3bfea7f777cb2fbba04fcd30eaa555f429ae`,
 licensed OpenMDW-1.1. Tests never download real weights.
 
-Protocol 87 reserves five independent transactional migration markers:
+Protocol 87 adds five independent transactional migration markers:
 `session_coordination_controls_schema`, `session_pr_associations_schema`,
 `voice_lifecycle_schema`, `chat_outputs_schema`, and
 `language_app_tools_schema`, each version 1. A genuine 86 upgrade adds the
@@ -56,6 +56,10 @@ Stop cancels the user's wait and holds its undispatched prompts in the same
 synchronous command boundary. Ordinary slash text remains queued; it is not a
 new permission or command bypass. A parent model stopping owned child work
 does not manufacture a user dependency cancellation.
+The original wait event fences completion, so a same-turn retry cannot adopt
+its earlier failed end. A captured queued slash task waits for its actual
+terminal command/view acknowledgement, not a guessed model turn or a command
+receipt alone.
 
 Pinned entries appear first within their original project or Chats scope.
 Unpinned priority is actual open questions/approvals, verified ready/finished,
@@ -136,6 +140,12 @@ normal parser's heap/watchdog/Node permissions stay unchanged. The app executor
 gets no provider/service credentials, uses an exact private temporary profile,
 and closes its newly owned target after one bounded action batch. Failed/unknown
 cleanup retains that profile.
+Regular executable and entry checks reject symlink aliases before launch;
+private-profile removal rechecks the original device/inode/owner. Chromium
+requests and WebSockets retain the admitted website scope. Service workers,
+WebRTC, WebTransport and new workers are unavailable in this bounded driver.
+The Node heap and ten/30-second worker deadlines are enforced; native compiler
+memory is an explicit Go GC target, not a claimed hard aggregate OS memory cap.
 Cancellation closes known owned targets; unknown cleanup remains partial.
 Restart never adopts PIDs or replays clicks, typing, launch or screenshots.
 Screenshots are actual page bytes, normalized locally and attached to the
@@ -183,3 +193,14 @@ PR counts/exact heads, opaque interactive HTML and real screenshot bytes.
 Use actual worker/TUI, hidden desktop/owned generated Playwright apps and an
 independently installed packed SDK. Preserve failed attempts and disclose any
 unavailable transport or physical qualification rather than substituting Local.
+
+The reported factory shortcut failure was reproduced in hidden Electron:
+an ordinary Ctrl+Space tap took the held-release path despite the saved
+`pushToTalk:false` default, cancelling admission before audio was ready.
+Honouring that actual setting fixes the tap; explicit held early release
+still discards late capture rather than recording after the gesture ended.
+The three new hidden session/PR/HTML cases pass, including actual opaque-renderer
+interaction and stale PR head rejection. The five migration cases pass exact
+rollback/reopen and missing/corrupt/premature/downgraded provenance. Full
+suite, packed consumer and changed native payload results must be recorded
+separately; these focused passes are not microphone accuracy or a release claim.

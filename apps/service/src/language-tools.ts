@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { lstat, realpath } from "node:fs/promises";
 import { isRecord, MoguriError, parse } from "../../../packages/protocol/src/core.ts";
 import { LanguageToolSchema } from "../../../packages/protocol/src/language-tools.ts";
 import { readProjectFile } from "./files.ts";
@@ -9,6 +10,14 @@ import { runDataTask } from "./data-tools.ts";
 export async function languageTool(root: string, name: string, input: Record<string, unknown>, policy: FolderPolicy, signal: AbortSignal, started: (pid: number) => void) {
   const args = parse(LanguageToolSchema, input);
   if (!/\.(?:[cm]?[jt]s|[jt]sx)$/i.test(args.path)) throw new MoguriError("language_unsupported", "Definitions/references currently support JavaScript and TypeScript only. No regex/name backend was substituted.");
+  const canonicalRoot = await realpath(root), owner = await lstat(canonicalRoot);
+  if (!owner.isDirectory() || owner.isSymbolicLink()) throw new MoguriError("language_root", "The approved source root is not a canonical directory.");
+  const checkRoot = async () => {
+    const current = await realpath(root), metadata = await lstat(current);
+    if (current !== canonicalRoot || metadata.dev !== owner.dev || metadata.ino !== owner.ino || !metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new MoguriError("language_stale", "The original source root changed during analysis. No replacement root or locations were adopted.", 409);
+    }
+  };
   await assertFolderAccess(root, args.path, false, policy);
   const inventory = await findProjectFiles(root, { pattern: "**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}", path: args.scope ?? ".", limit: 100 }, policy, signal, started);
   const second = inventory.nextOffset !== null ? await findProjectFiles(root, { pattern: "**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}", path: args.scope ?? ".", limit: 100, offset: inventory.nextOffset }, policy, signal, started) : null;
@@ -25,14 +34,17 @@ export async function languageTool(root: string, name: string, input: Record<str
   }
   const selected = files.find((file) => file.path === args.path)!;
   if (args.expectedDigest && args.expectedDigest !== selected.digest) throw new MoguriError("language_stale", "The requested source version changed. Review its actual bytes before selecting a new location.", 409);
-  const snapshotDigest = createHash("sha256").update(JSON.stringify(files.map(({ path, digest }) => ({ path, digest })))).digest("hex");
+  const snapshotDigest = createHash("sha256").update(JSON.stringify([canonicalRoot, owner.dev, owner.ino, name,
+    args.path, args.line, args.column, args.scope ?? ".", files.map(({ path, digest }) => ({ path, digest }))])).digest("hex");
   if (args.offset && !args.snapshotDigest || args.snapshotDigest && args.snapshotDigest !== snapshotDigest) throw new MoguriError("language_stale", "Semantic continuation requires the exact current captured source set. No newer corpus was substituted.", 409);
+  await checkRoot();
   const value = await runDataTask({ kind: name === "goto_definition" ? "language.definition" : "language.references", arguments: args, seed: { files } }, signal, started);
   if (!isRecord(value) || !Array.isArray(value.locations)) throw new MoguriError("language_output", "The compiler returned no bounded typed location result.");
   for (const file of files) {
     signal.throwIfAborted();
     if ((await readProjectFile(root, file.path)).digest !== file.digest) throw new MoguriError("language_stale", "The source set changed during analysis. No obsolete locations were called current.", 409);
   }
+  await checkRoot();
   const result = { ...value, snapshotDigest, sourceDigest: selected.digest, admittedFiles: files.length,
     inventoryComplete: inventory.complete && (!second || second.complete && second.nextOffset === null), scope: args.scope ?? "." };
   const rawText = JSON.stringify(result);

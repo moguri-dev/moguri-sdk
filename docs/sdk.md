@@ -254,10 +254,10 @@ Installed and configured skills share the same bounded selection path.
 Desktop dictation uses `voice.startCapture(sessionId, id?, { streaming: true })`,
 ordered `appendCapture(..., sequence, pcmBytes)`, volatile
 `readCapture(...): { text, revision }`, then `finishCapture(..., finalSequence)`.
-The microphone button toggles record/confirm on separate clicks; only the held
-voice shortcut uses release-to-finish. Renderer gesture ownership prevents an
-old shortcut release from finishing a newer click-owned capture. Legacy
-`voice.pushToTalk` settings remain readable without controlling the button.
+The microphone button toggles record/confirm on separate clicks. The factory
+Ctrl+Space shortcut also toggles; `voice.pushToTalk:true` explicitly selects
+held press/release behavior. Renderer gesture ownership prevents an old
+shortcut release from finishing a newer click-owned capture.
 Finish acknowledges flush intent; await the original job separately for the
 exact completed transcript. Frames are mono 16-kHz PCM16, bounded per frame and
 capture, authenticated with the transient original nonce, never journaled.
@@ -265,6 +265,76 @@ capture, authenticated with the transient original nonce, never journaled.
 concurrent/foreign edits. Batch WAV upload and reviewed transcript insertion
 remain separate APIs. Reconnect/restart cannot replay PCM, and cancelling a
 retained partial job never acknowledges uncertain cleanup as successful.
+
+`voice.enable(true, expectedSettingsRevision?)` reviews the pinned license,
+enables voice and downloads its sole managed model through an owned job.
+`voice.disable(true, expectedSettingsRevision?)` joins this profile's voice
+work, closes its recognizer and removes only the exact managed model/staging.
+`voice.prepare()` warms the qualified recognizer without microphone access.
+`voice.enabled` defaults false; legacy voice settings preserve their prior
+enabled behavior without downloading implicitly. `voice.standby` is separate
+user consent for the focused desktop composer's visible, scoped microphone
+standby. External model directories are never deletion authority.
+
+## Session IDs, dependencies and interactive outputs
+
+`sessions.get(id).id` and `/session-id` expose the real stable identity.
+`attachments.sessionPreview(destinationId, sourceId)` and
+`attachments.session(destinationId, sourceId, digest, true)` retain reviewed
+public context, including archived sources. ID matching never grants execution
+or private transcript/console access.
+
+`sessions.waitPreview(sourceId, targetId)` captures one current target turn or
+already queued task. `sessions.waitFor(preview, true)` saves that exact
+success-only dependency; `sessions.cancelWait(sourceId, waitId, revision)` removes
+only the observed wait. Stop cancels a user's wait and holds undispatched input.
+Failure, stop, deletion, archive, changed scope or unknown completion never
+releases it. `/wait-session` uses the normal command queue; unheld `/stop` stays
+the existing live escape hatch.
+
+`sessions.bulkPreview({action, sessionIds, targetSessionId?, children?})` and
+`sessions.bulk(preview, true)` atomically apply reviewed same-project homogeneous
+attach/detach or settled whole-set archive/delete. `children` is `cascade` or
+`detach` for unselected descendants. Profile-scoped
+`retention.confirmBulkArchive`/`confirmBulkDelete` skip only UI confirmation.
+`coordination.preview`/`grant` enable explicit same-profile public peer messages,
+not parent-style dispatch/stop permission. `sessions.associatePr(id, source)`
+requires the exact verified `github.source` plus `expectedDigest`; selecting an
+additional PR never changes first-association cleanup provenance.
+
+Built-ins `goto_definition` and `find_references` use the pinned TypeScript 7
+native semantic API over an approved JS/TS corpus: 200 files, 128 KiB each,
+2 MiB total, 1-based UTF-16 positions. Returned `snapshotDigest` binds the root,
+complete query and exact source set for continuation. Standard libraries,
+installed dependency types, custom config/plugins and other languages are
+not silently replaced by regex results. `find_in_array`, `order_asc`,
+`order_desc`, `find_bigger` and `find_smaller` accept bounded typed values with
+stable, non-coercing comparisons. Discover schemas through `tools.catalog`.
+
+`chatOutputs.renderHtml(sessionId, title, html)` and `render_html` deliver exact
+retained HTML up to 128 KiB. Desktop opens an isolated interactive document,
+without Node, Moguri access, network, file input or navigation. CLI/TUI expose
+the original source and a truthful non-rendering boundary.
+
+`click`, `type`, `wait` and `take_screenshot` use the exact user-enabled Local
+Browser pane, `controlId`, expected URL and fresh element refs. The matching
+MCP primitives remain available. `apps.run(sessionId, {launch, actions})` is a
+bounded `playwright` batch for a newly owned Electron or headless Chromium
+instance, never a personal app/browser. Launch selects an exact installed
+regular executable and relative Electron entry or approved website URL.
+Chromium denies out-of-scope HTTP/WebSocket traffic, service workers,
+WebTransport, WebRTC and new workers. Password/file/hidden inputs are refused.
+Normal Local host execution is not SendBox containment; non-Local and
+restricted-folder/read-only app launches stay blocked. No browser is downloaded
+automatically. Known target closure does not prove detached-descendant cleanup.
+
+Screenshot bytes are normalized and retained as typed chat attachments under
+their original user/model tool actor, not implicitly added to provider image
+context. `attachments.read(sessionId, attachmentId)` retrieves their genuine
+bytes. Partial/cancelled/lost work is not replayed or called successful.
+`github.read` resources `files` and `jobs` bind exact PR/run IDs and head SHA;
+the PR pane's Files/Actions/Reviews and reviewed watch use the same account/root
+and expose stale/unavailable data without acquiring GitHub write authority.
 
 ## Remembered approvals and GitHub entry points
 

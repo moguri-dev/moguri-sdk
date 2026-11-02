@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import * as vec from "sqlite-vec";
-import { attachmentDigests, eventTypes, hasCombinedWorkspaceHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { attachmentDigests, eventTypes, hasCombinedWorkspaceHistory, hasSessionControlsHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
@@ -523,12 +523,7 @@ export class EventStore {
         if (version < 87 && marker(id) !== undefined) throw new Error(`Premature session controls/tools schema marker ${id}. Original state was preserved.`);
         if (version >= 87) require(id, "session controls/tools");
       }
-      if (version >= 4 && version < 87 && this.readEvents(0, true, version < 10).some((event) =>
-        event.event_type === "session.wait_recorded" || event.event_type === "session.pr_associated" || event.event_type === "tool.completed" && event.payload.attachments !== undefined ||
-        event.event_type === "session.pr_observed" && event.payload.observation.pullRequest.readyToMerge !== undefined ||
-        event.event_type === "coordination.linked" && event.payload.link.kind === "peer" ||
-        event.event_type === "settings.updated" && (event.payload.settings.retention.confirmBulkArchive !== undefined || event.payload.settings.retention.confirmBulkDelete !== undefined ||
-          event.payload.settings.voice.enabled !== undefined || event.payload.settings.voice.standby !== undefined))) {
+      if (version >= 4 && version < 87 && hasSessionControlsHistory(this.readEvents(0, true, version < 10))) {
         throw new Error("Actual session controls/tools history cannot become a pre-87 lineage. Original state was preserved.");
       }
       for (const id of recoverySchemaMarkers) {

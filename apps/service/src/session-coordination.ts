@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { terminalCommandExecution } from "../../../packages/protocol/src/queued-commands.ts";
 import { MoguriError, type Session, type Snapshot, type StoredEvent, type EventInput, type CommandResult, type PublicMessage, type QueueItem } from "../../../packages/protocol/src/index.ts";
 import type { CoordinationBinding, CoordinationCommand, CoordinationLink, CoordinationMessage, CoordinationMetadata, CoordinationOrigin, CoordinationQuery, CoordinationRead, CoordinationResponse, CoordinationTaskOrigin, SessionContextInput, SessionControlInput } from "../../../packages/protocol/src/coordination.ts";
 import { textFilePage } from "./files.ts";
@@ -230,24 +231,35 @@ export class SessionCoordination {
       return { event_type: "session.wait_recorded", profile_id: this.host.profileId, project_id: source.projectId, session_id: source.id, payload: { wait } };
     }
     reconcileWaits(): void {
-      const snapshot = this.host.snapshot(), events: EventInput[] = [];
+      const snapshot = this.host.snapshot(), history = this.host.events(), events: EventInput[] = [];
       for (const source of snapshot.sessions) {
         const wait = source.wait;
         if (!wait || wait.status !== "waiting") continue;
         const target = snapshot.sessions.find((session) => session.id === wait.targetSessionId);
         let diagnostic: string | null = null, completed = false;
         try {
-          if (!target || target.status === "archived" || source.status === "archived") diagnostic = "The original prerequisite or waiting session was removed/archived. Restore and explicitly review a new dependency.";
+          const intent = history.find((event) => event.event_type === "session.wait_recorded" && event.session_id === source.id &&
+            event.payload.wait.id === wait.id && event.payload.wait.revision === 0 && event.payload.wait.status === "waiting");
+          if (!intent) diagnostic = "The original wait intent is unavailable. Inspect and explicitly replace it; no old completion was adopted.";
+          else if (!target || target.status === "archived" || source.status === "archived") diagnostic = "The original prerequisite or waiting session was removed/archived. Restore and explicitly review a new dependency.";
           else if (this.waitScope(source) !== wait.sourceScope || this.waitScope(target) !== wait.targetScope) diagnostic = "The original dependency's execution scope changed. No replacement root or future task was adopted.";
           else {
-            const start = wait.task.kind === "queue" ? this.host.events().find((event) => event.session_id === target.id &&
+            const start = wait.task.kind === "queue" ? history.find((event) => event.session_id === target.id &&
               event.event_type === "turn.started" && event.payload.item.id === wait.task.id) : undefined;
             const turnId = wait.task.kind === "turn" ? wait.task.id : start?.turn_id;
-            const end = turnId ? this.host.events().findLast((event) => event.session_id === target.id && event.turn_id === turnId && event.event_type === "turn.finished") : undefined;
+            const end = turnId ? history.findLast((event) => event.seq > intent.seq && event.session_id === target.id &&
+              event.turn_id === turnId && event.event_type === "turn.finished") : undefined;
+            const command = wait.task.kind === "queue" && !start ? snapshot.commandExecutions.findLast((execution) =>
+              execution.sessionId === target.id && execution.queueItemId === wait.task.id) : undefined;
             if (end?.event_type === "turn.finished") {
               completed = end.payload.outcome === "completed";
               if (!completed) diagnostic = `The captured prerequisite ended ${end.payload.outcome}. This session stays paused; no failed or unknown task was treated as success.`;
-            } else if (!turnId && !target.queue.some((item) => item.id === wait.task.id)) diagnostic = "The captured queued prerequisite was removed without successful completion. Future work cannot replace it.";
+            } else if (command && terminalCommandExecution(command.status)) {
+              const terminal = history.findLast((event) => event.event_type === "slash.command_recorded" &&
+                event.payload.execution.id === command.id && terminalCommandExecution(event.payload.execution.status));
+              completed = command.status === "completed" && Boolean(terminal && terminal.seq > intent.seq);
+              if (!completed) diagnostic = `The captured command prerequisite ended ${command.status} or lost its original completion fence. This session stays paused.`;
+            } else if (!turnId && !command && !target.queue.some((item) => item.id === wait.task.id)) diagnostic = "The captured queued prerequisite was removed without successful completion. Future work cannot replace it.";
           }
         } catch (error) {
           if (!(error instanceof MoguriError)) throw error;

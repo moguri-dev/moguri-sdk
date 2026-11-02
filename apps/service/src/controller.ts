@@ -292,7 +292,8 @@ export class ControlPlane extends EventEmitter {
     this.coordination = new SessionCoordination({
       profileId: this.profileId, snapshot: () => this.snapshot(), events: () => this.events(0),
       scope: (session) => this.coordinationScope(session), binding: (session) => this.coordinationBinding(session),
-      waitScope: (session) => frameDigest(["session-wait-binding-v1", this.commandBinding(session), session.homeRoot ?? null,
+      waitScope: (session) => frameDigest(["session-wait-binding-v1", session.controls.env === "Remote" ?
+        this.coordinationBinding(session) : this.commandBinding(session), session.homeRoot ?? null,
         session.sandboxWorkspaceId ?? null, this.projection.sandboxWorkspaces?.find((workspace) => workspace.id === session.sandboxWorkspaceId)?.inputDigest ?? null]),
       plan: (sessionId) => this.platform.progress.currentPlan(sessionId) ?? null, commit: (events) => this.commit(events),
       stop: (id) => this.stop(id), blocked: (session) => this.blocked(session), wake: () => this.wake(),

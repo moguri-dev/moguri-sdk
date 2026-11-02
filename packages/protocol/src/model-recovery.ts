@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
 import type { Session } from "./index.ts";
+import { sessionWaiting } from "./session-controls.ts";
 
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -37,7 +38,7 @@ export function recoveryDueRound(cycle: RecoveryCycle | null, now: number): numb
   return due;
 }
 export function retryFailure(session: Session, failures: readonly ModelFailure[]): ModelFailure | undefined {
-  if (session.status !== "failed" || session.turnId) return;
+  if (session.status !== "failed" || session.turnId || sessionWaiting(session)) return;
   const last = failures.findLast((failure) => failure.sessionId === session.id);
   return last?.id === session.lastModelFailureId && last?.requestDigest && last.retryable && last.lastRetryable &&
     ["pending", "exhausted", "blocked"].includes(last.status) ? last : undefined;

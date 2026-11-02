@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import type { Session } from "./index.ts";
+import type { Session, StoredEvent } from "./index.ts";
 
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const revision = Type.Integer({ minimum: 0 });
@@ -48,3 +48,21 @@ export type SessionControlsCommand = Static<typeof SessionControlsCommandSchema>
 export type SessionControlsResponse =
   | { type: "session.wait.preview"; preview: SessionWaitPreview }
   | { type: "sessions.bulk.preview"; preview: BulkSessionPreview };
+
+export function hasSessionControlsHistory(events: readonly StoredEvent[]): boolean {
+  const tools = new Set(["goto_definition", "find_references", "find_in_array", "order_asc", "order_desc", "find_bigger", "find_smaller",
+    "click", "type", "wait", "take_screenshot", "render_html", "playwright", "browser_wait", "browser_screenshot"]);
+  return events.some((event) => {
+    const call = event.event_type === "tool.requested" ? event.payload.approval.call :
+      event.event_type === "tool.started" || event.event_type === "tool.completed" ? event.payload.call : null;
+    return Boolean(call && tools.has(call.name)) ||
+      event.event_type === "session.wait_recorded" || event.event_type === "session.pr_associated" ||
+      event.event_type === "tool.completed" && event.payload.attachments !== undefined ||
+      event.event_type === "job.started" && ["voice.prepare", "voice.disable"].includes(event.payload.job.kind) ||
+      event.event_type === "session.pr_observed" && event.payload.observation.pullRequest.readyToMerge !== undefined ||
+      event.event_type === "coordination.linked" && event.payload.link.kind === "peer" ||
+      event.event_type === "settings.updated" && (event.payload.settings.retention.confirmBulkArchive !== undefined ||
+        event.payload.settings.retention.confirmBulkDelete !== undefined || event.payload.settings.voice.enabled !== undefined ||
+        event.payload.settings.voice.standby !== undefined);
+  });
+}

@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { createServer } from "node:http";
+import { chromium } from "playwright-core";
+import { WebSocketServer } from "ws";
 import sharp from "sharp";
 import { arrayTool, ArrayCompareSchema, ArrayOrderSchema, MoguriSdk, parse } from "../packages/sdk/src/index.ts";
 import { executeTool } from "../apps/service/src/tools.ts";
+import { runOwnedPlaywright } from "../apps/service/src/playwright-data.ts";
 import { setupFixture } from "./fixture.ts";
 
 test("typed array find/sort/compare is stable, exact and rejects mixed/missing values", () => {
@@ -32,9 +36,70 @@ test("actual native compiler resolves definitions and aliases without matching u
     assert.ok(references.locations.some((location: { path: string; line: number }) => location.path === "b.ts" && location.line === 3));
     assert.equal(references.locations.some((location: { path: string; line: number }) => location.path === "b.ts" && location.line === 2), false);
     assert.equal(JSON.parse((await run("goto_definition", "b.ts", 2, 7)).text).locations[0].path, "b.ts");
+    const changedQuery = { path: "b.ts", line: 2, column: 7, snapshotDigest: definition.snapshotDigest, offset: 1 };
+    await assert.rejects(() => executeTool(f.project, { id: "generated-stale-query", name: "goto_definition", arguments: changedQuery },
+      new AbortController().signal, () => {}, () => {}, undefined, { mode: "agent", env: "Local", folders: { denied: [], readOnly: [] } }), { code: "language_stale" });
     await assert.rejects(() => run("goto_definition", "missing.py", 1, 1), { code: "language_unsupported" });
     assert.equal(f.requests.length, 0);
   } finally { await f.close(); }
+});
+
+test("Playwright refuses app path aliases before launching or typing into another root", async () => {
+  const f = await setupFixture(), temporary = `${f.directory}/generated-app-profile`;
+  try {
+    await mkdir(temporary, { mode: 0o700 });
+    await writeFile(`${f.home}/outside-app.mjs`, "throw new Error('A generated outside app must not execute.');");
+    await symlink(`${f.home}/outside-app.mjs`, `${f.project}/alias-app.mjs`);
+    const executable = createRequire(import.meta.url)("electron");
+    await assert.rejects(() => runOwnedPlaywright(f.project, { launch: { kind: "electron", executable, entry: "alias-app.mjs" },
+      actions: [{ action: "take_screenshot" }] }, temporary), { code: "path_denied" });
+    await assert.rejects(() => runOwnedPlaywright(f.project, { launch: { kind: "electron", executable, entry: `${f.home}/outside-app.mjs` },
+      actions: [{ action: "take_screenshot" }] }, temporary), { code: "playwright_entry" });
+    assert.equal(f.requests.length, 0);
+  } finally { await f.close(); }
+});
+
+test("actual owned Chromium acknowledges interaction and blocks unapproved HTTP and WebSocket endpoints", { skip: process.platform !== "darwin" }, async () => {
+  let forbiddenRequests = 0, forbiddenSockets = 0;
+  const forbidden = createServer((_request, response) => { forbiddenRequests++; response.end("Generated blocked endpoint"); });
+  const sockets = new WebSocketServer({ server: forbidden });
+  sockets.on("connection", () => { forbiddenSockets++; });
+  await new Promise<void>((resolve) => forbidden.listen(0, "127.0.0.1", resolve));
+  const foreign = forbidden.address();
+  if (!foreign || typeof foreign === "string") throw new Error("Generated forbidden endpoint missing.");
+  const server = createServer((_request, response) => {
+    response.setHeader("Content-Type", "text/html");
+    response.end(`<label>Name<input id="name"></label><button id="go" onclick="document.querySelector('output').textContent='Hello '+document.querySelector('#name').value">Apply</button><output>Not applied</output>
+      <script>fetch("http://127.0.0.1:${foreign.port}/blocked").catch(()=>{});new WebSocket("ws://127.0.0.1:${foreign.port}/blocked");</script>`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Generated approved endpoint missing.");
+  const origin = `http://127.0.0.1:${address.port}`, f = await setupFixture(), temporary = `${f.directory}/generated-browser-profile`;
+  try {
+    await mkdir(temporary, { mode: 0o700 });
+    const result = await runOwnedPlaywright(f.project, { launch: { kind: "chromium", executable: chromium.executablePath(), url: origin },
+      actions: [{ action: "type", selector: "#name", text: "Generated Chromium visitor" }, { action: "click", selector: "#go" },
+        { action: "wait", milliseconds: 150 }, { action: "snapshot" }, { action: "take_screenshot" }] }, temporary,
+    { version: 1, unrestricted: false, origins: [origin], sites: [] });
+    assert.equal(result.outcome, "completed", result.diagnostic ?? "The exact owned Chromium batch failed.");
+    assert.equal(result.closedKnownTarget, true);
+    assert.ok(result.observations.some((entry) => typeof entry === "object" && entry !== null && "text" in entry && String(entry.text).includes("Hello Generated Chromium visitor")));
+    assert.equal(forbiddenRequests, 0); assert.equal(forbiddenSockets, 0);
+    const screenshot = result.deliveries[0];
+    assert.ok(screenshot?.kind === "image");
+    const bytes = Buffer.from(screenshot.data, "base64");
+    assert.equal(bytes.subarray(1, 4).toString(), "PNG");
+    assert.ok((await sharp(bytes).metadata()).width! >= 1280);
+    assert.equal(f.requests.length, 0);
+  } finally {
+    await f.close();
+    sockets.close();
+    for (const target of [server, forbidden]) {
+      target.closeAllConnections();
+      await new Promise<void>((resolve) => target.close(() => resolve()));
+    }
+  }
 });
 
 test("HTML output retains exact user/tool provenance and encrypted complete source", async () => {

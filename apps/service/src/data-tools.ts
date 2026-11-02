@@ -2,7 +2,7 @@ import { fork } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { extname } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MoguriError, isRecord, defaultProjectSettings, type ToolCall } from "../../../packages/protocol/src/index.ts";
@@ -21,6 +21,8 @@ export async function runDataTask(request: { kind: string; arguments: Record<str
   if (!modules.endsWith("/node_modules")) throw new MoguriError("tool_worker", "Structured tools need a qualified installed module boundary.");
   const dbFiles = request.path ? ["", "-wal", "-shm", "-journal"].map((suffix) => request.path + suffix) : [];
   const temporary = request.kind === "playwright" ? await mkdtemp(join(tmpdir(), "moguri-owned-app-")) : undefined;
+  const temporaryOwner = temporary ? await lstat(temporary) : undefined;
+  const effectful = writesDatabase || request.kind === "playwright";
   const actualRequest = temporary ? { ...request, temporary } : request;
   const child = fork(path, [], { detached: true, stdio: ["ignore", "ignore", "pipe", "ipc"], env: { NODE_NO_WARNINGS: "1",
     ...(temporary ? { HOME: temporary, TMPDIR: temporary, TMP: temporary, TEMP: temporary } : {}) },
@@ -44,14 +46,20 @@ export async function runDataTask(request: { kind: string; arguments: Record<str
     clean = stopping ? await stopping : child.pid ? await stopGroup(child.pid) : true;
     if (reason || !clean || !isRecord(reply)) {
       if (stderr) console.error("Structured tool stopped without a valid result:", stderr);
-      throw new MoguriError(writesDatabase || request.kind === "playwright" ? "tool_partial" : "tool_worker", `${reason ?? "Structured worker failed its output/heap boundary."} ${writesDatabase || request.kind === "playwright" ? "An admitted database/app effect may already exist; inspect before retrying." : "No successful data result was acknowledged."}`, 409);
+      throw new MoguriError(effectful ? "tool_partial" : "tool_worker", `${reason ?? "Structured worker failed its output/heap boundary."} ${effectful ? "An admitted database/app effect may already exist; inspect before retrying." : "No successful data result was acknowledged."}`, 409);
     }
     if (reply.ok !== true) throw new MoguriError(typeof reply.code === "string" ? reply.code : "tool_data", typeof reply.message === "string" ? reply.message : "Structured operation failed.", 409);
-    if (typeof reply.maxRssKiB !== "number" || reply.maxRssKiB > 384 * 1024) throw new MoguriError(writesDatabase ? "tool_partial" : "tool_worker", "Structured result exceeded its observed memory boundary; inspect any database effects.");
+    if (typeof reply.maxRssKiB !== "number" || reply.maxRssKiB > 384 * 1024) throw new MoguriError(effectful ? "tool_partial" : "tool_worker", "Structured result exceeded its observed memory boundary; inspect any admitted database/app effects.");
     return reply.value;
   } finally {
     clearTimeout(timer); signal.removeEventListener("abort", stop); if (child.connected) child.disconnect();
-    if (temporary && clean && isRecord(reply) && reply.ok === true && isRecord(reply.value) && reply.value.closedKnownTarget === true) await rm(temporary, { recursive: true, force: true });
+    if (temporary && temporaryOwner && clean && isRecord(reply) && reply.ok === true && isRecord(reply.value) && reply.value.closedKnownTarget === true) {
+      const current = await lstat(temporary);
+      if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== temporaryOwner.dev || current.ino !== temporaryOwner.ino || current.uid !== temporaryOwner.uid) {
+        throw new MoguriError("tool_partial", "The original private app profile changed ownership. No replacement directory was deleted; inspect the retained app operation.", 409);
+      }
+      await rm(temporary, { recursive: true, force: true });
+    }
     else if (temporary) console.error("Owned app temporary profile retained for unconfirmed cleanup:", temporary);
   }
 }
