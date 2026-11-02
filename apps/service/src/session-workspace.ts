@@ -3,7 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import {
-  MAX_TEXT, githubItemIdentity, MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
+  MAX_TEXT, githubItemIdentity, MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type SessionPrAssociation, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact, type SessionChildrenReview,
   sessionChildBindings, sessionSubtree,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
@@ -334,6 +334,35 @@ export class SessionWorkspace {
           throw new MoguriError("work_item", "Choose a Kanban card from this session's own project. No cross-project card was linked.", 403);
         }
         return finish([this.event(session, { event_type: "session.organized", profile_id: this.snapshot().profileId, payload: { changes: command.changes } })], { revision: session.revision + 1 });
+      }
+      case "session.pr.associate": {
+        const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
+        if (session.controls.env !== "Local" || !session.projectId || session.repositories || command.source.kind !== "pull" || !this.host.githubItem) {
+          throw new MoguriError("session_pr_boundary", "Associate an exact reviewed PR in this Local repository session. No SSH account, first repository or alternate Env was substituted.", 409);
+        }
+        if ((session.prAssociations?.length ?? 0) >= 100 && !session.prAssociations?.some((association) =>
+          association.source?.source.repository === command.source.repository && association.source.source.number === command.source.number)) {
+          throw new MoguriError("session_pr_limit", "A session may retain at most 100 distinct PR associations. No association was dropped.");
+        }
+        const { expectedDigest, ...source } = command.source;
+        const reviewed = await this.host.githubItem(session.projectId, session.workspaceId ?? undefined, source);
+        const identity = githubItemIdentity(reviewed.item.url ?? "");
+        this.revision(this.session(session.id).revision, command.expectedRevision);
+        if (reviewed.digest !== expectedDigest || identity.kind !== "pull") throw new MoguriError("session_pr_stale", "The reviewed PR or exact account changed. Reload that source before associating it.", 409);
+        const scope = sessionPrScope({ ...session, prUrl: identity.url }, this.snapshot());
+        if (!scope || reviewed.binding.root.root !== scope.root || reviewed.binding.configurationRevision !== scope.configurationRevision) {
+          throw new MoguriError("session_pr_stale", "The reviewed PR's original root/configuration changed. No association was added.", 409);
+        }
+        const state = reviewed.item.state;
+        const association: SessionPrAssociation = { version: 1, profileId: this.snapshot().profileId, sessionId: session.id, scope,
+          pullRequest: { url: identity.url, repo: identity.repository, number: identity.number,
+            state: state === "open" || state === "closed" || state === "merged" ? state : "unknown" as const,
+            draft: reviewed.item.draft ?? null, checkedAt: new Date().toISOString(),
+            ...(reviewed.item.readyToMerge !== undefined && reviewed.item.headSha ? { readyToMerge: reviewed.item.readyToMerge, headSha: reviewed.item.headSha } : {}),
+            diagnostic: ["open", "closed", "merged"].includes(state) ? null : "The exact source did not report a supported PR state." },
+          source: { version: 1 as const, source: reviewed.source, accountId: reviewed.accountId, binding: reviewed.binding, digest: reviewed.digest } };
+        return finish([this.event(session, { event_type: "session.pr_associated", profile_id: this.snapshot().profileId,
+          payload: { association, actor: "user" } })], { revision: session.revision + 1 });
       }
       case "session.mode": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);

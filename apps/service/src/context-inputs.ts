@@ -21,6 +21,7 @@ import { MAX_CONTEXT_TEXT_BYTES, MAX_CONTEXT_FOLDER_FILES } from "./input-limits
 import { DocumentParsers, type DocumentParserOptions } from "./documents.ts";
 import { documentPage, documentSearch } from "./document-reads.ts";
 import { assertFolderAccess, folderPolicy } from "./project-policy.ts";
+import { ToolDeliveriesSchema, type ToolDelivery } from "../../../packages/protocol/src/chat-outputs.ts";
 
 export const isInputCommand = (value: unknown): value is InputCommand => Value.Check(InputCommandSchema, value);
 export const isInputQuery = (value: unknown): value is InputQuery => Value.Check(InputQuerySchema, value);
@@ -56,6 +57,8 @@ export class ContextInputs {
       if (event.profile_id !== profileId || event.session_id !== sessionId) return [];
       if (event.event_type === "session.created") return [...(event.payload.pasteFiles ?? []), ...(event.payload.documents ?? [])];
       if (event.event_type === "draft.saved") return event.payload.attachments;
+      if (event.event_type === "tool.completed") return event.payload.attachments ?? [];
+      if (event.event_type === "model.completed") return event.payload.message.attachments ?? [];
       if (event.event_type === "queue.edited") return event.payload.attachments ?? [];
       if (event.event_type === "turn.started") return [...event.payload.item.attachments, ...(event.payload.sideContext?.pasteFiles ?? []), ...(event.payload.sideContext?.documents ?? [])];
       return event.event_type === "queue.enqueued" || event.event_type === "steer.applied" ? event.payload.item.attachments : [];
@@ -309,6 +312,7 @@ export class ContextInputs {
     if (attachment.kind === "document") return { type: query.type, attachment, content: { kind: "document", summary: this.documentData(attachment).summary } };
     const original = this.store.blob(attachment.digest);
     if (attachment.kind === "image") return { type: query.type, attachment, content: { kind: "image", data: original, mimeType: attachment.mimeType } };
+    if (attachment.kind === "html") return { type: query.type, attachment, content: { kind: "html", html: original } };
     const content = attachment.kind === "github_issue" || attachment.kind === "github_pr" ? workItemSnapshotView(original) : original;
     return { type: query.type, attachment, content: { kind: "text", text: content, ...(content !== original ? {
       filter: { kind: "work-item-comments-v1", sourceDigest: attachment.digest, viewDigest: digest(content), viewBytes: Buffer.byteLength(content) },
@@ -327,6 +331,37 @@ export class ContextInputs {
     if (normalized.length > MAX_IMAGE_BYTES) throw new MoguriError("attachment_image_limit", "The normalized image exceeds 8 MiB. Resize it explicitly before attaching.");
     const contentDigest = this.store.putBlob(normalized.toString("base64"));
     return { id: randomUUID(), kind: "image", path: name, digest: contentDigest, bytes: normalized.length, mimeType: "image/png", width, height, source: { ...source, revision: contentDigest } };
+  }
+  async deliverTool(sessionId: string, turnId: string, call: ToolCall, input: ToolDelivery[], actor: "user" | "model"): Promise<Attachment[]> {
+    const deliveries = parse(ToolDeliveriesSchema, input), session = this.session(sessionId, false);
+    if (session.turnId !== turnId) throw new MoguriError("output_owner", "The original output turn ended. No image/page was delivered into a replacement session or turn.", 409);
+    const outputs: Attachment[] = [];
+    for (const delivery of deliveries) {
+      const source = { kind: `${actor}-tool-output`, location: `${sessionId}/${turnId}/${call.id}` };
+      if (delivery.kind === "html") {
+        if (call.name !== "render_html" || call.arguments.html !== delivery.html || call.arguments.title !== delivery.title ||
+          !delivery.html.isWellFormed() || delivery.html.includes("\0") || Buffer.byteLength(delivery.html) > 128 * 1024) {
+          throw new MoguriError("output_source", "The HTML output differs from its exact original authored tool source. No substitute page was retained.", 409);
+        }
+        const hash = this.store.putBlob(delivery.html);
+        outputs.push({ id: randomUUID(), kind: "html", path: delivery.title, digest: hash, bytes: Buffer.byteLength(delivery.html), source: { ...source, revision: hash } });
+      } else {
+        if (call.name !== "take_screenshot" && call.name !== "playwright" &&
+          !(call.name === "mcp_gateway" && call.arguments.serverId === "builtin" && call.arguments.tool === "browser_screenshot")) {
+          throw new MoguriError("output_source", "Only the original owned screenshot tool may deliver image bytes. Other tool/model data cannot forge a screenshot.", 409);
+        }
+        const bytes = Buffer.from(delivery.data, "base64");
+        if (bytes.toString("base64") !== delivery.data || !delivery.name.trim() || /[\0\r\n]/.test(delivery.name)) throw new MoguriError("output_image", "Screenshot delivery requires canonical complete image bytes and a bounded name.");
+        outputs.push(await this.image(bytes, delivery.name, source));
+      }
+    }
+    const current = this.session(sessionId, false);
+    if (current.turnId !== turnId) throw new MoguriError("output_owner", "The original output owner ended during normalization. No new turn received these bytes.", 409);
+    const existing = current.messages.filter((message) => message.role === "tool" && message.turnId === turnId).flatMap((message) => message.attachments ?? []);
+    if (existing.length + outputs.length > 16 || [...existing, ...outputs].reduce((sum, output) => sum + output.bytes, 0) > 12 * 1024 * 1024) {
+      throw new MoguriError("output_limit", "This original turn exceeds 16 outputs/12 MiB. No output was silently omitted or delivered elsewhere.");
+    }
+    return outputs;
   }
   async execute(command: InputCommand, finish: WorkspaceFinish) {
     if (command.type === "attachment.document.cancel") {

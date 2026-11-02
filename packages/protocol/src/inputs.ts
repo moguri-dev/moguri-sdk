@@ -12,6 +12,7 @@ export const pasteLineCount = (text: string): number => text.split(/\r\n|\r|\n/)
 export const pasteFilePath = (attachmentId: string): string => `${PASTE_FILE_PREFIX}${attachmentId}.txt`;
 export const isPasteFilePath = (path: string): boolean => path.startsWith(PASTE_FILE_PREFIX);
 export const AttachmentSchema = Type.Union([
+  Type.Object({ ...base, kind: Type.Literal("html"), bytes: Type.Integer({ minimum: 1, maximum: 128 * 1024 }), source }, { additionalProperties: false }),
   Type.Object({ ...base, kind: Type.Literal("document"), format: DocumentFormatSchema, originalDigest: hash,
     extractedBytes: Type.Integer({ minimum: 1, maximum: DOCUMENT_LIMITS.outputBytes }), summary: DocumentSummarySchema, source }, { additionalProperties: false }),
   Type.Object({ ...base, bytes: Type.Integer({ minimum: 0, maximum: 128 * 1024 }), kind: Type.Literal("project_file") }, { additionalProperties: false }),
@@ -78,4 +79,4 @@ export type InputResponse =
   | { type: "attachment.folder.preview"; preview: ContextPreview }
   | { type: "attachment.github.preview"; preview: ContextPreview }
   | { type: "attachment.session.preview"; preview: ContextPreview }
-  | { type: "attachment.read"; attachment: Attachment; content: { kind: "text"; text: string; filter?: { kind: "work-item-comments-v1"; sourceDigest: string; viewDigest: string; viewBytes: number } } | { kind: "image"; data: string; mimeType: "image/png" } | { kind: "document"; summary: DocumentSummary } };
+  | { type: "attachment.read"; attachment: Attachment; content: { kind: "text"; text: string; filter?: { kind: "work-item-comments-v1"; sourceDigest: string; viewDigest: string; viewBytes: number } } | { kind: "html"; html: string } | { kind: "image"; data: string; mimeType: "image/png" } | { kind: "document"; summary: DocumentSummary } };

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
-import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
+import { defaultModelPreferences, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
@@ -11,7 +11,14 @@ test("protocol 70 dictation repair advances only metadata and recovers without r
   let reopened: EventStore | undefined;
   try {
     assert.ok(PROTOCOL_VERSION >= 71);
-    await sdk.models.setEnabled(fixture.modelId, false);
+    const settings = structuredClone(fixture.service.controller.snapshot().settings);
+    delete settings.values.voice.enabled; delete settings.values.voice.standby;
+    settings.values.modelPreferences = { ...defaultModelPreferences(),
+      disabledModels: [fixture.service.controller.snapshot().provider.models.find((model) => model.id === fixture.modelId)!.apiModelId ?? fixture.modelId] };
+    fixture.service.store.commit([{ event_type: "settings.updated", profile_id: "default", payload: {
+      settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision,
+    } }]);
+    fixture.service.controller.refreshProfile(); await sdk.refresh();
     const original = retainedCiphertextRows(fixture.service.store.db);
     sdk.disconnect(); await fixture.service.close();
     const raw = new DatabaseSync(path);

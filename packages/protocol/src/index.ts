@@ -59,8 +59,9 @@ import { GithubSessionOriginSchema, projectGithubOperation, type GithubEventPayl
 import { projectLinearOperation, type LinearEventPayloads, type LinearOperation } from "./linear-workflows.ts";
 import type { DependencyRegistry, WorkspaceEventPayloads } from "./workspace.ts";
 import type { TaskPlan, TaskProgressReport } from "./progress.ts";
-import { SessionPrObservationSchema, sameSessionPrScope, sessionPrScope, type SessionPrObservation } from "./session-status.ts";
+import { SessionPrObservationSchema, SessionPrAssociationSchema, sameSessionPrScope, sessionPrScope, type SessionPrObservation, type SessionPrAssociation } from "./session-status.ts";
 import { CoordinationLinkSchema, CoordinationMessageSchema, type CoordinationLink, type CoordinationMessage, type CoordinationTaskOrigin } from "./coordination.ts";
+import { SessionWaitSchema, type SessionWait } from "./session-controls.ts";
 import type { WorkflowKind } from "./workflows.ts";
 import { GithubBoardSourceSchema, isContinueWork, projectWorkRecord, type KanbanEventPayloads, type ProjectWorkRun } from "./kanban.ts";
 import { BoardConfigSchema, GithubIssueLinkSchema } from "./workspace.ts";
@@ -78,8 +79,12 @@ import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCyc
 export * from "./model-recovery.ts";
 export * from "./kupo-modes.ts";
 export * from "./owned-model-transports.ts";
+export * from "./array-tools.ts";
+export * from "./language-tools.ts";
+export * from "./chat-outputs.ts";
+export * from "./playwright-tools.ts";
 
-export const PROTOCOL_VERSION = 86;
+export const PROTOCOL_VERSION = 87;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -236,6 +241,7 @@ export interface Session {
   parentSessionId?: string;
   createdParentSessionId?: string;
   coordinationParentId?: string;
+  wait?: SessionWait;
   parentSnapshotDigest?: string;
   readOnly?: boolean;
   mode: SessionMode;
@@ -255,6 +261,7 @@ export interface Session {
   finishedAt?: string;
   prUrl: string | null;
   prObservation?: SessionPrObservation | null;
+  prAssociations?: SessionPrAssociation[];
   workItemId: string | null;
   workItemUrl?: string | null;
   githubSource?: GithubSessionOrigin;
@@ -313,10 +320,12 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "coordination.linked": { link: CoordinationLink };
   "coordination.message": { message: CoordinationMessage };
   "coordination.delivered": { messageId: string; turnId: string; stepId: string };
+  "session.wait_recorded": { wait: SessionWait };
   "command.inspected": { jobId: string; root: string; actor: "user" };
   "process.ended": { callId: string; pid: number; outcome: "completed" | "stopped" | "failed" | "partial" };
   "session.workspace_bound": { workspaceId: string | null };
   "session.pr_observed": { observation: SessionPrObservation };
+  "session.pr_associated": { association: SessionPrAssociation; actor: "user" };
   "session.sandbox_bound": { workspaceId: string };
   "sandbox.workspace_recorded": { workspace: SandboxWorkspace };
   "sandbox.execution_recorded": { execution: SandboxExecution };
@@ -380,7 +389,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
-  "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; rawDigest?: string; rawComplete?: boolean };
+  "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; rawDigest?: string; rawComplete?: boolean; attachments?: Attachment[] };
   "task.progress_reported": { report: TaskProgressReport };
   "task.plan_updated": { plan: TaskPlan };
   "turn.stop_requested": { holdQueue?: true };
@@ -473,8 +482,8 @@ export type StoredEvent = EventInput & {
 export const eventTypes: readonly EventType[] = [
   "prompt.schedule_recorded",
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
-  "coordination.linked", "coordination.message", "coordination.delivered", "command.inspected", "process.ended",
-  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "coordination.linked", "coordination.message", "coordination.delivered", "session.wait_recorded", "command.inspected", "process.ended",
+  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
@@ -1327,11 +1336,26 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       session.homeRoot = structuredClone(event.payload.root); session.revision++; session.updatedAt = event.timestamp;
     }
     if (event.event_type === "coordination.linked") {
-      const link = event.payload.link, previous = coordinationLinks.get(link.childId);
+      const link = event.payload.link, key = link.kind === "peer" ? `peer:${JSON.stringify([link.parentId, link.childId].sort())}` : link.childId;
+      const previous = coordinationLinks.get(key);
       if (!Value.Check(CoordinationLinkSchema, link) || link.origin.actor === "service" || event.session_id !== link.childId ||
-        session.createdParentSessionId !== link.parentId || session.projectId !== event.project_id ||
+        (link.kind === "peer" ? link.origin.actor !== "user" || link.parentId === link.childId || !sessions.has(link.parentId) :
+          session.createdParentSessionId !== link.parentId) || session.projectId !== event.project_id ||
         link.revision !== (previous?.revision ?? -1) + 1 || previous && previous.parentId !== link.parentId) throw new MoguriError("coordination_corrupt", "A coordination grant changed its actual birth owner, scope or revision.", 409);
-      coordinationLinks.set(link.childId, structuredClone(link));
+      coordinationLinks.set(key, structuredClone(link));
+    }
+    if (event.event_type === "session.wait_recorded") {
+      const wait = event.payload.wait, previous = session.wait;
+      if (!Value.Check(SessionWaitSchema, wait) || wait.profileId !== profileId || wait.sessionId !== session.id ||
+        wait.targetSessionId === session.id || event.project_id !== session.projectId ||
+        wait.revision !== (previous?.id === wait.id ? previous.revision + 1 : 0) ||
+        previous?.id === wait.id && (previous.targetSessionId !== wait.targetSessionId || previous.sourceScope !== wait.sourceScope ||
+          previous.targetScope !== wait.targetScope || JSON.stringify(previous.task) !== JSON.stringify(wait.task) ||
+          previous.createdAt !== wait.createdAt || previous.status !== "waiting" && wait.status !== "cancelled")) {
+        throw new MoguriError("session_wait_corrupt", "A wait lost its original task, scope, actor or revision. No task was resumed.", 409);
+      }
+      session.wait = structuredClone(wait);
+      continue;
     }
     if (event.event_type === "coordination.message") {
       const message = event.payload.message;
@@ -1356,6 +1380,25 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         throw new MoguriError("session_pr_scope", "A PR observation lost its exact session/profile/root/access binding. State was preserved.", 409);
       }
       session.prObservation = structuredClone(observation);
+      continue;
+    }
+    if (event.event_type === "session.pr_associated") {
+      const association = event.payload.association, source = association.source;
+      const scope = sessionPrScope({ ...session, prUrl: association.scope.url }, { issues: [...issues.values()], managedWorkspaces: [...managedWorkspaces.values()],
+        changeSets: [...changeSets.values()], projects: [...projects.values()], projectConfigurations: [...projectConfigurations.values()] });
+      if (!Value.Check(SessionPrAssociationSchema, association) || event.payload.actor !== "user" || association.profileId !== profileId ||
+        association.sessionId !== session.id || !source || source.source.kind !== "pull" || source.source.repository !== association.pullRequest.repo ||
+        source.source.number !== association.pullRequest.number || source.binding.profileId !== profileId || source.binding.projectId !== session.projectId ||
+        source.binding.workspaceId !== session.workspaceId || event.project_id !== session.projectId || !scope ||
+        !sameSessionPrScope(scope, association.scope) || source.binding.root.root !== scope.root || association.pullRequest.url !== scope.url) {
+        throw new MoguriError("session_pr_scope", "A PR association lost its exact account, item, session or root binding. Original associations were preserved.", 409);
+      }
+      const associations = session.prAssociations ??= [];
+      const index = associations.findIndex((value) => value.scope.url === association.scope.url);
+      if (index < 0) associations.push(structuredClone(association)); else associations[index] = structuredClone(association);
+      if (!session.prUrl) session.prUrl = association.scope.url;
+      if (session.prUrl === association.scope.url) session.prObservation = structuredClone(association);
+      session.revision++;
       continue;
     }
     session.updatedAt = event.timestamp;
@@ -1621,9 +1664,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "model.completed": {
         const message: PublicMessage = roleSequenceTurns.has(event.turn_id ?? "") ? { ...event.payload.message, role: "notice",
           text: "Owned role result retained independently. It is untrusted data, not a user answer, code approval or automatic instructions.", reasoning: undefined, toolCalls: [] } : event.payload.message;
+        const outputs = message.role === "assistant" && !message.toolCalls?.length ? session.messages
+          .filter((item) => item.role === "tool" && item.turnId === message.turnId).flatMap((item) => item.attachments ?? []) : [];
+        const delivered = outputs.length ? { ...message, attachments: [...new Map([...(message.attachments ?? []), ...outputs].map((item) => [item.id, item])).values()] } : message;
         const index = session.messages.findIndex((message) => message.id === event.payload.message.id);
-        if (index >= 0) session.messages[index] = message;
-        else session.messages.push(message);
+        if (index >= 0) session.messages[index] = delivered;
+        else session.messages.push(delivered);
         const usageIndex = session.usage.findIndex((usage) => usage.stepId === event.payload.usage.stepId);
         if (usageIndex >= 0) session.usage[usageIndex] = event.payload.usage; else session.usage.push(event.payload.usage);
         break;
@@ -1655,7 +1701,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const index = session.messages.findIndex((message) => message.id === sourceStepId);
         if (index < 0) throw new MoguriError("routing_corrupt", "The selected original Kupo response is missing. State was preserved.", 409);
         session.messages.splice(index, 1);
-        session.messages.push(structuredClone(response));
+        const outputs = session.messages.filter((message) => message.role === "tool" && message.turnId === event.turn_id).flatMap((message) => message.attachments ?? []);
+        session.messages.push({ ...structuredClone(response), ...(outputs.length ? { attachments: structuredClone(outputs) } : {}) });
         break;
       }
       case "model.late_usage": {
@@ -1700,6 +1747,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const message: PublicMessage = {
           id: event.payload.call.id, turnId: event.turn_id ?? "", role: "tool", text: event.payload.text,
           timestamp: event.timestamp, toolCalls: [event.payload.call], outcome: event.payload.outcome,
+          ...(event.payload.attachments ? { attachments: structuredClone(event.payload.attachments) } : {}),
         };
         const index = session.messages.findIndex((item) => item.id === message.id);
         if (index >= 0) session.messages[index] = message; else session.messages.push(message);

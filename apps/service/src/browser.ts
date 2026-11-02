@@ -30,7 +30,7 @@ export class BrowserBroker {
   private revoke(host: Host, reason: string): void {
     host.controlId = null;
     host.pending?.settle({ text: `${reason} No action was replayed. Inspect the page before retrying; website effects cannot be undone.`,
-      outcome: host.pending.dispatched && !["browser_snapshot", "browser_status"].includes(host.pending.request.tool) ? "partial" : "cancelled" });
+      outcome: host.pending.dispatched && !["browser_snapshot", "browser_status", "browser_wait", "browser_screenshot"].includes(host.pending.request.tool) ? "partial" : "cancelled" });
   }
   synchronize(): void {
     for (const host of this.hosts.values()) {
@@ -70,6 +70,8 @@ export class BrowserBroker {
     if (command.type === "browser.host.reply") {
       if (Buffer.byteLength(command.result.text) > 16384) throw new MoguriError("browser_output", "The browser result exceeded 16 KiB.", 409);
       if (!host.pending || host.pending.request.id !== command.requestId) throw new MoguriError("browser_reply_stale", "This browser request already ended. No late result resumed it.", 409);
+      if (command.result.deliveries && (host.pending.request.tool !== "browser_screenshot" || command.result.outcome !== "completed" ||
+        command.result.deliveries.length !== 1 || command.result.deliveries[0]?.kind !== "image")) throw new MoguriError("browser_delivery", "Only the exact successful screenshot request may deliver image bytes. No forged page output was accepted.", 409);
       this.synchronize();
       if (!host.pending) throw new MoguriError("browser_reply_stale", "Browser authority ended before this result. No late result resumed it.", 409);
       host.pending.settle(command.result); return;

@@ -12,6 +12,7 @@ const safetyReviewSchemaMarkers = ["work_item_comments_schema", "repository_scri
 const intakeSchemaMarkers = ["model_failure_recovery_schema", "scheduled_prompts_schema", "kupo_modes_schema"] as const;
 const ownedTransportSchemaMarkers = ["scheduled_native_preparation_schema", "owned_model_transport_schema", "transport_finishing_schema"] as const;
 const retryCheckpointSchemaMarkers = ["native_retry_restaging_schema", "transport_checkpoint_schema"] as const;
+export const sessionControlsSchemaMarkers = ["session_coordination_controls_schema", "session_pr_associations_schema", "voice_lifecycle_schema", "chat_outputs_schema", "language_app_tools_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -68,7 +69,7 @@ function references(input: EventInput): string[] {
     case "slash.command_recorded": return [input.payload.execution.inputDigest, input.payload.execution.resultDigest].filter((value): value is string => value !== null);
     case "slash.live_recorded": return [input.payload.control.inputDigest];
     case "slash.continuation_chosen": return [input.payload.choice.inputDigest];
-    case "tool.completed": return input.payload.rawDigest ? [input.payload.rawDigest] : [];
+    case "tool.completed": return [...(input.payload.rawDigest ? [input.payload.rawDigest] : []), ...(input.payload.attachments ?? []).flatMap(attachmentDigests)];
     case "script.review_recorded": return [input.payload.review.source.digest];
     case "candidate.owner_bound": {
       const evidence = input.payload.owner.generationEvidence;
@@ -505,12 +506,31 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=86; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 87) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of sessionControlsSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=87; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
     const recoveryLineage = () => {
+      for (const id of sessionControlsSchemaMarkers) {
+        if (version < 87 && marker(id) !== undefined) throw new Error(`Premature session controls/tools schema marker ${id}. Original state was preserved.`);
+        if (version >= 87) require(id, "session controls/tools");
+      }
+      if (version >= 4 && version < 87 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "session.wait_recorded" || event.event_type === "session.pr_associated" || event.event_type === "tool.completed" && event.payload.attachments !== undefined ||
+        event.event_type === "session.pr_observed" && event.payload.observation.pullRequest.readyToMerge !== undefined ||
+        event.event_type === "coordination.linked" && event.payload.link.kind === "peer" ||
+        event.event_type === "settings.updated" && (event.payload.settings.retention.confirmBulkArchive !== undefined || event.payload.settings.retention.confirmBulkDelete !== undefined ||
+          event.payload.settings.voice.enabled !== undefined || event.payload.settings.voice.standby !== undefined))) {
+        throw new Error("Actual session controls/tools history cannot become a pre-87 lineage. Original state was preserved.");
+      }
       for (const id of recoverySchemaMarkers) {
         if (version < 81 && marker(id) !== undefined) throw new Error(`Premature session request/Git schema marker ${id}. Original state was preserved.`);
         if (version >= 81) require(id, "session request/Git recovery");

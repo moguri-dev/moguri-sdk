@@ -30,7 +30,7 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { RepositoryMemory, memoryIndexId, memoryLocator } from "./memory.ts";
 import { McpGateway, McpKeychain, type SecretVault } from "./gateway.ts";
-import { LocalDictation, type SpeechOptions } from "./voice.ts";
+import { LocalDictation, type SpeechOptions, type VoiceModelOwner } from "./voice.ts";
 import { sqlConnection } from "./sql-connection.ts";
 import { cleanupSpeechSpool, withSpeechSpool } from "./voice-spool.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
@@ -67,6 +67,8 @@ import { textFilePage } from "./files.ts";
 import { performance } from "node:perf_hooks";
 import { BrowserBroker } from "./browser.ts";
 import { BROWSER_MCP_TOOLS, isBrowserCommand, isBrowserQuery, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
+import { ToolDeliveriesSchema } from "../../../packages/protocol/src/chat-outputs.ts";
+import type { DelegatedResult } from "./worker-protocol.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
 import { settleCandidateCleanup } from "./candidate-cleanup.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
@@ -149,6 +151,7 @@ export interface PlatformHost {
   kanbanQuery(query: KanbanQuery): Promise<KanbanResponse>;
   kanbanCommand(command: KanbanCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   coordinationQuery?(query: CoordinationQuery): CoordinationResponse;
+  sessionControlsQuery?(query: import("../../../packages/protocol/src/session-controls.ts").SessionControlsQuery): import("../../../packages/protocol/src/session-controls.ts").SessionControlsResponse;
   generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleProposal(id: string): import("../../../packages/protocol/src/index.ts").CandidateRoleProposalRead;
   compoundProposal(workflowId: string, stepId: string): CompoundCandidateProposal;
@@ -707,6 +710,10 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }));
   }
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
+    if (query.type === "session.wait.preview" || query.type === "sessions.bulk.preview") {
+      if (!this.host.sessionControlsQuery) throw new MoguriError("session_controls_authority", "The authoritative session controls are unavailable. No client-only operation was substituted.", 409);
+      return this.host.sessionControlsQuery(query);
+    }
     if (query.type === "routing.modes") {
       if (!this.host.routingModes) throw new MoguriError("routing_authority", "This host has no qualified shared mode reader. No eligibility was guessed.", 409);
       return { type: "routing.modes", modes: this.host.routingModes(query.sessionId) };
@@ -833,7 +840,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         return { type: query.type, ...(["waiting", "exchanging"].includes(saved.state) ? this.gateway.oauth.get(saved.id) : { authorization: saved, url: null }) };
       }
       case "result.read": return { type: query.type, ...this.readResult(query.resultId, query.offset, query.limit) };
-      case "voice.status": return { type: query.type, voice: await this.voice.status() };
+      case "voice.status": return { type: query.type, voice: { ...await this.voice.status(), enabled: this.snapshot().settings.values.voice.enabled !== false } };
       case "sandbox.status": {
         return { type: query.type, sandbox: this.host.sandboxStatus() };
       }
@@ -985,6 +992,24 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (!owner) throw new MoguriError("winddown_cleanup_unconfirmed", "This retained Git job has no live owned process/abort handle. Inspect the original ref/intent; no stop or retry was fabricated.", 409);
     owner.abort.abort();
   }
+  private voiceModelOwner(jobId: string): VoiceModelOwner {
+    return { profileId: this.snapshot().profileId, jobId, recover: (originalId) => this.snapshot().jobs.some((job) =>
+      job.id === originalId && ["voice.download", "voice.disable"].includes(job.kind) && !["running", "waiting_input"].includes(job.status)) };
+  }
+  private disableVoice(event: ReturnType<PlatformRuntime["settingsEvent"]>, finish: PlatformHost["finish"]): CommandResult {
+    if ([...this.active.values()].some((job) => job.kind === "voice.disable")) throw new MoguriError("speech_disable_pending", "The exact voice shutdown/model removal is already settling. No second cleanup was admitted.", 409);
+    const id = this.job("voice.disable", null, null, async (signal, progress, id) => {
+      const owned = [...this.active.values()].filter((job) => ["voice.capture", "voice.record", "voice.transcribe", "voice.prepare", "voice.download"].includes(job.kind));
+      for (const job of owned) job.abort.abort();
+      progress("Stopping owned voice work before removing the sole Moguri-managed model.");
+      await Promise.all(owned.map((job) => job.done));
+      await this.voice.close();
+      signal.throwIfAborted();
+      return this.voice.removeManaged(signal, this.voiceModelOwner(id));
+    }, undefined, (job) => finish([event, { event_type: "job.started", profile_id: this.snapshot().profileId, payload: { job } }],
+      { id: job.id, revision: event.payload.revision }));
+    return { id, revision: event.payload.revision };
+  }
   private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void, start?: (job: CapabilityJob) => void, workspaceId?: string, lifecycle?: CandidateJobLifecycle, id: string = randomUUID()): string {
     if (this.shuttingDown) throw new MoguriError("shutting_down", "The capability service is closing. No new owned job was started.", 503);
     if (projectId && this.host.closingProject(projectId)) throw new MoguriError("project_removing", "No new job can start while this project is being removed.", 409);
@@ -1077,6 +1102,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       lease.consumed = true; lease.input.resolve(bytes);
       return { id: request.id, accepted: true };
     }
+    if (this.snapshot().settings.values.voice.enabled === false) throw new MoguriError("speech_disabled", "Enable local voice dictation and review its pinned model in Settings / Voice. No microphone or download was started.", 409);
     const ready = await this.voice.status();
     if (this.shuttingDown) throw new MoguriError("shutting_down", "Capture was withdrawn before microphone startup.", 503);
     if (!ready.runtimeReady || !ready.modelReady) throw new MoguriError("speech_not_ready", ready.diagnostic!, 409);
@@ -1133,6 +1159,9 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     return { id: request.id, token: lease.token, ...(request.streaming ? { streaming: true } : {}) };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (command.type === "session.wait" || command.type === "session.wait.cancel" || command.type === "sessions.bulk") {
+      throw new MoguriError("session_controls_authority", "Session waits and whole-set lifecycle actions require the authoritative controller. No partial client operation was substituted.", 409);
+    }
     if (command.type === "script.review.force") throw new MoguriError("script_force_owner", "An actual user force must go through its original control-plane owner, not a script/plugin delegate.", 403);
     if (isQueuedCommandCommand(command)) throw new MoguriError("command_authority", "Queued command clients require their actual owning controller. No replacement profile authority was used.", 403);
     if (isPricingCommand(command)) {
@@ -1301,7 +1330,9 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }
+        if (settings.voice.enabled === true && snapshot.settings.values.voice.enabled === false) throw new MoguriError("speech_license", "Enable dictation through the exact voice model/license review. A generic settings write cannot start a download.", 409);
         const event = this.settingsEvent(settings, command.expectedRevision, command.type === "settings.reset" || command.acknowledgePromptRisk);
+        if (event.payload.settings.voice.enabled === false && snapshot.settings.values.voice.enabled !== false) return this.disableVoice(event, finish);
         const result = finish([event], { revision: event.payload.revision });
         if (event.payload.permissionRevision !== snapshot.settings.permissionRevision) this.host.invalidateApprovals();
         return result;
@@ -1417,12 +1448,36 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (this.session(command.sessionId).controls.env === "Sandbox") throw new MoguriError("subagent_env", "Native subagent execution is not qualified. No Local/SSH worker or source-root fallback was used.", 409);
         if (!snapshot.settings.values.subagents.enabled) throw new MoguriError("subagents_disabled", "Subagents are off by default. Explicitly enable the bounded read-only mode first.", 409);
         return finish([], { id: this.host.subagent(this.session(command.sessionId), command.prompt) });
+      case "voice.enable":
       case "voice.download": {
+        if ([...this.active.values()].some((job) => job.kind === "voice.disable")) throw new MoguriError("speech_disable_pending", "Wait for original voice shutdown/model removal before enabling. No new download was admitted.", 409);
+        if (command.type === "voice.enable" && command.expectedRevision !== snapshot.settings.revision) throw new MoguriError("revision_conflict", "Voice settings changed. Review the exact current model before enabling.", 409);
         if ([...this.active.values()].some((job) => job.kind === "voice.download")) throw new MoguriError("speech_download_pending", "The user-approved speech download is already running.", 409);
-        return finish([], { id: this.job("voice.download", null, null, (signal, progress) => this.voice.download(signal, progress)) });
+        if (!(await this.voice.status()).runtimeReady) throw new MoguriError("speech_not_ready", "The pinned local speech runtime is unavailable. Prepare the runtime first; no model weights were downloaded.", 409);
+        const event = this.settingsEvent({ ...snapshot.settings.values, voice: { ...snapshot.settings.values.voice, enabled: true } }, snapshot.settings.revision, false);
+        const id = this.job("voice.download", null, null, (signal, progress, id) => this.voice.download(signal, progress, this.voiceModelOwner(id)), undefined,
+          (job) => finish([event, { event_type: "job.started", profile_id: snapshot.profileId, payload: { job } }], { id: job.id, revision: event.payload.revision }));
+        return { id, revision: event.payload.revision };
+      }
+      case "voice.disable": {
+        const event = this.settingsEvent({ ...snapshot.settings.values, voice: { ...snapshot.settings.values.voice, enabled: false } }, command.expectedRevision, false);
+        return this.disableVoice(event, finish);
+      }
+      case "voice.prepare": {
+        if (snapshot.settings.values.voice.enabled === false) throw new MoguriError("speech_disabled", "Dictation is disabled. No recognizer was prepared.", 409);
+        const existing = [...this.active.entries()].find(([, job]) => job.kind === "voice.prepare");
+        if (existing) return finish([], { id: existing[0] });
+        if ((await this.voice.status()).prepared || [...this.active.values()].some((job) => ["voice.capture", "voice.record", "voice.transcribe"].includes(job.kind))) return finish([]);
+        return finish([], { id: this.job("voice.prepare", null, null, async (signal, progress) => {
+          progress("Preparing the licensed local recognizer without opening a microphone.");
+          await this.voice.prepare(snapshot.settings.values.voice, signal);
+          if (this.snapshot().settings.values.voice.enabled === false) throw new MoguriError("speech_disabled", "Dictation was disabled during preparation. No capture was started.", 409);
+          return { prepared: true, microphone: false };
+        }) });
       }
       case "voice.record":
       case "voice.transcribe": {
+        if (snapshot.settings.values.voice.enabled === false) throw new MoguriError("speech_disabled", "Enable voice dictation through its model/license review before capture. No audio was read or recorded.", 409);
         const session = this.session(command.sessionId);
         if ([...this.active.values()].some((job) => ["voice.record", "voice.transcribe", "voice.capture"].includes(job.kind))) throw new MoguriError("speech_busy", "Finish or cancel the current local dictation first.", 409);
         const ready = await this.voice.status();
@@ -1469,7 +1524,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       if (args.schemaDigest !== builtinToolDigest(tool)) throw new MoguriError("browser_schema", "The browser schema changed. Rediscover it and review the exact call.", 409);
       guard?.();
       const result = await this.browser.call(session.id, tool.name, input, signal, webAccess);
-      return { content: [{ type: "text", text: result.text }], isError: result.outcome !== "completed", outcome: result.outcome };
+      return { content: [{ type: "text", text: result.text }], isError: result.outcome !== "completed", outcome: result.outcome, ...(result.deliveries ? { deliveries: result.deliveries } : {}) };
     }
     if (!project && serverId === "builtin" && args.tool !== "fetch_page") throw new MoguriError("project_required", "This internal workspace tool requires a selected project.");
     if (project && serverId === "builtin" && ["search_memory", "memory_graph"].includes(String(args.tool))) {
@@ -1483,7 +1538,12 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     return this.gateway.operate({ action: "call", server, root, tool: String(args.tool), arguments: input, schemaDigest: String(args.schemaDigest), prepared,
       ...(serverId === "builtin" && args.tool === "fetch_page" ? { webAccess } : {}), scripts: await this.scripts(project?.id) }, signal, session.id, guard);
   }
-  async delegate(session: Session, call: ToolCall, signal: AbortSignal, guard?: () => void): Promise<{ text: string; isError: boolean; outcome: string }> {
+  async delegate(session: Session, call: ToolCall, signal: AbortSignal, guard?: () => void): Promise<DelegatedResult> {
+    if (["click", "type", "wait", "take_screenshot"].includes(call.name)) {
+      const names: Record<string, string> = { click: "browser_click", type: "browser_fill", wait: "browser_wait", take_screenshot: "browser_screenshot" };
+      const result = await this.browser.call(session.id, names[call.name]!, call.arguments, signal, this.host.webAccess?.(session, call));
+      return { text: result.text, isError: result.outcome !== "completed", outcome: result.outcome, deliveries: result.deliveries };
+    }
     if (call.name === "git_read") return this.gitTools.read(session, call.arguments, signal);
     if (call.name === "command_job") return { text: JSON.stringify(this.commandJob(session, call, signal)), isError: false, outcome: "completed" };
     if (call.name === "read_command_job") {
@@ -1573,12 +1633,14 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         const result = await this.callMcp(session, call.arguments, signal, this.host.webAccess?.(session, call), guard);
         const id = randomUUID();
         const browser = call.arguments.serverId === "builtin" && isBrowserTool(String(call.arguments.tool)) && isRecord(result);
+        const deliveries = browser && result.deliveries ? parse(ToolDeliveriesSchema, result.deliveries) : undefined;
+        const metadata = browser && deliveries ? Object.fromEntries(Object.entries(result).filter(([name]) => name !== "deliveries")) : result;
         const partial = browser && (result.outcome === "partial" || result.outcome === "cancelled");
         const failed = browser && result.isError === true;
-        const job: CapabilityJob = { id, kind: "mcp.result", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: session.turnId, status: partial ? "partial" : failed ? "failed" : "completed", progress: "Result retained", resultDigest: this.store.putBlob(JSON.stringify(result)), error: failed ? "Browser action did not complete; inspect its original retained outcome." : null };
+        const job: CapabilityJob = { id, kind: "mcp.result", sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: session.turnId, status: partial ? "partial" : failed ? "failed" : "completed", progress: "Result retained", resultDigest: this.store.putBlob(JSON.stringify(metadata)), error: failed ? "Browser action did not complete; inspect its original retained outcome." : null };
         this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { job } }]);
-        const text = JSON.stringify(result);
-        return { text: JSON.stringify({ resultId: id, content: text.slice(0, 12000), truncated: text.length > 12000, readWith: "mcp_gateway read_result" }), isError: isRecord(result) && result.isError === true, outcome: partial ? "partial" : isRecord(result) && result.isError === true ? "failed" : "completed" };
+        const text = JSON.stringify(metadata);
+        return { text: JSON.stringify({ resultId: id, content: text.slice(0, 12000), truncated: text.length > 12000, readWith: "mcp_gateway read_result" }), isError: isRecord(result) && result.isError === true, outcome: partial ? "partial" : isRecord(result) && result.isError === true ? "failed" : "completed", deliveries };
       }
       throw new MoguriError("gateway_action", "Use discover, tools, auth, call or read_result. Authentication/settings changes are user-only.");
     }

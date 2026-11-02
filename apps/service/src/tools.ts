@@ -21,6 +21,11 @@ import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { GitReadSchema, GitWriteToolSchema } from "../../../packages/protocol/src/github-workflows.ts";
 import { RunScriptToolSchema, ScriptExecutionSchema, ScriptReviewToolSchema, type ScriptExecution } from "../../../packages/protocol/src/script-reviews.ts";
 import { executeReviewedScript } from "./script-execution.ts";
+import { arrayTool, ArrayFindSchema, ArrayOrderSchema, ArrayCompareSchema } from "../../../packages/protocol/src/array-tools.ts";
+import { languageTool } from "./language-tools.ts";
+import { runDataTask } from "./data-tools.ts";
+import { RenderHtmlSchema, ToolDeliveriesSchema } from "../../../packages/protocol/src/chat-outputs.ts";
+import type { DelegatedResult } from "./worker-protocol.ts";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 export const repositoryTools = new Set([...fileTools, "run_command"]);
@@ -86,6 +91,9 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
     .filter((tool) => !["review_script", "run_script"].includes(tool.name) || scope.env === "Local")
     .filter((tool) => tool.name !== "fetch_page" || scope.env === "Sandbox")
     .filter((tool) => !["git_read", "git_write", "command_job", "create_issue", "project_work"].includes(tool.name) || scope.env === "Local")
+    .filter((tool) => !["goto_definition", "find_references"].includes(tool.name) || scope.env === "Local")
+    .filter((tool) => !["click", "type", "wait", "take_screenshot", "playwright", "render_html"].includes(tool.name) || scope.env === "Local")
+    .filter((tool) => tool.name !== "playwright" || !scope.multiRepository && !folders?.denied.length && !folders?.readOnly.length)
     .filter((tool) => tool.name !== "diff_files" || scope.env !== "Sandbox")
     .filter((tool) => !isDocumentTool(tool.name) || scope.documents)
     .filter((tool) => tool.name !== "moguri_config" || scope.metachat)
@@ -125,8 +133,8 @@ export function validateTool(call: ToolCall): void {
     if (Buffer.byteLength(JSON.stringify(call.arguments)) > (call.name === "create_issue" ? 512 : 256) * 1024) throw new MoguriError("tool_input_limit", "Structured arguments exceed their complete byte bound. Use a smaller explicit operation.");
   }
 }
-export async function executeTool(root: string | null, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall) => Promise<{ text: string; isError: boolean; outcome: string; endTurn?: true }>, safety?: { mode: SessionMode; folders: FolderPolicy; env?: Controls["env"]; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution }, catalog?: Tool[],
-  debuggerOwner?: { runtime: OwnedDebugRuntime; ended(pid: number, outcome: DebugProcessOutcome): Promise<void> }): Promise<{ text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean; endTurn?: true }> {
+export async function executeTool(root: string | null, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall) => Promise<DelegatedResult>, safety?: { mode: SessionMode; folders: FolderPolicy; env?: Controls["env"]; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution }, catalog?: Tool[],
+  debuggerOwner?: { runtime: OwnedDebugRuntime; ended(pid: number, outcome: DebugProcessOutcome): Promise<void> }): Promise<DelegatedResult> {
   signal.throwIfAborted();
   validateTool(call);
   if (safety?.homeRoot) {
@@ -150,6 +158,36 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
   const { repository, ...args } = call.arguments;
   const executionCall = repository === undefined ? call : { ...call, arguments: args };
   switch (call.name) {
+    case "render_html": {
+      if (safety?.env !== "Local") throw new MoguriError("html_env", "Interactive output delivery currently needs the qualified Local worker. No alternate environment was substituted.", 409);
+      const input = parse(RenderHtmlSchema, args);
+      if (!input.html.isWellFormed() || Buffer.byteLength(input.html) > 128 * 1024) throw new MoguriError("html_limit", "Use complete valid HTML up to 128 KiB. No source was truncated.");
+      return { text: JSON.stringify({ title: input.title, output: "isolated interactive HTML attached to this response", untrusted: true,
+        rendering: "Desktop only; other clients retain the complete source.", permissions: "No host, filesystem, service, network or navigation authority." }),
+        isError: false, outcome: "completed", deliveries: [{ kind: "html", ...input }] };
+    }
+    case "playwright": {
+      if (safety?.env !== "Local" || !root || safety.folders.denied.length || safety.folders.readOnly.length) throw new MoguriError("playwright_boundary", "Owned app execution needs its exact unrestricted approved Local root. No folder-policy or environment fallback.", 403);
+      const value = await runDataTask({ kind: "playwright", arguments: args, root, webAccess: safety.webAccess }, signal, started);
+      if (!isRecord(value) || !["completed", "partial"].includes(String(value.outcome))) throw new MoguriError("tool_partial", "The actual owned app result is missing. No app/input was replayed.");
+      const deliveries = parse(ToolDeliveriesSchema, value.deliveries);
+      const { deliveries: _, ...metadata } = value, rawText = JSON.stringify(metadata);
+      return { text: Buffer.byteLength(rawText) <= 12000 ? rawText : JSON.stringify({ outcome: value.outcome, closedKnownTarget: value.closedKnownTarget,
+        diagnostic: value.diagnostic, complete: false, detail: "Complete original observations are retained with read_tool_result." }),
+        rawText, rawComplete: true, deliveries, isError: value.outcome !== "completed", outcome: String(value.outcome) };
+    }
+    case "click": case "type": case "wait": case "take_screenshot":
+      if (safety?.env !== "Local" || !delegate) throw new MoguriError("browser_owner", "This tool needs the exact opened Local Browser pane and its service broker. No personal or substitute browser was launched.", 409);
+      return delegate(call);
+    case "goto_definition": case "find_references":
+      if (safety?.env !== "Local") throw new MoguriError("language_env", "The native semantic backend is qualified only for Local. No host or regex fallback was used.", 409);
+      return languageTool(root!, call.name, args, safety.folders, signal, started);
+    case "find_in_array": case "order_asc": case "order_desc": case "find_bigger": case "find_smaller": {
+      const input = parse(call.name === "find_in_array" ? ArrayFindSchema : call.name === "order_asc" || call.name === "order_desc" ? ArrayOrderSchema : ArrayCompareSchema, args);
+      const rawText = JSON.stringify(arrayTool(call.name, input));
+      return { text: rawText.length <= 12000 ? rawText : JSON.stringify({ complete: false, originalBytes: Buffer.byteLength(rawText),
+        diagnostic: "The complete typed array result is retained; page it with read_tool_result." }), rawText, rawComplete: true, isError: false, outcome: "completed" };
+    }
     case "debug": {
       if (!debuggerOwner) throw new MoguriError("dap_owner", "DAP needs the original owning model turn. No adapter was started.");
       try { return await debuggerOwner.runtime.execute(root!, args, signal, started, debuggerOwner.ended); }

@@ -16,6 +16,11 @@ if (!isMainThread) {
     void (async () => {
       await new Promise<void>((resolve, reject) => { watchdog.once("message", (value) => value === "ready" ? resolve() : reject(new Error("Invalid watchdog readiness."))); watchdog.once("error", reject); });
       if (!isRecord(request) || typeof request.kind !== "string" || !isRecord(request.arguments)) throw new Error("Invalid bounded data request.");
+      if (request.kind === "language.definition" || request.kind === "language.references") {
+        process.env.GOMEMLIMIT = "128MiB";
+        const { semanticSnapshot } = await import("./language-data.ts");
+        return semanticSnapshot(request.arguments, request.seed, request.kind === "language.definition");
+      }
       if (request.kind === "state_sql") {
         const { queryStateData } = await import("./state-sql-data.ts");
         return queryStateData(request.arguments, request.seed);

@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { lstat, mkdtemp, open, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { MoguriError, isRecord, parse, kanbanIssueSignature, type CommandResult, type EventInput } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, observedPrReadiness, isRecord, parse, kanbanIssueSignature, type CommandResult, type EventInput } from "../../../packages/protocol/src/index.ts";
 import {
   GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, GithubOperationResultSchema, GithubQuerySchema, GithubRepositorySchema, GithubReviewDocumentSchema, githubRootQuarantined, githubSourceOwner,
   type GithubAction, type GithubBrowse, type GithubGitState, type GithubItem, type GithubOperation,
@@ -109,13 +109,20 @@ function item(value: unknown, kind: GithubItem["kind"]): GithubItem {
   return {
     kind, id: numeric(data.id), ...(numeric(data.number) ? { number: numeric(data.number) } : {}),
     title: workItem ? stripMarkdownComments(string(data.title ?? data.name ?? data.context)) : string(data.title ?? data.name ?? data.context),
-    body: workItem ? stripMarkdownComments(string(data.body)) : string(data.body), state: string(data.state ?? data.status),
+    body: workItem ? stripMarkdownComments(string(data.body)) : string(data.body), state: kind === "pull" && data.merged === true ? "merged" : string(data.state ?? data.status),
     url: string(data.html_url ?? data.details_url ?? data.target_url) || null,
     updatedAt: string(data.updated_at ?? data.submitted_at ?? data.completed_at) || null, author: string(author.login) || null,
     headSha: string(data.head_sha ?? data.commit_id ?? head.sha) || null, conclusion: string(data.conclusion) || null,
     ...(kind === "release" ? { tag: string(data.tag_name), target: string(data.target_commitish), draft: data.draft === true, prerelease: data.prerelease === true } : {}),
     ...(kind === "pull" ? { base: string(base.ref), head: string(head.ref), draft: data.draft === true,
+      ...(observedPrReadiness(data) !== undefined ? { readyToMerge: observedPrReadiness(data), mergeState: string(data.mergeable_state) } : {}),
       ...(string(record(head.repo).full_name) ? { headRepository: string(record(head.repo).full_name) } : {}) } : {}),
+    ...(kind === "file" ? { title: string(data.filename), path: string(data.filename), state: string(data.status),
+      additions: numeric(data.additions), deletions: numeric(data.deletions), patch: typeof data.patch === "string" ? data.patch : null,
+      url: string(data.blob_url) || null } : {}),
+    ...(kind === "comment" && string(data.path) ? { path: string(data.path), ...(numeric(data.line) ? { line: numeric(data.line) } : {}) } : {}),
+    ...(kind === "job" && Array.isArray(data.steps) ? { steps: data.steps.map((step) => ({ name: string(record(step).name),
+      status: string(record(step).status), conclusion: string(record(step).conclusion) || null })) } : {}),
   };
 }
 const visibleItem = (value: GithubItem): GithubItem => ["issue", "pull", "comment", "review"].includes(value.kind) ?
@@ -869,6 +876,16 @@ export class GitHubWorkflows {
       case "reviews": path = `${base}/pulls/${input.number}/reviews?${suffix}`; kind = "review"; break;
       case "comments": path = `${base}/issues/${input.number}/comments?${suffix}`; kind = "comment"; break;
       case "review-comments": path = `${base}/pulls/${input.number}/comments?${suffix}`; kind = "comment"; break;
+      case "files": {
+        const pull = record((await this.api(root, `${base}/pulls/${input.number}`, signal)).data);
+        if (numeric(pull.number) !== input.number || record(pull.head).sha !== input.headSha) throw new MoguriError("github_head", "The PR head changed before its file read. No newer diff was substituted.", 409);
+        path = `${base}/pulls/${input.number}/files?${suffix}`; kind = "file"; break;
+      }
+      case "jobs": {
+        const run = record((await this.api(root, `${base}/actions/runs/${input.runId}`, signal)).data);
+        if (numeric(run.id) !== input.runId || run.head_sha !== input.headSha) throw new MoguriError("github_head", "The selected run no longer matches this exact PR head. No job data was adopted.", 409);
+        path = `${base}/actions/runs/${input.runId}/jobs?${suffix}`; kind = "job"; field = "jobs"; break;
+      }
       case "threads": {
         const [owner, name] = input.repository.split("/");
         let after: string | null = null, selected: unknown[] = [], next = false, head = "";
@@ -927,6 +944,10 @@ export class GitHubWorkflows {
     if (input.resource === "issues") values = values.filter((value) => !record(value).pull_request);
     if (input.resource === "issue" && record(response.data).pull_request) throw new MoguriError("github_source", "This number is a pull request, not an issue. Choose it from pull requests.", 409);
     const result = values.map((value) => item(value, kind));
+    if (input.resource === "files") {
+      const pull = record((await this.api(root, `${base}/pulls/${input.number}`, signal)).data);
+      if (numeric(pull.number) !== input.number || record(pull.head).sha !== input.headSha) throw new MoguriError("github_head", "The PR head changed during its file read. No mixed-head diff was adopted.", 409);
+    }
     if (input.resource === "runs" && input.headSha && result.some((value) => value.headSha !== input.headSha)) throw new MoguriError("github_head", "GitHub returned workflow runs from a different head. No CI result was adopted.", 409);
     await this.account(root, input.account, signal); context.current();
     return { type: "github.browse", boundary: "controller-gh-account-not-ssh", account: input.account, accountId, repository: input.repository,

@@ -37,6 +37,8 @@ export function createGithubApi(sdk: MoguriSdk) {
     pulls: (scope: GithubScope, repository: string, account: string, page = 1, perPage = 30) => browse(scope, { resource: "pulls", repository, account, page, perPage }),
     reviews: (scope: GithubScope, repository: string, account: string, number: number, page = 1, perPage = 30) => browse(scope, { resource: "reviews", repository, account, number, page, perPage }),
     threads: (scope: GithubScope, repository: string, account: string, number: number, page = 1, perPage = 30) => browse(scope, { resource: "threads", repository, account, number, page, perPage }),
+    files: (scope: GithubScope, repository: string, account: string, number: number, headSha: string, page = 1, perPage = 30) => browse(scope, { resource: "files", repository, account, number, headSha, page, perPage }),
+    jobs: (scope: GithubScope, repository: string, account: string, runId: number, headSha: string, page = 1, perPage = 30) => browse(scope, { resource: "jobs", repository, account, runId, headSha, page, perPage }),
     comments: (scope: GithubScope, repository: string, account: string, number: number, reviewComments = false, page = 1, perPage = 30) =>
       browse(scope, { resource: reviewComments ? "review-comments" : "comments", repository, account, number, page, perPage }),
     checks: (scope: GithubScope, repository: string, account: string, headSha: string, page = 1, perPage = 30) => browse(scope, { resource: "checks", repository, account, headSha, page, perPage }),

@@ -3,6 +3,7 @@ import type { Session, Snapshot } from "./index.ts";
 import { PullRequestLinkSchema, type PullRequestLink } from "./workspace.ts";
 import { defaultProjectConfiguration } from "./sessions.ts";
 import { colorContrast } from "./preferences.ts";
+import { GithubSessionOriginSchema, type GithubSessionOrigin } from "./github-workflows.ts";
 
 const nullableId = Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]);
 export const SessionPrScopeSchema = Type.Object({
@@ -18,6 +19,10 @@ export const SessionPrObservationSchema = Type.Object({
   sessionId: Type.String({ minLength: 1, maxLength: 128 }), scope: SessionPrScopeSchema, pullRequest: PullRequestLinkSchema,
 }, { additionalProperties: false });
 export type SessionPrObservation = Static<typeof SessionPrObservationSchema>;
+export const SessionPrAssociationSchema = Type.Object({ ...SessionPrObservationSchema.properties,
+  source: Type.Optional(GithubSessionOriginSchema),
+}, { additionalProperties: false });
+export type SessionPrAssociation = SessionPrObservation & { source?: GithubSessionOrigin };
 type PrSources = Pick<Snapshot, "issues" | "managedWorkspaces" | "changeSets" | "projects" | "projectConfigurations">;
 type PrOwner = Pick<Session, "projectId" | "workspaceId" | "workItemId" | "prUrl">;
 export function sessionPullRequestUrl(session: PrOwner, snapshot: Pick<PrSources, "issues" | "managedWorkspaces" | "changeSets">): string | null {
@@ -52,10 +57,29 @@ export function sessionPullRequest(session: Session, snapshot: PrSources & Pick<
     sameSessionPrScope(observed.scope, scope) && observed.pullRequest.url === scope.url) return observed.pullRequest;
   return null;
 }
+export function sessionPullRequestUrls(session: Session, snapshot: PrSources): string[] {
+  const primary = sessionPullRequestUrl(session, snapshot);
+  return [...new Set([...(primary ? [primary] : []), ...(session.prAssociations ?? []).map((association) => association.scope.url)])];
+}
+export function sessionPriority(session: Session, snapshot: Snapshot): number {
+  if (session.pendingQuestionId || session.pendingApproval || session.status === "waiting_input") return 0;
+  const pr = sessionPullRequest(session, snapshot);
+  const checked = pr?.checkedAt ? Date.now() - Date.parse(pr.checkedAt) : NaN;
+  if (session.status === "completed" || !session.turnId && pr && !pr.diagnostic &&
+    (pr.state === "merged" || pr.readyToMerge === true && checked >= 0 && checked <= 120000)) return 1;
+  if (session.status === "failed" || session.status === "partial" || session.wait?.status === "blocked") return 2;
+  if (session.turnId || session.status === "running" || session.status === "stopping") return 3;
+  if (session.status === "queued" || session.queue.length) return 4;
+  return 5;
+}
+export function compareSessionPriority(a: Session, b: Session, snapshot: Snapshot): number {
+  return Number(b.pinned) - Number(a.pinned) || sessionPriority(a, snapshot) - sessionPriority(b, snapshot) ||
+    (a.order ?? 0) - (b.order ?? 0) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
+}
 export type SessionIndicatorKind = "running" | "question" | "approval" | "completed" | "merged" | "failed" | "partial" | "stopped" | "queued" | "idle" | "archived";
 export type SessionPrIndicatorKind = "unknown" | "open" | "draft" | "closed" | "merged";
 export function sessionIndicator(session: Session, snapshot: Snapshot): {
-  kind: SessionIndicatorKind; label: string; pr: PullRequestLink | null; prUrl: string | null; prState: SessionPrIndicatorKind; prLabel: string;
+  kind: SessionIndicatorKind; label: string; pr: PullRequestLink | null; prUrl: string | null; prState: SessionPrIndicatorKind; prLabel: string; prCount: number;
 } {
   const pr = sessionPullRequest(session, snapshot), prUrl = sessionPullRequestUrl(session, snapshot);
   const prState: SessionPrIndicatorKind = !pr || pr.diagnostic || pr.state === "unknown" || pr.state === "open" && pr.draft == null ? "unknown" :
@@ -64,7 +88,7 @@ export function sessionIndicator(session: Session, snapshot: Snapshot): {
     prState === "merged" ? "Attached pull request merged" : prState === "closed" ? "Attached pull request is closed, not merged" :
     `Attached pull request status is not verified${pr?.diagnostic ? `: ${pr.diagnostic}` : ""}`;
   const result = (kind: SessionIndicatorKind, label: string) => ({
-    kind, label: kind === "completed" && prUrl ? `${label}; ${prLabel}` : label, pr, prUrl, prState, prLabel,
+    kind, label: kind === "completed" && prUrl ? `${label}; ${prLabel}` : label, pr, prUrl, prState, prLabel, prCount: sessionPullRequestUrls(session, snapshot).length,
   });
   if (session.pendingQuestionId) return result("question", "Question needs your answer");
   if (session.pendingApproval) return result("approval", "Permission or approval needed");

@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { access, mkdir, open, rename, stat, statfs, unlink } from "node:fs/promises";
+import { access, lstat, mkdir, open, readFile, rename, stat, statfs, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,18 +28,23 @@ export interface SpeechOptions {
   model?: typeof NEMOTRON_MODEL;
   fetch?: typeof globalThis.fetch;
   modelDirectory?: string;
+  managedModelDirectory?: boolean;
   finalizationTimeoutMs?: number;
 }
+export interface VoiceModelOwner { profileId: string; jobId: string; recover: (jobId: string) => boolean }
+const modelOperations = new Map<string, symbol>();
 export class LocalDictation {
   private readonly executable: string;
   private readonly model;
   private readonly modelPath: string;
   private verified = "";
-  private streaming?: { backend: string; server: Promise<SpeechServer>; readonly owner?: SpeechServer };
+  private streaming?: { backend: string; server: Promise<SpeechServer>; ready: boolean; readonly owner?: SpeechServer };
   private active = new Map<string, { child: ChildProcess | null; stopping: boolean; ready: boolean; terminate?: (signal: NodeJS.Signals) => void }>();
   constructor(stateDir: string, private readonly options: SpeechOptions = {}) {
     this.executable = options.executable ?? fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../../../.native/speech/bin/nemo-speech" : "./native/speech/bin/nemo-speech", import.meta.url));
     this.model = options.model ?? NEMOTRON_MODEL;
+    if (!/^[A-Za-z0-9._-]+\.gguf$/.test(this.model.filename) || !/^[a-f0-9]{64}$/.test(this.model.sha256) ||
+      !Number.isSafeInteger(this.model.bytes) || this.model.bytes < 1 || this.model.bytes > 2 * 1024 * 1024 * 1024) throw new MoguriError("speech_model", "The configured speech artifact has invalid bounded identity/size. No path was adopted.");
     this.modelPath = join(options.modelDirectory ?? join(stateDir, "speech-models"), this.model.filename);
   }
   async status(): Promise<VoiceStatus> {
@@ -52,10 +57,73 @@ export class LocalDictation {
     return {
       runtimeReady, modelReady, modelId: this.model.id, bytes: this.model.bytes, license: this.model.license,
       languageLocales: VOICE_LOCALES,
+      prepared: Boolean(this.streaming?.ready && this.streaming.owner && !this.streaming.owner.closed),
+      managed: this.options.modelDirectory === undefined || this.options.managedModelDirectory === true,
       diagnostic: !runtimeReady ? "Install the pinned local NeMo-Speech.cpp runtime. No cloud fallback is used." : !modelReady ? "Download the Nemotron model once after accepting its license. Recording never downloads it implicitly." : "Audio stays local. Model integrity is checked before use; adaptation-tier locales require fine-tuning.",
     };
   }
-  async download(signal: AbortSignal, progress: (message: string) => void): Promise<{ installed: boolean; modelId: string }> {
+  private async modelOperation<T>(owner: VoiceModelOwner | undefined, signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+    signal.throwIfAborted();
+    const lock = `${this.modelPath}.operation`, token = Symbol("owned speech model operation");
+    if (modelOperations.has(lock)) throw new MoguriError("speech_download_pending", "Another exact speech model operation owns this shared model. No file was replaced or deleted.", 409);
+    modelOperations.set(lock, token);
+    let file: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      await mkdir(dirname(this.modelPath), { recursive: true, mode: 0o700 });
+      const directory = await lstat(dirname(this.modelPath));
+      if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== process.getuid?.()) throw new MoguriError("speech_model_directory", "Speech models require an actual owned directory, not a symlink or another user's files.");
+      try { file = await open(lock, "wx", 0o600); }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+        if (!owner) throw new MoguriError("speech_download_pending", "An original shared model operation is still retained. Inspect it before another download.", 409);
+        const metadata = await lstat(lock);
+        if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 4096) throw new MoguriError("speech_model_owner", "The original model-operation owner is invalid. No file was removed.", 409);
+        const retained: unknown = JSON.parse(await readFile(lock, "utf8"));
+        if (!retained || typeof retained !== "object" || !("version" in retained) || retained.version !== 1 ||
+          !("profileId" in retained) || retained.profileId !== owner.profileId || !("jobId" in retained) || typeof retained.jobId !== "string" ||
+          !("digest" in retained) || retained.digest !== this.model.sha256 || !owner.recover(retained.jobId)) {
+          throw new MoguriError("speech_model_owner", "The shared model still has an unknown or other-profile operation owner. Inspect that original job before retrying; no work was replayed or deleted.", 409);
+        }
+        await this.removeModelFile(`${this.modelPath}.download`);
+        await unlink(lock);
+        file = await open(lock, "wx", 0o600);
+      }
+      await file.writeFile(JSON.stringify({ version: 1, profileId: owner?.profileId ?? "embedded", jobId: owner?.jobId ?? randomUUID(), digest: this.model.sha256 }));
+      await file.sync(); signal.throwIfAborted();
+      return await operation();
+    } finally {
+      try {
+        if (file) {
+          const original = await file.stat();
+          let current;
+          try { current = await lstat(lock); } finally { await file.close(); }
+          if (original.ino !== current.ino || original.dev !== current.dev) throw new MoguriError("speech_partial", "The original model-operation lock changed. Cleanup is unconfirmed; no replacement lock was deleted.", 409);
+          await unlink(lock);
+        }
+      } finally { if (modelOperations.get(lock) === token) modelOperations.delete(lock); }
+    }
+  }
+  private async removeModelFile(path: string): Promise<void> {
+    let metadata;
+    try { metadata = await lstat(path); }
+    catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return; throw error; }
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.uid !== process.getuid?.()) throw new MoguriError("speech_model_owner", "The exact managed model/staging file is not an owned regular file. No external file was removed.", 409);
+    await unlink(path);
+  }
+  async removeManaged(signal: AbortSignal, owner: VoiceModelOwner): Promise<{ removed: true; modelId: string }> {
+    if (this.options.modelDirectory !== undefined && this.options.managedModelDirectory !== true) throw new MoguriError("speech_external_model", "Dictation is disabled, but this externally selected model directory is not Moguri-owned. No user-selected model was deleted.", 409);
+    return this.modelOperation(owner, signal, async () => {
+      signal.throwIfAborted();
+      await this.removeModelFile(`${this.modelPath}.download`);
+      await this.removeModelFile(this.modelPath);
+      this.verified = "";
+      return { removed: true, modelId: this.model.id };
+    });
+  }
+  async download(signal: AbortSignal, progress: (message: string) => void, owner?: VoiceModelOwner): Promise<{ installed: boolean; modelId: string }> {
+    return this.modelOperation(owner, signal, () => this.install(signal, progress));
+  }
+  private async install(signal: AbortSignal, progress: (message: string) => void): Promise<{ installed: boolean; modelId: string }> {
     await mkdir(dirname(this.modelPath), { recursive: true, mode: 0o700 });
     const info = await statfs(dirname(this.modelPath));
     if (info.bavail * info.bsize < this.model.bytes * 2) throw new MoguriError("speech_disk", "Free at least twice the model download size before installing it.");
@@ -110,8 +178,7 @@ export class LocalDictation {
     if (hash.digest("hex") !== this.model.sha256) throw new MoguriError("speech_integrity", "Installed model integrity failed. Reinstall it explicitly; no download or cloud fallback was attempted.");
     this.verified = fingerprint;
   }
-  async stream(jobId: string, settings: UserSettings["voice"], signal: AbortSignal, changed: (text: string) => void) {
-    if (!jobId) throw new MoguriError("speech_scope", "Streaming recognition needs its exact capture owner.");
+  async prepare(settings: UserSettings["voice"], signal: AbortSignal): Promise<void> {
     await this.verify(signal);
     if (settings.language !== "auto" && !VOICE_LOCALES.some((locale) => locale.code === settings.language && locale.tier !== "adaptation")) {
       throw new MoguriError("speech_language", "Choose auto or a qualified ready/broad-coverage locale.");
@@ -120,6 +187,7 @@ export class LocalDictation {
       await this.close();
       let owner: SpeechServer | undefined;
       this.streaming = { backend: settings.backend,
+        ready: false,
         server: startSpeechServer(this.executable, this.options.prefixArgs ?? [], this.modelPath, settings.backend, signal, (value) => { owner = value; }),
         get owner() { return owner; } };
     }
@@ -129,6 +197,13 @@ export class LocalDictation {
       if (this.streaming === owned && !(error instanceof MoguriError && error.code === "speech_partial")) this.streaming = undefined;
       throw error;
     }
+    owned.ready = !server.closed;
+    signal.throwIfAborted();
+  }
+  async stream(jobId: string, settings: UserSettings["voice"], signal: AbortSignal, changed: (text: string) => void) {
+    if (!jobId) throw new MoguriError("speech_scope", "Streaming recognition needs its exact capture owner.");
+    await this.prepare(settings, signal);
+    const owned = this.streaming!, server = await owned.server;
     const stream = await openSpeechStream(server, settings.language, signal, changed);
     return { append: stream.append,
       finish: async () => ({ ...await stream.finish(), modelId: this.model.id, language: settings.language, source: "local" as const }),

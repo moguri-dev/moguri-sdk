@@ -11,7 +11,7 @@ export const CoordinationOriginSchema = Type.Union([
   object({ actor: Type.Literal("user") }), object({ actor: Type.Literal("service") }),
   ModelAdviceSourceSchema,
 ]);
-export const CoordinationLinkSchema = object({ parentId: id, childId: id, parentScope: hash, childScope: hash, enabled: Type.Boolean(), revision: Type.Integer({ minimum: 0 }), origin: CoordinationOriginSchema });
+export const CoordinationLinkSchema = object({ parentId: id, childId: id, parentScope: hash, childScope: hash, enabled: Type.Boolean(), revision: Type.Integer({ minimum: 0 }), origin: CoordinationOriginSchema, kind: Type.Optional(Type.Literal("peer")) });
 export const CoordinationMessageSchema = object({
   id, fromSessionId: id, toSessionId: id, fromTurnId: Type.Union([id, Type.Null()]), origin: CoordinationOriginSchema,
   bindingDigest: Type.Optional(hash),
@@ -21,6 +21,7 @@ export const CoordinationMessageSchema = object({
 export interface CoordinationLink {
   parentId: string; childId: string; parentScope: string; childScope: string;
   enabled: boolean; revision: number; origin: CoordinationOrigin;
+  kind?: "peer";
 }
 export interface CoordinationMessage {
   id: string; fromSessionId: string; toSessionId: string; fromTurnId: string | null;
@@ -68,5 +69,5 @@ export type CoordinationRead =
   | (CoordinationMetadata & { action: "inspect"; plan: TaskPlan | null; question: UserQuestion | null; approval: { id: string; name: string; argumentsDigest: string } | null; authority: string })
   | { action: "snapshot" | "transcript"; text: string; bytes: number; offset: number; nextOffset: number | null; eof: boolean; digest: string; sourceSessionId: string; authority: string };
 export type CoordinationResponse =
-  | { type: "coordination.preview"; digest: string; link: CoordinationLink | null; parentScope: string; childScope: string; parentBinding: CoordinationBinding; childBinding: CoordinationBinding }
+  | { type: "coordination.preview"; digest: string; link: CoordinationLink | null; parentScope: string; childScope: string; parentBinding: CoordinationBinding; childBinding: CoordinationBinding; kind?: "peer" }
   | { type: "coordination.read"; data: CoordinationRead };

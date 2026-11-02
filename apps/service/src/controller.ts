@@ -58,6 +58,9 @@ import { McpToolInfoSchema, type QueueItem } from "../../../packages/protocol/sr
 import { CommandJobReadSchema, retainedToolText, type ToolingQuery, type ToolingResponse } from "../../../packages/protocol/src/tooling.ts";
 import { publicToolResults } from "./retained-tool-results.ts";
 import { SessionCoordination, coordinatedMessageContext } from "./session-coordination.ts";
+import { previewSessionBulk } from "./session-bulk.ts";
+import { sessionWaiting, type SessionControlsCommand } from "../../../packages/protocol/src/session-controls.ts";
+import { ToolDeliveriesSchema } from "../../../packages/protocol/src/chat-outputs.ts";
 import { SessionStateSql } from "./session-state-sql.ts";
 import { IssueTools } from "./issue-tools.ts";
 import { workItemSnapshotView } from "../../../packages/protocol/src/markdown.ts";
@@ -289,6 +292,8 @@ export class ControlPlane extends EventEmitter {
     this.coordination = new SessionCoordination({
       profileId: this.profileId, snapshot: () => this.snapshot(), events: () => this.events(0),
       scope: (session) => this.coordinationScope(session), binding: (session) => this.coordinationBinding(session),
+      waitScope: (session) => frameDigest(["session-wait-binding-v1", this.commandBinding(session), session.homeRoot ?? null,
+        session.sandboxWorkspaceId ?? null, this.projection.sandboxWorkspaces?.find((workspace) => workspace.id === session.sandboxWorkspaceId)?.inputDigest ?? null]),
       plan: (sessionId) => this.platform.progress.currentPlan(sessionId) ?? null, commit: (events) => this.commit(events),
       stop: (id) => this.stop(id), blocked: (session) => this.blocked(session), wake: () => this.wake(),
       validate: (session) => this.available(session.controls, true, session),
@@ -359,6 +364,9 @@ export class ControlPlane extends EventEmitter {
       kanbanQuery: (query) => this.projectWork.query(query),
       kanbanCommand: (command, finish) => this.projectWork.execute(command, finish),
       coordinationQuery: (query) => this.coordination.query(query),
+      sessionControlsQuery: (query) => query.type === "session.wait.preview" ?
+        { type: query.type, preview: this.coordination.waitPreview(query.sessionId, query.targetSessionId) } :
+        { type: query.type, preview: previewSessionBulk(this.snapshot(), query.input) },
       generationCommand: (command, finish) => this.generations.execute(command, finish),
       roleProposal: (id) => this.ownedRoles.proposal(id),
       compoundProposal: (id, stepId) => this.compound.proposal(id, stepId),
@@ -1769,31 +1777,40 @@ export class ControlPlane extends EventEmitter {
   }
   private async deleteSession(session: Session, finish: WorkspaceFinish, children?: SessionChildrenReview, requireChildReview = false): Promise<CommandResult> {
     const decision = this.childrenDecision(session, "delete", children, requireChildReview);
-    const ownershipScope = decision.tree;
+    return this.deleteSessionSet([{ root: session, ...decision, children, required: requireChildReview }], finish, session.id);
+  }
+  private async deleteSessionSet(decisions: { root: Session; tree: Session[]; action: SessionChildrenAction | null; children?: SessionChildrenReview; required: boolean }[],
+    finish: WorkspaceFinish, resultId: string, recheck?: () => void): Promise<CommandResult> {
+    const ownershipScope = [...new Map(decisions.flatMap((decision) => decision.tree).map((session) => [session.id, session])).values()];
     if (ownershipScope.some((value) => value.repositories && value.kind === "agent" && this.projection.blockedSessions.includes(value.id))) {
       throw new MoguriError("cleanup_unconfirmed", "This folder session retains unconfirmed ownership across its original roots. Inspect every root and explicitly Resume before forgetting its owner.", 409);
     }
     const locked = ownershipScope.map((value) => value.id);
     if (locked.some((id) => this.deletingSessions.has(id))) throw new MoguriError("session_busy", "This session tree is already being removed.", 409);
     for (const id of locked) this.deletingSessions.add(id);
-    const targets = decision.action === "delete" ? [...decision.tree].reverse() : [session];
+    const targets = [...new Map(decisions.flatMap((decision) => decision.action === "delete" ? [...decision.tree].reverse() : [decision.root])
+      .map((session) => [session.id, session])).values()];
     const cleanups: NonNullable<ReturnType<CandidateCleanupRuntime["beginSession"]>>[] = [];
     try {
       for (const target of targets) {
         const cleanup = this.candidateCleanup.beginSession(target.id);
         if (cleanup) cleanups.push(cleanup);
       }
-      if (cleanups.length) await settleCandidateCleanup(this.settleOwned(session.id));
-      else await this.settleOwned(session.id);
-      if (children !== undefined) this.childrenDecision(this.session(session.id), "delete", children, requireChildReview);
+      for (const decision of decisions) {
+        if (cleanups.length) await settleCandidateCleanup(this.settleOwned(decision.root.id));
+        else await this.settleOwned(decision.root.id);
+        if (decision.children !== undefined) this.childrenDecision(this.session(decision.root.id), "delete", decision.children, decision.required);
+      }
+      recheck?.();
       await this.settleCandidateWork([...new Set(cleanups.flatMap((cleanup) => cleanup.targets))]);
       const targetIds = new Set(targets.map((target) => target.id));
       if (this.projection.winddowns.some((record) => targetIds.has(record.sessionId) && unsettledWinddownCommit(record))) {
         throw new MoguriError("winddown_inspection", "Inspect and separately acknowledge the original partial transport checkpoint before deleting its actual session owner. Ref intent, independent report and writer quarantine were preserved.", 409);
       }
       for (const execution of this.projection.executions.filter((value) => targetIds.has(value.sessionId))) await this.remote.forget(execution);
-      const detach = decision.action === "detach" ? this.projection.sessions.filter((child) => child.parentSessionId === session.id)
-        .map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } })) : [];
+      const detachedParents = new Set(decisions.filter((decision) => decision.action === "detach").map((decision) => decision.root.id));
+      const detach = this.projection.sessions.filter((child) => child.parentSessionId && detachedParents.has(child.parentSessionId) && !targetIds.has(child.id))
+        .map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } }));
       const completed = cleanups.map((cleanup) => this.candidateCleanup.complete(cleanup.id));
       const deletionEvents = targets.map((target) => {
         const current = this.session(target.id);
@@ -1802,7 +1819,7 @@ export class ControlPlane extends EventEmitter {
       });
       const artifacts = [...new Set(completed.flatMap((cleanup) => cleanup.forget.artifacts ?? []))];
       const result = finish([...detach, ...completed.flatMap((cleanup) => cleanup.events), ...deletionEvents],
-        { id: session.id }, { ...(artifacts.length ? { artifacts } : {}), sessions: targets.map((target) => target.id) });
+        { id: resultId }, { ...(artifacts.length ? { artifacts } : {}), sessions: targets.map((target) => target.id) });
       for (const target of targets) this.paused.delete(target.id);
       return result;
     } catch (error) {
@@ -1810,6 +1827,56 @@ export class ControlPlane extends EventEmitter {
       for (const cleanup of cleanups) cleanupFailure ??= this.candidateCleanup.failed(cleanup.id, error);
       if (cleanupFailure) throw cleanupFailure;
       throw error;
+    } finally { for (const id of locked) this.deletingSessions.delete(id); }
+  }
+  private async bulkSessions(command: Extract<SessionControlsCommand, { type: "sessions.bulk" }>, finish: WorkspaceFinish): Promise<CommandResult> {
+    const preview = previewSessionBulk(this.snapshot(), command.input);
+    if (preview.digest !== command.expectedDigest) throw new MoguriError("session_bulk_stale", "The entire selected set or tree changed after review. Review it again; no partial action was applied.", 409);
+    const roots = preview.roots.map((id) => this.session(id));
+    const tree = [...new Map(roots.flatMap((session) => this.descendants(session.id)).map((session) => [session.id, session])).values()];
+    if (tree.some((session) => this.removingSession(session.id) || session.projectId && this.deletingProjects.has(session.projectId))) {
+      throw new MoguriError("session_bulk_busy", "A selected tree is already settling/removing owned work. No second bulk action was admitted.", 409);
+    }
+    if (command.input.action === "attach" || command.input.action === "detach") {
+      const target = command.input.action === "attach" ? command.input.targetSessionId! : null;
+      return finish(command.input.sessionIds.map((id) => this.event(this.session(id), "session.organized", { changes: { parentSessionId: target } })), { id: preview.roots[0] });
+    }
+    const action = command.input.action;
+    const decisions = roots.map((root) => {
+      const children: SessionChildrenReview = { action: command.input.children === "detach" ? "detach" : action,
+        expected: sessionChildBindings(this.projection.sessions, root.id) };
+      return { root, children, required: true, ...this.childrenDecision(root, action, children) };
+    });
+    const binding = () => frameDigest([this.projection.policy.revision, this.projection.settings.permissionRevision,
+      roots.map((root) => this.commandBinding(this.session(root.id))),
+      this.projection.projectConfigurations.filter((configuration) => configuration.projectId === roots[0]!.projectId)]);
+    const captured = binding();
+    const recheck = () => {
+      if (binding() !== captured) throw new MoguriError("session_bulk_stale", "A selected root or policy changed while cleanup settled. No session was archived/deleted; inspect and review the complete set again.", 409);
+      for (const decision of decisions) this.childrenDecision(this.session(decision.root.id), action, decision.children);
+    };
+    if (action === "delete") return this.deleteSessionSet(decisions, finish, preview.roots[0]!, recheck);
+    const locked = tree.map((session) => session.id);
+    for (const id of locked) this.deletingSessions.add(id);
+    try {
+      for (const root of roots) await this.settleOwned(root.id);
+      recheck();
+      const targets = [...new Map(decisions.flatMap((decision) => decision.action === "archive" ? decision.tree : [decision.root])
+        .map((session) => [session.id, this.session(session.id)])).values()];
+      if (this.projection.winddowns.some((record) => targets.some((target) => target.id === record.sessionId) && unsettledWinddownCommit(record))) {
+        throw new MoguriError("winddown_inspection", "An original checkpoint has unconfirmed effects. Inspect it before bulk archive; no selected conversation was hidden.", 409);
+      }
+      const targetIds = new Set(targets.map((session) => session.id));
+      const detachedParents = new Set(decisions.filter((decision) => decision.action === "detach").map((decision) => decision.root.id));
+      const detach = this.projection.sessions.filter((child) => child.parentSessionId && detachedParents.has(child.parentSessionId) && !targetIds.has(child.id))
+        .map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } }));
+      const events = [...detach, ...targets.flatMap((session) => [
+        ...(session.queue.length ? [this.event(session, "queue.held", { messageIds: session.queue.map((item) => item.id) })] : []),
+        this.event(session, "session.archived", {}),
+      ])];
+      // No asynchronous gap separates releasing our cleanup locks from committing the complete archive.
+      for (const id of locked) this.deletingSessions.delete(id);
+      return finish(events, { id: preview.roots[0] });
     } finally { for (const id of locked) this.deletingSessions.delete(id); }
   }
   private async removeProject(id: string, finish: WorkspaceFinish, choice?: ProjectArtifactChoice): Promise<CommandResult> {
@@ -1982,13 +2049,17 @@ export class ControlPlane extends EventEmitter {
       external.executing = true; this.externalEffects.add(external);
       return external.execute(external.abort.signal);
     };
-    void execute().then((result) => {
+    void execute().then(async (result) => {
       if (external.abort.signal.aborted || !this.externalRuns.has(external.sessionId)) return;
       const failed = result !== null && typeof result === "object" && "isError" in result && result.isError === true;
       const browser = external.call.arguments.serverId === "builtin" && isBrowserTool(String(external.call.arguments.tool)) && isRecord(result);
       const observed = isRecord(result) && (browser || external.call.name !== "mcp_gateway") ? result.outcome : undefined;
       const outcome = observed === "partial" ? "partial" : observed === "stopped" || observed === "cancelled" ? "stopped" : failed ? "failed" : "completed";
-      this.finishExternal(external, outcome, failed ? "The MCP tool did not complete. Inspect its original outcome; no automatic retry." : null, result);
+      const outputs = isRecord(result) && result.deliveries ? await this.platform.inputs.deliverTool(external.sessionId, external.turnId, external.call,
+        parse(ToolDeliveriesSchema, result.deliveries), "user") : undefined;
+      if (external.abort.signal.aborted || !this.externalRuns.has(external.sessionId)) return;
+      const metadata = isRecord(result) && result.deliveries ? Object.fromEntries(Object.entries(result).filter(([name]) => name !== "deliveries")) : result;
+      this.finishExternal(external, outcome, failed ? "The tool did not complete. Inspect its original outcome; no automatic retry." : null, metadata, undefined, outputs);
     }).catch((error: unknown) => {
       if (!this.externalRuns.has(external.sessionId)) return;
       const outcome = !external.executing ? external.abort.signal.aborted ? "stopped" : "failed" :
@@ -2000,7 +2071,7 @@ export class ControlPlane extends EventEmitter {
       console.error("External MCP settlement persistence failed:", error instanceof MoguriError ? error.code : "mcp_settlement");
     }).finally(() => { external.executing = false; this.externalEffects.delete(external); this.wake(); });
   }
-  private finishExternal(external: ExternalRun, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null, result?: unknown, decision?: "denied"): void {
+  private finishExternal(external: ExternalRun, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null, result?: unknown, decision?: "denied", attachments?: import("../../../packages/protocol/src/inputs.ts").Attachment[]): void {
     if (!this.externalRuns.has(external.sessionId)) return;
     const session = this.session(external.sessionId);
     const nativeResult = external.call.name !== "mcp_gateway" && isRecord(result) ? result : null;
@@ -2012,6 +2083,7 @@ export class ControlPlane extends EventEmitter {
       ...mcpEvents,
       ...this.finishHomeWriter(external),
       this.event(session, "tool.completed", { call: external.call, text: text.slice(0, MAX_TEXT), isError: outcome !== "completed", outcome: decision ?? outcome,
+        ...(attachments?.length ? { attachments } : {}),
         ...(nativeResult && typeof nativeResult.rawText === "string" ? { rawDigest: this.store.putBlob(nativeResult.rawText), rawComplete: nativeResult.rawComplete === true } : {}) }, external.stepId),
       this.event(session, "job.finished", { jobId: external.jobId, status: outcome === "stopped" ? "cancelled" : outcome, resultDigest: result === undefined ? null : this.store.putBlob(JSON.stringify(result)), error: diagnostic }, external.stepId),
       this.event(session, "turn.finished", { outcome, diagnostic }, external.stepId),
@@ -2880,6 +2952,8 @@ export class ControlPlane extends EventEmitter {
         payload: { jobId: job.id, root: job.commandJob.root, actor: "user" } }], { id: job.id });
       this.wake(); return result;
     }
+    if (command.type === "session.wait" || command.type === "session.wait.cancel") return this.coordination.waitCommand(command, finish);
+    if (command.type === "sessions.bulk") return this.bulkSessions(command, finish);
     if (command.type === "coordination.grant" || command.type === "coordination.message" || command.type === "coordination.control") return this.coordination.execute(command, finish);
     if (command.type === "script.review.force") {
       const session = this.session(command.sessionId), record = this.platform.scriptReviews.read({ type: "script.review.read", sessionId: session.id, reviewId: command.reviewId }).review;
@@ -3193,7 +3267,9 @@ export class ControlPlane extends EventEmitter {
         }
         return finish([this.event(session, "queue.removed", { messageId: command.messageId })]);
       case "session.stop":
-        finish([]);
+        if (sessionWaiting(session)) this.coordination.waitCommand({ type: "session.wait.cancel", sessionId: session.id,
+          waitId: session.wait!.id, expectedRevision: session.wait!.revision }, finish);
+        else finish([]);
         this.stop(session.id);
         return {};
       case "approval.respond": {
@@ -3338,7 +3414,7 @@ export class ControlPlane extends EventEmitter {
   private retryInput(failure: ModelFailure, active = false): RetainedModelRequest {
     const session = this.session(failure.sessionId);
     if (this.shuttingDown || !failure.retryable || !failure.lastRetryable || !failure.requestDigest || !["pending", "exhausted", "blocked", "retrying"].includes(failure.status) ||
-      session.status === "archived" || this.removingSession(session.id) || !active && (session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id))) {
+      session.status === "archived" || sessionWaiting(session) || this.removingSession(session.id) || !active && (session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id))) {
       throw new MoguriError("model_retry_blocked", "The original failure is not eligible or its owned work has not settled. No new prompt or model request was started.", 409);
     }
     if (active && (session.turnId !== failure.turnId || failure.status !== "retrying")) throw new MoguriError("model_retry_stale", "The exact retry turn/attempt no longer owns admission.", 409);
@@ -3413,7 +3489,7 @@ export class ControlPlane extends EventEmitter {
   private pumpRetries(): void {
     for (const failure of this.projection.modelFailures.filter((failure) => failure.status === "retrying")) {
       const session = this.session(failure.sessionId);
-      if (this.runs.has(session.id) || this.nativeAdmissions.has(session.id)) continue;
+      if (sessionWaiting(session) || this.runs.has(session.id) || this.nativeAdmissions.has(session.id)) continue;
       try {
         const input = this.retryInput(failure, true);
         if (session.kind === "agent" && session.mode === "agent" && this.otherWriter(session)) continue;
@@ -3696,9 +3772,11 @@ export class ControlPlane extends EventEmitter {
   }
   private pumpAll(): void {
     if (this.shuttingDown) return;
+    this.coordination.reconcileWaits();
     this.settleHomeBackgroundWriters();
     this.pumpRetries();
     for (let session of this.projection.sessions) {
+      if (sessionWaiting(session)) continue;
       const command = session.queue.find((item) => item.delivery !== "steer" && !item.held);
       if (command?.command) {
         if (!this.removingSession(session.id) && this.commandBoundary(session) &&
@@ -5509,10 +5587,12 @@ export class ControlPlane extends EventEmitter {
     if (request.kind === "tool.complete") {
       const hook = run.hooks?.calls.get(request.call.id);
       if (run.chatWriterId && homeWriteTool(request.call) && ["partial", "unconfirmed"].includes(request.outcome)) run.homeUncertain = true;
+      const attachments = request.deliveries?.length ? await this.platform.inputs.deliverTool(session.id, run.turnId, request.call, request.deliveries, "model") : undefined;
       run.calls.delete(request.call.id);
       run.granted.delete(request.call.id);
       run.webScopes?.delete(request.call.id);
       const completed = this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
+        ...(attachments?.length ? { attachments } : {}),
         ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) }, request.stepId);
       const mcp = run.mcpDispatches?.get(request.call.id);
       if (mcp) {

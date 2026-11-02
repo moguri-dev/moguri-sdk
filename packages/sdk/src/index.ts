@@ -35,6 +35,20 @@ export const attachmentStatus = (attachment: Attachment): string => attachment.k
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
 export class MoguriSdk extends TransportClient {
+  readonly chatOutputs = {
+    renderHtml: async (sessionId: string, title: string, html: string) => {
+      const tool = (await this.tools.catalog(sessionId, "render_html")).tools.find((tool) => tool.name === "render_html");
+      if (!tool) throw new ClientError("html_unavailable", "Interactive output is unavailable in this original session/Env. No host fallback.");
+      return this.tools.execute(sessionId, tool.name, { title, html }, tool.schemaDigest);
+    },
+  };
+  readonly apps = {
+    run: async (sessionId: string, input: import("../../protocol/src/playwright-tools.ts").PlaywrightToolInput) => {
+      const tool = (await this.tools.catalog(sessionId, "playwright")).tools.find((tool) => tool.name === "playwright");
+      if (!tool) throw new ClientError("playwright_unavailable", "Owned app execution is unavailable in this session/Env/policy. No personal app or host fallback.");
+      return this.tools.execute(sessionId, tool.name, input, tool.schemaDigest);
+    },
+  };
   readonly scheduledPrompts = {
     list: (sessionId?: string) => (this.getState().snapshot?.scheduledPrompts ?? []).filter((prompt) => sessionId === undefined || prompt.sessionId === sessionId),
     create: (sessionId: string, timing: import("../../protocol/src/scheduled-prompts.ts").ScheduledTiming, expectedRevision = this.draftRevision(sessionId)) =>
@@ -215,6 +229,20 @@ export class MoguriSdk extends TransportClient {
     read: (sessionId: string, attachmentId: string) => this.query({ type: "attachment.read", sessionId, attachmentId }),
   };
   readonly sessions = {
+    get: (id: string) => this.getState().snapshot?.sessions.find((session) => session.id === id),
+    waitPreview: (sessionId: string, targetSessionId: string) => this.query({ type: "session.wait.preview", sessionId, targetSessionId }),
+    waitFor: (preview: import("../../protocol/src/session-controls.ts").SessionWaitPreview, confirm: true) =>
+      this.command({ type: "session.wait", sessionId: preview.sessionId, targetSessionId: preview.targetSessionId, expectedDigest: preview.digest, confirm }),
+    cancelWait: (sessionId: string, waitId?: string, expectedRevision?: number) => {
+      const wait = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.wait;
+      if (!wait && (!waitId || expectedRevision === undefined)) throw new ClientError("session_wait_missing", "Choose the actual retained dependency; no newer wait was guessed.");
+      return this.command({ type: "session.wait.cancel", sessionId, waitId: waitId ?? wait!.id, expectedRevision: expectedRevision ?? wait!.revision });
+    },
+    bulkPreview: (input: import("../../protocol/src/session-controls.ts").BulkSessionInput) => this.query({ type: "sessions.bulk.preview", input }),
+    bulk: (preview: import("../../protocol/src/session-controls.ts").BulkSessionPreview, confirm: true) =>
+      this.command({ type: "sessions.bulk", input: preview.input, expectedDigest: preview.digest, confirm }),
+    associatePr: (sessionId: string, source: import("../../protocol/src/github-workflows.ts").GithubSessionSource, expectedRevision = this.sessionRevision(sessionId)) =>
+      this.command({ type: "session.pr.associate", sessionId, source, expectedRevision }),
     kupoMode: (sessionId: string, kupoMode: import("../../protocol/src/kupo-modes.ts").KupoMode, expectedRevision = this.sessionRevision(sessionId)) => {
       const session = this.getState().snapshot?.sessions.find((session) => session.id === sessionId);
       if (!session || session.controls.modelId !== "kupo" || this.settings.get()?.values.kupo.workflow !== "auto") throw new ClientError("routing_mode", "Choose automatic Kupo in this actual session before selecting its mode. Fixed-model effort and legacy policies are unchanged.");
@@ -870,6 +898,15 @@ export class MoguriSdk extends TransportClient {
       if (!isRecord(result) || result.id !== id || result.accepted !== true) throw new ClientError("speech_capture_response", "Cancellation was not accepted by the original capture. No different profile or microphone was contacted.");
     },
     status: () => this.query({ type: "voice.status" }),
+    enable: (acceptLicense: true, expectedRevision = this.settings.get()?.revision) => {
+      if (expectedRevision === undefined) throw new ClientError("settings_missing", "Connect before reviewing the exact voice model.");
+      return this.command({ type: "voice.enable", acceptLicense, expectedRevision });
+    },
+    disable: (confirm: true, expectedRevision = this.settings.get()?.revision) => {
+      if (expectedRevision === undefined) throw new ClientError("settings_missing", "Connect the original profile before disabling and removing its managed voice model.");
+      return this.command({ type: "voice.disable", confirm, expectedRevision });
+    },
+    prepare: () => this.command({ type: "voice.prepare" }),
     download: (acceptLicense: true) => this.command({ type: "voice.download", acceptLicense }),
     record: (sessionId: string) => this.command({ type: "voice.record", sessionId }),
     transcribe: (sessionId: string, path: string) => this.command({ type: "voice.transcribe", sessionId, path }),

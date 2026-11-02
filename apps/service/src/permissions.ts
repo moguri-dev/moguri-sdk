@@ -22,13 +22,15 @@ export interface PermissionContext {
   enforcedWebDomains?: string[];
 }
 export function toolWebTarget(call: ToolCall): string | undefined {
+  if (["click", "type", "wait", "take_screenshot"].includes(call.name)) return typeof call.arguments.expectedUrl === "string" ? call.arguments.expectedUrl : undefined;
+  if (call.name === "playwright" && isRecord(call.arguments.launch) && call.arguments.launch.kind === "chromium") return typeof call.arguments.launch.url === "string" ? call.arguments.launch.url : undefined;
   if (call.name === "review_script" && call.arguments.action === "inspect" && typeof call.arguments.url === "string") return call.arguments.url;
   if (call.name === "web_search") return "https://html.duckduckgo.com/html/";
   if (["web_fetch", "fetch_page"].includes(call.name)) return typeof call.arguments.url === "string" ? call.arguments.url : undefined;
   if (call.name !== "mcp_gateway" || call.arguments.action !== "call" || call.arguments.serverId !== "builtin" || !isRecord(call.arguments.arguments)) return;
   const tool = call.arguments.tool, args = call.arguments.arguments;
   if (tool === "fetch_page" || tool === "browser_navigate") return typeof args.url === "string" ? args.url : undefined;
-  if (["browser_snapshot", "browser_click", "browser_fill", "browser_press_key"].includes(String(tool))) return typeof args.expectedUrl === "string" ? args.expectedUrl : undefined;
+  if (["browser_snapshot", "browser_click", "browser_fill", "browser_press_key", "browser_wait", "browser_screenshot"].includes(String(tool))) return typeof args.expectedUrl === "string" ? args.expectedUrl : undefined;
 }
 export function approvedWebAccess(settings: UserSettings, call: ToolCall, context: PermissionContext): WebAccess | undefined {
   const target = toolWebTarget(call);

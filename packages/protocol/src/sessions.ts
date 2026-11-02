@@ -115,6 +115,7 @@ export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.home"), sessionId: id, expectedRevision: revision }),
   object({ type: Type.Literal("chat.writer.acknowledge"), sessionId: id, writerId: id, expectedRevision: revision, confirmInspection: Type.Literal(true) }),
   object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema, confirmDetach: Type.Optional(Type.Literal(true)) }),
+  object({ type: Type.Literal("session.pr.associate"), sessionId: id, expectedRevision: revision, source: GithubSessionSourceSchema }),
   object({ type: Type.Literal("session.reorder"), sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("session.reorder"), projectId: nullableId, parentSessionId: nullableId, groupId: nullableId, projectFolderId: Type.Optional(nullableId), archived: Type.Boolean(),
     sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
