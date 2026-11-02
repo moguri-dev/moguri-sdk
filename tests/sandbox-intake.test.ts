@@ -48,7 +48,7 @@ test("actual native Kupo preserves a scheduled ghost/new draft and owned Stop wi
   } finally { await fixture.close(passed); }
 });
 
-test("actual native failure retains the root-inspection gate instead of replaying a rolled-back guest or using Local inference", native, async () => {
+test("actual native failure keeps snapshot retry off without explicit policy and never replays a guest or uses Local inference", native, async () => {
   assert.ok(configuration);
   const clock = new GeneratedIntakeClock(), fixture = await nativeApiFixture(configuration, { intakeClock: clock }), { sdk, service, project, provider } = fixture;
   let passed = false;
@@ -56,6 +56,7 @@ test("actual native failure retains the root-inspection gate instead of replayin
     const settings = structuredClone(sdk.settings.get()!);
     settings.values.sandbox = fixture.reviewedConfiguration;
     settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
+    assert.notEqual(settings.values.interactions.nativeRetryRestaging, true);
     await sdk.settings.update(settings.values, settings.revision); await sdk.sandbox.probe();
     const bound = await sdk.projects.add(project), created = await sdk.sessions.create(bound.id!, "Generated native original recovery", { env: "Sandbox", modelId: provider.modelId });
     const session = () => service.controller.snapshot().sessions.find((value) => value.id === created.id)!;
@@ -67,7 +68,7 @@ test("actual native failure retains the root-inspection gate instead of replayin
     clock.advanceBy(30000);
     await waitFor(() => service.controller.snapshot().modelFailures[0]?.status === "blocked");
     await sdk.refresh();
-    await assert.rejects(async () => sdk.sessions.retry(created.id!, original.id, service.controller.snapshot().modelFailures[0]!.revision), /prepare this session's exact native workspace/);
+    await assert.rejects(async () => sdk.sessions.retry(created.id!, original.id, service.controller.snapshot().modelFailures[0]!.revision), /Explicitly enable exact private-snapshot retry restaging/);
     clock.advanceBy(150000);
     const state = service.controller.snapshot();
     assert.equal(state.modelFailures[0]?.requestDigest, original.requestDigest); assert.equal(state.modelFailures[0]?.status, "blocked");
