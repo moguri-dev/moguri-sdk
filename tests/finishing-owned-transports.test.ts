@@ -21,8 +21,8 @@ for (const { unknown, kupo, late } of [{ unknown: false, kupo: false, late: fals
       }
       const state = fixture.service.controller.snapshot(), record = state.winddowns[0]!;
       assert.equal(fixture.session().status, "partial", fixture.session().lastError ?? "");
-      assert.equal(record.version, 2); assert.equal(record.env, "Remote"); assert.equal(record.status, unknown || late ? "partial" : "ready");
-      assert.equal(record.version === 2 && record.transport?.executionId, state.executions[0]?.id);
+      assert.equal(record.version, 3); assert.equal(record.env, "Remote"); assert.equal(record.status, unknown || late ? "partial" : "ready");
+      assert.equal(record.transport?.executionId, state.executions[0]?.id);
       assert.equal(fixture.requests.length, 0); assert.equal(fixture.solver.requests.length, 2); assert.equal(state.executions.length, 1);
       assert.deepEqual(state.budgetEntries.map((entry) => [entry.env, entry.role]), [["Remote", "solver"], ["Remote", "checkpoint"]]);
       assert.equal(state.budgetEntries[1]?.status, unknown ? "unknown" : "settled");

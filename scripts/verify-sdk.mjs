@@ -93,6 +93,18 @@ try {
         if(workspace.preparation?.version===2){void workspace.preparation.commandDigest;void workspace.preparation.draftDigest;}
       };void ownedData;
       ` : ""}
+      ${installedProtocol >= 86 ? `
+      const privateRetryPolicy:UserSettings["interactions"]["nativeRetryRestaging"]=true;void privateRetryPolicy;
+      const transportCheckpoint=async(client:MoguriSdk,id:string,sessionId:string)=>{
+        const source=await client.winddown.sourcePreview(id,["generated.ts"]);
+        await client.winddown.acceptSource(id,["generated.ts"],source.preview.revision,source.preview.digest,true);
+        const inspection=await client.winddown.inspectCommit(id);void inspection.inspection.review.document.actualCommit;
+        await client.winddown.reconcileCommit(id,inspection.inspection.review.revision,inspection.inspection.review.digest,true);
+        const native=await client.winddown.commitPreview({winddownId:id,sessionId,candidateIds:[],nativePublicationIds:["generated-publication"],branch:"moguri/generated-native",message:"Generated accepted native source"});
+        const remote=await client.winddown.commitPreview({winddownId:id,sessionId,candidateIds:[],remoteAccepted:true,branch:"moguri/generated-peer",message:"Generated accepted peer source"});
+        const retained=await client.winddown.read(id);void retained.commitInspection?.operationSettled;void native.preview.document.version;void remote.preview.document.source;
+      };void transportCheckpoint;
+      ` : ""}
       ${upgradeDiscovery ? `
       void ServiceProtocolMismatch;void ServiceUpgradeCancelled;
       const upgradeReview = async (review:ServiceUpgradeReview):Promise<boolean> => {void review.fingerprint;void review.observedProtocol;return false;};

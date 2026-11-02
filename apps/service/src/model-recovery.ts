@@ -9,7 +9,7 @@ const tool = Type.Unsafe<Tool>(Type.Object({
   name: Type.String(), description: Type.String(), parameters: Type.Record(Type.String(), Type.Unknown()),
 }));
 const baseSchema = Type.Object({
-  version: Type.Literal(1), profileId: Type.String(), sessionId: Type.String(), turnId: Type.String(), sourceStepId: Type.String(),
+  version: Type.Union([Type.Literal(1), Type.Literal(2)]), profileId: Type.String(), sessionId: Type.String(), turnId: Type.String(), sourceStepId: Type.String(),
   modelId: Type.String(), modelBindingDigest: Type.String(), boundaryDigest: Type.String(), controls: ControlsSchema,
   authorizationRevision: Type.Integer({ minimum: 0 }),
   endpoint: Type.String({ minLength: 1, maxLength: 4096 }), api: Type.String({ minLength: 1, maxLength: 128 }),
@@ -23,6 +23,7 @@ const baseSchema = Type.Object({
 }, { additionalProperties: true });
 export interface RetainedModelRequest extends Static<typeof baseSchema> {
   context: Message[];
+  nativeOrigin?: { executionId: string; workspaceId: string; inputDigest: string; root: string };
   phase?: BoundaryReply["phase"];
   thinkingEffort?: ThinkingEffort;
   directMcpTools?: DirectMcpTool[];
@@ -35,6 +36,11 @@ export function retainedModelRequest(value: unknown): RetainedModelRequest {
     raw.phase !== undefined && !["solver", "router", "kupo-draft", "kupo-gate", "kupo-critic", "kupo-revision", "kupo-escalation"].includes(String(raw.phase)) ||
     raw.thinkingEffort !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(String(raw.thinkingEffort)) ||
     raw.directMcpTools !== undefined && !Array.isArray(raw.directMcpTools) ||
+    raw.version === 2 && (!isRecord(raw.nativeOrigin) || !isRecord(raw.controls) || raw.controls.env !== "Sandbox" ||
+      typeof raw.nativeOrigin.executionId !== "string" || typeof raw.nativeOrigin.workspaceId !== "string" ||
+      typeof raw.nativeOrigin.inputDigest !== "string" || !/^[a-f0-9]{64}$/.test(raw.nativeOrigin.inputDigest) ||
+      typeof raw.nativeOrigin.root !== "string" || !raw.nativeOrigin.root.startsWith("/")) ||
+    raw.version === 1 && raw.nativeOrigin !== undefined ||
     raw.kupo !== undefined && (!isRecord(raw.kupo) || typeof raw.kupo.contextDigest !== "string" ||
       !["draft", "gate", "critic", "revision", "escalation"].includes(String(raw.kupo.phase)) ||
       ["escalations", "revisions"].some((key) => raw.kupo && isRecord(raw.kupo) && raw.kupo[key] !== undefined &&

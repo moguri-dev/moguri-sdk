@@ -506,6 +506,19 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (!command.argument) return client === "desktop" ? { kind: "panel", panel: "Candidates" } : { kind: "text", text: JSON.stringify(sdk.winddown.list(session.id), null, 2) };
       if (command.argument === "status") return { kind: "text", text: JSON.stringify(await sdk.winddown.status(session.id), null, 2) };
       if (command.argument === "list") return { kind: "text", text: JSON.stringify(sdk.winddown.list(session.id), null, 2) };
+      const sourcePreview = command.argument.match(/^source-preview\s+(\S+)\s+([\s\S]+)$/);
+      if (sourcePreview) {
+        const paths: unknown = JSON.parse(sourcePreview[2]!);
+        if (!Array.isArray(paths) || !paths.every((path) => typeof path === "string")) throw new ClientError("winddown_source", "Use an exact JSON array of peer source paths.");
+        const result = await sdk.winddown.sourcePreview(sourcePreview[1]!, paths);
+        return { kind: "text", text: JSON.stringify({ ...result, acceptCommand: `/winddown source-accept ${sourcePreview[1]} ${result.preview.revision} ${result.preview.digest} confirm-source ${JSON.stringify(paths)}` }, null, 2) };
+      }
+      const sourceAccept = command.argument.match(/^source-accept\s+(\S+)\s+(\d+)\s+([a-f0-9]{64})\s+confirm-source\s+([\s\S]+)$/);
+      if (sourceAccept) {
+        const value = parse(WinddownCommandSchema, { type: "winddown.source.accept", winddownId: sourceAccept[1], paths: JSON.parse(sourceAccept[4]!),
+          expectedRevision: Number(sourceAccept[2]), expectedDigest: sourceAccept[3], confirm: true });
+        await sdk.command(value); return { kind: "ok", message: "Only the exact peer source was accepted by the user. Git still needs its separate original new-branch review." };
+      }
       const preview = command.argument.match(/^commit-preview\s+([\s\S]+)$/), commit = command.argument.match(/^commit\s+(\d+)\s+([a-f0-9]{64})\s+confirm-git\s+([\s\S]+)$/);
       if (preview || commit) {
         const value: unknown = JSON.parse(preview?.[1] ?? commit![3]!);
@@ -520,7 +533,16 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         if (!created.id) throw new ClientError("winddown_intent", "No original user/Git intent was acknowledged. Inspect its retained record before another review.");
         return { kind: "text", text: JSON.stringify(await sdk.winddown.waitCommit(created.id), null, 2) };
       }
+      const reconciliation = command.argument.match(/^reconcile\s+(\S+)\s+(\d+)\s+([a-f0-9]{64})\s+confirm-inspection$/);
+      if (reconciliation) {
+        await sdk.winddown.reconcileCommit(reconciliation[1]!, Number(reconciliation[2]), reconciliation[3]!, true);
+        return { kind: "ok", message: "Only the original checkpoint writer inspection was acknowledged. Partial job, task outcome and charges remain unchanged; no Git/model replay." };
+      }
       const [action, id, revision, confirmation, ...extra] = command.argument.split(/\s+/);
+      if (action === "inspect" && id && revision === undefined) {
+        const result = await sdk.winddown.inspectCommit(id);
+        return { kind: "text", text: JSON.stringify({ ...result, reconciliationCommand: `/winddown reconcile ${id} ${result.inspection.review.revision} ${result.inspection.review.digest} confirm-inspection` }, null, 2) };
+      }
       if (action === "read" && id && revision === undefined) return { kind: "text", text: JSON.stringify(await sdk.winddown.read(id), null, 2) };
       if (action === "stop" && id && revision === "confirm-stop" && confirmation === undefined) {
         await sdk.winddown.stop(id); return { kind: "ok", message: "Original finishing model/Git stop requested. Actual cleanup/publication may remain partial; no replay or rollback." };
@@ -528,7 +550,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "decline" && id && revision && /^\d+$/.test(revision) && confirmation === "confirm-decline" && !extra.length) {
         await sdk.winddown.decline(id, Number(revision), true); return { kind: "ok", message: "Actual user declined this exact checkpoint's Git publication. No extra model or branch was created." };
       }
-      throw new ClientError("winddown_command", "Use /winddown status/list/read ID, commit-preview JSON, its exact commit REV SHA confirm-git JSON, decline ID REV confirm-decline or stop ID confirm-stop.");
+      throw new ClientError("winddown_command", "Use /winddown status/list/read ID, source-preview ID PATHS_JSON and its source-accept command, commit-preview JSON and its commit command, inspect ID and its reconcile command, decline ID REV confirm-decline or stop ID confirm-stop.");
     }
     case "compound": {
       if (!command.argument) return client === "desktop" ? { kind: "panel", panel: "Candidates" } : { kind: "text", text: JSON.stringify(sdk.compound.list(session.id), null, 2) };

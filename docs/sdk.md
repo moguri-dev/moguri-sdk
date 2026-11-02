@@ -1258,7 +1258,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
 | `roleSequences` | Read exact independently retained role intent, original input and one selected raw role input/result; never start a model, grant acceptance or resume partial work. |
 | `compound` | Explicit Local source/cost preview/start/read, focused validation preview, actual-user stage/test review/deny and exact stop. Real conditional Cascade/Critique uses the existing root-less worker and all-role ledger. `lineageDraft` prepares an unpersisted exact model/source claim with browser-safe hashing; it does not inspect providers, save policy or prove training/quality. Source application stays in `candidates`. |
-| `winddown` | Canonical readiness and independent selected-boundary finishing holds/input/results/stop. Local accepted-work/new-branch Git preview/commit remains separate; SSH/native metadata cannot adopt it. All roles share one ledger; summaries grant no source/Git authority or ordinary continuation. |
+| `winddown` | Canonical readiness and independent selected-boundary finishing holds/input/results/stop. Separate accepted-source/new-branch Git review preserves the original Local or SSH root; native-model work discloses its separately accepted original Local-Git boundary. Exact effect inspection/acknowledgement never completes or replays a partial job. All roles share one ledger; summaries grant no source/Git authority or ordinary continuation. |
 | `decisions` | Exact request/model/rubric/raw evidence, actual Local or original SSH/native parent transport, all-role accounting and one-shot stop. No public evaluate, paid retry, answer or approval endpoint. Only separate explicit delegation can use the real decision-provider actor. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
@@ -1277,6 +1277,38 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `models` | Profile-owned `catalogue()`, `setProviderEnabled`, `setEnabled` and exclusive `selectSource`, plus explicit refresh, informational `evidence(modelId)`, always-visible Kupo and resource-bound endpoint keys. Selection and admission use only enabled, available, chosen sources; disabled inventory remains inspectable. No sign-in, inference, host scan, automatic evidence read or substitution. |
 | `attachments` | Explicit local text/images, exact folder/reference/session previews and confirmation, private snapshot reads. Unsupported models preserve context rather than silently dropping images. |
 | `remote` | Explicit pinned-target probe/status, resource-bound endpoint keys and existing-run reconciliation/inspection acknowledgement. No provisioning, key forwarding, Local fallback or side-effect replay. |
+
+### Native snapshot retries and transport checkpoint review
+
+Protocol86 adds `settings.values.interactions.nativeRetryRestaging`, factory
+off. `sessions.retry` still admits only the last exact retained failure;
+enabled native retries restore its signed private snapshot and cannot capture
+new live-source bytes, change Env/model/profile, replay effects or refund
+unknown calls.
+
+`winddown.sourcePreview(id, paths)` reads complete exact SSH source.
+`acceptSource(id, paths, revision, digest, true)` binds actual-user source
+acceptance, not Git permission. `commitPreview`/`commit` use `remoteAccepted:true`
+for that peer or exact `nativePublicationIds` for already separately accepted
+native output. The former performs Git only on the captured peer; the latter
+explicitly uses Local Git at the original source repository and requires current
+Local policy. New branch, base, bytes/modes and message are separately reviewed.
+
+`inspectCommit(id)` is read-only and returns exact current source/ref/receipt
+review data. `reconcileCommit(id, revision, digest, true)` is separate actual-user
+acknowledgement of an ended original writer, never an answer, approval, effect
+replay or partial-to-success transition. `read(id).commitInspection` retains that
+observation independently of the session. Unknown or changed source/ref/cleanup
+cannot release its quarantine or erase its report.
+
+CLI uses `winddown source-preview/source-accept`, `preview/commit`,
+`inspect/reconcile`; acceptance/reconciliation require exact `--revision`,
+`--digest` and `--confirm-review`, while Git requires `--confirm-git`.
+The shared TUI commands are `/winddown source-preview ID PATHS_JSON`, the
+returned `source-accept ... confirm-source` command, `commit-preview JSON` and
+its exact Git command, then `inspect ID` and its `reconcile ... confirm-inspection`
+command when partial. All surfaces use this SDK authority.
+See the [retry/checkpoint contract](architecture/native-retry-checkpoints.md).
 
 ### Owned Local and Remote user consoles
 

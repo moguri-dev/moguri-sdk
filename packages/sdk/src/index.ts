@@ -468,6 +468,12 @@ export class MoguriSdk extends TransportClient {
       return snapshot.winddowns.filter((record) => sessionId === undefined || record.sessionId === sessionId);
     },
     read: (winddownId: string) => this.query({ type: "winddown.read", winddownId }),
+    sourcePreview: (winddownId: string, paths: string[]) => this.query({ type: "winddown.source.preview", winddownId, paths }),
+    acceptSource: (winddownId: string, paths: string[], expectedRevision: number, expectedDigest: string, confirm: true) =>
+      this.command({ type: "winddown.source.accept", winddownId, paths, expectedRevision, expectedDigest, confirm }),
+    inspectCommit: (winddownId: string) => this.query({ type: "winddown.commit.inspect", winddownId }),
+    reconcileCommit: (winddownId: string, expectedRevision: number, expectedDigest: string, confirm: true) =>
+      this.command({ type: "winddown.commit.reconcile", winddownId, expectedRevision, expectedDigest, confirm }),
     commitPreview: (input: Omit<Extract<WinddownQuery, { type: "winddown.commit.preview" }>, "type">) => this.query({ type: "winddown.commit.preview", ...input }),
     commit: (input: Omit<Extract<WinddownQuery, { type: "winddown.commit.preview" }>, "type">, expectedRevision: number, expectedDigest: string, confirm: true) =>
       this.command({ type: "winddown.commit", ...input, expectedRevision, expectedDigest, confirm }),

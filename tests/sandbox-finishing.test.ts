@@ -47,7 +47,7 @@ test(`actual native finite ${behavior === "hold-checkpoint" ? "fixed-model" : "K
     const state = service.controller.snapshot(), record = state.winddowns[0]!, execution = state.sandboxExecutions![0]!;
     assert.equal(session().status, behavior === "hold-checkpoint" ? "stopped" : "partial", session().lastError ?? "");
     assert.equal(record.status, behavior ? "partial" : "ready");
-    assert.equal(record.version, 2); assert.equal(record.env, "Sandbox"); assert.equal(record.version === 2 && record.transport?.executionId, execution.id);
+    assert.equal(record.version, 3); assert.equal(record.env, "Sandbox"); assert.equal(record.transport?.executionId, execution.id);
     assert.equal(state.sandboxExecutions!.length, 1); assert.equal(execution.cleanup, "owned-guest-stopped"); assert.equal(provider.requests.length, 0);
     assert.deepEqual(state.budgetEntries.map((entry) => [entry.env, entry.role, entry.reportedTokens]), [["Sandbox", "solver", 42], ["Sandbox", "checkpoint", behavior ? null : 42]]);
     assert.equal(state.budgetEntries[1]?.status, behavior ? "unknown" : "settled");

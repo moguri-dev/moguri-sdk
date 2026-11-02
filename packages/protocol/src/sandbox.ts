@@ -58,7 +58,9 @@ export interface SandboxWorkspace {
   stage: NativeStage | null; authorityDigest: string; configDigest: string; revision: number; createdAt: string;
   commandId: string; commandDigest: string;
   preparation?: { version: 1; kind: "automatic"; turnId: string } |
-    { version: 2; kind: "scheduled"; commandId: string; commandDigest: string; draftRevision: number; draftDigest: string };
+    { version: 2; kind: "scheduled"; commandId: string; commandDigest: string; draftRevision: number; draftDigest: string } |
+    { version: 3; kind: "retry"; turnId: string; failureId: string; attemptId: string; requestDigest: string;
+      executionId: string; originExecutionId: string; resultDigest: string; afterId: string };
   repositories?: SandboxRepository[];
   status: "preparing" | "ready" | "partial" | "closed"; diagnostic: string | null;
 }

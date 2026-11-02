@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { Type, type Static } from "typebox";
 import {
   MoguriError, parse, SessionRepositorySchema, sandboxRepositories, type EventInput, type Project, type ProjectSettings, type SandboxCommand, type SandboxWorkspace,
-  type SandboxRepository, type SandboxWorkspacePreview, type Session, type Snapshot,
+  type ModelFailure, type SandboxExecution, type SandboxRepository, type SandboxWorkspacePreview, type Session, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 import { captureNativeSource, captureNativeTree, materializeNativeStage, inspectNativeStage, assertNativeWorkspaceIdentity,
   NATIVE_TREE_MAX_FILES, NATIVE_TREE_MAX_BYTES, NATIVE_TREE_FILE_BYTES, type NativeSource } from "./native-staging.ts";
@@ -20,6 +20,8 @@ import { readNativeCompletion } from "./native-evidence.ts";
 import { isProtectedProjectPath, scopedPath } from "./files.ts";
 import { ignoredPath } from "./ignore-rules.ts";
 import { repositoryIgnored } from "./repository-source.ts";
+import { sandboxResult } from "./sandbox-results.ts";
+import type { RetainedModelRequest } from "./model-recovery.ts";
 
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" }), path = Type.String({ minLength: 1, maxLength: 4096 });
 const identity = Type.Object({ device: Type.String(), inode: Type.String() }, { additionalProperties: false });
@@ -56,7 +58,7 @@ const GroupInputSchema = Type.Object({
 }, { additionalProperties: false });
 const InputSchema = Type.Union([ReviewedInputSchema, AutomaticInputSchema, GroupInputSchema]);
 type StaticGroupRepository = Static<typeof GroupInputSchema>["repositories"][number];
-type PreparationOwner = NonNullable<SandboxWorkspace["preparation"]>;
+type PreparationOwner = Exclude<NonNullable<SandboxWorkspace["preparation"]>, { version: 3 }>;
 interface Host {
   snapshot(): Pick<Snapshot, "profileId" | "sessions" | "settings" | "policy" | "sandboxWorkspaces" | "sandboxExecutions">; project(session: Session, repository?: string): Project;
   settings(projectId: string | null): { revision: number; values: ProjectSettings };
@@ -212,10 +214,107 @@ export class SandboxWorkspaces {
     }).finally(() => this.active.delete(sessionId));
     this.active.set(sessionId, { abort, task }); return task;
   }
+  retrySource(session: Session, failure: ModelFailure, input: RetainedModelRequest): SandboxExecution {
+    const snapshot = this.host.snapshot(), origin = input.nativeOrigin;
+    if (input.version !== 2 || !origin || snapshot.settings.values.interactions.nativeRetryRestaging !== true ||
+      session.controls.env !== "Sandbox" || !snapshot.policy.allowedEnvs.includes("Sandbox") || this.host.closing(session)) {
+      throw new MoguriError("native_retry_policy", "Explicitly enable exact private-snapshot retry restaging for new qualified requests. No legacy request, live checkout or different Env was adopted.", 409);
+    }
+    const executions = (snapshot.sandboxExecutions ?? []).filter((entry) => entry.sessionId === session.id && entry.turnId === failure.turnId);
+    const original = executions.find((entry) => entry.id === origin.executionId), last = executions.at(-1);
+    if (!original || original.profileId !== snapshot.profileId || original.workspaceId !== origin.workspaceId ||
+      original.inputDigest !== origin.inputDigest || original.stage.workspace !== origin.root || !last || last.profileId !== snapshot.profileId ||
+      last.cleanup !== "owned-guest-stopped" || !last.resultDigest || !last.nativeSessionId || !last.planDigest || !last.signerFingerprint ||
+      session.sandboxWorkspaceId !== last.workspaceId || last.workerDigest !== original.workerDigest ||
+      last.configDigest !== original.configDigest || last.sourceWorkspaceId !== session.workspaceId) {
+      throw new MoguriError("native_retry_snapshot", "The exact original request/guest/source or verified cleanup changed. Acknowledged inspection cannot replace VM-absence or snapshot proof.", 409);
+    }
+    const workspace = snapshot.sandboxWorkspaces?.find((entry) => entry.id === last.workspaceId);
+    if (!workspace || workspace.authorityDigest !== this.authority(session) ||
+      last.id !== original.id && (workspace.preparation?.version !== 3 || workspace.preparation.failureId !== failure.id ||
+        workspace.preparation.originExecutionId !== original.id || workspace.preparation.requestDigest !== failure.requestDigest)) {
+      throw new MoguriError("native_retry_owner", "The retained private snapshot is not this original failure's exact source lineage. No new root or owner was substituted.", 409);
+    }
+    const result = sandboxResult(this.store.blob(last.resultDigest));
+    if (result.executionId !== last.id || result.inputDigest !== last.inputDigest || result.workspaceId !== last.workspaceId ||
+      result.planDigest !== last.planDigest || result.signerFingerprint !== last.signerFingerprint ||
+      result.nativeSessionId !== last.nativeSessionId || result.rollback !== "confirmed" || result.journal.status !== "verified") {
+      throw new MoguriError("native_retry_snapshot", "The original rolled-back private snapshot/journal is incomplete or unverified. No live-source reconstruction or paid retry was admitted.", 409);
+    }
+    return last;
+  }
+  async prepareRetry(sessionId: string, failure: ModelFailure, input: RetainedModelRequest, requested: AbortSignal) {
+    if (this.active.has(sessionId)) throw new MoguriError("sandbox_busy", "This exact session already owns private staging work.", 409);
+    const session = this.session(sessionId), source = this.retrySource(session, failure, input), result = sandboxResult(this.store.blob(source.resultDigest!));
+    if (!failure.attemptId || !failure.requestDigest || session.turnId !== failure.turnId) throw new MoguriError("native_retry_owner", "No actual retained retry attempt owns this preparation.", 409);
+    const abort = new AbortController(), signal = AbortSignal.any([requested, abort.signal]), authorityDigest = this.authority(session);
+    const owner: Extract<NonNullable<SandboxWorkspace["preparation"]>, { version: 3 }> = { version: 3, kind: "retry", turnId: failure.turnId, failureId: failure.id, attemptId: failure.attemptId,
+      requestDigest: failure.requestDigest, executionId: source.id, originExecutionId: input.nativeOrigin!.executionId,
+      resultDigest: source.resultDigest!, afterId: result.afterId };
+    const current = () => {
+      signal.throwIfAborted(); const actual = this.session(sessionId);
+      if (actual.turnId !== failure.turnId || this.authority(actual) !== authorityDigest ||
+        this.host.snapshot().settings.values.interactions.nativeRetryRestaging !== true || actual.sandboxWorkspaceId !== source.workspaceId) {
+        throw new MoguriError("native_retry_stale", "The actual retry owner, current permissions or snapshot binding changed during copy. No new stage or inference was admitted.", 409);
+      }
+      return actual;
+    };
+    const task = Promise.resolve().then(async () => {
+      current();
+      const prior = this.host.snapshot().sandboxWorkspaces?.find((entry) => entry.commandId === failure.attemptId);
+      if (prior) throw new MoguriError("native_retry_replay", "This exact retry already retained preparation intent. Inspect its partial result; no copy or call was replayed.", 409);
+      const id = randomUUID(), original = this.document(source), workspace: SandboxWorkspace = {
+        id, sessionId, projectId: session.projectId, sourceWorkspaceId: session.workspaceId, sourceRoot: source.sourceRoot,
+        sourceHead: original.sourceHead, inputDigest: this.store.putBlob(JSON.stringify({ format: "moguri-native-retry-intent", version: 1, owner, authorityDigest })),
+        stage: null, authorityDigest, configDigest: frameDigest(this.native.assertReady()), revision: 0, createdAt: new Date().toISOString(),
+        commandId: failure.attemptId!, commandDigest: frameDigest(owner), preparation: owner, ...(source.repositories ? { repositories: source.repositories } : {}),
+        status: "preparing", diagnostic: null,
+      };
+      this.host.commit([this.event(workspace)]);
+      try {
+        const policies = session.repositories?.map((binding) => ({ binding, policy: folderPolicy(this.host.settings(binding.projectId).values) }));
+        const policy: FolderPolicy = policies ? { denied: policies.flatMap(({ binding, policy }) => policy.denied.map((path) => `${nativeRepositoryDirectory(binding.projectId)}/${path}`)),
+          readOnly: policies.flatMap(({ binding, policy }) => policy.readOnly.map((path) => `${nativeRepositoryDirectory(binding.projectId)}/${path}`)) } :
+          folderPolicy(this.host.settings(session.projectId).values);
+        const retained = await this.restoreAfter(source, id, policy, signal, true);
+        current();
+        const document = original.version === 3 ? parse(GroupInputSchema, { ...original, authorityDigest, previousExecutionId: source.id,
+          repositories: await Promise.all(original.repositories.map(async (repository) => {
+            const root = join(retained.root, repository.directory); await mkdir(root, { recursive: true, mode: 0o700 });
+            return { ...repository, workingSource: await captureNativeTree(await realpath(root), repository.workingSource.policy, signal) };
+          })) }) : parse(AutomaticInputSchema, { format: "moguri-native-workspace", version: 2, sessionId,
+            source: original.source, sourceHead: original.sourceHead, workingSource: retained, authorityDigest, previousExecutionId: source.id });
+        const parent = join(this.stateDir, "native-stage-root"); await mkdir(parent, { recursive: true, mode: 0o700 });
+        const stageOwner = { profileId: this.host.snapshot().profileId, sessionId, turnId: id };
+        const stage = document.version === 3 ? await materializeNativeGroup(await realpath(parent), stageOwner,
+          document.repositories.map((repository) => ({ projectId: repository.binding.projectId, directory: repository.directory, source: repository.workingSource })), signal) :
+          await materializeNativeStage(await realpath(parent), stageOwner, retained, signal);
+        current(); await inspectNativeStage(stage); current();
+        const ready = { ...workspace, inputDigest: this.store.putBlob(JSON.stringify(document)), stage, revision: 1, status: "ready" as const };
+        this.host.commit([this.event(ready), { event_type: "session.sandbox_bound", profile_id: this.host.snapshot().profileId,
+          project_id: session.projectId, session_id: sessionId, payload: { workspaceId: ready.id } }]);
+        return ready;
+      } catch (error) {
+        this.host.commit([this.event({ ...workspace, revision: 1, status: "partial", diagnostic: error instanceof MoguriError ? error.message :
+          "Exact native retry snapshot copy was interrupted. Original input, unknown charges and partial owned files remain; no replay." })]);
+        throw error;
+      }
+    }).finally(() => this.active.delete(sessionId));
+    this.active.set(sessionId, { abort, task }); return task;
+  }
+  retryCurrent(session: Session, failure: ModelFailure, input: RetainedModelRequest): void {
+    const workspace = this.current(session), owner = workspace.preparation;
+    if (this.host.snapshot().settings.values.interactions.nativeRetryRestaging !== true || input.version !== 2 ||
+      owner?.version !== 3 || owner.failureId !== failure.id || owner.attemptId !== failure.attemptId ||
+      owner.requestDigest !== failure.requestDigest || owner.originExecutionId !== input.nativeOrigin?.executionId ||
+      owner.turnId !== failure.turnId || session.turnId !== failure.turnId) {
+      throw new MoguriError("native_retry_owner", "The active private stage lost its exact original request/attempt/snapshot policy. No transferred root or new model call was authorized.", 409);
+    }
+  }
   private preparationCurrent(sessionId: string, owner: PreparationOwner, authorityDigest: string, signal: AbortSignal): Session {
     signal.throwIfAborted();
     const actual = this.session(sessionId);
-    const owning = owner.version === 1 ? actual.turnId === owner.turnId :
+    const owning = owner.version !== 2 ? actual.turnId === owner.turnId :
       actual.turnId === null && actual.draft.revision === owner.draftRevision && digest(JSON.stringify(actual.draft)) === owner.draftDigest;
     if (!owning || !this.automatic() || this.authority(actual) !== authorityDigest) {
       throw new MoguriError("sandbox_stale", "The exact preparation owner, saved draft, source or policy changed. No model or scheduled prompt was admitted.", 409);
@@ -384,7 +483,7 @@ export class SandboxWorkspaces {
       throw error;
     }
   }
-  private async restoreAfter(execution: import("../../../packages/protocol/src/index.ts").SandboxExecution, id: string, policy: FolderPolicy, signal: AbortSignal) {
+  private async restoreAfter(execution: import("../../../packages/protocol/src/index.ts").SandboxExecution, id: string, policy: FolderPolicy, signal: AbortSignal, exact = false) {
     const evidence = await readNativeCompletion({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: execution.nativeSessionId!,
       workspace: execution.stage.workspace, image: execution.image, command: { program: execution.command[0]!, arguments: execution.command.slice(1) },
       createdAfter: execution.createdAfter, createdBefore: execution.createdBefore, planDigest: execution.planDigest!, signerFingerprint: execution.signerFingerprint! });
@@ -399,7 +498,10 @@ export class SandboxWorkspaces {
     let bytes = 0, files = 0;
     for (const entry of entries) {
       signal.throwIfAborted();
-      if (await repositoryIgnored(root, entry.path, ignores)) continue;
+      if (await repositoryIgnored(root, entry.path, ignores)) {
+        if (exact) throw new MoguriError("native_retry_snapshot", "The original private snapshot contains newly ignored work. No subset was silently discarded.", 409);
+        continue;
+      }
       if (!["regular", "hardlink"].includes(String(entry.kind.type))) throw new MoguriError("sandbox_workspace", "Retained native work contains an unsupported non-regular path. Inspect the original result; no data was silently discarded.", 409);
       const file = await evidence.read(entry.path, NATIVE_TREE_FILE_BYTES);
       if (++files > NATIVE_TREE_MAX_FILES || (bytes += file.content.length) > NATIVE_TREE_MAX_BYTES) throw new MoguriError("sandbox_workspace", "Complete retained native work exceeds the automatic snapshot boundary. No subset or fresh checkout was substituted.", 409);
@@ -407,7 +509,12 @@ export class SandboxWorkspaces {
       await scopedPath(root, entry.path, true); await writeFile(target, file.content, { flag: "wx", mode: 0o600 | (entry.mode & 0o100) });
       if (entry.path.endsWith(".gitignore")) ignores.clear();
     }
-    return captureNativeTree(await realpath(root), policy, signal);
+    const captured = await captureNativeTree(await realpath(root), policy, signal);
+    if (exact && (captured.files.length !== entries.length || captured.files.some((file) => !entries.some((entry) => entry.path === file.path &&
+      entry.kind.type === "regular" && entry.kind.content_hash === file.digest && entry.kind.size === file.bytes && (entry.mode & 0o100) === (file.mode & 0o100))))) {
+      throw new MoguriError("native_retry_snapshot", "The complete original private snapshot bytes/modes changed during restaging. No root was bound or model was started.", 409);
+    }
+    return captured;
   }
   current(session: Session): SandboxWorkspace & { stage: NonNullable<SandboxWorkspace["stage"]> } {
     const workspace = (this.host.snapshot().sandboxWorkspaces ?? []).find((value) => value.id === session.sandboxWorkspaceId);

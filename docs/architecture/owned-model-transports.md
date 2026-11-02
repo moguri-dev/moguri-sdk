@@ -6,6 +6,11 @@ This extends the delivered protocol84 source `d6aeae4`; its installer,
 qualified image, ciphertext, history and receipts remain original evidence,
 not qualification of these new bytes.
 
+The later [protocol86 contract](native-retry-checkpoints.md) implements the
+confirmed explicit snapshot-restaging policy and separately reviewed accepted-
+work publication. The protocol85 measurements and handoff gates below remain
+historical, not a claim that those later paths are unavailable.
+
 ## Change contract
 
 Reuse maintained pi-ai, Node IPC/abort/crypto, TypeBox, the existing worker,
@@ -162,7 +167,7 @@ Existing renderer chunk-size, experimental OpenTUI FFI and deprecated
 dependency/install-allow-list notices remain visible. No checks or safeguards
 were disabled to obtain these results.
 
-| Remaining gate | Exact owner/outcome |
+| Protocol85 handoff gate | Owner/outcome at that delivery |
 | --- | --- |
 | Native rollback recovery | Actual user policy/review decision is still held by the coordinator. Scheduling cannot transfer or reconstruct a failed stage. |
 | Jev/System One | Unavailable upstream enforceable output-token/accounting wire. The explicit bounded-model alternative is not a Jev substitute. |
@@ -170,6 +175,7 @@ were disabled to obtain these results.
 | Live provider/model evidence | User review of actual compatible evaluation/reference-price sources remains required for Savings/Performance. Generated models do not establish live quality, training independence, calibration or billed cost. |
 | GitHub main-only CI | Jobs have no steps because GitHub reports an account payment/spending-limit eligibility gate. Keep checks and push-to-main-only triggers intact; no rerun hides it. Ubuntu26 migration and macOS arm64 capacity notices remain visible. |
 
-The coordinator is obtaining the actual user's decision about native
-rollback restaging. This change does not duplicate that question, transfer
-roots, infer review or grant automatic restaging before their decision.
+The actual user subsequently permitted only exact private-snapshot restaging
+under an explicit policy, plus separately accepted native work on a new branch
+at its original Local repository. Protocol86 records that decision and its
+actual implementation/qualification separately; no85 receipt is relabeled.

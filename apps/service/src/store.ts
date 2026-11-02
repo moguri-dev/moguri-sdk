@@ -11,6 +11,7 @@ const commandToolSchemaMarkers = ["workflow_commands_schema", "tool_preferences_
 const safetyReviewSchemaMarkers = ["work_item_comments_schema", "repository_script_review_schema"] as const;
 const intakeSchemaMarkers = ["model_failure_recovery_schema", "scheduled_prompts_schema", "kupo_modes_schema"] as const;
 const ownedTransportSchemaMarkers = ["scheduled_native_preparation_schema", "owned_model_transport_schema", "transport_finishing_schema"] as const;
+const retryCheckpointSchemaMarkers = ["native_retry_restaging_schema", "transport_checkpoint_schema"] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -122,7 +123,8 @@ function references(input: EventInput): string[] {
     case "compound.recorded": return [input.payload.workflow.inputDigest, ...input.payload.workflow.steps.flatMap((step) => [step.inputDigest, step.resultDigest]),
       ...input.payload.workflow.validations.flatMap((validation) => [validation.documentDigest, validation.resultDigest])].filter((hash): hash is string => hash !== null);
     case "winddown.recorded": return [input.payload.winddown.inputDigest, input.payload.winddown.step.inputDigest, input.payload.winddown.step.resultDigest,
-      input.payload.winddown.commitDocumentDigest, input.payload.winddown.commit?.resultDigest ?? null].filter((hash): hash is string => hash !== null);
+      input.payload.winddown.commitDocumentDigest, input.payload.winddown.commit?.resultDigest ?? null, input.payload.winddown.commit?.inspection?.inputDigest ?? null,
+      ...(input.payload.winddown.version !== 1 && input.payload.winddown.remoteAcceptance ? [input.payload.winddown.remoteAcceptance.inputDigest] : [])].filter((hash): hash is string => hash !== null);
     case "decision.recorded": return [input.payload.decision.inputDigest, input.payload.decision.actualInputDigest, input.payload.decision.resultDigest, input.payload.decision.adviceDigest].filter((hash): hash is string => hash !== null);
     case "configuration.proposed": return [input.payload.proposal.contentDigest, input.payload.proposal.baseDigest];
     case "job.started": return input.payload.job.resultDigest ? [input.payload.job.resultDigest] : [];
@@ -496,6 +498,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=85; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 86) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of retryCheckpointSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=86; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
@@ -561,6 +570,17 @@ export class EventStore {
         event.event_type === "decision.recorded" && Object.hasOwn(event.payload.decision, "transport") ||
         event.event_type === "winddown.recorded" && Object.hasOwn(event.payload.winddown, "transport"))) {
         throw new Error("Actual scheduled native/owned model/finishing history cannot become a pre-85 lineage. Original state was preserved.");
+      }
+      for (const id of retryCheckpointSchemaMarkers) {
+        if (version < 86 && marker(id) !== undefined) throw new Error(`Premature native retry/checkpoint schema marker ${id}. Original state was preserved.`);
+        if (version >= 86) require(id, "native retry/transport checkpoint");
+      }
+      if (version >= 4 && version < 86 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "model.request_bound" && event.payload.nativeRestaging ||
+        event.event_type === "sandbox.workspace_recorded" && event.payload.workspace.preparation?.version === 3 ||
+        event.event_type === "settings.updated" && event.payload.settings.interactions?.nativeRetryRestaging !== undefined ||
+        event.event_type === "winddown.recorded" && (event.payload.winddown.version === 3 || event.payload.winddown.commit?.inspection))) {
+        throw new Error("Actual native retry/checkpoint history cannot become a pre-86 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

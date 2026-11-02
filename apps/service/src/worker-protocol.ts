@@ -9,6 +9,7 @@ import type { CompoundValidationOperation } from "./compound-validation.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import type { DirectMcpTool } from "./direct-mcp-tools.ts";
 import type { ScriptExecution } from "../../../packages/protocol/src/script-reviews.ts";
+import { WinddownCommitDocumentSchema, WinddownCommitResultSchema } from "../../../packages/protocol/src/winddown.ts";
 
 const toolCall = ToolCallSchema;
 export const OwnedModelRequestSchema = Type.Union([
@@ -26,6 +27,9 @@ export type OwnedModelRequest = Static<typeof OwnedModelRequestSchema>;
 export const isOwnedModelRequest = (value: unknown): value is OwnedModelRequest => Value.Check(OwnedModelRequestSchema, value);
 export const WorkerRequestSchema = Type.Union([
   ...OwnedModelRequestSchema.anyOf,
+  Type.Object({ kind: Type.Literal("checkpoint.phase"), phase: Type.Union([Type.Literal("intent"), Type.Literal("prepared"), Type.Literal("published"), Type.Literal("result"), Type.Literal("settled")]),
+    document: Type.Optional(WinddownCommitDocumentSchema), commit: Type.Optional(Type.String({ pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" })),
+    result: Type.Optional(WinddownCommitResultSchema) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("boundary"), requestId: Type.String(), stepId: Type.String(), loadedTools: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 64, uniqueItems: true })) }),
   Type.Object({ kind: Type.Literal("model.dispatch"), requestId: Type.String(), stepId: Type.String(), context: Type.Unknown(),
     loadedTools: Type.Array(Type.String(), { maxItems: 64, uniqueItems: true }), instructionSources: Type.Array(Type.String(), { maxItems: 4096, uniqueItems: true }) }, { additionalProperties: false }),

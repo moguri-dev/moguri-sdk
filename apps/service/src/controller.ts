@@ -34,6 +34,7 @@ import {
   type RoutingResponseReservation,
   ordinarySolverStep,
   OwnedModelTransportSchema, type OwnedModelTransport,
+  unsettledWinddownCommit,
 } from "../../../packages/protocol/src/index.ts";
 import { SessionIntake } from "./session-intake.ts";
 import { retainedModelRequest, transientModelFailure, type RetainedModelRequest } from "./model-recovery.ts";
@@ -495,7 +496,7 @@ export class ControlPlane extends EventEmitter {
     this.winddowns = new Winddowns(store, {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events) => this.commit(events),
       budgets: this.platform.budgets, models: this.provider, repositories: this.platform.repositories,
-      root: (session) => session.projectId ? this.platform.managed.project(session) : null,
+      root: (session, repository) => session.projectId || repository ? this.platform.managed.project(session, repository) : null,
       projects: () => this.platform.sessions.projects,
       assertRoot: (session, signal) => this.platform.managed.assert(session, signal),
       rootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
@@ -504,6 +505,7 @@ export class ControlPlane extends EventEmitter {
       stop: (sessionId, turnId) => { if (this.session(sessionId).turnId === turnId) this.stop(sessionId); },
       scopeDigest: (session) => this.transportPreparationScope(session),
       transport: (session) => this.ownedModelTransport(session),
+      remote: this.remote,
       prepareModel: (session, modelId, signal) => {
         if (session.controls.env === "Local") return this.provider.prepare(modelId, signal);
         const run = this.runs.get(session.id);
@@ -882,6 +884,9 @@ export class ControlPlane extends EventEmitter {
         ...this.projection.managedWorkspaces.filter((workspace) => workspace.status !== "removed" && localRootsOverlap(workspace.path, path)).map((workspace) => workspace.path));
     }
     roots.push(...this.compound?.writeRoots(exceptJobId) ?? []);
+    for (const record of this.projection.winddowns) if (unsettledWinddownCommit(record) && record.commit?.jobId !== exceptJobId) {
+      roots.push(this.winddowns.writeRoot(record.id));
+    }
     if (!permitRebaseRecovery) for (const root of new Set(this.projection.githubOperations.map((operation) => operation.root.root))) {
       if (githubRootQuarantined(this.projection, root)) roots.push(root);
     }
@@ -893,8 +898,8 @@ export class ControlPlane extends EventEmitter {
         roots.push(operation.root.root);
       } else if (job.winddownId) {
         const record = this.projection.winddowns.find((record) => record.id === job.winddownId);
-        if (!record?.source) throw new MoguriError("winddown_ownership", "An actual accepted-work writer lost its captured original root. No fallback.", 409);
-        roots.push(record.source.root);
+        if (!record) throw new MoguriError("winddown_ownership", "An actual accepted-work writer lost its captured original root. No fallback.", 409);
+        roots.push(record.source?.root ?? this.winddowns.writeRoot(record.id));
       } else if (job.candidate) {
         const candidate = this.projection.candidates.find((candidate) => candidate.id === job.candidate?.candidateId);
         if (!candidate) throw new MoguriError("candidate_ownership", "An owned candidate writer lost its original captured roots.", 409);
@@ -1783,6 +1788,9 @@ export class ControlPlane extends EventEmitter {
       if (children !== undefined) this.childrenDecision(this.session(session.id), "delete", children, requireChildReview);
       await this.settleCandidateWork([...new Set(cleanups.flatMap((cleanup) => cleanup.targets))]);
       const targetIds = new Set(targets.map((target) => target.id));
+      if (this.projection.winddowns.some((record) => targetIds.has(record.sessionId) && unsettledWinddownCommit(record))) {
+        throw new MoguriError("winddown_inspection", "Inspect and separately acknowledge the original partial transport checkpoint before deleting its actual session owner. Ref intent, independent report and writer quarantine were preserved.", 409);
+      }
       for (const execution of this.projection.executions.filter((value) => targetIds.has(value.sessionId))) await this.remote.forget(execution);
       const detach = decision.action === "detach" ? this.projection.sessions.filter((child) => child.parentSessionId === session.id)
         .map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } })) : [];
@@ -3067,6 +3075,9 @@ export class ControlPlane extends EventEmitter {
         const current = this.session(session.id);
         const reviewed = this.childrenDecision(current, "archive", command.children);
         const targets = reviewed.action === "archive" ? reviewed.tree : [current];
+        if (this.projection.winddowns.some((record) => targets.some((target) => target.id === record.sessionId) && unsettledWinddownCommit(record))) {
+          throw new MoguriError("winddown_inspection", "Inspect and separately acknowledge the original partial transport checkpoint before archiving its actual owner. No report, quarantine or partial job was erased.", 409);
+        }
         const detach = reviewed.action === "detach" ? reviewed.tree.filter((child) => child.parentSessionId === current.id)
           .map((child) => this.event(child, "session.organized", { changes: { parentSessionId: null } })) : [];
         return finish([...detach, ...targets.flatMap((value) => [
@@ -3255,7 +3266,9 @@ export class ControlPlane extends EventEmitter {
   private cycleEvent(cycle: RecoveryCycle): EventInput {
     return { event_type: "recovery.cycle_recorded", profile_id: this.profileId, payload: { cycle } };
   }
-  private recoveryBinding(session: Session): string {
+  private recoveryBinding(session: Session, nativeOrigin?: RetainedModelRequest["nativeOrigin"]): string {
+    if (nativeOrigin) return frameDigest(["model-request-recovery-v2", this.scheduledBinding(session, true),
+      session.activeCompactionId, this.projection.settings.values.sandbox, nativeOrigin]);
     return frameDigest(["model-request-recovery-v1", this.scheduledBinding(session), session.activeCompactionId,
       session.controls.env === "Remote" ? [this.remote.readiness.hostFingerprint, this.remote.readiness.workerDigest] : null,
       session.controls.env === "Sandbox" ? this.projection.settings.values.sandbox.qualification : null]);
@@ -3336,7 +3349,7 @@ export class ControlPlane extends EventEmitter {
     }
     const input = retainedModelRequest(JSON.parse(this.store.blob(failure.requestDigest)));
     if (input.profileId !== this.profileId || input.sessionId !== session.id || input.turnId !== failure.turnId ||
-      input.boundaryDigest !== this.recoveryBinding(session) || this.projection.blockedProjects.includes(session.projectId ?? "") ||
+      input.boundaryDigest !== this.recoveryBinding(session, input.nativeOrigin) || this.projection.blockedProjects.includes(session.projectId ?? "") ||
       this.projection.blockedWorkspaces.includes(session.workspaceId ?? "") || session.repositories?.some((repository) => this.projection.blockedProjects.includes(repository.projectId))) {
       throw new MoguriError("model_retry_changed", "The exact original model, controls, root, boundary or policy changed, or workspace effects remain unconfirmed. Inspect the original failure; no provider, Env or root was substituted.", 409);
     }
@@ -3347,6 +3360,10 @@ export class ControlPlane extends EventEmitter {
     if (!active && executions.some((execution) => !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("model_retry_cleanup", "The exact prior SSH worker cleanup is unconfirmed. Reconcile it before a new owned model continuation.", 409);
     if (!active && (this.projection.sandboxExecutions ?? []).some((execution) => execution.sessionId === session.id && execution.turnId === failure.turnId &&
       !["owned-guest-stopped", "acknowledged"].includes(execution.cleanup))) throw new MoguriError("model_retry_cleanup", "The exact prior native guest cleanup is unconfirmed. No replacement guest or Local continuation was started.", 409);
+    if (input.nativeOrigin) {
+      if (active && this.runs.get(session.id)?.sandboxExecutionId) this.sandboxWorkspaces.retryCurrent(session, failure, input);
+      else this.sandboxWorkspaces.retrySource(session, failure, input);
+    }
     this.available(session.controls, true, session);
     const model = this.provider.state.models.find((model) => model.id === input.modelId);
     if (!model || frameDigest(model) !== input.modelBindingDigest || this.authorizationRevision(model.providerId ?? model.id) !== input.authorizationRevision) {
@@ -3762,7 +3779,11 @@ export class ControlPlane extends EventEmitter {
     const done = Promise.resolve().then(async () => {
       if (Object.entries(control).some(([key, value]) => key !== "retry" && Boolean(value))) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No alternate worker or root was used.", 409);
       const base = this.sandbox.assertReady(), prepared = new Map<string, PreparedModel>();
-      if (this.sandboxWorkspaces.automatic()) await this.sandboxWorkspaces.prepareAutomatic(current.id, turnId, abort.signal);
+      if (control.retry?.input.nativeOrigin) {
+        const failure = this.projection.modelFailures.find((entry) => entry.id === control.retry!.failureId);
+        if (!failure || failure.status !== "retrying") throw new MoguriError("native_retry_owner", "The original retry was cancelled before private snapshot preparation.", 409);
+        await this.sandboxWorkspaces.prepareRetry(current.id, failure, control.retry.input, abort.signal);
+      } else if (this.sandboxWorkspaces.automatic()) await this.sandboxWorkspaces.prepareAutomatic(current.id, turnId, abort.signal);
       else await this.sandboxWorkspaces.assert(actual());
       let admission: NativeAdmission = { config: base, prepared };
       const management = this.projection.settings.values.sandboxManagement;
@@ -3796,7 +3817,11 @@ export class ControlPlane extends EventEmitter {
       console.error("Native turn preparation failed:", error instanceof MoguriError ? error.code : abort.signal.aborted ? "native_preparation_cancelled" : "native_preparation");
       this.paused.add(session.id);
       this.commit([...(abort.signal.aborted ? [this.event(session, "turn.stop_acknowledged", {})] : []),
+        ...(control.retry ? this.projection.modelFailures.filter((entry) => entry.id === control.retry!.failureId && entry.status === "retrying").map((failure) =>
+          this.failureEvent(this.failureUpdate(failure, { status: abort.signal.aborted ? "cancelled" : "blocked",
+            diagnostic: error instanceof MoguriError ? error.message : "Exact private retry preparation ended before inference. No copy or paid work was replayed." }))) : []),
         this.event(session, "turn.finished", { outcome: abort.signal.aborted ? "stopped" : "failed", workspaceEffects: "none",
+          ...(control.retry && !abort.signal.aborted ? { modelFailureId: control.retry.failureId } : {}),
           diagnostic: abort.signal.aborted ? "Native preparation stopped before guest or model admission. Original prompt, source and private records were retained." :
             error instanceof MoguriError ? error.message : "Native workspace/provider preparation failed. No guest, model request or Local fallback was started." })]);
     }).finally(() => {
@@ -4144,7 +4169,7 @@ export class ControlPlane extends EventEmitter {
       return [];
     }
     const entry = this.projection.budgetEntries.find((entry) => entry.id === request.stepId), message = assistantMessage(request.message);
-    if (record.version !== 2 || record.sessionId !== execution.sessionId || record.turnId !== execution.turnId ||
+    if (record.version === 1 || record.sessionId !== execution.sessionId || record.turnId !== execution.turnId ||
       JSON.stringify(record.transport) !== JSON.stringify(this.executionModelTransport(execution)) || !entry || entry.env !== record.env ||
       entry.sessionId !== record.sessionId || entry.turnId !== record.turnId || entry.role !== "checkpoint" || entry.planId !== record.step.planId ||
       entry.modelId !== record.step.modelId || entry.providerId !== record.step.providerId || entry.apiModelId !== record.step.apiModelId ||
@@ -4649,14 +4674,15 @@ export class ControlPlane extends EventEmitter {
   private bindModelInput(run: Run, request: Extract<WorkerRequest, { kind: "model.dispatch" }>): void {
     const session = this.session(run.sessionId), input = run.modelInput;
     if (!input || input.sourceStepId !== request.stepId || run.stepId !== request.stepId || !run.inFlight || run.modelInputDigest ||
-      run.abort.signal.aborted || input.boundaryDigest !== this.recoveryBinding(session) ||
+      run.abort.signal.aborted || input.boundaryDigest !== this.recoveryBinding(session, input.nativeOrigin) ||
       frameDigest(input.loadedTools) !== frameDigest(request.loadedTools)) {
       throw new MoguriError("model_request_owner", "The exact original model request lost its fresh boundary or was already dispatched. No inference was authorized.", 409);
     }
     const context = contextMessages(request.context); validateContextSize(context);
     const captured = retainedModelRequest({ ...input, context, instructionSources: request.instructionSources });
     const inputDigest = this.store.putBlob(JSON.stringify(captured));
-    this.commit([this.event(session, "model.request_bound", { inputDigest, modelId: input.modelId }, request.stepId)]);
+    this.commit([this.event(session, "model.request_bound", { inputDigest, modelId: input.modelId,
+      ...(input.nativeOrigin ? { nativeRestaging: true as const } : {}) }, request.stepId)]);
     run.modelInput = captured; run.modelInputDigest = inputDigest;
     this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
   }
@@ -4737,6 +4763,7 @@ export class ControlPlane extends EventEmitter {
       steers: [], phase: input.phase, maxTokens: input.maxTokens, thinkingEffort: input.thinkingEffort, mode: input.mode, folders: input.folders } });
   }
   private async workerMessage(run: Run, request: WorkerRequest): Promise<void> {
+    if (request.kind === "checkpoint.phase") throw new MoguriError("checkpoint_owner", "Git checkpoint receipts belong only to their exact model-free SSH operation. An ordinary/model worker cannot adopt that authority.", 403);
     if (isOwnedModelRequest(request)) throw new MoguriError("owned_model_owner", "Private frames require their independent original report/transport path; they cannot adopt ordinary tool or solver authority.", 409);
     const session = this.session(run.sessionId);
     if (request.kind === "ack") {
@@ -5033,10 +5060,14 @@ export class ControlPlane extends EventEmitter {
         const decisionSteers = this.history.flatMap((event) => event.event_type === "steering.applied" && event.session_id === current.id && event.turn_id === run.turnId &&
           event.step_id === request.stepId ? [this.steeringContext(event)] : []);
         const value: BoundaryReply = { ...prepared, model: { ...configured.model, maxTokens: reservation.maxTokens }, maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, phase, ...(routedContext ? { context: routedContext } : {}), steers: [...decisionSteers, ...steers.map((item) => this.contextItem(item)), ...incomingContext], systemPrompt: effectivePrompt, tools, toolCatalog: phase === "router" ? [] : solverTools, directMcpTools: directTools, mode: effectiveMode, folders: folderPolicy(projectSettings) };
-        run.modelInput = { version: 1, profileId: this.profileId, sessionId: current.id, turnId: run.turnId, sourceStepId: request.stepId,
+        const nativeExecution = run.sandboxExecutionId ? this.sandboxExecution(run.sandboxExecutionId) : undefined;
+        const nativeOrigin = nativeExecution ? { executionId: nativeExecution.id, workspaceId: nativeExecution.workspaceId,
+          inputDigest: nativeExecution.inputDigest, root: nativeExecution.stage.workspace } : undefined;
+        run.modelInput = { version: nativeOrigin ? 2 : 1, ...(nativeOrigin ? { nativeOrigin } : {}),
+          profileId: this.profileId, sessionId: current.id, turnId: run.turnId, sourceStepId: request.stepId,
           modelId, modelBindingDigest: frameDigest(metadata), authorizationRevision: this.authorizationRevision(metadata.providerId ?? metadata.id),
           endpoint: prepared.auth.baseUrl ?? prepared.model.baseUrl, api: prepared.model.api,
-          boundaryDigest: this.recoveryBinding(current), controls: structuredClone(current.controls),
+          boundaryDigest: this.recoveryBinding(current, nativeOrigin), controls: structuredClone(current.controls),
           systemPrompt: value.systemPrompt, tools, toolCatalog: value.toolCatalog ?? [], maxTokens: value.maxTokens, contextWindow: value.model.contextWindow,
           loadedTools: request.loadedTools ?? [], instructionSources: [], mode: value.mode, folders: value.folders, phase,
           context: value.context ?? canonicalContext, ...(value.thinkingEffort ? { thinkingEffort: value.thinkingEffort } : {}),

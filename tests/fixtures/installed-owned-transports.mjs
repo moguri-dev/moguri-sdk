@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { fixtureProvider, waitFor } from "../fixture.ts";
 import { createSshTarget } from "./ssh-target.ts";
 import { generatedTechnicalAdvice } from "./decisions-api.ts";
+import { initializeGeneratedRepository } from "./git-project.ts";
 
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the independently installed package root.");
@@ -88,19 +89,36 @@ try {
         ({ status: record.status, diagnostic: record.diagnostic, step: record.step.state })) })}`, { cause: error });
   }); await tightened;
   const report = await sdk.winddown.read(sdk.winddown.list(created.id).at(-1).id);
-  assert.equal(report.winddown.version, 2); assert.equal(report.winddown.env, "Remote"); assert.equal(report.winddown.status, "ready");
+  assert.equal(report.winddown.version, PROTOCOL_VERSION >= 86 ? 3 : 2); assert.equal(report.winddown.env, "Remote"); assert.equal(report.winddown.status, "ready");
   assert.ok(report.winddown.transport.executionId !== decision.transport.executionId);
   assert.equal(report.roleInput.includes("GENERATED_INSTALLED_TASK_NOT_FINISHING_CONTEXT"), false);
   assert.equal(sdk.getState().snapshot.budgetEntries.at(-1).role, "checkpoint");
   assert.equal(sdk.getState().snapshot.budgetPlans.find((plan) => plan.id === report.winddown.step.planId).status, "consumed");
   await assert.rejects(() => sdk.winddown.commitPreview({ sessionId: created.id, winddownId: report.winddown.id,
     candidateIds: ["generated-not-local"], branch: "generated/never-local", message: "Generated no-root-transfer." }), /Local accepted-work\/Git|Remote\/native boundary/);
+  if (PROTOCOL_VERSION >= 86) {
+    const git = initializeGeneratedRepository(workspace);
+    git(["config", "user.name", "Generated fixture"]); git(["config", "user.email", "fixture@example.invalid"]);
+    await sdk.workspaces.file(created.id, "fixture.txt"); await sdk.command({ type: "session.resume", sessionId: created.id });
+    await writeFile(join(workspace, "fixture.txt"), "Generated installed separately accepted peer source.\n");
+    const source = await sdk.winddown.sourcePreview(report.winddown.id, ["fixture.txt"]);
+    await sdk.winddown.acceptSource(report.winddown.id, ["fixture.txt"], source.preview.revision, source.preview.digest, true);
+    const checkpoint = { winddownId: report.winddown.id, sessionId: created.id, candidateIds: [], remoteAccepted: true,
+      branch: "moguri/generated-installed-peer-checkpoint", message: "Retain exact installed peer source" };
+    const review = await sdk.winddown.commitPreview(checkpoint), head = git(["rev-parse", "HEAD"]);
+    await sdk.winddown.commit(checkpoint, review.preview.revision, review.preview.digest, true);
+    const completed = await sdk.winddown.waitCommit(report.winddown.id);
+    assert.equal(completed.winddown.status, "completed");
+    assert.equal(git(["show", checkpoint.branch + ":fixture.txt"]), "Generated installed separately accepted peer source.");
+    assert.equal(git(["rev-parse", "HEAD"]), head);
+    assert.equal((await sdk.winddown.inspectCommit(report.winddown.id)).inspection.review.document.actualCommit, completed.winddown.commit.publishedCommit);
+  }
   const count = primary.requests.length + advice.requests.length;
   sdk.disconnect(); await runtime.close(); runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
   assert.equal((await sdk.decisions.read(decision.id)).decision.transport.executionId, decision.transport.executionId);
-  assert.equal((await sdk.winddown.read(report.winddown.id)).winddown.status, "ready");
+  assert.equal((await sdk.winddown.read(report.winddown.id)).winddown.status, PROTOCOL_VERSION >= 86 ? "completed" : "ready");
   assert.equal(primary.requests.length + advice.requests.length, count);
-  console.log("Installed protocol85 runtime/SDK and installed SSH worker: owned Balanced-Kupo technical decision, actual role actor/transport, complete all-role holds, selected-peer finishing, no Local Git/task context and restart/no-replay passed.");
+  console.log(`Installed protocol${PROTOCOL_VERSION} runtime/SDK and installed SSH worker: owned Balanced-Kupo technical decision, actual role actor/transport, complete all-role holds, selected-peer finishing, separately accepted peer Git with current ref/source inspection and restart/no-replay passed.`);
 } finally {
   sdk?.disconnect(); await runtime?.close(); await ssh.close(); await primary.close(); await advice.close();
   await rm(root, { recursive: true, force: true });

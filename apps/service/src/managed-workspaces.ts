@@ -216,7 +216,7 @@ export class ManagedWorkspaces {
     if (session.controls.env === "Remote") {
       const request: WorkspaceReadQuery = query.type === "session.git" ? { type: query.type, diff: query.diff } : { type: query.type, path: query.path };
       const result = await this.host.remoteRead(session, request);
-      if (result.type === "plan.read") throw new MoguriError("remote_workspace_type", "Remote file/Git response did not match its request.", 409);
+      if (result.type === "plan.read" || result.type === "checkpoint.source") throw new MoguriError("remote_workspace_type", "Remote file/Git response did not match its request.", 409);
       return result;
     }
     if (session.controls.env !== "Local") throw new MoguriError("workspace_env", "This file/Git surface has no qualified transport for the selected environment. No Local fallback.", 409);

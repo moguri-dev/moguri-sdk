@@ -90,9 +90,19 @@ atomic85 migration. It retains the original `d6aeae4` installer/receipt identity
 not a relabeled Local model or previous guest qualification. A tool-less role
 inside a rooted parent is not a rootless OS process. Raw late data/accounting
 may improve one originally admitted step without changing terminal work,
-cleanup, delegation or source acceptance. Jev remains upstream-unqualified;
-native rollback root transfer awaits the actual user policy decision. Metadata
-finishing is not Remote/native accepted-work Git integration.
+cleanup, delegation or source acceptance. Jev remains upstream-unqualified.
+
+D32's [snapshot retry/checkpoint continuation](native-retry-checkpoints.md)
+adds protocol86's independent `native_retry_restaging_schema` and
+`transport_checkpoint_schema` markers. The actual user permits restaging only
+the complete byte-verified original private snapshot under an explicit off-by-
+default retry policy, never a changed live-source capture or substituted owner.
+The user separately chose new-branch Git publication at the original Local
+repository after native-source acceptance; current Local and Sandbox policy
+both apply. Remote accepted-work Git stays on its pinned SSH peer/root.
+Separate source acceptance, Git review and partial-effect inspection never turn
+metadata into acceptance, replay work, clear unknown charges or relabel a
+partial job as completed.
 
 The owner-requested [shared themes and TUI follow-up](themes-and-tui.md) retains
 OpenTUI/React and the existing profile settings/event authority. Protocol 78 adds

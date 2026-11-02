@@ -167,9 +167,11 @@ This table and its exact qualification remain evidence for the original
 `d6aeae4` delivery/installer, not the new worker. Protocol85's model-free native
 scheduling preparation and selected-parent decision/finishing implementation
 are recorded separately in [owned model transports](owned-model-transports.md).
-Native rollback restaging and Jev remain distinct unresolved gates.
+Protocol86's [snapshot retry/checkpoint contract](native-retry-checkpoints.md)
+records the later confirmed restaging boundary and accepted-work implementation.
+Jev remains a distinct unavailable upstream wire.
 
-| Boundary | Current executable result |
+| Boundary | Executable result at protocol84 delivery |
 |---|---|
 | Local recovery | Exact four rounds, oldest currently failed eligible prompt, successful metered reset, exhaustion and manual/timer single-flight. Unknown results, later authorization failures and lost controller attempts remain blocked/partial. |
 | SSH recovery | Actual pinned worker/model/root continuation with original request bytes, all-role charges and no controller-model or Local-checkout fallback. |

@@ -79,7 +79,7 @@ export * from "./model-recovery.ts";
 export * from "./kupo-modes.ts";
 export * from "./owned-model-transports.ts";
 
-export const PROTOCOL_VERSION = 85;
+export const PROTOCOL_VERSION = 86;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -360,7 +360,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "steer.applied": { item: QueueItem };
   "steering.applied": { decisionId: string; modelId: string; providerId: string; sourceStepId: string; text: string; decisionOrigin: DecisionEvidence };
   "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole; kupoPhase?: KupoResponsePhase };
-  "model.request_bound": { inputDigest: string; modelId: string };
+  "model.request_bound": { inputDigest: string; modelId: string; nativeRestaging?: true };
   "model.authorization_changed": { providerId: string; actor: "user"; commandId: string; commandDigest: string };
   "model.failure_recorded": { failure: ModelFailure };
   "recovery.cycle_recorded": { cycle: RecoveryCycle };
@@ -1009,6 +1009,18 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           workspace.commandId !== owner.commandId || workspace.commandDigest !== owner.commandDigest ||
           previous && JSON.stringify(previous.preparation) !== JSON.stringify(owner)) {
           throw new MoguriError("sandbox_preparation_corrupt", "Scheduled native preparation lost its exact original command/draft owner. No source or prompt was replayed.", 409);
+        }
+      }
+      if (workspace.preparation?.version === 3) {
+        const owner = workspace.preparation, failure = modelFailures.get(owner.failureId);
+        const execution = sandboxExecutions.get(owner.executionId), origin = sandboxExecutions.get(owner.originExecutionId);
+        if (owner.kind !== "retry" || !failure || failure.sessionId !== workspace.sessionId || failure.turnId !== owner.turnId ||
+          failure.requestDigest !== owner.requestDigest || !previous && (failure.attemptId !== owner.attemptId || failure.status !== "retrying") ||
+          !execution || !origin || execution.sessionId !== workspace.sessionId || execution.turnId !== owner.turnId ||
+          origin.sessionId !== workspace.sessionId || origin.turnId !== owner.turnId || execution.cleanup !== "owned-guest-stopped" ||
+          execution.resultDigest !== owner.resultDigest || !/^[a-f0-9]{64}$/.test(owner.afterId) ||
+          previous && JSON.stringify(previous.preparation) !== JSON.stringify(owner)) {
+          throw new MoguriError("sandbox_preparation_corrupt", "Native retry staging lost its exact original request, attempt or verified snapshot owner. No root or effect was transferred.", 409);
         }
       }
       if (workspace.repositories) {
