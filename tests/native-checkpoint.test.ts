@@ -17,6 +17,7 @@ for (const stopped of [false, true]) test(`native accepted-work checkpoint ${sto
     await assert.rejects(() => f.sdk.winddown.commitPreview(input), /accept|publication/i);
     const accepted = await f.accept();
     input.nativePublicationIds = [accepted.publication.id];
+    await assert.rejects(() => f.sdk.winddown.commitPreview({ ...input, remoteAccepted: true }), /actual original boundary|fallback/i);
     await f.sdk.command({ type: "policy.set", allowedEnvs: ["Sandbox"] });
     await assert.rejects(() => f.sdk.winddown.commitPreview(input), /Local Git policy|original.*source/i);
     await f.sdk.command({ type: "policy.set", allowedEnvs: ["Local", "Sandbox", "Remote"] });

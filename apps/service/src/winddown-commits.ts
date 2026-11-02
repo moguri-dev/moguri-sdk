@@ -200,6 +200,9 @@ export class WinddownCommits {
   }
   async preview(value: Input, signal = AbortSignal.timeout(15000)) {
     const input = structuredClone(value), record = this.host.record(input.winddownId);
+    if (input.remoteAccepted && record.env !== "Remote" || input.nativePublicationIds && record.env !== "Sandbox") {
+      throw new MoguriError("winddown_commit_env", "Accepted-source flags must match the report's actual original boundary. No Remote/native/Local source or Git fallback was selected.", 409);
+    }
     if (record.env === "Remote" && input.remoteAccepted) return this.remotePreview(record, input);
     if (record.env !== "Local" && !(record.version === 3 && record.env === "Sandbox" && input.nativePublicationIds?.length)) throw new MoguriError("winddown_commit_env", "This report needs its exact selected-transport accepted-work review. Local accepted-work/Git cannot adopt Remote/native metadata or a controller mapping.", 409);
     if (record.status !== "ready" || record.commit !== null) throw new MoguriError("winddown_commit_state", "Only one exact complete known finishing report may request a fresh actual-user accepted-work review. Terminal/partial work cannot replay.", 409);

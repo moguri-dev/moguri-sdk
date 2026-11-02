@@ -26,6 +26,7 @@ const count = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 export const CheckpointFileSchema = object({ path: Type.String({ minLength: 1, maxLength: 4096 }), text: Type.String({ maxLength: 128 * 1024 }),
   digest: hash, mode: Type.Union([Type.Literal("100644"), Type.Literal("100755")]) });
 const files = Type.Array(CheckpointFileSchema, { minItems: 1, maxItems: 20 });
+const sourcePaths = Type.Array(CheckpointFileSchema.properties.path, { minItems: 1, maxItems: 20, uniqueItems: true });
 export const RemoteCheckpointRootSchema = object({ ...CandidateRootSchema.properties, env: Type.Literal("Remote") });
 export const RemoteCheckpointSourceSchema = object({
   format: Type.Literal("moguri-remote-checkpoint-source"), version: Type.Literal(1), winddownId: id, sessionId: id,
@@ -204,7 +205,7 @@ export const WinddownCommitInspectionSchema = object({
 export type WinddownCommitInspection = Static<typeof WinddownCommitInspectionSchema>;
 export const WinddownCommandSchema = Type.Union([
   object({ type: Type.Literal("winddown.commit.reconcile"), winddownId: id, expectedRevision: count, expectedDigest: hash, confirm: Type.Literal(true) }),
-  object({ type: Type.Literal("winddown.source.accept"), winddownId: id, paths: Type.Array(id, { minItems: 1, maxItems: 20, uniqueItems: true }),
+  object({ type: Type.Literal("winddown.source.accept"), winddownId: id, paths: sourcePaths,
     expectedRevision: count, expectedDigest: hash, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("winddown.stop"), winddownId: id }),
   object({ type: Type.Literal("winddown.decline"), winddownId: id, expectedRevision: count, confirm: Type.Literal(true) }),
@@ -213,7 +214,7 @@ export const WinddownCommandSchema = Type.Union([
 export type WinddownCommand = Static<typeof WinddownCommandSchema>;
 export const WinddownQuerySchema = Type.Union([
   object({ type: Type.Literal("winddown.commit.inspect"), winddownId: id }),
-  object({ type: Type.Literal("winddown.source.preview"), winddownId: id, paths: Type.Array(id, { minItems: 1, maxItems: 20, uniqueItems: true }) }),
+  object({ type: Type.Literal("winddown.source.preview"), winddownId: id, paths: sourcePaths }),
   object({ type: Type.Literal("winddown.status"), sessionId: id }),
   object({ type: Type.Literal("winddown.read"), winddownId: id }),
   object({ type: Type.Literal("winddown.commit.preview"), ...commitInput }),

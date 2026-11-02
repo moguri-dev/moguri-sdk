@@ -1286,7 +1286,10 @@ enabled native retries restore its signed private snapshot and cannot capture
 new live-source bytes, change Env/model/profile, replay effects or refund
 unknown calls.
 
-`winddown.sourcePreview(id, paths)` reads complete exact SSH source.
+`winddown.sourcePreview(id, paths)` reads complete exact SSH source: at most
+20 distinct paths, each up to 4,096 characters, subject to the actual host's
+filesystem limits and the complete 128-KiB source/Git review bound. It never
+uses the shorter artifact-ID bound for file paths or truncates a review.
 `acceptSource(id, paths, revision, digest, true)` binds actual-user source
 acceptance, not Git permission. `commitPreview`/`commit` use `remoteAccepted:true`
 for that peer or exact `nativePublicationIds` for already separately accepted

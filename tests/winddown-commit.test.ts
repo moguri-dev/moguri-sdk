@@ -14,6 +14,7 @@ test("budget wind-down accepts only separately reviewed actual-user accepted byt
     const index = await readFile(join(f.project, ".git/index")), head = f.git(["rev-parse", "HEAD"]);
     const input = { winddownId: checkpoint.winddown.id, sessionId: f.sessionId, candidateIds: [accepted.candidate.id],
       branch: "moguri/generated-reviewed-budget-checkpoint", message: "chore: retain explicitly accepted checkpoint work" };
+    await assert.rejects(() => f.sdk.winddown.commitPreview({ ...input, remoteAccepted: true }), /actual original boundary|fallback/i);
     const preview = await f.sdk.winddown.commitPreview(input);
     assert.equal(f.git(["rev-parse", "HEAD"]), head); assert.deepEqual(await readFile(join(f.project, ".git/index")), index);
     const created = await f.sdk.winddown.commit(input, preview.preview.revision, preview.preview.digest, true); assert.equal(created.id, checkpoint.winddown.id);

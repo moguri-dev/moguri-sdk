@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fixtureProvider, waitFor } from "../fixture.ts";
 import { createSshTarget } from "./ssh-target.ts";
@@ -101,8 +101,10 @@ try {
     git(["config", "user.name", "Generated fixture"]); git(["config", "user.email", "fixture@example.invalid"]);
     await sdk.workspaces.file(created.id, "fixture.txt"); await sdk.command({ type: "session.resume", sessionId: created.id });
     await writeFile(join(workspace, "fixture.txt"), "Generated installed separately accepted peer source.\n");
-    const source = await sdk.winddown.sourcePreview(report.winddown.id, ["fixture.txt"]);
-    await sdk.winddown.acceptSource(report.winddown.id, ["fixture.txt"], source.preview.revision, source.preview.digest, true);
+    const deepPath = "generated/".repeat(14) + "fixture.txt", paths = ["fixture.txt", deepPath];
+    await mkdir(join(workspace, dirname(deepPath)), { recursive: true }); await writeFile(join(workspace, deepPath), "Generated installed deep peer path.\n");
+    const source = await sdk.winddown.sourcePreview(report.winddown.id, paths);
+    await sdk.winddown.acceptSource(report.winddown.id, paths, source.preview.revision, source.preview.digest, true);
     const checkpoint = { winddownId: report.winddown.id, sessionId: created.id, candidateIds: [], remoteAccepted: true,
       branch: "moguri/generated-installed-peer-checkpoint", message: "Retain exact installed peer source" };
     const review = await sdk.winddown.commitPreview(checkpoint), head = git(["rev-parse", "HEAD"]);
@@ -110,6 +112,7 @@ try {
     const completed = await sdk.winddown.waitCommit(report.winddown.id);
     assert.equal(completed.winddown.status, "completed");
     assert.equal(git(["show", checkpoint.branch + ":fixture.txt"]), "Generated installed separately accepted peer source.");
+    assert.equal(git(["show", checkpoint.branch + ":" + deepPath]), "Generated installed deep peer path.");
     assert.equal(git(["rev-parse", "HEAD"]), head);
     assert.equal((await sdk.winddown.inspectCommit(report.winddown.id)).inspection.review.document.actualCommit, completed.winddown.commit.publishedCommit);
   }
