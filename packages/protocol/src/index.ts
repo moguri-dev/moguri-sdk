@@ -84,7 +84,7 @@ export * from "./language-tools.ts";
 export * from "./chat-outputs.ts";
 export * from "./playwright-tools.ts";
 
-export const PROTOCOL_VERSION = 88;
+export const PROTOCOL_VERSION = 89;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";

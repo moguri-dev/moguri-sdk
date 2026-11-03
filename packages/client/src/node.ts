@@ -46,7 +46,8 @@ export async function readPrivateConnection(stateDir = stateDirectory()): Promis
 export async function serviceUpgradeReview(connection: Connection, stateDir: string): Promise<ServiceUpgradeReview> {
   const root = await realpath(stateDir);
   return { stateDir: root, pid: connection.pid, observedProtocol: connection.protocolVersion, requiredProtocol: PROTOCOL_VERSION,
-    fingerprint: createHash("sha256").update(JSON.stringify({ stateDir: root, ...connection })).digest("hex"),
+    fingerprint: createHash("sha256").update(JSON.stringify({ stateDir: root, protocolVersion: connection.protocolVersion, baseUrl: connection.baseUrl,
+      wsUrl: connection.wsUrl, token: connection.token, pid: connection.pid, ...(connection.storeId ? { storeId: connection.storeId } : {}) })).digest("hex"),
     canRestart: connection.protocolVersion >= 23 && connection.protocolVersion < PROTOCOL_VERSION };
 }
 export async function readConnection(stateDir = stateDirectory()): Promise<Connection> {
@@ -60,6 +61,41 @@ function unavailable(error: unknown): boolean {
   return error instanceof TypeError && error.cause instanceof Error && "code" in error.cause && error.cause.code === "ECONNREFUSED";
 }
 type ConnectionOptions = { stateDir?: string; runtime?: string; servicePath?: string; explicitStateDir?: boolean };
+export class ServiceHealthTimeout extends Error {
+  constructor(protocol: number, cause: unknown) {
+    super(`The registered Moguri service (protocol ${protocol}) did not confirm authenticated health within this operation's existing deadline. Its owner is unconfirmed; inspect its original log/cleanup. No replacement or force-stop was attempted.`, { cause });
+    this.name = "ServiceHealthTimeout";
+  }
+}
+export async function readAuthenticatedServiceHealth(connection: Connection, stateDir: string, deadline: number): Promise<Record<string, unknown>> {
+  const expected = (await serviceUpgradeReview(connection, stateDir)).fingerprint;
+  const guard = async () => {
+    if ((await serviceUpgradeReview(await readPrivateConnection(stateDir), stateDir)).fingerprint !== expected) throw new Error("The service connection changed, or its canonical root changed, during health inspection. No different owner was adopted or stopped.");
+  };
+  let timeout: unknown;
+  while (performance.now() < deadline) {
+    await guard();
+    try {
+      const response = await fetch(`${connection.baseUrl}/v1/health`, { headers: { Authorization: `Bearer ${connection.token}` }, redirect: "error",
+        signal: AbortSignal.timeout(Math.max(1, Math.min(2000, Math.ceil(deadline - performance.now())))) });
+      if (!response.ok) throw new Error("The registered Moguri endpoint rejected authentication. No owner was stopped or replaced.");
+      let health: unknown;
+      try { health = await response.json(); }
+      catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new Error("The registered Moguri endpoint returned invalid health metadata. No authenticated owner was accepted or stopped.", { cause: error });
+      }
+      await guard();
+      if (!isRecord(health) || health.protocolVersion !== connection.protocolVersion || health.pid !== connection.pid) throw new Error("Moguri service identity or protocol changed. No unverified owner was restarted.");
+      return health;
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "TimeoutError")) throw error;
+      timeout = error;
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(50, deadline - performance.now()))));
+    }
+  }
+  throw new ServiceHealthTimeout(connection.protocolVersion, timeout);
+}
 export async function verifyServiceInstallation(options: ConnectionOptions): Promise<{ servicePath: string; runtime: string }> {
   const servicePath = options.servicePath ?? fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../../../apps/service/src/main.ts" : "./service.mjs", import.meta.url));
   const runtime = options.runtime ?? process.execPath;
@@ -73,18 +109,10 @@ export async function verifyServiceInstallation(options: ConnectionOptions): Pro
   return { servicePath, runtime };
 }
 export async function ensureConnection(options: ConnectionOptions = {}): Promise<Connection> {
-  const stateDir = options.stateDir ?? stateDirectory();
+  const stateDir = options.stateDir ?? stateDirectory(), deadline = performance.now() + 60_000;
   const probe = async () => {
     const connection = await readPrivateConnection(stateDir);
-    let response: Response;
-    try { response = await fetch(`${connection.baseUrl}/v1/health`, { headers: { Authorization: `Bearer ${connection.token}` }, redirect: "error", signal: AbortSignal.timeout(2000) }); }
-    catch (error) {
-      if (error instanceof Error && error.name === "TimeoutError") throw new Error(`The registered Moguri service (protocol ${connection.protocolVersion}) did not respond. Its owner is unconfirmed; no replacement or force-stop was attempted. Close the original service and retry. Stored data was preserved.`, { cause: error });
-      throw error;
-    }
-    if (!response.ok) throw new Error("Existing Moguri service rejected the connection.");
-    const health: unknown = await response.json();
-    if (!isRecord(health) || health.protocolVersion !== connection.protocolVersion || health.pid !== connection.pid) throw new Error("Moguri service identity or protocol changed. No unverified owner was restarted.");
+    const health = await readAuthenticatedServiceHealth(connection, stateDir, deadline);
     if (connection.protocolVersion !== PROTOCOL_VERSION) throw new ServiceProtocolMismatch(await serviceUpgradeReview(connection, stateDir));
     if (health.lifecycle !== undefined && health.lifecycle !== null) {
       throw new Error(`The authenticated Moguri service is ${isRecord(health.lifecycle) && health.lifecycle.status === "unconfirmed" ? "in unconfirmed shutdown" : "stopping"}. Acceptance is not readiness. Inspect its original cleanup and retry; no replacement service was started.`);
@@ -119,7 +147,7 @@ export async function ensureConnection(options: ConnectionOptions = {}): Promise
       child.unref();
     } finally { await log.close(); }
   }
-  const deadline = performance.now() + 60_000, logPath = join(stateDir, "service.log");
+  const logPath = join(stateDir, "service.log");
   while (performance.now() < deadline) {
     if (launchError) throw new Error(`Could not launch the Moguri service: ${launchError.message}`);
     try { return await probe(); } catch (error) { if (!unavailable(error)) throw error; }

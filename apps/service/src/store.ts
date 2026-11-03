@@ -14,6 +14,11 @@ const ownedTransportSchemaMarkers = ["scheduled_native_preparation_schema", "own
 const retryCheckpointSchemaMarkers = ["native_retry_restaging_schema", "transport_checkpoint_schema"] as const;
 export const sessionControlsSchemaMarkers = ["session_coordination_controls_schema", "session_pr_associations_schema", "voice_lifecycle_schema", "chat_outputs_schema", "language_app_tools_schema"] as const;
 export const voiceShortcutSchemaMarker = "voice_shortcut_schema";
+export const eventReadIndexesSchemaMarker = "event_read_indexes_schema";
+const eventReadIndexes = [
+  "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
+  "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
+] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -521,6 +526,20 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=88; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 89) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const sql of eventReadIndexes) this.db.exec(sql);
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(eventReadIndexesSchemaMarker);
+          this.db.exec("PRAGMA user_version=89; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
+        const header: unknown = JSON.parse(String(row.header));
+        if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
+        this.validEvent({ schema_version: header[0], event_type: header[1], id: header[2], timestamp: header[3], profile_id: header[4],
+          payload: row.payload_type === "object" ? {} : null }, Number(row.seq));
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
@@ -531,6 +550,16 @@ export class EventStore {
       if (version >= 88) require(voiceShortcutSchemaMarker, "voice shortcut");
       if (version >= 4 && version < 88 && hasVoiceShortcutHistory(this.readEvents(0, true, version < 10))) {
         throw new Error("Actual voice shortcut preference history cannot become a pre-88 lineage. Original state was preserved.");
+      }
+      if (version < 89 && marker(eventReadIndexesSchemaMarker) !== undefined) throw new Error("Premature event read indexes schema marker. Original state was preserved.");
+      if (version >= 89) {
+        require(eventReadIndexesSchemaMarker, "event read indexes");
+        for (const sql of eventReadIndexes) {
+          const name = sql.split(" ")[2]!;
+          if (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='events'").get(name)?.sql !== sql) {
+            throw new Error(`Missing or invalid event read index ${name}. Original state was preserved; no index or history was silently rebuilt.`);
+          }
+        }
       }
       for (const id of sessionControlsSchemaMarkers) {
         if (version < 87 && marker(id) !== undefined) throw new Error(`Premature session controls/tools schema marker ${id}. Original state was preserved.`);
@@ -952,7 +981,9 @@ export class EventStore {
   }
   events(after = 0): StoredEvent[] { return this.readEvents(after, false); }
   private readEvents(after: number, allProfiles: boolean, legacyArtifactScopes = false): StoredEvent[] {
-    return this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after).flatMap((row) => {
+    const rows = allProfiles ? this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after) :
+      this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq").all(this.profileId, after);
+    return rows.flatMap((row) => {
       const event: unknown = JSON.parse(String(row.data));
       const data = this.validEvent(event, Number(row.seq));
       if (!allProfiles && data.profile_id !== this.profileId) return [];

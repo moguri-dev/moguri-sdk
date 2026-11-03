@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { ensureConnection as ensureTransportConnection, readConnection, readPrivateConnection, serviceUpgradeReview, ServiceProtocolMismatch, stateDirectory, verifyServiceInstallation, type ServiceUpgradeReview } from "../../client/src/node.ts";
+import { ensureConnection as ensureTransportConnection, readAuthenticatedServiceHealth, readConnection, readPrivateConnection, serviceUpgradeReview, ServiceHealthTimeout, ServiceProtocolMismatch, stateDirectory, verifyServiceInstallation, type ServiceUpgradeReview } from "../../client/src/node.ts";
 import type { ServiceOptions } from "../../../apps/service/src/server.ts";
 import { MoguriSdk } from "./index.ts";
 import { basename, dirname, join } from "node:path";
@@ -84,6 +84,7 @@ async function capturedServiceGone(stateDir: string, connection: Connection, ack
   }
 }
 export async function stopMoguriService(stateDir = stateDirectory(), options: RuntimeCloseOptions & { expectedConnection?: Connection } = {}, expected?: ServiceUpgradeReview): Promise<void> {
+  const deadline = performance.now() + 30_000;
   let value: Connection;
   try { value = await readPrivateConnection(stateDir); }
   catch (error) {
@@ -104,17 +105,14 @@ export async function stopMoguriService(stateDir = stateDirectory(), options: Ru
   const fingerprint = (await serviceUpgradeReview(value, stateDir)).fingerprint;
   const url = new URL(value.baseUrl);
   if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || url.username || url.password) throw new Error("Refusing to signal an unverified service.");
-  let response: Response;
-  try { response = await fetch(`${url.origin}/v1/health`, { headers: { Authorization: `Bearer ${value.token}` }, redirect: "error", signal: AbortSignal.timeout(2000) }); }
+  let health: Record<string, unknown>;
+  try { health = await readAuthenticatedServiceHealth(value, stateDir, deadline); }
   catch (error) {
+    if (!(error instanceof ServiceHealthTimeout) && !(error instanceof TypeError && error.cause instanceof Error) &&
+      !missingServiceFile(error) && !(error instanceof ServiceFileDisappeared)) throw error;
     if (await capturedServiceGone(stateDir, value)) return;
     throw new Error(`The registered Moguri service could not authenticate a lifecycle request. Inspect ${join(stateDir, "service.log")} and the original cleanup before retrying. No PID was signalled and no replacement was started.`, { cause: error });
   }
-  if (!response.ok) throw new Error("The registered endpoint rejected lifecycle authentication. No PID was signalled and no replacement was started.");
-  let health: unknown;
-  try { health = await response.json(); }
-  catch (error) { throw new Error("The registered endpoint returned invalid health metadata. No authenticated lifecycle owner was confirmed or stopped.", { cause: error }); }
-  if (!isRecord(health) || health.pid !== value.pid || health.protocolVersion !== value.protocolVersion) throw new Error("The process does not match the authenticated Moguri service. No signal was sent.");
   const unchanged = async () => {
     let current: Connection;
     try { current = await readPrivateConnection(stateDir); }
@@ -139,7 +137,6 @@ export async function stopMoguriService(stateDir = stateDirectory(), options: Ru
     catch (error) { throw new Error("The lifecycle acknowledgement was invalid. Original shutdown is unconfirmed; inspect its log/cleanup. No replacement was started.", { cause: error }); }
     if (!closing.ok || !isRecord(result) || result.accepted !== true || result.pid !== value.pid) throw new Error("The authenticated service did not accept its exact lifecycle request. No process was signalled.");
   } else process.kill(value.pid, "SIGTERM");
-  const deadline = performance.now() + 30_000;
   while (performance.now() < deadline) {
     if (!await unchanged() && await capturedServiceGone(stateDir, value, true)) return;
     if (typeof health.protocolVersion === "number" && health.protocolVersion >= 23) {
