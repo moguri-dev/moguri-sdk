@@ -408,10 +408,11 @@ export async function startService(options: ServiceOptions) {
       if (lifecycle && lifecycle.action !== action) return Promise.reject(new MoguriError("lifecycle_conflict", "Original lifecycle cleanup is unconfirmed. Retry the same action; terminal preservation cannot change after cleanup started.", 409));
       lifecycle = { action, status: "stopping", diagnostic: null };
       closeTask ??= (async () => {
-        await assertOwnedServiceFile(lockPath, ownedLock);
-        await assertOwnedServiceFile(connectionPath, ownedConnection, true);
+        // Fence owned admission before the first await; registry I/O must not release pending opens.
         const nativeClosing = rootApplication.close(preserveInstaller), ownersClosing = rootProfiles.close(options);
         await Promise.all([nativeClosing, ownersClosing]);
+        await assertOwnedServiceFile(lockPath, ownedLock);
+        await assertOwnedServiceFile(connectionPath, ownedConnection, true);
         await closeServer();
         if (store!.db.isOpen) store!.close();
         await releaseIdentity?.();

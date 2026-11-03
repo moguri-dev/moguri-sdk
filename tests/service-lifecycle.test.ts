@@ -101,6 +101,17 @@ test("an owned service can finish acknowledged shutdown when its registry disapp
   } finally { t.mock.restoreAll(); await fixture.close(); }
 });
 
+test("accepted shutdown synchronously fences owned admission before any private metadata I/O can release a pending open", async (t) => {
+  const fixture = await setupFixture(), close = fixture.service.profiles.close.bind(fixture.service.profiles);
+  let fenced = false;
+  t.mock.method(fixture.service.profiles, "close", (...args: Parameters<typeof close>) => { fenced = true; return close(...args); });
+  try {
+    const closing = fixture.service.close();
+    assert.equal(fenced, true);
+    await closing;
+  } finally { t.mock.restoreAll(); await fixture.close(); }
+});
+
 test("service discovery never reports an accepted but unconfirmed lifecycle operation as ready", async (t) => {
   const fixture = await setupFixture(), stateDir = join(fixture.directory, "state");
   const original = fixture.service.profiles.close.bind(fixture.service.profiles);
