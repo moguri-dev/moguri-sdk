@@ -267,3 +267,49 @@ then verify actual acknowledgement or exact refusal recovery. Shared tests
 cover newer typing, held delivery and unknown acknowledgements without replay;
 native TUI and hidden desktop cover the same transient state. Diagnostic tests
 cover bounds, caller mutation, failed status and payload/credential exclusion.
+
+The immutable feedback/diagnostic cut is `37f674d`, protocol 89,
+Moguri `0.31.0-alpha.1`. It is not a claim that the remaining live latency
+has been resolved:
+
+| Exact check | Result |
+| --- | --- |
+| Shared draft/queue/dictation, diagnostic bounds/privacy and native-input checks | 20 passed |
+| Transport negotiation and all capability-client regression files | 28 passed |
+| Complete native TUI/input suite | 42 passed, one skipped |
+| Complete hidden desktop suite | 330 passed, four skipped, zero failures; 631.91 s |
+| Independently installed packed SDK/types/runtime and audit | PASS; zero vulnerabilities |
+| Actual complete application package verifier | PASS |
+| Actual packaged pending input, diagnostic copy, startup/selection/shutdown | 11 passed |
+| Actual packaged input visible before delayed acknowledgement | 19-25 ms; no service queue/message/model call yet |
+| Actual ZIP/manifest consumer and read-only DMG/layout | PASS; no Finder/app opened by the layout check |
+| Fresh clean-source physical SendBox qualification | All eight gates PASS in 44.01 s; owned guests confirmed absent |
+
+Current artifacts are under
+`release/qualification-builds/pending-input-37f674d/`:
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `Moguri-0.31.0-alpha.1-macos-arm64.dmg` | 830090199 | `ec7855598d26f8f3bf0c588b1433adeb28da9a5ded1c24a5ab744d82fcd1caac` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.zip` | 814546579 | `d292c8b8cc0fd37a600a0c810d141625f8f9905400098b7e1755447e877b3c5e` |
+
+The matching app is
+`builds.noindex/0.31.0-alpha.1/Moguri-darwin-arm64/Moguri.app`.
+It is ad-hoc-signed, not notarized, not uploaded or installed automatically.
+The installer is too large for a chat attachment. The complete package uses
+generated fixtures only; no personal inference, authorization or microphone.
+
+Compiled service/desktop bytes changed. Worker, remote bridge, MCP/data
+workers and private terminal-broker bytes were explicitly compared with the
+qualified 89 cut and remained identical. The existing exact guest image
+`sha256:8b3ecbfd342357a9032d98fae70c1e65006fad2b9b24f3304967e0619f9f4ed2`
+was reused, while current host/control-plane accounting and teardown were
+physically rerun. Clean-source receipt:
+`.native/qualification/current-sendbox-qDdp5B/qualification.json`,
+SHA-256 `4ad441fbf96bbe6ea700aeaa57d963592361ab6fa73ffd55cd517fa841311fd3`.
+
+The source desktop startup fixture now deliberately waits for a diagnostic
+phase before releasing recovery. Its complete-startup number includes that
+controlled wait and must not be presented as a directly comparable live
+startup benchmark. The current qualification proves the feedback, diagnostics
+and preserved fences, not the unresolved user's acknowledgement latency.
