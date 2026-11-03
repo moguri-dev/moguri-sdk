@@ -132,3 +132,70 @@ failed quit, unchanged-owner recovery and keyboard-counted multi-selection.
 Protocol 89 changes the bridge payload; old protocol-88 native/package
 receipts must not be relabeled. Exact current package/native evidence and
 remaining physical qualification limits are recorded with delivery artifacts.
+
+## Delivery qualification
+
+The corrected executable cut is `18bd457`, protocol 89,
+Moguri `0.31.0-alpha.1`, pinned Node 26.12.0. All measurements below use
+generated state and secret backends, not the user's installation, database,
+keys, terminals, authorization or microphone.
+
+| Exact check | Result |
+| --- | --- |
+| Typecheck/build and root audit | PASS; zero vulnerabilities |
+| Actual frozen-88 ciphertext migration | PASS; no event/key/grant/receipt byte change; saved draft, held queue and independent artifact recover |
+| Actual frozen-88 authenticated restart into current SDK | PASS in 914 ms; one explicit generated upgrade review, original PTY/PID/output with no input replay, retained unknown model hold and saved input/artifact; no second model call |
+| Independent packed SDK/all four entrypoints | PASS in 118.42 s; declarations, actual runtime/worker/bridge probes and zero consumer vulnerabilities |
+| Complete actual-package verifier | PASS in 60.46 s |
+| Untouched actual packaged Electron | PASS; 13 cases in 24.7 s, one unpackaged-only skip |
+| Packaged finite-policy 67-MB / 61-chat fixture | PASS; first window 344 ms, full startup to enabled chat creation 1,280 ms; acknowledged visible new chats 126-242 ms |
+| Exact current physical SendBox qualification | PASS in 40.57 s; all eight gates, including real service/worker accounting, groups, five native retry/checkpoint cases and verified owned-guest teardown |
+| Production ZIP/manifest consumer | PASS; 814,542,934 bytes in 111.71 s |
+| Read-only actual DMG/layout | PASS; exact signed app bytes, Applications shortcut and native geometry/background; Finder/app were not opened by that check |
+
+Artifacts are frozen under
+`release/qualification-builds/responsive-startup-18bd457/`:
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `Moguri-0.31.0-alpha.1-macos-arm64.dmg` | 830095894 | `71b223d2da5f3f87ccc4094addb3dd634e05d5400242bc11c2b36b1d72960299` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.zip` | 814542934 | `d5c7dd05c65d0dc9de6ea5b80a5ae21ff80cd82f1a05dab80149d7080aa2e332` |
+
+The actual app is
+`builds.noindex/0.31.0-alpha.1/Moguri-darwin-arm64/Moguri.app`.
+Its matching integrity manifest has the same archive stem and
+`.manifest.json` suffix. These are **ad-hoc-signed, not notarized**, not
+published or installed automatically. The image exceeds chat's attachment
+limit and remains a local artifact. Intermediate `f7a6ca0` and earlier
+protocol-88 artifacts remain byte-identical and are not the current repair.
+
+The current guest image is
+`docker.io/library/moguri-worker@sha256:8b3ecbfd342357a9032d98fae70c1e65006fad2b9b24f3304967e0619f9f4ed2`.
+Its new no-cache producer took 82.24 s. The exact 466,206,720-byte OCI archive
+has SHA-512
+`f4fc46170642a52b1f871adf62119f963d5aff0a7e70001132f40738c1f18e7ac9310cfe10aabf406ff5f805059d9331c0a0b0fd72f2d8f1f501ad4d7a960567`.
+Distribution manifest SHA-256 is
+`32ad3ad0dfdb5266cb4e0ad87d3894cb4910c6f6ceef96d71e00c9fc952ae779`;
+bridge SHA-256 is
+`43a9fcd5dd7ff8c7459b6cfc73dd99e1d77caf928fa1520aab8ad1462635e0e2`.
+Worker/MCP/data bytes are unchanged from 88, but the changed bridge/protocol
+and host accounting were physically requalified, not inherited.
+
+Clean-source `18bd457` evidence is retained at
+`.native/qualification/current-sendbox-gNzfJh/qualification.json`,
+SHA-256 `0449217da7c234f27db9163b47f77fb0901924bb7e1395b32fa7b95a18443134`.
+The original intermediate-cut receipt remains separately at
+`current-sendbox-BxhMjh/qualification.json`. No shared images or unrelated
+guests were removed. Generated model calls are not paid inference or live
+provider/quality/billing qualification.
+
+The historical-upgrade harness initially failed its generated wrapper launch;
+isolated module-format and canonical-root bindings were corrected before the
+successful result above. Failed attempts were not counted as passes. Generated
+fixture cleanup used exact private-root/parent/owner identity; no personal
+process or data was modified.
+
+Existing warnings remain: experimental OpenTUI FFI, renderer chunks over
+500 kB, missing optional Apple `.icon` companion while `.icns` exists, and
+generated Sandbox-feed diagnostics. This is not notarization, external-Linux
+release readiness, personal-provider validation or wider milestone acceptance.
