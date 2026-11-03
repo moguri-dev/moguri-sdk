@@ -199,8 +199,58 @@ an ordinary Ctrl+Space tap took the held-release path despite the saved
 `pushToTalk:false` default, cancelling admission before audio was ready.
 Honouring that actual setting fixes the tap; explicit held early release
 still discards late capture rather than recording after the gesture ended.
-The three new hidden session/PR/HTML cases pass, including actual opaque-renderer
-interaction and stale PR head rejection. The five migration cases pass exact
-rollback/reopen and missing/corrupt/premature/downgraded provenance. Full
-suite, packed consumer and changed native payload results must be recorded
-separately; these focused passes are not microphone accuracy or a release claim.
+Hidden session/PR/HTML cases cover actual opaque-renderer interaction, late
+source-read ownership, retained screenshot delivery and stale PR head rejection.
+The five migration cases cover exact rollback/reopen and
+missing/corrupt/premature/downgraded provenance. Historical tests select a
+pre-87 journal encoder before their first write; they never rewrite current
+ciphertext to manufacture an older format. Native TUI checkpoint review waits
+for actual SSH worker cleanup, and preparation failure closes its own fixture
+instead of leaving the complete suite waiting indefinitely.
+
+## Final qualification, 2026-11-03
+
+| Surface | Result | Actual coverage |
+| --- | --- | --- |
+| Locked install, build and type checks | PASS | Pinned Node 26.12.0; speech runtime prepared without model weights |
+| Root and independent packed-consumer audits | PASS | Zero reported vulnerabilities |
+| Complete `npm test` | PASS | 2,163 passed, 29 explicitly skipped, zero failures; 1,963.97 seconds, including actual native TUI and crash/restart cases |
+| Complete `npm run test:e2e` | PASS | 321 passed, four explicitly skipped, zero failures; 9.4 minutes of hidden desktop/generated app, audio and network fixtures |
+| `npm run verify:sdk` | PASS | Independently installed browser-safe/root/React/Node entrypoints, actual worker/CLI and protocol-87 session/tools/retention/restart probe without inference |
+| Actual macOS development package | PASS | Ad-hoc signature, mascot, bundled Node/service/worker/TUI, Ghostty, speech executable and installed session/tools/retention probes; not notarized |
+| Packaged desktop shell aggregate | PASS | 551.78 MiB with one console; 569.72 MiB with four, against the existing 600 MiB shell budget; control-plane/broker and user-program memory reported separately |
+| Fresh no-cache Linux arm64 workload | PASS | Protocol 87, locked production install, zero audit findings, native PTY/cache/payload hashes; image qualification only |
+| Generated pinned loopback SSH | PASS | One worker-originating request, 161.65 ms; not an external SSH host qualification |
+| Generated local-provider transport | PASS | Two requests, 48.20 ms; not model-quality or physical-device qualification |
+| Real SendBox guest/control/containment | BLOCKED | Native executable presence is healthy, but the verified guest/runtime/workload boundary remains unqualified |
+| Personal microphone, real weights, live accounts and external SSH host | NOT RUN | No personal device, authorization, paid inference, automatic weight download or external host was used |
+
+The qualified Linux workload digest is
+`sha256:eaae5fd2d64ddc111ea83fb3999047941be954268ffd9519647b42922407d897`.
+This does not reuse an earlier native receipt or turn image construction into
+SendBox containment. Owned Local Electron/Chromium interaction is not arbitrary
+native OS control; the semantic backend supports the disclosed bounded JS/TS
+corpus, not every language or installed dependency.
+
+The first complete desktop attempt had one timeout in the existing default-model
+profile-override test. That exact case passed alone, then the final complete run
+passed without increasing timeouts or weakening assertions. Earlier historical
+fixture and native TUI cleanup failures remain distinct from the final green
+whole-suite results. Expected OpenTUI experimental FFI, existing Vite chunk-size
+and optional macOS `.icon`-format warnings remain visible; the actual `.icns`
+mascot and ad-hoc signature passed package verification.
+
+Raw qualification logs are retained in the implementation session's `files/`:
+`session-controls-full-local-final.log`,
+`session-controls-full-desktop-final.log`,
+`session-controls-sdk-final-qualified.log`,
+`session-controls-packaged-qualified.log`, and
+`session-controls-remote-qualification.log`.
+
+The latest observed main GitHub run,
+[41405993889](https://github.com/mbianchidev/moguri/actions/runs/41405993889),
+is completed/cancelled at the original base. Both Linux/macOS jobs completed
+install, audit, typecheck and build, then were cancelled during tests; their
+SDK and desktop steps were skipped. The cancellation cause is unknown, not an
+inferred account block or source failure. CI remains main-push-only, with no
+working-branch/PR trigger change or rerun.
