@@ -980,6 +980,11 @@ export class EventStore {
     return { ...event, seq } as StoredEvent;
   }
   events(after = 0): StoredEvent[] { return this.readEvents(after, false); }
+  globalBudgetSequence(): number {
+    const value = Number(this.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE json_extract(data,'$.event_type') IN ('budget.recorded','budget.plan_recorded')").get()?.seq ?? 0);
+    if (!Number.isSafeInteger(value) || value < 0) throw new MoguriError("budget_sequence", "Global accounting sequence is invalid. No cached or free capacity was substituted.", 409);
+    return value;
+  }
   private readEvents(after: number, allProfiles: boolean, legacyArtifactScopes = false): StoredEvent[] {
     const rows = allProfiles ? this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after) :
       this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq").all(this.profileId, after);

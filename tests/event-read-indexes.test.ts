@@ -106,6 +106,15 @@ test("new chat and snapshot acknowledgement do not repeatedly decode unrelated r
     assert.ok(startupMs < 2000, `Generated service startup took ${startupMs.toFixed(1)} ms, above 2000 ms.`);
     assert.ok(timings.every((ms) => ms < 500), `Generated new-chat acknowledgement exceeded 500 ms: ${timings.join(", ")}.`);
     assert.ok(snapshotMs < 200, `Generated snapshot took ${snapshotMs.toFixed(1)} ms, above 200 ms.`);
+    const catalog = await sdk.profiles.list();
+    await sdk.profiles.globalBudget({ basis: "estimate", tokens: 1_000_000_000 }, catalog.catalog.globalBudget.revision, true);
+    const capped: number[] = [];
+    for (let index = 0; index < 3; index++) {
+      const began = performance.now(); await sdk.sessions.create(null, `Generated capped responsive chat ${index}`);
+      capped.push(performance.now() - began);
+    }
+    t.diagnostic(JSON.stringify({ finiteGlobalPolicyNewChatMs: capped }));
+    assert.ok(capped.every((ms) => ms < 500), `Finite-global-policy new-chat acknowledgement exceeded 500 ms: ${capped.join(", ")}.`);
     assert.equal(sdk.sessions.get(fixture.sessionId)?.draft.text, "Generated retained responsive draft.");
     assert.equal(fixture.requests.length, 0);
   } finally { sdk?.disconnect(); await runtime?.close(); await fixture.close(); }

@@ -17,8 +17,8 @@ encrypted payload rows repeatedly. The snapshot's global-budget sequence
 query also scanned JSON for every profile snapshot.
 
 The generated baseline measured service startup at 4,362 ms, SDK new-chat
-acknowledgement at 1,079–1,317 ms, and a snapshot at 253 ms. That identifies
-a real inefficiency; it is not a claim that the user's complete 15–20-second
+acknowledgement at 1,079-1,317 ms, and a snapshot at 253 ms. That identifies
+a real inefficiency; it is not a claim that the user's complete 15-20-second
 delay was reproduced by that smaller fixture alone.
 
 Schema 89 atomically adds `event_read_indexes_schema='1'` and two expression
@@ -36,14 +36,32 @@ terminal-preserving restart review. A failed migration rolls back both indexes,
 the marker and version together; reopening genuine 88 data remains supported.
 Deleting personal state or manually downgrading its schema is not recovery.
 
-After the repair, the same generated service starts in about 366–412 ms,
-new-chat acknowledgements take 5–9 ms and snapshot reads about 1 ms. The
+After indexed reads, the same generated service starts in about 366-412 ms,
+new-chat acknowledgements take 5-9 ms and snapshot reads about 1 ms. The
 stronger desktop fixture retains 61 chats, 5,860 events and 67 MB of encrypted
 history, including historical tool output. Actual click-to-acknowledged-visible
-new chats take 131–145 ms. Its startup window appears in 319 ms while service
+new chats take 131-145 ms. Its startup window appears in 319 ms while service
 recovery is deliberately held. Tests enforce 1,500 ms for that window and
 1,000 ms per new-chat interaction, not merely a fast health endpoint.
 No history is truncated or model/tool effect replayed to meet those bounds.
+
+The additional finite-global-policy case exposed another cost: unchanged
+capacity repeatedly decrypted every profile's retained history, leaving new
+chats at 2,372-2,413 ms even after indexing. Root-owned capacity reuse now keys
+the exact catalog and indexed accounting sequences. It is not a client cache
+or a permission grant. Active profile writers whose visible accounting head
+differs must recompute; speculative transaction results are never published
+into the cache because SQLite may reuse an aborted sequence. The same fixture's
+finite-policy SDK acknowledgement now takes about 5-6 ms. Unknown holds and
+unpriced USD remain unknown/held, never zero or refunded. Default/foreign
+profile rollback, reused sequence/different amount, caller mutation, concurrent
+finite admission and restart/deletion accounting are explicitly covered.
+
+The earlier `f7a6ca0` artifact is a frozen intermediate cut, not final delivery:
+its default-budget paths passed, but the incomplete full sweep was stopped when
+finite-global-policy latency failed. Its native receipt qualifies only that
+original source. The final host/service cut must rerun the complete checks and
+physical accounting qualification even when its guest/bridge bytes are unchanged.
 
 ## Visible startup and truthful lifecycle
 

@@ -5,7 +5,12 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **85** for
+Current source uses protocol **89** for
+[indexed event reads, responsive startup/lifecycle and counted session navigation](architecture/startup-responsiveness.md).
+The atomic read-index migration preserves genuine 88 ciphertext, keys, grants,
+receipts, budget holds and saved input. Its root-owned global capacity reuse
+never caches speculative transactions or treats unknown usage as free.
+It retains protocol **85**
 [owned SSH/native decisions, metadata finishing and model-free scheduled preparation](architecture/owned-model-transports.md).
 It preserves protocol84
 [retained model recovery, scheduled input and evidence-qualified Kupo modes](architecture/recovery-scheduling-kupo.md),
