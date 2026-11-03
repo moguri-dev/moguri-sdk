@@ -49,10 +49,13 @@ export type SessionControlsResponse =
   | { type: "session.wait.preview"; preview: SessionWaitPreview }
   | { type: "sessions.bulk.preview"; preview: BulkSessionPreview };
 
+export const hasVoiceShortcutHistory = (events: readonly EventInput[]): boolean =>
+  events.some((event) => event.event_type === "settings.updated" && event.payload.settings.voice.shortcutMode !== undefined);
+
 export function hasSessionControlsHistory(events: readonly EventInput[]): boolean {
   const tools = new Set(["goto_definition", "find_references", "find_in_array", "order_asc", "order_desc", "find_bigger", "find_smaller",
     "click", "type", "wait", "take_screenshot", "render_html", "playwright", "browser_wait", "browser_screenshot"]);
-  return events.some((event) => {
+  return hasVoiceShortcutHistory(events) || events.some((event) => {
     const call = event.event_type === "tool.requested" ? event.payload.approval.call :
       event.event_type === "tool.started" || event.event_type === "tool.completed" ? event.payload.call : null;
     return Boolean(call && tools.has(call.name)) ||

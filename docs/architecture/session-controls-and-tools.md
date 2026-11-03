@@ -65,6 +65,8 @@ Pinned entries appear first within their original project or Chats scope.
 Unpinned priority is actual open questions/approvals, verified ready/finished,
 errors, then running/queued/idle. Stable stored order breaks ties. Heuristic
 question badges and model-written progress are not ordering authority.
+The user explicitly confirmed on recheck that children remain under their
+parents and priority applies within sibling lists, not a flattened project.
 Moving a row never changes execution scope.
 
 Multiple PRs retain exact associations and selection. URL syntax alone is not
@@ -80,6 +82,18 @@ confirmation, never cleanup, source, policy or execution permission.
 Independent artifacts, worktrees, external PRs and unknown accounting survive.
 
 ## Voice ownership
+
+The requirement recheck preserves the original control contract: the microphone
+button is click-record/click-confirm, while Ctrl+Space is held push-to-talk by
+default. The legacy `voice.pushToTalk:false` field described the old button
+behavior; it is not evidence that the user chose a toggle shortcut.
+An explicit `voice.shortcutMode` stores `hold` or `toggle` independently, with
+`hold` as the fallback when absent. Existing stored values are not rewritten.
+Protocol 88 and transactional `voice_shortcut_schema` version 1 qualify this
+new setting so an older healthy service cannot accept the new client contract.
+Migration/restart tests must preserve original ciphertext and explicit choices,
+reject forged provenance, and prove that the absent setting stays held even
+when the legacy boolean is false. No dependency or license changes are needed.
 
 Enable/disable is explicit. Enable reviews the pinned license/download and
 qualified local runtime. Disable cancels owned capture/download work, closes
@@ -194,11 +208,13 @@ Use actual worker/TUI, hidden desktop/owned generated Playwright apps and an
 independently installed packed SDK. Preserve failed attempts and disclose any
 unavailable transport or physical qualification rather than substituting Local.
 
-The reported factory shortcut failure was reproduced in hidden Electron:
-an ordinary Ctrl+Space tap took the held-release path despite the saved
-`pushToTalk:false` default, cancelling admission before audio was ready.
-Honouring that actual setting fixes the tap; explicit held early release
-still discards late capture rather than recording after the gesture ended.
+The first implementation incorrectly inferred a shortcut toggle preference from
+the legacy `pushToTalk:false` field. The requirement recheck rejected that
+interpretation; the user never changed the original held-shortcut default.
+Input-free preparation, gesture-synchronous audio resume and capture ownership
+remain separate from that correction. Held early release must still discard
+late capture rather than record after the gesture ended; explicitly selected
+toggle mode must survive key release and finish only on its next activation.
 Hidden session/PR/HTML cases cover actual opaque-renderer interaction, late
 source-read ownership, retained screenshot delivery and stale PR head rejection.
 The five migration cases cover exact rollback/reopen and
@@ -208,7 +224,10 @@ ciphertext to manufacture an older format. Native TUI checkpoint review waits
 for actual SSH worker cleanup, and preparation failure closes its own fixture
 instead of leaving the complete suite waiting indefinitely.
 
-## Final qualification, 2026-11-03
+## Protocol-87 qualification before the shortcut recheck, 2026-11-03
+
+These are retained results from before the incorrect shortcut-default
+interpretation was corrected. They do not qualify changed protocol-88 bytes.
 
 | Surface | Result | Actual coverage |
 | --- | --- | --- |
@@ -254,3 +273,38 @@ install, audit, typecheck and build, then were cancelled during tests; their
 SDK and desktop steps were skipped. The cancellation cause is unknown, not an
 inferred account block or source failure. CI remains main-push-only, with no
 working-branch/PR trigger change or rerun.
+
+## Requirement recheck
+
+The recheck found and corrected the default-shortcut gap rather than treating
+earlier passing tests as proof of the user requirement. The regression first
+failed against the old renderer's actual toggle tooltip and the missing typed
+shortcut setting. Corrected source/build checks pass 78 generated service/tool
+cases and 38 hidden desktop cases, including held cold admission with the
+obsolete false button value, explicit toggle and settings UI, complete
+transcripts, actual restart, atomic migration rollback, HTML interaction,
+PR Actions/reviews and real screenshot attachment bytes.
+
+| Requested behavior | Executable path and qualification |
+| --- | --- |
+| Stable IDs and details | Actual service IDs, Insights copy control and headless `/session-id`; hidden details case |
+| ID mentions attach context | Same typed source snapshot/review as session attachments; hidden mention case, no model call or source execution |
+| Queued session dependencies | Original captured task, success-only release, cycle/stale/deleted/failed/stop/retry guards and actual SIGKILL recovery |
+| Session messages | Same-profile reviewed peer grants, original actors and no implicit target task/paid reply |
+| Multiple PRs and badge | Exact distinct associations, count beside PR icon and usable selection; primary cleanup binding unchanged |
+| Session priority | Questions/approvals, ready/finished, errors, running/queued; sibling order preserves nesting as explicitly chosen |
+| Pin/unpin | Project or Chats-local promotion, including attached descendants, without changing original roots |
+| Multi-selection | Same-project homogeneous attach/detach and whole-set archive/delete; scoped confirmation opt-outs, revision/tree and cleanup rechecks |
+| Automations copy | Desktop/TUI describe actions beyond prompts and disclose that only one-time prompts currently run |
+| Kupo effort | Balanced/Savings/Performance in the model effort dropdown, distinct from concrete-model thinking effort and still eligibility-gated |
+| Dictation controls | Mic click-toggle, Ctrl+Space held by default, explicit independent shortcut toggle, main/side ownership and complete draft insertion |
+| Voice preparation/model lifecycle | Input-free preparation; separately consented focused standby; exact managed-model enable/download/disable/delete/re-download, at most one managed model |
+| Extra tools | Actual bounded JS/TS definitions/references and typed stable array find/sort/compare, never regex-labelled semantics |
+| Interactive HTML | Original retained source and a genuinely interactive separate opaque renderer without privileged/network/filesystem access |
+| GitHub PR pane | Exact account/repo/head file patches, runs/jobs/steps/logs, review comments/threads and bounded CI watch |
+| App control and screenshots | Owned Local Browser and Playwright Electron/Chromium input, waits, actual PNG bytes attached to the original response, cancellation/partial cleanup and no input replay |
+
+JS/TS corpus and owned Local Electron/Chromium limits are intentional qualified
+boundaries, not support for arbitrary languages, native OS windows or a personal
+browser. Generated microphone/recognizer tests do not establish physical-device
+accuracy or authorize personal microphone use.

@@ -1191,7 +1191,11 @@ CI/watch/reviews bind the original account/repository/head independently of
 GitHub writes.
 
 Voice enable/disable owns only the single pinned managed model. The factory
-shortcut toggles start/finish; held push-to-talk is explicit. Input-free warm-up
+Ctrl+Space shortcut remains held push-to-talk; the microphone button remains
+click-record/click-confirm. Protocol 88 adds `voice_shortcut_schema` and an
+explicit optional `voice.shortcutMode` independent of the retained obsolete
+button boolean. Absence means held, never inferred toggle; migration preserves
+original values and ciphertext. Input-free warm-up
 is not microphone access, and focused-composer standby has separate visible
 consent and exact teardown. Native HTML uses its own opaque isolated renderer
 without Moguri/Node/filesystem/network access. Genuine screenshot bytes are

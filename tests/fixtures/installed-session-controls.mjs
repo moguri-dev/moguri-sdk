@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the actual independently installed package root.");
 const { createRuntime } = await import(pathToFileURL(join(installed, "dist/sdk/node.mjs")).href);
-const { MoguriSdk, PROTOCOL_VERSION } = await import(pathToFileURL(join(installed, "dist/sdk/index.mjs")).href);
+const { MoguriSdk, PROTOCOL_VERSION, voiceShortcutMode } = await import(pathToFileURL(join(installed, "dist/sdk/index.mjs")).href);
 assert.ok(PROTOCOL_VERSION >= 87);
 for (const path of ["dist/playwright-worker.mjs", "dist/data-worker.mjs", "dist/desktop/html-preload.cjs"]) await access(join(installed, path));
 const directory = await mkdtemp(join(tmpdir(), "moguri-installed-session-controls-"));
@@ -33,6 +33,14 @@ const waitFor = async (read) => {
 };
 try {
   runtime = await createRuntime(options); sdk = await new MoguriSdk(runtime.connection).ready();
+  if (PROTOCOL_VERSION >= 88) {
+    const settings = sdk.settings.get();
+    assert.equal(voiceShortcutMode(settings.values.voice), "hold");
+    assert.equal(settings.values.voice.pushToTalk, false);
+    await sdk.settings.update({ ...settings.values, voice: { ...settings.values.voice, shortcutMode: "toggle" } }, settings.revision);
+    assert.equal(voiceShortcutMode(sdk.settings.get().values.voice), "toggle");
+    assert.equal(sdk.settings.get().values.voice.pushToTalk, false);
+  }
   const projectId = (await sdk.projects.add(project)).id;
   const a = (await sdk.sessions.create(projectId, "Generated installed source")).id;
   const b = (await sdk.sessions.create(projectId, "Generated installed prerequisite")).id;
@@ -76,6 +84,10 @@ try {
   const artifact = (await sdk.artifacts.create(a, { kind: "research-note", name: "Generated independent evidence", text: "Generated independent bytes survive session deletion." })).id;
   await sdk.sessions.bulk((await sdk.sessions.bulkPreview({ action: "archive", sessionIds: [a, b] })).preview, true);
   sdk.disconnect(); await runtime.close(); runtime = await createRuntime(options); sdk = await new MoguriSdk(runtime.connection).ready();
+  if (PROTOCOL_VERSION >= 88) {
+    assert.equal(voiceShortcutMode(sdk.settings.get().values.voice), "toggle");
+    assert.equal(sdk.settings.get().values.voice.pushToTalk, false);
+  }
   assert.equal(sdk.sessions.get(a).wait.status, "released");
   assert.equal((await sdk.attachments.read(a, output.id)).content.html, html);
   await sdk.sessions.bulk((await sdk.sessions.bulkPreview({ action: "delete", sessionIds: [a, b] })).preview, true);
@@ -83,5 +95,5 @@ try {
   assert.equal(sdk.sessions.get(keep).projectId, projectId);
   assert.equal((await sdk.artifacts.read(artifact)).text, "Generated independent bytes survive session deletion.");
   assert.equal(calls, 0);
-  console.log("Installed protocol87 SDK/runtime: exact IDs, peer messages, command-fenced success dependencies, real native TS semantics, typed arrays, retained HTML, restart and whole-set archive/delete with independent artifact survival passed without inference.");
+  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/runtime: exact IDs, peer messages, command-fenced success dependencies, real native TS semantics, typed arrays, retained HTML, explicit shortcut defaults/preferences, restart and whole-set archive/delete with independent artifact survival passed without inference.`);
 } finally { sdk?.disconnect(); await runtime?.close(); await rm(directory, { recursive: true, force: true }); }

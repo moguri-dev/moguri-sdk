@@ -255,8 +255,11 @@ Desktop dictation uses `voice.startCapture(sessionId, id?, { streaming: true })`
 ordered `appendCapture(..., sequence, pcmBytes)`, volatile
 `readCapture(...): { text, revision }`, then `finishCapture(..., finalSequence)`.
 The microphone button toggles record/confirm on separate clicks. The factory
-Ctrl+Space shortcut also toggles; `voice.pushToTalk:true` explicitly selects
-held press/release behavior. Renderer gesture ownership prevents an old
+Ctrl+Space shortcut is held press/release. `voice.shortcutMode:"toggle"` is an
+explicit independent shortcut choice; `"hold"` or an absent mode keeps PTT.
+The obsolete `voice.pushToTalk` button preference is retained unchanged and
+never determines shortcut mode. Protocol 88 migrates existing stores without
+inventing a user choice. Renderer gesture ownership prevents an old
 shortcut release from finishing a newer click-owned capture.
 Finish acknowledges flush intent; await the original job separately for the
 exact completed transcript. Frames are mono 16-kHz PCM16, bounded per frame and

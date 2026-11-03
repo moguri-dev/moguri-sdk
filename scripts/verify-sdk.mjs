@@ -76,6 +76,7 @@ try {
     ${installedProtocol >= 84 ? 'import {type KupoMode,type ScheduledTiming,type ModelFailure,type KupoModelProfileInput,scheduleLocalChoices,RECOVERY_DELAYS_MS} from "moguri";' : ""}
     ${installedProtocol >= 85 ? 'import {type OwnedModelTransport,type DecisionRecord,type WinddownRecord,type SandboxWorkspace} from "moguri";' : ""}
     ${installedProtocol >= 87 ? 'import {type SessionWaitPreview,type BulkSessionPreview,type PlaywrightToolInput,LanguageToolSchema,ArrayOrderSchema} from "moguri";' : ""}
+    ${installedProtocol >= 88 ? 'import {voiceShortcutMode} from "moguri";' : ""}
     ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
     ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
@@ -83,6 +84,13 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 88 ? `
+      const typedVoiceShortcut = async (client:MoguriSdk) => {
+        const settings=client.settings.get();if(!settings)return;
+        const mode:"hold"|"toggle"=voiceShortcutMode(settings.values.voice);
+        await client.settings.update({...settings.values,voice:{...settings.values.voice,shortcutMode:mode}},settings.revision);
+      };void typedVoiceShortcut;
+      ` : ""}
       ${installedProtocol >= 87 ? `
       const typedSessionControls = async (client:MoguriSdk,id:string,wait:SessionWaitPreview,bulk:BulkSessionPreview,app:PlaywrightToolInput) => {
         await client.sessions.waitFor(wait,true);await client.sessions.cancelWait(id);

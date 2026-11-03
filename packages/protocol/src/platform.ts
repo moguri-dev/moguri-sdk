@@ -159,6 +159,7 @@ export const SettingsSchema = object({
     backend: Type.Union([Type.Literal("auto"), Type.Literal("cpu"), Type.Literal("metal")]),
     inputDeviceId: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
     shortcut: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+    shortcutMode: Type.Optional(Type.Union([Type.Literal("hold"), Type.Literal("toggle")])),
     pushToTalk: Type.Optional(Type.Boolean()),
   }),
   shortcuts: Type.Optional(object({
@@ -192,6 +193,7 @@ export const SettingsSchema = object({
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
 });
 export type UserSettings = Static<typeof SettingsSchema>;
+export const voiceShortcutMode = (voice: UserSettings["voice"]): "hold" | "toggle" => voice.shortcutMode ?? "hold";
 export const defaultSettings = (): UserSettings => ({
   appearance: { theme: "dark", palette: "moguri", custom: {} }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true, confirmSessionDetach: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
   permissions: { defaultDecision: "ask", tools: [], commands: [] },
