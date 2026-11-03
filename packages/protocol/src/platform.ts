@@ -31,6 +31,8 @@ import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "
 export * from "./tooling.ts";
 import { CoordinationCommandSchema, CoordinationQuerySchema, type CoordinationResponse, type CoordinationLink, type CoordinationMessage } from "./coordination.ts";
 export * from "./coordination.ts";
+import { SessionControlsCommandSchema, SessionControlsQuerySchema, type SessionControlsResponse } from "./session-controls.ts";
+export * from "./session-controls.ts";
 import { WorkflowCommandSchema } from "./workflows.ts";
 export * from "./workflows.ts";
 import { ScriptReviewCommandSchema, ScriptReviewQuerySchema, type ScriptReviewResponse, type ScriptReviewsSnapshot } from "./script-reviews.ts";
@@ -152,10 +154,12 @@ export const SettingsSchema = object({
   toolPreferences: Type.Optional(ToolPreferencesSchema),
   skillSources: Type.Optional(Type.Array(SkillSourceSchema, { maxItems: 16 })),
   voice: object({
+    enabled: Type.Optional(Type.Boolean()), standby: Type.Optional(Type.Boolean()),
     language: Type.String({ minLength: 1, maxLength: 16 }),
     backend: Type.Union([Type.Literal("auto"), Type.Literal("cpu"), Type.Literal("metal")]),
     inputDeviceId: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
     shortcut: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+    shortcutMode: Type.Optional(Type.Union([Type.Literal("hold"), Type.Literal("toggle")])),
     pushToTalk: Type.Optional(Type.Boolean()),
   }),
   shortcuts: Type.Optional(object({
@@ -170,6 +174,7 @@ export const SettingsSchema = object({
     deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }),
     archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
     confirmArchive: Type.Optional(Type.Boolean()), confirmDelete: Type.Optional(Type.Boolean()),
+    confirmBulkArchive: Type.Optional(Type.Boolean()), confirmBulkDelete: Type.Optional(Type.Boolean()),
     archiveChildren: Type.Optional(Type.Union([Type.Literal("archive"), Type.Literal("detach")])),
     deleteChildren: Type.Optional(Type.Union([Type.Literal("delete"), Type.Literal("detach")])),
   }),
@@ -188,12 +193,13 @@ export const SettingsSchema = object({
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
 });
 export type UserSettings = Static<typeof SettingsSchema>;
+export const voiceShortcutMode = (voice: UserSettings["voice"]): "hold" | "toggle" => voice.shortcutMode ?? "hold";
 export const defaultSettings = (): UserSettings => ({
   appearance: { theme: "dark", palette: "moguri", custom: {} }, interactions: { confirmSessionAttachments: true, confirmTerminalClose: true, confirmSessionDetach: true }, systemPrompt: DEFAULT_SYSTEM_PROMPT, instructions: "", guidance: {},
   permissions: { defaultDecision: "ask", tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [], skillSources: [],
-  voice: { language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
+  voice: { enabled: false, standby: false, language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
   shortcuts: { commands: "Primary+KeyK", terminalCopy: "Primary+Shift+KeyC" },
   lifecycle: { keepAwake: false, tailMinutes: 5 },
   integrations: { sql: { enabled: false, endpoint: "http://127.0.0.1:9147" } },
@@ -216,7 +222,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
     appearance: { ...defaults.appearance, ...settings.appearance },
     interactions: { ...defaults.interactions, ...settings.interactions },
     permissions: { ...defaults.permissions, ...settings.permissions },
-    voice: { ...defaults.voice, ...settings.voice },
+    voice: { ...defaults.voice, ...settings.voice, enabled: settings.voice ? settings.voice.enabled ?? true : defaults.voice.enabled, standby: settings.voice?.standby ?? false },
     retention: { ...defaults.retention, ...settings.retention },
     notifications: { ...defaults.notifications, ...settings.notifications },
     sandboxManagement: { ...defaultSandboxManagement(), ...(settings.sandbox?.qualification ? { version: settings.sandbox.qualification.release } : {}), ...settings.sandboxManagement },
@@ -236,6 +242,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  SessionControlsCommandSchema,
   ScriptReviewCommandSchema,
   QueuedCommandCommandSchema,
   ModelPreferenceCommandSchema,
@@ -283,6 +290,9 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("mcp.call"), sessionId: id, serverId: id, tool: Type.String({ minLength: 1, maxLength: 160 }), arguments: Type.Record(Type.String(), Type.Unknown()), schemaDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("subagent.run"), sessionId: id, prompt: Type.String({ minLength: 1, maxLength: 32768 }) }),
   object({ type: Type.Literal("voice.download"), acceptLicense: Type.Literal(true) }),
+  object({ type: Type.Literal("voice.enable"), expectedRevision: revision, acceptLicense: Type.Literal(true) }),
+  object({ type: Type.Literal("voice.disable"), expectedRevision: revision, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("voice.prepare") }),
   object({ type: Type.Literal("voice.transcribe"), sessionId: id, path }),
   object({ type: Type.Literal("voice.record"), sessionId: id }),
   object({ type: Type.Literal("voice.stop"), jobId: id }),
@@ -300,6 +310,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  SessionControlsQuerySchema,
   object({ type: Type.Literal("routing.modes"), sessionId: id }),
   ScriptReviewQuerySchema,
   QueuedCommandQuerySchema,
@@ -440,6 +451,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
 export interface VoiceStatus {
   runtimeReady: boolean; modelReady: boolean; diagnostic: string | null; modelId: string;
   bytes: number; license: string; languageLocales: { code: string; tier: "ready" | "broad" | "adaptation" }[];
+  prepared?: boolean; enabled?: boolean; managed?: boolean;
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse
@@ -450,6 +462,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | SkillGatewayResponse
   | DashboardResponse
   | CoordinationResponse
+  | SessionControlsResponse
   | ToolingResponse
   | BrowserResponse
   | UpdateResponse

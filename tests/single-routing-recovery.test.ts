@@ -11,7 +11,7 @@ import { profileFixture } from "./fixtures/profiles.ts";
 import { appendLegacyProjectFreeSession, assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema 15 preserves both profiles' ciphertexts, receipts and grants while adding visible automatic Kupo without inference", async () => {
-  const fixture = await profileFixture();
+  const fixture = await profileFixture(undefined, undefined, false, true);
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const { client: beta, profile } = await fixture.create("Generated routing migration Beta");

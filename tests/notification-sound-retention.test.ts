@@ -54,7 +54,7 @@ test("sound grants and choices stay profile-owned even when original PCM bytes m
 });
 
 test("schema-46 notification defaults migrate additively without rewriting existing preferences, ciphertext or capture choices", async () => {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const settings = sdk.settings.get()!;

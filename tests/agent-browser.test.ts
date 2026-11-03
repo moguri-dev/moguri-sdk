@@ -156,11 +156,12 @@ test("browser schemas refuse executable URLs, extra arguments and oversized outp
 test("SDK builtin navigate discovery and exact approved browser dispatch use the shared service without model inference", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   const owner = { sessionId: fixture.sessionId, hostId: "generated-sdk-browser", lease: "ef".repeat(32) };
+  let attached = false;
   try {
     const discovered = await sdk.query({ type: "mcp.tools", sessionId: fixture.sessionId, serverId: "builtin", query: "navigate", offset: 0 });
     const navigate = discovered.tools.find((tool) => tool.name === "browser_navigate"); assert.ok(navigate);
-    assert.equal(BROWSER_MCP_TOOLS.length, 6);
-    await sdk.browser.host.attach(owner); await sdk.browser.host.control(owner, 1, true);
+    assert.equal(BROWSER_MCP_TOOLS.length, 8);
+    await sdk.browser.host.attach(owner); attached = true; await sdk.browser.host.control(owner, 1, true);
     const controlId = (await sdk.browser.state(fixture.sessionId)).browser.controlId!;
     const args = { controlId, url: "https://example.invalid/generated" };
     const job = await sdk.command({ type: "mcp.call", sessionId: fixture.sessionId, serverId: "builtin", tool: navigate.name, arguments: args, schemaDigest: navigate.digest });
@@ -181,7 +182,7 @@ test("SDK builtin navigate discovery and exact approved browser dispatch use the
     assert.equal(JSON.parse(result.text).outcome, "completed");
     await sdk.browser.host.control(owner, 2, false);
     assert.equal((await sdk.browser.state(fixture.sessionId)).browser.controlId, null);
-  } finally { await sdk.browser.host.detach(owner); sdk.disconnect(); await fixture.close(); }
+  } finally { try { if (attached) await sdk.browser.host.detach(owner); } finally { sdk.disconnect(); await fixture.close(); } }
 });
 
 test("actual service restart preserves history but never restores a native browser lease or enabled control", async () => {

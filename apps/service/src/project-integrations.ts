@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stripMarkdownComments } from "../../../packages/protocol/src/markdown.ts";
-import { isRecord, MoguriError, type GitHubConnection, type GithubBoardSource, type LinearConnection, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
+import { isRecord, observedPrReadiness, MoguriError, type GitHubConnection, type GithubBoardSource, type LinearConnection, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
 import { boundedBody, fetchJson } from "./network.ts";
 import { runProgram } from "./program.ts";
 import type { SecretVault } from "./gateway.ts";
@@ -311,7 +311,9 @@ export class ProjectIntegrations {
       typeof result.draft !== "boolean" || typeof result.merged !== "boolean" || result.merged && (result.state !== "closed" || typeof result.merged_at !== "string" || !Number.isFinite(Date.parse(result.merged_at)))) {
       throw new MoguriError("issue_pr_response", "The response did not verify this exact PR's state. No phase was changed.");
     }
-    return { ...current, state: result.merged ? "merged" : result.state === "closed" ? "closed" : "open", draft: result.draft, checkedAt: new Date().toISOString(), diagnostic: null };
+    const readiness = observedPrReadiness(result);
+    return { ...current, state: result.merged ? "merged" : result.state === "closed" ? "closed" : "open", draft: result.draft, checkedAt: new Date().toISOString(), diagnostic: null,
+      ...(readiness !== undefined && isRecord(result.head) && typeof result.head.sha === "string" ? { readyToMerge: readiness, headSha: result.head.sha } : {}) };
   }
   async importLinear(board: IssueBoard, cursor: string | undefined, signal: AbortSignal): Promise<{
     items: { title: string; body: string; linear: NonNullable<LocalIssue["linear"]> }[]; nextCursor: string | null;

@@ -85,6 +85,10 @@ export function projectCandidateOwners(events: readonly StoredEvent[], profileId
       const session = sessions.get(event.session_id);
       if (session && event.payload.changes.prUrl !== undefined) session.prUrl = event.payload.changes.prUrl;
     }
+    if (event.event_type === "session.pr_associated" && event.session_id) {
+      const session = sessions.get(event.session_id);
+      if (session && !session.prUrl) session.prUrl = event.payload.association.scope.url;
+    }
     if (event.event_type === "session.workspace_bound" && event.session_id) {
       const session = sessions.get(event.session_id); if (session) session.workspaceId = event.payload.workspaceId;
     }
@@ -101,7 +105,7 @@ export function projectCandidateOwners(events: readonly StoredEvent[], profileId
         originSessionId: "originSessionId" in record ? record.originSessionId : record.sessionId, pullRequest: null } });
       bind();
     }
-    if (["session.created", "session.organized", "session.workspace_bound", "issue.saved", "workspace.saved", "change_set.saved"].includes(event.event_type)) bind();
+    if (["session.created", "session.organized", "session.pr_associated", "session.workspace_bound", "issue.saved", "workspace.saved", "change_set.saved"].includes(event.event_type)) bind();
     if (event.event_type === "candidate.owner_bound") {
       const owner = event.payload.owner, source = sources.get(owner.id), original = source?.owner;
       if (!Value.Check(CandidateOwnerSchema, owner) || !original || event.artifact_id !== owner.id ||

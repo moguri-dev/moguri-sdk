@@ -115,7 +115,7 @@ test("stopping a Guided question preserves advice provenance but never fabricate
 });
 
 test("schema 14 upgrades both profiles without changing encrypted grants, receipts or legacy question identity", async () => {
-  const fixture = await profileFixture();
+  const fixture = await profileFixture(undefined, undefined, false, true);
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const { client: beta, profile } = await fixture.create("Generated advice migration Beta");

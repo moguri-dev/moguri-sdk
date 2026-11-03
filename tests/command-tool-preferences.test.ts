@@ -75,7 +75,7 @@ test("genuine81 migration atomically adds both82 markers without rewriting retai
 
 test("actual ranked preference history cannot be downgraded and missing current markers cannot be silently minted", async (t) => {
   for (const mode of ["downgrade", "missing"] as const) await t.test(mode, async () => {
-    const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready(), path = f.service.store.path;
+    const f = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(f.service.connection).ready(), path = f.service.store.path;
     try {
       const current = sdk.settings.get()!;
       await sdk.settings.update({ ...current.values, toolPreferences: { order: ["cli", "rest", "mcp-direct", "mcp-gateway"] } }, current.revision);

@@ -25,7 +25,7 @@ test("both retained schema lineages converge and reopen without rewriting grants
     { name: "desktop 46 previously opened by main 52", version: 46, lineage: "desktop", partialMain: true },
   ] as const;
   for (const source of sources) await t.test(source.name, async () => {
-    const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+    const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
     let store: EventStore | undefined, restarted: Awaited<ReturnType<typeof startService>> | undefined, peer: MoguriSdk | undefined;
     try {
       const file = join(fixture.directory, "generated-retained-merge.txt"), text = "Generated original context, never replayed.";

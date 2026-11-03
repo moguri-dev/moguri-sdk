@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   appearanceColors, appearanceErrors, colorContrast, effectiveGuidance, guidanceText, readinessGuidance,
 } from "../packages/protocol/src/preferences.ts";
-import { AppearanceSchema, defaultSettings, normalizeSettings, parse, SettingsSchema } from "../packages/protocol/src/index.ts";
+import { AppearanceSchema, defaultSettings, normalizeSettings, parse, SettingsSchema, voiceShortcutMode } from "../packages/protocol/src/index.ts";
 import { resolveControls } from "../packages/protocol/src/controls.ts";
 import { authorizeTool, validateSettings } from "../apps/service/src/permissions.ts";
 
@@ -22,6 +22,8 @@ test("legacy nested settings normalize without changing explicit retention or en
   assert.equal(legacy.voice.inputDeviceId, "default");
   assert.equal(legacy.voice.shortcut, "Control+Space");
   assert.equal(legacy.voice.pushToTalk, false);
+  assert.equal(legacy.voice.shortcutMode, undefined);
+  assert.equal(voiceShortcutMode(legacy.voice), "hold");
   assert.equal(legacy.retention.afterDays, 91);
   assert.equal(legacy.retention.deleteArchived, true);
   assert.equal(legacy.retention.archiveCompleted, false);
@@ -29,6 +31,16 @@ test("legacy nested settings normalize without changing explicit retention or en
   assert.equal(legacy.retention.deleteChildren, undefined);
   assert.equal(legacy.permissions.defaultDecision, "ask");
   assert.deepEqual(parse(SettingsSchema, legacy), legacy);
+});
+
+test("shortcut-specific dictation choices are typed independently of the retained legacy button preference", () => {
+  for (const shortcutMode of ["hold", "toggle"] as const) {
+    const settings = { ...defaultSettings(), voice: { ...defaultSettings().voice, pushToTalk: false, shortcutMode } };
+    assert.deepEqual(parse(SettingsSchema, settings).voice, settings.voice);
+    assert.deepEqual(normalizeSettings(settings).voice, settings.voice);
+    assert.equal(voiceShortcutMode(settings.voice), shortcutMode);
+  }
+  assert.throws(() => parse(SettingsSchema, { ...defaultSettings(), voice: { ...defaultSettings().voice, shortcutMode: "guessed" } }));
 });
 
 test("every named palette meets measured text, control, focus and selected-state contrast in both modes", () => {

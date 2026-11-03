@@ -7,7 +7,7 @@ import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-stat
 import { winddownApiFixture } from "./fixtures/winddown-api.ts";
 
 test("schema-40 migration preserves exact schema-39 wind-down results, all-role holds, receipts and independent ciphertext through rollback and reopen", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
-  const f = await winddownApiFixture(); let reopened: EventStore | undefined;
+  const f = await winddownApiFixture({ legacySessionControlsJournal: true }); let reopened: EventStore | undefined;
   try {
     const checkpoint = await f.run(), before = retainedCiphertextRows(f.service.store.db), path = f.service.store.path;
     f.sdk.disconnect(); await writeLegacyState(f.service, 39);

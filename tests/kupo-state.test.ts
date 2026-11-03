@@ -8,7 +8,7 @@ import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-stat
 import { routedFixture } from "./fixtures/single-routing.ts";
 
 test("schema 60 upgrades Kupo atomically while preserving ciphertext, receipts and explicit legacy policy", async () => {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let store: EventStore | undefined;
   try {
     const policy = { ...defaultSingleKupoSettings(), classifierModelId: fixture.modelId };

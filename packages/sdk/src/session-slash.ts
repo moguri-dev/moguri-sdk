@@ -1,8 +1,12 @@
 import { ClientError } from "../../client/src/index.ts";
-import { ControlsSchema, IssueInputSchema, isRecord, parse, type CommandClient, type Session, type SettingsSection, type SlashResult } from "../../protocol/src/index.ts";
+import { BulkSessionInputSchema, ControlsSchema, IssueInputSchema, isRecord, parse, type CommandClient, type Session, type SettingsSection, type SlashResult } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 
 export const sessionSlashCommands = [
+  { name: "session-id", description: "Read this actual stable session ID and context mention syntax" },
+  { name: "wait-session", description: "Review a success-only dependency; unheld /stop cancels a live wait and holds its prompts", argument: "review ID|set ID SHA256|cancel WAIT_ID REVISION" },
+  { name: "message-session", description: "Send an advisory to an exact session with an actual reviewed coordination grant", argument: "ID TEXT" },
+  { name: "sessions-bulk", description: "Review and apply one homogeneous same-project selected set", argument: "review JSON|apply SHA256 JSON" },
   { name: "commands", description: "Read original queued-command outcomes without replay", argument: "[read EXECUTION_ID]" },
   { name: "config", description: "Review exact pending configuration proposals", argument: "[list|review ID|apply ID SHA acknowledge-risk|reject ID SHA]" },
   { name: "notifications", description: "Read this profile's notification settings and actual attention" },
@@ -20,7 +24,7 @@ export const sessionSlashCommands = [
   { name: "scripts", description: "Read this session's builtin tool catalogue" },
   { name: "result", description: "Read an exact original retained MCP result", argument: "RESULT_ID" },
   { name: "subagent", description: "Request a separately metered tool-less child within existing policy", argument: "PROMPT" },
-  { name: "dictate", description: "Inspect or control this session's local speech runtime", argument: "status|download accept-license|record|stop|file PATH|insert" },
+  { name: "dictate", description: "Inspect or control this session's local speech runtime", argument: "status|enable accept-license|disable|prepare|record|stop|file PATH|insert" },
   { name: "local-models", description: "Inspect configured endpoints or explicitly refresh discovery", argument: "[refresh]" },
   { name: "model-token", description: "Open masked credential input, never a composer credential", argument: "ENDPOINT_ID" },
   { name: "remote-model-token", description: "Open masked input for a configured SSH model", argument: "ENDPOINT_ID" },
@@ -59,6 +63,27 @@ export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { 
   };
   const ok = (message: string): SlashResult => ({ kind: "ok", message });
   switch (name) {
+    case "session-id":
+      if (argument) throw new ClientError("session_id_input", "Use /session-id without arguments.");
+      return json({ sessionId: session.id, mention: `:${session.id}`, authority: "Reviewed public attachment only; no filesystem, private transcript, execution or permission grant." });
+    case "wait-session": {
+      const [action, id, value, extra] = argument.split(/\s+/);
+      if (action === "review" && id && !value) return json(await sdk.sessions.waitPreview(session.id, id));
+      if (action === "set" && id && value && !extra) return json(await sdk.command({ type: "session.wait", sessionId: session.id, targetSessionId: id, expectedDigest: value, confirm: true }));
+      if (action === "cancel" && id && value && /^\d+$/.test(value) && !extra) return json(await sdk.sessions.cancelWait(session.id, id, Number(value)));
+      throw new ClientError("session_wait_input", "Use /wait-session review ID, set ID SHA256 after exact task review, or cancel WAIT_ID REVISION. While waiting, unheld /stop cancels the dependency and holds prompts; ordinary commands stay queued. Only actual success releases a dependency.");
+    }
+    case "message-session": {
+      const separator = argument.indexOf(" ");
+      if (separator < 1) throw new ClientError("session_message_input", "Use /message-session EXACT_ID TEXT. An ID alone never grants coordination.");
+      return json(await sdk.coordination.message(session.id, argument.slice(0, separator), argument.slice(separator + 1)));
+    }
+    case "sessions-bulk": {
+      if (argument.startsWith("review ")) return json(await sdk.sessions.bulkPreview(parse(BulkSessionInputSchema, JSON.parse(argument.slice(7)))));
+      const applied = argument.match(/^apply ([a-f0-9]{64}) ([\s\S]+)$/);
+      if (applied) return json(await sdk.command({ type: "sessions.bulk", expectedDigest: applied[1]!, input: parse(BulkSessionInputSchema, JSON.parse(applied[2]!)), confirm: true }));
+      throw new ClientError("session_bulk_input", "Use /sessions-bulk review JSON, then apply SHA256 JSON with the exact reviewed input. The service rechecks the whole selected tree.");
+    }
     case "commands":
       if (!argument) return client === "tui" ? view() : json(snapshot.commandExecutions.filter((entry) => entry.sessionId === session.id));
       if (/^read\s+\S+$/.test(argument)) {
@@ -154,14 +179,16 @@ export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { 
     case "subagent": return json(await sdk.subagents.run(session.id, argument));
     case "dictate": {
       if (argument === "status") return json(await sdk.voice.status());
-      if (argument === "download accept-license") return json(await sdk.voice.download(true));
+      if (argument === "enable accept-license" || argument === "download accept-license") return json(await sdk.voice.enable(true));
+      if (argument === "disable") return json(await sdk.voice.disable(true));
+      if (argument === "prepare") return json(await sdk.voice.prepare());
       if (argument === "record") return json(await sdk.voice.record(session.id));
       const job = snapshot.jobs.findLast((job) => job.sessionId === session.id && job.kind === "voice.record" && job.status === "running");
       if (argument === "stop" && job) return json(await sdk.voice.stop(job.id));
       if (argument.startsWith("file ")) return json(await sdk.voice.transcribe(session.id, argument.slice(5)));
       const transcript = snapshot.jobs.findLast((job) => job.sessionId === session.id && job.status === "completed" && job.resultDigest && job.kind.startsWith("voice."));
       if (argument === "insert" && transcript) return json(await sdk.voice.insert(session.id, transcript.id, session.draft.revision));
-      throw new ClientError("dictation_input", "Use /dictate status, download accept-license, record, stop, file PATH or insert. Nothing was recorded or downloaded implicitly.");
+      throw new ClientError("dictation_input", "Use /dictate status, enable accept-license, disable, prepare, record, stop, file PATH or insert. Disable removes only the exact managed model; no external files or other profiles' work are deleted.");
     }
     case "local-models":
       if (argument === "refresh") { await sdk.models.refresh(); return json(sdk.getState().snapshot?.provider); }

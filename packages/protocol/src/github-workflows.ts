@@ -245,6 +245,8 @@ export const GithubBrowseSchema = Type.Union([
   object({ resource: Type.Union([Type.Literal("issues"), Type.Literal("pulls"), Type.Literal("releases")]), ...github, ...page,
     state: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("closed"), Type.Literal("all")])) }),
   object({ resource: Type.Union([Type.Literal("issue"), Type.Literal("pull"), Type.Literal("reviews"), Type.Literal("comments"), Type.Literal("review-comments"), Type.Literal("threads")]), ...github, number, ...page }),
+  object({ resource: Type.Literal("files"), ...github, number, headSha: gitHash, ...page }),
+  object({ resource: Type.Literal("jobs"), ...github, runId: number, headSha: gitHash, ...page }),
   object({ resource: Type.Literal("checks"), ...github, headSha: gitHash, ...page }),
   object({ resource: Type.Literal("runs"), ...github, headSha: Type.Optional(gitHash), ...page }),
   object({ resource: Type.Union([Type.Literal("run"), Type.Literal("logs")]), ...github, runId: number, ...page }),
@@ -271,13 +273,17 @@ export const isGithubQuery = (value: unknown): value is GithubQuery => Value.Che
 const nullableText = (maxLength: number) => Type.Union([Type.String({ maxLength }), Type.Null()]);
 export const GithubItemSchema = object({
   kind: Type.Union([Type.Literal("issue"), Type.Literal("pull"), Type.Literal("review"), Type.Literal("comment"), Type.Literal("check"),
-    Type.Literal("status"), Type.Literal("run"), Type.Literal("release"), Type.Literal("logs")]),
+    Type.Literal("status"), Type.Literal("run"), Type.Literal("release"), Type.Literal("logs"), Type.Literal("file"), Type.Literal("job")]),
   id: count, number: Type.Optional(number), title: Type.String({ maxLength: 2048 }), body: Type.String({ maxLength: 512 * 1024 }),
   state: Type.String({ maxLength: 100 }), url: nullableText(4096), updatedAt: nullableText(100), author: nullableText(128),
   headSha: maybeGit, conclusion: nullableText(100), tag: Type.Optional(Type.String({ maxLength: 1024 })), target: Type.Optional(Type.String({ maxLength: 1024 })),
   draft: Type.Optional(Type.Boolean()), prerelease: Type.Optional(Type.Boolean()), base: Type.Optional(Type.String({ maxLength: 1024 })), head: Type.Optional(Type.String({ maxLength: 1024 })),
   headRepository: Type.Optional(Type.String({ minLength: 3, maxLength: 140 })),
   nodeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  path: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), line: Type.Optional(Type.Integer({ minimum: 1 })),
+  additions: Type.Optional(count), deletions: Type.Optional(count), patch: Type.Optional(nullableText(512 * 1024)),
+  steps: Type.Optional(Type.Array(object({ name: Type.String({ maxLength: 2048 }), status: Type.String({ maxLength: 100 }), conclusion: nullableText(100) }), { maxItems: 1000 })),
+  readyToMerge: Type.Optional(Type.Boolean()), mergeState: Type.Optional(nullableText(100)),
 });
 export type GithubItem = Static<typeof GithubItemSchema>;
 export const GithubOperationResultSchema = object({

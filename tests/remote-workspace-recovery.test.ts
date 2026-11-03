@@ -13,7 +13,7 @@ import { remoteFixture } from "./fixtures/remote-service.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 
 test("schema 16 upgrades workspace reads without rewriting scoped ciphertexts, receipts or retained grants", async () => {
-  const fixture = await profileFixture();
+  const fixture = await profileFixture(undefined, undefined, false, true);
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const { client: beta, profile } = await fixture.create("Generated remote-view migration Beta");

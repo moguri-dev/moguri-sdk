@@ -1,6 +1,7 @@
 import { Type, type Static, type TSchema } from "typebox";
 import type { GitHubConnection, LinearConnection } from "./preferences.ts";
 import { Value } from "typebox/value";
+import { isRecord } from "./core.ts";
 import { KanbanPreferencesSchema } from "./kanban.ts";
 import type { GithubSourceBinding } from "./github-workflows.ts";
 
@@ -55,6 +56,12 @@ export interface PullRequestLink {
   url: string; repo: string; number: number; state: "unknown" | "open" | "closed" | "merged";
   draft?: boolean | null;
   checkedAt: string | null; diagnostic: string | null;
+  readyToMerge?: boolean; headSha?: string;
+}
+export function observedPrReadiness(value: unknown): boolean | undefined {
+  if (!isRecord(value) || typeof value.mergeable !== "boolean" || typeof value.mergeable_state !== "string" || typeof value.draft !== "boolean" ||
+    !isRecord(value.head) || typeof value.head.sha !== "string" || !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(value.head.sha)) return undefined;
+  return value.state === "open" && value.draft === false && value.mergeable === true && value.mergeable_state === "clean";
 }
 export const PullRequestLinkSchema = object({
   url: Type.String({ minLength: 1, maxLength: 2048 }), repo: Type.String({ minLength: 3, maxLength: 200 }),
@@ -63,6 +70,7 @@ export const PullRequestLinkSchema = object({
   draft: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
   checkedAt: Type.Union([Type.String({ maxLength: 40 }), Type.Null()]),
   diagnostic: Type.Union([Type.String({ maxLength: 4000 }), Type.Null()]),
+  readyToMerge: Type.Optional(Type.Boolean()), headSha: Type.Optional(Type.String({ pattern: "^[a-f0-9]{40}(?:[a-f0-9]{24})?$" })),
 });
 export const GithubIssueLinkSchema = object({
   nodeId: Type.String({ pattern: "^[A-Za-z0-9_+/=-]{1,256}$" }), databaseId: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),

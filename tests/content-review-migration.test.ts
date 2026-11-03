@@ -46,7 +46,7 @@ test("actual83 review history cannot be relabeled as82 or manufacture a missing 
       raw.exec("DELETE FROM retention_metadata WHERE id='repository_script_review_schema'");
       if (mode === "downgrade") raw.exec("DELETE FROM retention_metadata WHERE id='work_item_comments_schema'; PRAGMA user_version=82");
       raw.close();
-      assert.throws(() => new EventStore(path, fixture.retentionKey), mode === "downgrade" ? /pre-83 lineage/ : /content\/script review.*marker/);
+      assert.throws(() => new EventStore(path, fixture.retentionKey), mode === "downgrade" ? /Premature.*schema marker|pre-\d+ lineage/ : /content\/script review.*marker/);
       const preserved = new DatabaseSync(path);
       assert.deepEqual(retainedCiphertextRows(preserved), rows); preserved.close();
     } finally { await fixture.close(); }

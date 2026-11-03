@@ -5,7 +5,7 @@ import { routedFixture } from "./single-routing.ts";
 process.once("message", (value: unknown) => {
   void (async () => {
     if (!isRecord(value) || value.phase !== "gate" && value.phase !== "selected") throw new Error("Choose a generated Kupo controller-loss phase.");
-    const fixture = await routedFixture({ configured: false });
+    const fixture = await routedFixture({ configured: false, legacySessionControlsJournal: value.legacySessionControlsJournal === true });
     process.send?.({ stage: "created", directory: fixture.directory });
     await reviewNativeTools(fixture, ["write_file"]);
     fixture.options.respond = (_request, index) => index === 1 ? { text: JSON.stringify({

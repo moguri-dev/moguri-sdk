@@ -17,7 +17,7 @@ function legacyTelemetry(events: EventInput[]): EventInput[] {
 }
 
 test("schema-17 accounting gains only provable category metadata without rewriting charges, prices or ciphertext history", { skip: process.platform !== "darwin" }, async (t) => {
-  const fixture = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)), maxOutputTokens: 128, stream: { chunks: ["Generated ", "legacy ", "report."], delayMs: 25 },
+  const fixture = await setupFixture({ legacySessionControlsJournal: true, workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)), maxOutputTokens: 128, stream: { chunks: ["Generated ", "legacy ", "report."], delayMs: 25 },
     usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42, prompt_tokens_details: { cached_tokens: 10 } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;

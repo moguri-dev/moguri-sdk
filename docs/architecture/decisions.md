@@ -54,6 +54,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D30 | Lazy typed discovery and compact recoverable views reuse the owned worker; deterministic utilities, structured authoring/SQL and root-bound parent/child coordination extend the same SDK/policy/budget authority. | Required evidence becomes unreachable, actual actor/root/cap ownership fails, or representative task-quality evaluation regresses. |
 | D31 | Profile-owned retained-request backoff, one-time scheduled input and evidence-qualified Kupo modes share the existing SDK/worker/ledger; compaction is explicit opt-in and all-role finite holds retain exact owners. | Deadline/order, source/account identity, cancellation/restart, model/effort/context evidence, packed-client or exact native-byte qualification fails. |
 | D32 | Model-free native schedule preparation uses the existing managed capture; bounded decision/metadata-finishing roles remain on the exact SSH/native parent with separate private-role release, all-role holds and terminal no-replay. | Source/policy/draft scope, actual transport/cancellation, atomic failed/late receipts, client/packed SDK or exact native-byte qualification fails. |
+| D34 | Actual session identities/dependencies/bulk controls, explicit voice lifecycle, native JS/TS semantics, isolated HTML and owned Local Playwright outputs reuse the service/SDK/event authority. | Exact task/account/root identity, atomic migration/cleanup, real capture/interaction/output, isolation or packed-consumer qualification fails. |
 
 D28's [task progress contract](task-progress.md) records generated checklist and
 hidden-client qualification. D29's [document contract](document-attachments.md)
@@ -1161,6 +1162,45 @@ Only verification of the exact owned VM's absence establishes the complete
 process boundary; it does not establish successful filesystem rollback,
 permission or prompt-injection resistance. No unsupported macOS fork tracker,
 privileged helper, PID inference or unrelated workload is substituted.
+
+## D34. Session controls and owned interactive tools
+
+**Decision, 2026-11-02.** Follow the
+[session-control and tool contract](session-controls-and-tools.md) from genuine
+merged protocol 86. Reuse the existing store, scoped SDK, worker, context,
+GitHub/browser and native speech primitives. There is no new agent loop,
+language-server framework, general-purpose scheduler or native OS controller.
+
+TypeScript **7.0.2** moves from development-only to the runtime dependency
+closure. Its pinned Apache-2.0 native async semantic API supplies real JS/TS
+definitions/references through a closed, bounded virtual filesystem.
+Playwright-core **1.64.1**, Apache-2.0, supplies bounded newly owned
+Electron/Chromium batches without implicit browser downloads. Its normal
+Local executor is separate from restricted document/data parsers and is not
+SendBox containment. Restricted/read-only and non-Local app launches stay
+blocked. Changed native/worker bytes require fresh qualification, never
+earlier protocol-86 receipts.
+
+Five independent protocol-87 markers commit atomically. Actual wait intents
+fence current-turn and queued-command completions; retries, unknown results,
+source changes and future tasks cannot release them. Navigation/bulk
+attachment grants no new execution authority, and independent artifacts and
+unknown budget capacity survive conversation deletion. Verified multiple PR
+associations never move first-association candidate cleanup provenance.
+CI/watch/reviews bind the original account/repository/head independently of
+GitHub writes.
+
+Voice enable/disable owns only the single pinned managed model. The factory
+Ctrl+Space shortcut remains held push-to-talk; the microphone button remains
+click-record/click-confirm. Protocol 88 adds `voice_shortcut_schema` and an
+explicit optional `voice.shortcutMode` independent of the retained obsolete
+button boolean. Absence means held, never inferred toggle; migration preserves
+original values and ciphertext. Input-free warm-up
+is not microphone access, and focused-composer standby has separate visible
+consent and exact teardown. Native HTML uses its own opaque isolated renderer
+without Moguri/Node/filesystem/network access. Genuine screenshot bytes are
+retained under their original user/model tool actor and delivered in chat,
+not implicitly promoted to model image context.
 
 ## Still open
 

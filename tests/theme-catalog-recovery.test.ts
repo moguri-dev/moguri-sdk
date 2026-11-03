@@ -9,7 +9,7 @@ import { setupFixture } from "./fixture.ts";
 import { removePost77FixtureMarkers, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("the genuine76-to-combined80 theme migration is atomic and preserves ciphertext, receipts, custom choices and hard policy", async () => {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let reopened: EventStore | undefined, service: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     const settings = sdk.settings.get()!;

@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
+import { terminalCommandExecution } from "../../../packages/protocol/src/queued-commands.ts";
 import { MoguriError, type Session, type Snapshot, type StoredEvent, type EventInput, type CommandResult, type PublicMessage, type QueueItem } from "../../../packages/protocol/src/index.ts";
 import type { CoordinationBinding, CoordinationCommand, CoordinationLink, CoordinationMessage, CoordinationMetadata, CoordinationOrigin, CoordinationQuery, CoordinationRead, CoordinationResponse, CoordinationTaskOrigin, SessionContextInput, SessionControlInput } from "../../../packages/protocol/src/coordination.ts";
 import { textFilePage } from "./files.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import type { TaskPlan } from "../../../packages/protocol/src/progress.ts";
+import { sessionWaiting, type SessionWait, type SessionWaitPreview, type SessionControlsCommand } from "../../../packages/protocol/src/session-controls.ts";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const dataText = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e").replaceAll("&", "\\u0026");
@@ -15,6 +17,7 @@ export function coordinatedMessageContext(message: CoordinationMessage, timestam
 }
 interface Host {
   profileId: string; snapshot(): Snapshot; events(): StoredEvent[]; scope(session: Session): string;
+  waitScope?(session: Session): string;
   binding(session: Session): CoordinationBinding;
   plan(sessionId: string): TaskPlan | null;
   commit(events: EventInput[]): void; stop(id: string): void; blocked(session: Session): boolean; wake(): void;
@@ -32,7 +35,7 @@ export class SessionCoordination {
     return session;
   }
   private link(parent: Session, child: Session): CoordinationLink | undefined {
-    return this.host.snapshot().coordinationLinks.find((link) => link.parentId === parent.id && link.childId === child.id);
+    return this.host.snapshot().coordinationLinks.find((link) => !link.kind && link.parentId === parent.id && link.childId === child.id);
   }
   creation(parent: Session, childId: string, origin: CoordinationOrigin): EventInput[] {
     if (parent.controls.env === "Sandbox") return [];
@@ -53,7 +56,7 @@ export class SessionCoordination {
   }
   private check(link: CoordinationLink) {
     const parent = this.session(link.parentId), child = this.session(link.childId);
-    if (!link.enabled || child.createdParentSessionId !== parent.id || parent.projectId !== child.projectId ||
+    if (!link.enabled || (link.kind === "peer" ? link.origin.actor !== "user" : child.createdParentSessionId !== parent.id || parent.projectId !== child.projectId) ||
       this.host.scope(parent) !== link.parentScope || this.host.scope(child) !== link.childScope) {
       throw new MoguriError("coordination_changed", "Coordination ownership, execution root or grant changed. Review the actual roots again; navigation nesting cannot grant access.", 403);
     }
@@ -65,6 +68,11 @@ export class SessionCoordination {
   private authorize(sourceId: string, targetId: string, control = false) {
     const source = this.session(sourceId), target = this.session(targetId), links: CoordinationLink[] = [];
     if (source.id === target.id && !control) return { source, target, links };
+    if (!control) {
+      const peer = this.host.snapshot().coordinationLinks.find((link) => link.kind === "peer" &&
+        (link.parentId === source.id && link.childId === target.id || link.childId === source.id && link.parentId === target.id));
+      if (peer) { this.check(peer); return { source, target, links: [peer] }; }
+    }
     let cursor = target;
     const visited = new Set<string>();
     while (cursor.createdParentSessionId && !visited.has(cursor.id)) {
@@ -103,10 +111,14 @@ export class SessionCoordination {
   query(query: CoordinationQuery): CoordinationResponse {
     if (query.type === "coordination.preview") {
       const parent = this.session(query.sessionId), child = this.session(query.childId);
-      if (child.createdParentSessionId !== parent.id || parent.projectId !== child.projectId) throw new MoguriError("coordination_owner", "Review only the actual original parent/child relationship, not a navigation attachment.", 403);
-      const link = this.link(parent, child) ?? null, parentBinding = this.host.binding(parent), childBinding = this.host.binding(child);
+      if (parent.id === child.id) throw new MoguriError("coordination_owner", "Choose another exact retained session; self-coordination is not a peer grant.", 403);
+      const peer = child.createdParentSessionId !== parent.id;
+      const existing = peer ? this.host.snapshot().coordinationLinks.find((link) => link.kind === "peer" &&
+        (link.parentId === parent.id && link.childId === child.id || link.parentId === child.id && link.childId === parent.id)) : this.link(parent, child);
+      if (existing?.kind === "peer" && existing.parentId !== parent.id) return this.query({ ...query, sessionId: child.id, childId: parent.id });
+      const link = existing ?? null, parentBinding = this.host.binding(parent), childBinding = this.host.binding(child);
       const parentScope = hash(["coordination-binding-v1", parentBinding]), childScope = hash(["coordination-binding-v1", childBinding]);
-      return { type: query.type, link, parentScope, childScope, parentBinding, childBinding,
+      return { type: query.type, link, parentScope, childScope, parentBinding, childBinding, ...(peer ? { kind: "peer" as const } : {}),
         digest: hash([parent.id, child.id, parentScope, childScope, link?.revision ?? -1, this.host.snapshot().policy.revision, this.host.snapshot().settings.permissionRevision]) };
     }
     return { type: query.type, data: this.read(query.sessionId, query.input) };
@@ -164,9 +176,10 @@ export class SessionCoordination {
     if (command.type === "coordination.grant") {
       const preview = this.query({ type: "coordination.preview", sessionId: command.sessionId, childId: command.childId });
       if (preview.type !== "coordination.preview" || preview.digest !== command.expectedDigest) throw new MoguriError("coordination_stale", "The reviewed roots/grant changed. Review the actual relationship again.", 409);
-      const parent = this.session(command.sessionId), child = this.session(command.childId);
+      const parent = this.session(preview.kind === "peer" ? preview.link?.parentId ?? command.sessionId : command.sessionId);
+      const child = this.session(preview.kind === "peer" ? preview.link?.childId ?? command.childId : command.childId);
       const link: CoordinationLink = { parentId: parent.id, childId: child.id, parentScope: preview.parentScope, childScope: preview.childScope,
-        enabled: command.enabled, revision: (preview.link?.revision ?? -1) + 1, origin: { actor: "user" } };
+        enabled: command.enabled, revision: (preview.link?.revision ?? -1) + 1, origin: { actor: "user" }, ...(preview.kind ? { kind: preview.kind } : {}) };
       return finish([{ event_type: "coordination.linked", profile_id: this.host.profileId, project_id: child.projectId, session_id: child.id, payload: { link } }], { revision: link.revision });
     }
     if (command.type === "coordination.message") {
@@ -175,6 +188,88 @@ export class SessionCoordination {
     }
     return this.control(command.sessionId, command.input, { actor: "user" }, finish.intent.id, finish);
   }
+    private waitScope(session: Session): string { return (this.host.waitScope ?? this.host.scope)(session); }
+    waitPreview(sessionId: string, targetSessionId: string): SessionWaitPreview {
+      const source = this.session(sessionId), target = this.session(targetSessionId);
+      if (source.id === target.id || source.turnId || source.status === "archived" || target.status === "archived") {
+        throw new MoguriError("session_wait_owner", "Choose an idle source and another retained unarchived prerequisite session. No active work was paused.", 409);
+      }
+      const pending = target.queue.find((item) => item.delivery !== "steer");
+      const task: SessionWait["task"] | undefined = target.turnId ? { kind: "turn", id: target.turnId } : pending ? { kind: "queue", id: pending.id } : undefined;
+      if (!task) throw new MoguriError("session_wait_task", "The prerequisite has no current turn or queued task to capture. Queue its task first; future work was not guessed.", 409);
+      const visited = new Set([source.id]);
+      for (let cursor: Session | undefined = target; cursor; cursor = sessionWaiting(cursor) ? this.host.snapshot().sessions.find((session) => session.id === cursor!.wait!.targetSessionId) : undefined) {
+        if (visited.has(cursor.id) || visited.size > 1000) throw new MoguriError("session_wait_cycle", "This dependency would create a cycle or exceed the bounded session graph. Nothing was queued.", 409);
+        visited.add(cursor.id);
+      }
+      const sourceScope = this.waitScope(source), targetScope = this.waitScope(target);
+      return { sessionId, targetSessionId, task, sourceScope, targetScope,
+        digest: hash([this.host.profileId, source.id, source.revision, source.wait ?? null, sourceScope, target.id, target.revision, targetScope, task]) };
+    }
+    waitCommand(command: Exclude<SessionControlsCommand, { type: "sessions.bulk" }>, finish: WorkspaceFinish): CommandResult {
+      const source = this.session(command.sessionId);
+      if (command.type === "session.wait.cancel") {
+        const wait = source.wait;
+        if (!wait || wait.id !== command.waitId || wait.revision !== command.expectedRevision || !sessionWaiting(source)) throw new MoguriError("session_wait_stale", "This exact wait changed or already ended. No newer dependency was cancelled.", 409);
+        const result = finish([this.waitEvent({ ...wait, status: "cancelled", revision: wait.revision + 1, updatedAt: new Date().toISOString(),
+          diagnostic: "The user removed this dependency. Held prompts and other admission gates remain unchanged." })], { id: wait.id });
+        this.host.wake(); return result;
+      }
+      const preview = this.waitPreview(command.sessionId, command.targetSessionId);
+      if (preview.digest !== command.expectedDigest || !finish.intent) throw new MoguriError("session_wait_stale", "The reviewed source, prerequisite task or scope changed. Review the exact wait again; no task was resumed.", 409);
+      const now = new Date().toISOString();
+      const wait: SessionWait = { version: 1, id: hash(["session-wait", finish.intent.id]), profileId: this.host.profileId,
+        sessionId: source.id, targetSessionId: preview.targetSessionId, sourceScope: preview.sourceScope, targetScope: preview.targetScope,
+        task: preview.task, revision: 0, actor: "user", status: "waiting", createdAt: now, updatedAt: now, diagnostic: null };
+      const previous = source.wait;
+      return finish([...(previous && sessionWaiting(source) ? [this.waitEvent({ ...previous, status: "cancelled",
+        revision: previous.revision + 1, updatedAt: now, diagnostic: "The user explicitly replaced this exact dependency." })] : []),
+        this.waitEvent(wait)], { id: wait.id, revision: 0 });
+    }
+    private waitEvent(wait: SessionWait): EventInput {
+      const source = this.session(wait.sessionId);
+      return { event_type: "session.wait_recorded", profile_id: this.host.profileId, project_id: source.projectId, session_id: source.id, payload: { wait } };
+    }
+    reconcileWaits(): void {
+      const snapshot = this.host.snapshot(), history = this.host.events(), events: EventInput[] = [];
+      for (const source of snapshot.sessions) {
+        const wait = source.wait;
+        if (!wait || wait.status !== "waiting") continue;
+        const target = snapshot.sessions.find((session) => session.id === wait.targetSessionId);
+        let diagnostic: string | null = null, completed = false;
+        try {
+          const intent = history.find((event) => event.event_type === "session.wait_recorded" && event.session_id === source.id &&
+            event.payload.wait.id === wait.id && event.payload.wait.revision === 0 && event.payload.wait.status === "waiting");
+          if (!intent) diagnostic = "The original wait intent is unavailable. Inspect and explicitly replace it; no old completion was adopted.";
+          else if (!target || target.status === "archived" || source.status === "archived") diagnostic = "The original prerequisite or waiting session was removed/archived. Restore and explicitly review a new dependency.";
+          else if (this.waitScope(source) !== wait.sourceScope || this.waitScope(target) !== wait.targetScope) diagnostic = "The original dependency's execution scope changed. No replacement root or future task was adopted.";
+          else {
+            const start = wait.task.kind === "queue" ? history.find((event) => event.session_id === target.id &&
+              event.event_type === "turn.started" && event.payload.item.id === wait.task.id) : undefined;
+            const turnId = wait.task.kind === "turn" ? wait.task.id : start?.turn_id;
+            const end = turnId ? history.findLast((event) => event.seq > intent.seq && event.session_id === target.id &&
+              event.turn_id === turnId && event.event_type === "turn.finished") : undefined;
+            const command = wait.task.kind === "queue" && !start ? snapshot.commandExecutions.findLast((execution) =>
+              execution.sessionId === target.id && execution.queueItemId === wait.task.id) : undefined;
+            if (end?.event_type === "turn.finished") {
+              completed = end.payload.outcome === "completed";
+              if (!completed) diagnostic = `The captured prerequisite ended ${end.payload.outcome}. This session stays paused; no failed or unknown task was treated as success.`;
+            } else if (command && terminalCommandExecution(command.status)) {
+              const terminal = history.findLast((event) => event.event_type === "slash.command_recorded" &&
+                event.payload.execution.id === command.id && terminalCommandExecution(event.payload.execution.status));
+              completed = command.status === "completed" && Boolean(terminal && terminal.seq > intent.seq);
+              if (!completed) diagnostic = `The captured command prerequisite ended ${command.status} or lost its original completion fence. This session stays paused.`;
+            } else if (!turnId && !command && !target.queue.some((item) => item.id === wait.task.id)) diagnostic = "The captured queued prerequisite was removed without successful completion. Future work cannot replace it.";
+          }
+        } catch (error) {
+          if (!(error instanceof MoguriError)) throw error;
+          diagnostic = "The original dependency scope is unavailable. Inspect and explicitly replace or cancel this wait; no work was resumed.";
+        }
+        if (completed || diagnostic) events.push(this.waitEvent({ ...wait, status: completed ? "released" : "blocked",
+          revision: wait.revision + 1, updatedAt: new Date().toISOString(), diagnostic }));
+      }
+      if (events.length) this.host.commit(events);
+    }
   control(sourceId: string, input: SessionControlInput, origin: CoordinationOrigin, intentId: string, finish: WorkspaceFinish): CommandResult {
     const source = this.session(sourceId);
     if (input.action === "spawn") {

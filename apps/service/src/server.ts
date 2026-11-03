@@ -128,7 +128,8 @@ export async function startService(options: ServiceOptions) {
         return new ControlPlane(view, provider, options.workerPath, {
           ...platform, stateDir, profileHooks,
           cache: { ...platform?.cache, cacheDirectory: platform?.cache?.cacheDirectory ?? join(resourceBase, "dependency-cache") },
-          speech: { ...platform?.speech, modelDirectory: platform?.speech?.modelDirectory ?? (officialSpeech ? join(resourceBase, "speech-models") : undefined) },
+          speech: { ...platform?.speech, modelDirectory: platform?.speech?.modelDirectory ?? (officialSpeech ? join(resourceBase, "speech-models") : undefined),
+            managedModelDirectory: platform?.speech?.modelDirectory === undefined ? true : platform.speech.managedModelDirectory },
         }, () => commandEnvironment.promise);
       },
       changed,
