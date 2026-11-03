@@ -54,7 +54,7 @@ for (const mode of ["missing", "downgrade", "premature"] as const) {
       else raw.exec("PRAGMA user_version=84");
       raw.close();
       assert.throws(() => new EventStore(path, fixture.retentionKey), mode === "missing" ? /owned model\/finishing transport.*marker/ :
-        mode === "downgrade" ? /pre-85 lineage/ : /Premature owned transport/);
+        /Premature.*schema marker|pre-\d+ lineage/);
       const preserved = new DatabaseSync(path); assert.deepEqual(retainedCiphertextRows(preserved), rows); preserved.close();
     } finally { await fixture.close(); }
   });

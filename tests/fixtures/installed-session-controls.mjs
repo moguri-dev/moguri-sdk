@@ -23,7 +23,7 @@ const provider = {
   prepare: async () => { calls++; throw new Error("Inference is forbidden in installed session-control qualification."); },
 };
 const options = { stateDir: join(directory, "state"), retentionKey: Buffer.alloc(32, 0x73), provider,
-  platform: { terminal: { defaultRoot: home } } };
+  platform: { terminal: { defaultRoot: home }, sandbox: { setup: { automatic: false } } } };
 const waitFor = async (read) => {
   const deadline = Date.now() + 10000;
   while (!read()) {

@@ -10,7 +10,7 @@ import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { appendLegacyAutopilot, removePost77FixtureMarkers, retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 for (const version of [73, 74]) test(`the new service preserves schema-${version} ciphertext, events and website grants`, async () => {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let reopened: EventStore | undefined;
   try {
     await sdk.webAllowlist.add("generated.example.invalid", { kind: "session", sessionId: fixture.sessionId });

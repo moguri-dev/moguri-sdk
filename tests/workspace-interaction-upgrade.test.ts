@@ -59,7 +59,7 @@ for (const kind of ["queue", "native-group"] as const) test(`actual combined80 $
 });
 
 for (const version of [76, 77, 78, 79] as const) test(`genuine schema ${version} converges to actual combined80 without changing retained ciphertext or receipts`, async () => {
-  const fixture = await setupFixture();
+  const fixture = await setupFixture({ legacySessionControlsJournal: true });
   try {
     if (version === 78) {
       const sdk = await new MoguriSdk(fixture.service.connection).ready();

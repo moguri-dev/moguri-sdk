@@ -30,6 +30,7 @@ test("protocol-51 migration preserves encrypted settings and manual grants witho
   try {
     const original = new EventStore(path, key);
     const legacy = defaultSettings(); delete legacy.sandboxManagement;
+    delete legacy.voice.enabled; delete legacy.voice.standby;
     legacy.instructions = "Generated retained original instructions.";
     original.commit([{ event_type: "settings.updated", profile_id: "default", payload: { settings: legacy, revision: 4, permissionRevision: 3 } }]);
     const rows = original.db.prepare("SELECT seq,data FROM events ORDER BY seq").all();

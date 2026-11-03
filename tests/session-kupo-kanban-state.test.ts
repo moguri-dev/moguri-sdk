@@ -11,7 +11,7 @@ const workflowMarkers = ["session_github_workflows_schema", "session_github_conv
 
 for (const lineage of ["automatic-61", "workflows-61", "kanban-62"] as const) {
   test(`actual ${lineage} markers converge atomically without rewriting consent, settings, ciphertext or receipts`, async () => {
-    const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready(), path = fixture.service.store.path;
+    const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready(), path = fixture.service.store.path;
     let store: EventStore | undefined;
     try {
       const policy = { ...defaultSingleKupoSettings(), classifierModelId: fixture.modelId };
