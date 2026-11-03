@@ -144,11 +144,13 @@ keys, terminals, authorization or microphone.
 | --- | --- |
 | Typecheck/build and root audit | PASS; zero vulnerabilities |
 | Complete unit/integration suite, default concurrency | PASS; 2,209 passed, 29 skipped, zero failures/cancellations in 1,738.67 s |
+| Complete hidden desktop suite after readiness-test repair | PASS; 327 passed, four skipped, zero failures in 591.44 s |
 | Actual frozen-88 ciphertext migration | PASS; no event/key/grant/receipt byte change; saved draft, held queue and independent artifact recover |
 | Actual frozen-88 authenticated restart into current SDK | PASS in 914 ms; one explicit generated upgrade review, original PTY/PID/output with no input replay, retained unknown model hold and saved input/artifact; no second model call |
 | Independent packed SDK/all four entrypoints | PASS in 118.42 s; declarations, actual runtime/worker/bridge probes and zero consumer vulnerabilities |
 | Complete actual-package verifier | PASS in 60.46 s |
 | Untouched actual packaged Electron | PASS; 13 cases in 24.7 s, one unpackaged-only skip |
+| Additional actual-package clipboard, clone, menu and update-link interactions | PASS; all seven repaired cases in 13.5 s, using the same frozen app |
 | Packaged finite-policy 67-MB / 61-chat fixture | PASS; first window 344 ms, full startup to enabled chat creation 1,280 ms; acknowledged visible new chats 126-242 ms |
 | Exact current physical SendBox qualification | PASS in 40.57 s; all eight gates, including real service/worker accounting, groups, five native retry/checkpoint cases and verified owned-guest teardown |
 | Production ZIP/manifest consumer | PASS; 814,542,934 bytes in 111.71 s |
@@ -205,7 +207,16 @@ native handlers and check the new keyboard order. Early-window responsiveness
 tests still measure opening before backend readiness; no product deadline,
 readiness fence or packaged byte was changed to conceal the failed run.
 All seven corrected cases pass twice in one 23.7-s runner invocation;
-the complete desktop rerun remains separate from that targeted result.
+the complete 331-case desktop rerun and additional actual-package check are
+separate passes, not extrapolated from that targeted result. Subsequent
+commits change documentation and those test assumptions only; executable
+source, immutable app/archive bytes and clean-source native evidence remain
+the qualified `18bd457` cut.
+
+Main-only CI run `41602139750` on base `60197e5` separately exceeded both
+jobs' 30-minute cap during `npm test`. No branch/PR trigger, timeout or rerun
+was changed to conceal it. All complete checks above ran locally; an empty
+working-branch check list is not a claim that the earlier main run passed.
 
 Existing warnings remain: experimental OpenTUI FFI, renderer chunks over
 500 kB, missing optional Apple `.icon` companion while `.icns` exists, and
