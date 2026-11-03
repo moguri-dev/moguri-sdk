@@ -18,16 +18,29 @@ owning project or Chats group detaches. Keyboard menu actions provide the same
 operations. Other profiles and projects cannot be adopted by a drag payload.
 
 Session actions open from right-click, a macOS two-finger click, Context Menu or
-Shift+F10. Ordinary click opens the chat; double-click opens the existing Rename
-dialog for project and project-free sessions. The name is focused and selected
-after the modal opens, and Escape or Cancel leaves it unchanged. Rename uses the
-same SDK command and service-owned metadata event as the context menu, without
-changing drafts, workspaces, controls or permissions. No schema or migration is
-added. Archive is not a chat-header action.
+Shift+F10. Ordinary click opens the chat; double-click, F2 or contextual Rename
+edits its name inline for project and project-free sessions, never in a dialog.
+The name is focused/selected, Enter saves and Escape/Cancel leaves it unchanged.
+Rename uses the same SDK command and service-owned metadata event without an
+unrelated project-configuration read. A changed peer title preserves the local
+proposal as an explicit conflict. Unrelated session-revision drift may retry
+once only for a known revision conflict with the original title unchanged.
+Drafts, workspaces, controls and permissions stay unchanged; saving is not
+reported successful before acknowledgement. No schema/migration is added by
+this inline editor. Archive is not a chat-header action.
 Routine archive/delete confirmation preferences are profile-owned settings, not
 permissions, automatic deletion grants or a way around project/artifact review.
 Failure to save a requested preference prevents the action; failed resource
 cleanup still blocks deletion. Independent artifacts and repository files survive.
+
+The interaction follow-up reran Phase 0 before feature edits on macOS arm64:
+six generated primitives pass (six intercepted provider requests, 32.34-ms
+cancellation; 1,000 SQLite events, 0.061-ms append p95 and 0.541-ms rebuild;
+owned PTY cancellation 150.96 ms with zero survivors; 60 OpenTUI updates at
+17.98-ms mean; hidden Electron 196.33-ms startup/446.20 MiB/8.06-ms scroll;
+2,000-file search/Git at 0.83/6.34 ms). The baseline's unavailable live-provider,
+Rust/Linux, notarization and other historical gates are not promoted to passes.
+This reuses existing MIT React/Electron/SDK libraries and adds no dependency.
 
 ## Reliable session reordering
 

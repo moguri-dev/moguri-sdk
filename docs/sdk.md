@@ -655,6 +655,14 @@ tool, provider metadata lookup or terminal. Thought sources are already-public
 provider reasoning only; request time is not separate thinking time.
 Its optional fourth `toolName` argument narrows the service-owned view and its
 scope key; it is not an execution grant.
+Successful unchanged activity reads also survive a chat/dashboard remount in a
+bounded 16-scope cache owned by the exact SDK client/profile/connection.
+Draft edits and title-only changes do not invalidate retained operations.
+Relevant turn/message/usage/operation changes still refresh, and active pending
+work keeps its existing bounded polling. Earlier loaded pages stay with their
+own scope. Disconnect, connection replacement and session deletion evict their
+cache entries; errors never become empty successful histories. This is a
+transient read cache, not model context, execution authority or durable history.
 
 CLI `activity list [SEQUENCE ID]`, `activity turn TURN_ID`, and
 `activity read ACTIVITY_ID arguments|output [UTF8_OFFSET]` require `--session ID`.
