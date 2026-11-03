@@ -72,7 +72,18 @@ test("an event committed between snapshot delivery and event authentication is r
 test("a late ready frame cannot roll back a newer authenticated HTTP snapshot or its resume cursor", async (t) => {
   const fixture = await setupFixture(), client = new MoguriSdk(fixture.service.connection);
   const snapshot = fixture.service.profiles.snapshot.bind(fixture.service.profiles), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const originalSend = WebSocket.prototype.send, cursors: number[] = [];
+  let channel: WebSocket | undefined;
   let reads = 0;
+  t.mock.method(WebSocket.prototype, "send", function (this: WebSocket, data: Parameters<WebSocket["send"]>[0]) {
+    if (typeof data === "string") {
+      const frame: unknown = JSON.parse(data);
+      if (frame && typeof frame === "object" && "type" in frame && frame.type === "authenticate" && "after" in frame && typeof frame.after === "number") {
+        channel = this; cursors.push(frame.after);
+      }
+    }
+    return originalSend.call(this, data);
+  });
   t.mock.method(fixture.service.profiles, "snapshot", async (...args: Parameters<typeof snapshot>) => {
     const value = await snapshot(...args);
     if (++reads === 2) { entered.resolve(); await release.promise; }
@@ -89,6 +100,11 @@ test("a late ready frame cannot roll back a newer authenticated HTTP snapshot or
     release.resolve(); await waitFor(() => client.getState().status === "connected");
     assert.equal(client.getState().snapshot?.seq, sequence);
     assert.equal(client.sessions.get(fixture.sessionId)?.draft.text, "Generated newer authenticated snapshot.");
+    assert.ok(channel);
+    channel.close(4000, "Generated reconnect cursor inspection.");
+    await waitFor(() => cursors.length === 2 && client.getState().status === "connected");
+    assert.equal(cursors[1], sequence);
+    assert.equal(client.getState().snapshot?.seq, sequence);
     assert.equal(fixture.requests.length, 0);
   } finally { release.resolve(); t.mock.restoreAll(); client.disconnect(); await fixture.close(); }
 });
