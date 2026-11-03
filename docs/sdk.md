@@ -1848,6 +1848,19 @@ retry, force-stop or replacement. Health reporting stopping/unconfirmed lifecycl
 work is not accepted as ready. Lost lifecycle acknowledgement may mean the
 original owner is already stopping; it never authorizes another launch.
 
+After accepting a same-connection, exact-profile HTTP snapshot, the client uses
+its validated sequence as the event resume cursor. It does not replay the full
+retained history from zero before authenticating. Events committed after that
+snapshot, including the HTTP-to-WebSocket gap, remain delivered. A late ready
+frame cannot roll back newer snapshot data or cursor progress. This avoids
+large-history replay/backpressure consuming the unchanged ten-second event
+negotiation window; it does not truncate service history or resend a mutation.
+`ClientState.events` is the bounded live delivery window, not retained history;
+use the authoritative snapshot/activity/source-result APIs for earlier state.
+If negotiation still fails, its error retains the observed event close
+diagnostic (authentication/protocol/profile or replay recovery), not arbitrary
+server-supplied frame contents.
+
 CLI, TUI and desktop builds import the actual `dist/sdk/node.mjs` rather than
 inlining its location-sensitive runtime paths. Packed SDKs retain the same
 explicit `dist/service.mjs`/`dist/runtime.mjs` layout. Private connection/lock

@@ -40,6 +40,8 @@ try {
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 35_000 });
   if (typeof installedNode.restartMoguriService === "function") execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 88) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-negotiation.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 45_000 });
   if (installedProtocol >= 87) execFileSync(process.execPath, [resolve("tests/fixtures/installed-session-controls.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");

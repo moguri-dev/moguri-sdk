@@ -2,7 +2,7 @@ import { GLOBAL_PROFILE_ID, isRecord, PROFILE_ID, PROTOCOL_VERSION, QUERY_TIMEOU
 
 export interface ClientState { snapshot: Snapshot | null; status: "connecting" | "connected" | "disconnected"; error: string | null; events: StoredEvent[] }
 function isSnapshot(value: unknown, profileId: string): value is Snapshot {
-  return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && typeof value.seq === "number" &&
+  return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && typeof value.seq === "number" && Number.isSafeInteger(value.seq) && value.seq >= 0 &&
     value.profileId === profileId &&
     Array.isArray(value.projects) && Array.isArray(value.sessions) && isRecord(value.provider) && isRecord(value.policy) && isRecord(value.sessionTelemetry);
 }
@@ -137,7 +137,8 @@ export class MoguriClient {
       const projects = new Set(snapshot.projects.map((project) => project.id));
       const sessions = new Set(snapshot.sessions.map((session) => session.id));
       if (this.state.snapshot && snapshot.seq < this.state.snapshot.seq) { this.refreshAgain = true; return; }
-      this.update({ snapshot, error: null,
+      this.after = Math.max(this.after, snapshot.seq);
+      this.update({ snapshot, error: this.readySocket === this.socket ? null : this.state.error,
         ...(this.readySocket === this.socket && this.socket?.readyState === WebSocket.OPEN ? { status: "connected" as const } : {}),
         events: this.state.events.filter((event) => (!event.project_id || projects.has(event.project_id)) && (!event.session_id || sessions.has(event.session_id))) });
       this.refreshError = undefined;
@@ -169,10 +170,11 @@ export class MoguriClient {
         if (message.type === "ready") {
           const snapshot = message.snapshot;
           if (!isSnapshot(snapshot, this.profileId)) throw new Error("Unsupported event protocol or profile scope.");
-          this.after = snapshot.seq;
+          this.after = Math.max(this.after, snapshot.seq);
           this.backoff = 300;
           this.readySocket = socket;
-          this.update({ status: "connected", error: null, snapshot });
+          this.update({ status: "connected", error: null,
+            snapshot: this.state.snapshot && this.state.snapshot.seq > snapshot.seq ? this.state.snapshot : snapshot });
         } else if (message.type === "event" && isEvent(message.event)) {
           if (message.event.profile_id !== this.profileId) throw new Error("A foreign-profile event was rejected.");
           this.after = Math.max(this.after, message.event.seq);
@@ -187,10 +189,13 @@ export class MoguriClient {
       }
     };
     socket.onerror = () => { if (!this.disposed && this.socket === socket) this.update({ error: "The event connection failed. Reconnecting; unsent edits are preserved." }); };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (this.disposed || this.socket !== socket) return;
       this.readySocket = undefined;
-      this.update({ status: "disconnected" });
+      this.update({ status: "disconnected", error: event.code === 1008 ?
+        "Moguri's event service rejected authentication or protocol/profile negotiation (close 1008). Verify the matching app/service and selected profile; saved data was preserved." :
+        event.code === 1013 ? "Moguri's event stream requested replay recovery (close 1013). Reconnecting from the last verified snapshot/event cursor; no commands were resent." :
+        this.state.error ?? `The Moguri event connection closed (code ${event.code}). Reconnecting without resending commands; unsent edits are preserved.` });
       this.reconnect = setTimeout(() => {
         void (async () => {
           try {

@@ -1006,9 +1006,13 @@ export class MoguriSdk extends TransportClient {
   };
   async ready(timeoutMs = 10_000): Promise<this> {
     try { await this.connect(); } catch (error) { this.disconnect(); throw error; }
-    const deadline = Date.now() + timeoutMs;
-    while (this.getState().status !== "connected" && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-    if (this.getState().status !== "connected") { this.disconnect(); throw new ClientError("connection_timeout", "Moguri protocol negotiation did not complete."); }
+    const deadline = performance.now() + timeoutMs;
+    while (this.getState().status !== "connected" && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    if (this.getState().status !== "connected") {
+      const diagnostic = this.getState().error;
+      this.disconnect();
+      throw new ClientError("connection_timeout", `Moguri protocol negotiation did not complete.${diagnostic ? ` ${diagnostic}` : " The authenticated event handshake was not ready; inspect the matching service log and selected profile."} No commands were resent or saved state reset.`);
+    }
     return this;
   }
 }
