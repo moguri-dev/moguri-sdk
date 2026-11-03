@@ -143,6 +143,7 @@ keys, terminals, authorization or microphone.
 | Exact check | Result |
 | --- | --- |
 | Typecheck/build and root audit | PASS; zero vulnerabilities |
+| Complete unit/integration suite, default concurrency | PASS; 2,209 passed, 29 skipped, zero failures/cancellations in 1,738.67 s |
 | Actual frozen-88 ciphertext migration | PASS; no event/key/grant/receipt byte change; saved draft, held queue and independent artifact recover |
 | Actual frozen-88 authenticated restart into current SDK | PASS in 914 ms; one explicit generated upgrade review, original PTY/PID/output with no input replay, retained unknown model hold and saved input/artifact; no second model call |
 | Independent packed SDK/all four entrypoints | PASS in 118.42 s; declarations, actual runtime/worker/bridge probes and zero consumer vulnerabilities |
@@ -194,6 +195,17 @@ isolated module-format and canonical-root bindings were corrected before the
 successful result above. Failed attempts were not counted as passes. Generated
 fixture cleanup used exact private-root/parent/owner identity; no personal
 process or data was modified.
+
+The first complete current desktop sweep found seven obsolete test assumptions:
+six installed generated IPC overrides immediately after `firstWindow()`, before
+native registration, and one expected Rename to precede the new Select action.
+The native-hook race was reproduced with its actual duplicate-handler startup
+error. Those tests now wait for the operational workspace before overriding
+native handlers and check the new keyboard order. Early-window responsiveness
+tests still measure opening before backend readiness; no product deadline,
+readiness fence or packaged byte was changed to conceal the failed run.
+All seven corrected cases pass twice in one 23.7-s runner invocation;
+the complete desktop rerun remains separate from that targeted result.
 
 Existing warnings remain: experimental OpenTUI FFI, renderer chunks over
 500 kB, missing optional Apple `.icon` companion while `.icns` exists, and
