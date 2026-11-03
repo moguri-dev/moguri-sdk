@@ -297,7 +297,7 @@ PR Actions/reviews and real screenshot attachment bytes.
 | Multi-selection | Same-project homogeneous attach/detach and whole-set archive/delete; scoped confirmation opt-outs, revision/tree and cleanup rechecks |
 | Automations copy | Desktop/TUI describe actions beyond prompts and disclose that only one-time prompts currently run |
 | Kupo effort | Balanced/Savings/Performance in the model effort dropdown, distinct from concrete-model thinking effort and still eligibility-gated |
-| Dictation controls | Mic click-toggle, Ctrl+Space held by default, explicit independent shortcut toggle, main/side ownership and complete draft insertion |
+| Dictation controls | Desktop mic click-toggle, Ctrl+Space held by default, explicit independent shortcut toggle, main/side ownership and complete draft insertion |
 | Voice preparation/model lifecycle | Input-free preparation; separately consented focused standby; exact managed-model enable/download/disable/delete/re-download, at most one managed model |
 | Extra tools | Actual bounded JS/TS definitions/references and typed stable array find/sort/compare, never regex-labelled semantics |
 | Interactive HTML | Original retained source and a genuinely interactive separate opaque renderer without privileged/network/filesystem access |
@@ -308,3 +308,33 @@ JS/TS corpus and owned Local Electron/Chromium limits are intentional qualified
 boundaries, not support for arbitrary languages, native OS windows or a personal
 browser. Generated microphone/recognizer tests do not establish physical-device
 accuracy or authorize personal microphone use.
+
+### Fresh protocol-88 evidence
+
+| Check | Result |
+| --- | --- |
+| Type checks and build | PASS; no dependency changes or real model download |
+| Requested service/tool behaviors | 78 passed, zero failures, including actual native TUI |
+| Every historical migration/state/recovery selector | 350 passed, one explicit skip, zero failures; 229.05 seconds |
+| Requested hidden desktop behaviors | 38 passed, zero failures; 1.4 minutes |
+| Independent packed SDK | PASS, including typed shortcut mode, actual installed worker and explicit choice surviving restart; audit reports zero vulnerabilities |
+| Actual new macOS package | PASS; signature/icon, bundled runtime and installed protocol-88 default/choice/restart probes, ad-hoc signed only |
+| Packaged desktop shell aggregate | 558.83 MiB with one console; 572.08 MiB with four, under the existing 600 MiB shell budget; other process totals reported separately |
+| Fresh no-cache Linux arm64 workload | PASS; protocol 88, native PTY/cache/exact payload, zero dependency audit findings; 78.58 seconds |
+| Fresh generated SSH/runtime primitives | PASS; one pinned loopback worker request in 145.66 ms, two local-provider requests in 52.06 ms |
+
+The new immutable workload is
+`sha256:d3f6b94c0031cd7e5cd50cfa59536bc325ffb86a71a58a1f10cf796fb3cb4a54`.
+It does not replace the earlier protocol-87 evidence or qualify real SendBox
+guest/control/containment. The isolated development DMG is
+`release/qualification-builds/session-controls-recheck-88/Moguri-0.31.0-alpha.1-macos-arm64.dmg`;
+the earlier package was preserved.
+
+Current logs in the implementation session's `files/` are
+`requirement-recheck-targeted.log`, `requirement-recheck-upgrades.log`,
+`requirement-recheck-desktop.log`, `requirement-recheck-sdk-final.log`,
+`requirement-recheck-package.log` and
+`requirement-recheck-packaged-verified.log`. An initial SDK packaging attempt
+raced a concurrent rebuild of `dist/` and failed on a missing entrypoint;
+the independently installed completed build passed on rerun. No product
+fallback, dependency change or assertion weakening was used.
