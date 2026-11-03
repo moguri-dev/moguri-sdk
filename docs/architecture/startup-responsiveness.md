@@ -222,3 +222,48 @@ Existing warnings remain: experimental OpenTUI FFI, renderer chunks over
 500 kB, missing optional Apple `.icon` companion while `.icns` exists, and
 generated Sandbox-feed diagnostics. This is not notarization, external-Linux
 release readiness, personal-provider validation or wider milestone acceptance.
+
+## Submitted input feedback and remaining latency
+
+The generated `18bd457` timings above did not establish that the user's full
+startup/new-chat/first-send delays were fixed. Subsequent read-only diagnostics
+and generated job-heavy fixtures did not capture/reproduce the slow UI action;
+fast idle health/snapshot responses are not proof of responsive admission.
+The remaining acknowledgement/startup performance issue stays open.
+
+One separate visible gap is established: the composer cleared its original
+draft before acknowledgement, while the transcript could render only the
+later service snapshot. The shared SDK now retains an owner-local
+`DraftState.pendingInput` during that existing request. Desktop main/side
+transcripts and the TUI display its exact captured text and attachments with
+an explicit Sending/Holding/Steer/Interrupt acknowledgement label. It has no
+canonical message ID and never enters history, model context, billing,
+permissions or question answers. Newer typing remains separate. Settlement
+clears only that transient row; rejected/unknown outcomes retain existing
+draft/conflict and no-replay behaviour.
+
+No dependency, stack, service API, durable event, schema marker or migration
+is added by this feedback/diagnostic change. Existing React/OpenTUI and SDK
+draft mechanisms are reused. It does not shorten or conceal an unmeasured
+backend acknowledgement.
+
+Native startup now exposes a read-only, main-renderer-only phase snapshot
+before the native-ready fence. The opening screen shows the actual waiting
+phase and elapsed time without enabling any early mutation. Completed phase
+durations remain available for the user's diagnostic copy. The native-ready,
+shutdown, owner/profile and cancellation fences are unchanged.
+
+Each immutable SDK client also retains at most 50 payload-free request timing
+observations. The getter returns clones and never emits a state-change loop.
+Only fixed operation categories, connection generation, status, completion
+and monotonic transport durations are collected; no source text, identifiers,
+paths, endpoints, credentials or provider/model data are retained. Desktop
+Insights can copy these alongside startup phases; TUI `/trace` exposes its
+client timings. They are not server CPU, model latency or permission evidence.
+
+Generated tests hold the original send before effects, require immediate
+visible feedback while the service still has no message/queue/model call,
+then verify actual acknowledgement or exact refusal recovery. Shared tests
+cover newer typing, held delivery and unknown acknowledgements without replay;
+native TUI and hidden desktop cover the same transient state. Diagnostic tests
+cover bounds, caller mutation, failed status and payload/credential exclusion.

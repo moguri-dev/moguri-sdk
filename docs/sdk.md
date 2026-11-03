@@ -2015,6 +2015,24 @@ delayed context capture; foreign draft edits still require explicit conflict
 resolution. Submission, context capture and clipboard success are not inferred
 from matching text. A lost acknowledgement never triggers a paid retry.
 
+Ordinary `DraftEditor.send` exposes its captured local input through
+`getState().pendingInput` while the composer is cleared and the original
+request is awaiting acknowledgement. Desktop and TUI label it as Sending,
+Holding, Steer or Interrupt, never as a committed message or model start.
+It is not a durable event, model context, receipt or permission. Newer edits
+remain independent; refusal or unknown acknowledgement restores the existing
+draft/conflict recovery without automatically resending. Generic
+`submit(intake)` does not turn a question answer or slash action into a
+provisional ordinary message.
+
+`sdk.getRequestTimings()` returns copies of the last 50 completed SDK request
+observations: allowlisted operation, connection generation, HTTP status,
+headers/body/total milliseconds and whether delivery completed. These are
+client transport observations, not server CPU, inference, billing or readiness
+proof. They retain no input, identifier, path, endpoint, credential, model name
+or request/response payload and are not persisted. Desktop Insights and TUI
+`/trace` expose the same diagnostics without issuing new model requests.
+
 `commands.attach(client, handlers, {canApply?, onError?})` returns
 `{clientId, wake, dispose}`. Handlers receive the original SDK/session, execution,
 input/result, private claim and AbortSignal. They return an explicit completed,

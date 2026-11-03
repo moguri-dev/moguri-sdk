@@ -26,9 +26,9 @@ export * from "./slash.ts";
 export * from "./slash-catalog.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
-export { DraftEditor } from "../../client/src/draft.ts";
-export type { DraftDictation } from "../../client/src/draft.ts";
-export type { ClientState } from "../../client/src/index.ts";
+export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";
+export type { DraftDictation, DraftPendingInput } from "../../client/src/draft.ts";
+export type { ClientState, ClientRequestTiming } from "../../client/src/index.ts";
 export const sessionTitle = (session: Session, limit = 64, fallback = "New session"): string =>
   session.title !== "New session" ? session.title : session.messages.find((message) => message.role === "user")?.text.split("\n")[0]?.slice(0, limit) || fallback;
 export const attachmentStatus = (attachment: Attachment): string => attachment.kind !== "document" ? attachment.kind :
