@@ -1828,21 +1828,44 @@ automatic downgrade/restart. Without a callback, callers receive the actionable
 mismatch and may choose an explicit lifecycle operation themselves.
 `autoStart: false` stays strict and never invokes upgrade/launch effects.
 
+`restartMoguriService({stateDir, expectedConnection?, runtime?, servicePath?})`
+performs an explicit service-wide terminal-preserving restart and returns the
+new authenticated ready `Connection`. It captures one root for the whole
+operation and verifies the selected service entrypoint/executable **before**
+requesting shutdown. Missing/incomplete installations cannot first interrupt a
+healthy service. Omit runtime/path overrides to use this SDK's actual installed
+layout and current Node executable; no development checkout, different app or
+ambient Node is substituted. Ordinary `stopMoguriService` remains separate and
+does not launch a replacement.
+
 Cold auto-start waits up to 60 seconds for matching authenticated health rather
 than timing out after ten seconds during encrypted-history recovery. A process
 that exits without another retained writer reports its exit code/signal and
 exact private log path promptly. Competing launch clients may still connect only
 to the verified owner; a writer-lock file alone is not authentication. A deadline
 leaves the original initializing owner and all state intact, with no automatic
-retry, force-stop or replacement.
+retry, force-stop or replacement. Health reporting stopping/unconfirmed lifecycle
+work is not accepted as ready. Lost lifecycle acknowledgement may mean the
+original owner is already stopping; it never authorizes another launch.
+
+CLI, TUI and desktop builds import the actual `dist/sdk/node.mjs` rather than
+inlining its location-sensitive runtime paths. Packed SDKs retain the same
+explicit `dist/service.mjs`/`dist/runtime.mjs` layout. Private connection/lock
+reads are bounded and inode-checked through no-follow handles. Stale-lock
+reclamation is serialized by a private `service.lock.recovery` claim; a retained
+unconfirmed claim is not deleted or replayed automatically.
 
 Native desktop exit calls `stopMoguriService(capturedStateDir,
 {expectedConnection: capturedConnection})`, not a freshly inferred default root.
 The private registry fingerprint and authenticated PID/protocol must still match
 that captured owner before sending the existing ordinary-stop lifecycle request.
-A missing registry is considered already stopped only with no writer lock and a
-refused captured endpoint. A rotated/new owner is never stopped implicitly.
-Window close waits for this acknowledgement, while unsaved-edit cancellation
+A missing registry is considered already stopped only with no writer lock or
+recovery claim and a refused captured endpoint. Without a captured owner,
+stopping a never-started/already-stopped root is idempotent only when all three
+metadata paths are absent. A missing connection with a retained lock fails
+explicitly; it is not permission to signal a PID, delete state or start another
+writer. A rotated/new owner is never stopped implicitly.
+Window close waits for completed shutdown, not merely request acceptance, while unsaved-edit cancellation
 does not begin shutdown. Explicit terminal-preserving restart remains separate.
 
 `application.storage.status()` and `application.storage.preview(path)` expose the

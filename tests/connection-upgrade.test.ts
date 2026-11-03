@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -131,6 +131,8 @@ test("an unreachable protocol-35 connection and dead writer lock do not block a 
 test("an approved authenticated old-service restart starts the actual new runtime without deleting retained drafts or independent grants", async () => {
   const fixture = await setupFixture(), directory = join(fixture.directory, "state"), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let current: MoguriSdk | undefined, successor: Awaited<ReturnType<typeof ensureConnection>> | undefined, restarts = 0;
+  const closed = Promise.withResolvers<void>();
+  void closed.promise.catch((error: unknown) => console.error("Generated old-service cleanup failed:", error instanceof Error ? error.message : "inspect generated registry/lock"));
   const server = createServer((request, response) => {
     assert.equal(request.headers.authorization, `Bearer ${fixture.service.connection.token}`);
     if (request.url === "/v1/health") { response.end(JSON.stringify({ pid: process.pid, protocolVersion: PROTOCOL_VERSION - 1 })); return; }
@@ -138,7 +140,13 @@ test("an approved authenticated old-service restart starts the actual new runtim
     void (async () => {
       let body = ""; for await (const chunk of request) body += String(chunk);
       assert.deepEqual(JSON.parse(body), { action: "restart" }); restarts++;
-      response.once("finish", () => { void fixture.service.close({ preserveTerminals: true }); });
+      response.once("finish", () => {
+        void (async () => {
+          await unlink(join(directory, "connection.json")); await unlink(join(directory, "service.lock"));
+          server.closeAllConnections();
+          await new Promise<void>((resolve) => server.close(() => resolve()));
+        })().then(() => closed.resolve(), closed.reject);
+      });
       response.end(JSON.stringify({ accepted: true, pid: process.pid }));
     })().catch((error: unknown) => { response.writeHead(500).end(error instanceof Error ? error.message : "Generated lifecycle failure"); });
   });
@@ -148,7 +156,8 @@ test("an approved authenticated old-service restart starts the actual new runtim
     await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "Generated retained upgrade draft.", attachments: [] });
     const sound = await sdk.notifications.importSound("Generated upgrade sound", defaultNotificationWav("completed"));
     const keyId = fixture.service.store.db.prepare("SELECT value FROM retention_metadata WHERE id='key_id'").get()?.value;
-    sdk.disconnect();
+    sdk.disconnect(); await fixture.service.close({ preserveTerminals: true });
+    await writeFile(join(directory, "service.lock"), JSON.stringify({ pid: process.pid }), { mode: 0o600 });
     await writeFile(join(directory, "connection.json"), JSON.stringify({ ...fixture.service.connection, protocolVersion: PROTOCOL_VERSION - 1,
       baseUrl: `http://127.0.0.1:${address.port}`, wsUrl: `ws://127.0.0.1:${address.port}/v1/events` }), { mode: 0o600 });
     successor = await ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts"), confirmUpgrade: async () => true });
@@ -158,6 +167,7 @@ test("an approved authenticated old-service restart starts the actual new runtim
     assert.equal((await current.notifications.sound(sound.id!)).sound.name, "Generated upgrade sound");
     assert.equal(JSON.parse(await readFile(join(directory, "connection.json"), "utf8")).pid, successor.pid);
     assert.ok(keyId); assert.equal(fixture.requests.length, 0);
+    await closed.promise;
   } finally {
     sdk.disconnect(); current?.disconnect();
     if (successor) await stopMoguriService(directory);

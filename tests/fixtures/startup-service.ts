@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { startService } from "../../apps/service/src/server.ts";
 
 const stateDir = process.env.MOGURI_STATE_DIR;
@@ -29,4 +29,5 @@ const values = new Map<string, string>(), vault = {
   remove: async (id: string) => { values.delete(id); },
 };
 const service = await startService({ stateDir, provider, retentionKey: Buffer.alloc(32, 0x67), platform: { vault, terminal: { vault, defaultRoot: join(stateDir, "console") } } });
+await appendFile(join(stateDir, "generated-startup-owners.jsonl"), JSON.stringify({ pid: service.connection.pid }) + "\n", { mode: 0o600 });
 process.once("SIGTERM", () => { void service.close().catch((error: unknown) => { console.error(error); process.exitCode = 1; }); });

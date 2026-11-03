@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
-import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, realpath, rename } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { Type } from "typebox";
@@ -19,6 +19,8 @@ import { runtimeBuildVersion, type UpdateOptions } from "./updates.ts";
 import { pinnedInstalledApplication } from "./bundle-tree.ts";
 import type { CommandEnvironment, CommandOwner } from "./queued-commands.ts";
 import type { CommandEnvelope, CommandResult, PlatformQuery, PlatformResponse } from "../../../packages/protocol/src/index.ts";
+import { assertOwnedServiceFile, readPrivateServiceFile, readServiceLock, removeOwnedServiceFile, type PrivateServiceFile } from "../../../packages/client/src/service-files.ts";
+import { processMayExist } from "../../../packages/client/src/state-location.ts";
 
 const authenticateSchema = Type.Object({
   type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -34,16 +36,37 @@ function tokenMatches(value: string | undefined, expected: string): boolean {
 async function claimLock(path: string): Promise<Awaited<ReturnType<typeof open>>> {
   try { return await open(path, "wx", 0o600); } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
-    const old: unknown = JSON.parse(await readFile(path, "utf8"));
-    if (typeof old !== "object" || old === null || !("pid" in old) || typeof old.pid !== "number" || !Number.isSafeInteger(old.pid) || old.pid < 1) {
-      throw new Error("The service lock is invalid. Preserve your state and inspect service.lock before restarting.");
-    }
-    try { process.kill(old.pid, 0); } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ESRCH") {
-        await unlink(path);
-        return open(path, "wx", 0o600);
+    const old = await readServiceLock(path);
+    if (!old) return open(path, "wx", 0o600);
+    if (old.pid !== null && !processMayExist(old.pid)) {
+      const recoveryPath = `${path}.recovery`;
+      let recovery;
+      try { recovery = await open(recoveryPath, "wx", 0o600); }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+        throw new Error("Another or interrupted service-lock recovery remains. Inspect service.lock.recovery and the original log; no lock was removed or second writer started.", { cause: error });
       }
-      throw error;
+      let nextLock: Awaited<ReturnType<typeof open>> | undefined;
+      let ownedRecovery;
+      try {
+        await recovery.writeFile(JSON.stringify({ pid: process.pid, token: randomBytes(16).toString("hex") }));
+        await recovery.sync();
+        ownedRecovery = await readPrivateServiceFile(recoveryPath);
+        await assertOwnedServiceFile(path, old);
+        if (processMayExist(old.pid)) throw new Error("The original writer PID is no longer absent. No lock was removed and no owner was inferred.");
+        await removeOwnedServiceFile(path, old);
+        nextLock = await open(path, "wx", 0o600);
+      } finally {
+        try {
+          await recovery.close();
+          if (!ownedRecovery) throw new Error("The private service-lock recovery claim could not be published. Its exact file was retained for inspection.");
+          await removeOwnedServiceFile(recoveryPath, ownedRecovery);
+        } catch (error) {
+          await nextLock?.close();
+          throw new Error("Service-lock recovery cleanup is unconfirmed. Its original metadata was retained; no service became ready.", { cause: error });
+        }
+      }
+      return nextLock;
     }
     throw new Error("Another Moguri service owns this state directory. Connect to it instead.");
   }
@@ -68,11 +91,15 @@ export async function startService(options: ServiceOptions) {
   const lockPath = join(options.stateDir, "service.lock");
   const lock = await claimLock(lockPath);
   await lock.writeFile(JSON.stringify({ pid: process.pid }));
+  const ownedLock = await readPrivateServiceFile(lockPath);
   let store: EventStore | undefined;
   let controller: ControlPlane | undefined;
   let profiles: ProfileRuntime | undefined;
   let application: ApplicationRuntime | undefined;
   let releaseIdentity: (() => Promise<void>) | undefined;
+  let closeEndpoints: (() => Promise<void>) | undefined;
+  let publishedConnection: PrivateServiceFile | undefined;
+  let pendingConnectionFile: { path: string; original: PrivateServiceFile } | undefined;
   const connectionPath = join(options.stateDir, "connection.json");
   const commandEnvironment = Promise.withResolvers<CommandEnvironment>();
   void commandEnvironment.promise.catch(() => console.error("The original queued-command service environment could not initialize."));
@@ -246,7 +273,7 @@ export async function startService(options: ServiceOptions) {
         }
         if (request.url === "/v1/lifecycle") {
           const requested = parse(Type.Object({ action: Type.Union([Type.Literal("stop"), Type.Literal("restart")]) }, { additionalProperties: false }), body);
-          if (lifecycle?.status === "stopping" && lifecycle.action !== requested.action) throw new MoguriError("lifecycle_conflict", "A different explicit lifecycle operation is already stopping this controller. No opposite terminal action was accepted.", 409);
+          if (lifecycle && lifecycle.action !== requested.action) throw new MoguriError("lifecycle_conflict", "A different explicit lifecycle operation is stopping or has unconfirmed cleanup. Retry that original action; no opposite terminal action was accepted.", 409);
           lifecycle = { action: requested.action, status: "stopping", diagnostic: null };
           response.once("finish", () => {
             void closeRuntime({ preserveTerminals: requested.action === "restart" }).catch((error: unknown) => {
@@ -321,6 +348,22 @@ export async function startService(options: ServiceOptions) {
       });
     });
     const websockets = new WebSocketServer({ noServer: true, maxPayload: 4096 });
+    let socketsClosed = false, serverClosed = false;
+    const closeServer = async () => {
+      if (!socketsClosed) {
+        for (const socket of websockets.clients) socket.terminate();
+        await new Promise<void>((resolve) => websockets.close(() => resolve()));
+        socketsClosed = true;
+      }
+      if (!serverClosed) {
+        if (server.listening) await new Promise<void>((resolve, reject) => {
+          server.close((error) => error ? reject(error) : resolve());
+          server.closeAllConnections();
+        });
+        serverClosed = true;
+      }
+    };
+    closeEndpoints = closeServer;
     server.on("upgrade", (request, socket, head) => {
       if (!acceptable(request) || request.url !== "/v1/events") { socket.destroy(); return; }
       websockets.handleUpgrade(request, socket, head, (ws) => websockets.emit("connection", ws));
@@ -353,28 +396,30 @@ export async function startService(options: ServiceOptions) {
     if (!address || typeof address === "string") throw new Error("Loopback binding failed.");
     expectedHost = `127.0.0.1:${address.port}`;
     const connection: Connection = { protocolVersion: PROTOCOL_VERSION, baseUrl: `http://${expectedHost}`, wsUrl: `ws://${expectedHost}/v1/events`, token, pid: process.pid, storeId: digest(retention.id) };
-    commandEnvironment.resolve({ connection, command: executeCommand, query: (profileId, query, owner, signal) => executeQuery(profileId, query, signal, owner) });
     const pendingConnection = join(options.stateDir, `connection-${process.pid}.tmp`);
     await writePrivate(pendingConnection, JSON.stringify(connection));
-    await rename(pendingConnection, connectionPath);
+    const ownedConnection = await readPrivateServiceFile(pendingConnection);
+    pendingConnectionFile = { path: pendingConnection, original: ownedConnection };
     let closeTask: Promise<void> | undefined;
+    let lockClosed = false;
     closeRuntime = (options: RuntimeCloseOptions = {}, preserveInstaller = false) => {
-      if (!closeTask) lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "stopping", diagnostic: null };
+      if (closeTask) return closeTask;
+      const action = options.preserveTerminals ? "restart" : "stop";
+      if (lifecycle && lifecycle.action !== action) return Promise.reject(new MoguriError("lifecycle_conflict", "Original lifecycle cleanup is unconfirmed. Retry the same action; terminal preservation cannot change after cleanup started.", 409));
+      lifecycle = { action, status: "stopping", diagnostic: null };
       closeTask ??= (async () => {
+        await assertOwnedServiceFile(lockPath, ownedLock);
+        await assertOwnedServiceFile(connectionPath, ownedConnection, true);
         const nativeClosing = rootApplication.close(preserveInstaller), ownersClosing = rootProfiles.close(options);
         await Promise.all([nativeClosing, ownersClosing]);
-        for (const socket of websockets.clients) socket.terminate();
-        await new Promise<void>((resolve) => websockets.close(() => resolve()));
-        await new Promise<void>((resolve, reject) => {
-          server.close((error) => error ? reject(error) : resolve());
-          server.closeAllConnections();
-        });
-        store!.close();
-        await unlink(connectionPath);
-        await lock.close();
-        await unlink(lockPath);
+        await closeServer();
+        if (store!.db.isOpen) store!.close();
         await releaseIdentity?.();
         releaseIdentity = undefined;
+        await assertOwnedServiceFile(lockPath, ownedLock);
+        await removeOwnedServiceFile(connectionPath, ownedConnection, true);
+        if (!lockClosed) { await lock.close(); lockClosed = true; }
+        await removeOwnedServiceFile(lockPath, ownedLock);
       })().catch((error: unknown) => {
         lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "unconfirmed",
           diagnostic: "Shutdown did not complete. The registry and writer lock remain; restore the explicit terminal backend or inspect its processes, then retry lifecycle cleanup." };
@@ -382,18 +427,29 @@ export async function startService(options: ServiceOptions) {
       });
       return closeTask;
     };
+    await rename(pendingConnection, connectionPath);
+    publishedConnection = ownedConnection; pendingConnectionFile = undefined;
+    await assertOwnedServiceFile(connectionPath, ownedConnection);
+    commandEnvironment.resolve({ connection, command: executeCommand, query: (profileId, query, owner, signal) => executeQuery(profileId, query, signal, owner) });
     return {
       connection, controller: control, store, profiles: rootProfiles, application: rootApplication,
       close: closeRuntime,
     };
   } catch (error) {
     commandEnvironment.reject(error);
-    const nativeClosing = application?.close(), ownersClosing = profiles ? profiles.close() : controller?.close();
-    await Promise.all([nativeClosing, ownersClosing]);
-    store?.close();
-    await lock.close();
-    await unlink(lockPath);
-    await releaseIdentity?.();
+    try {
+      const nativeClosing = application?.close(), ownersClosing = profiles ? profiles.close({ preserveTerminals: true }) : controller?.close({ preserveTerminals: true });
+      await Promise.all([nativeClosing, ownersClosing]);
+      await closeEndpoints?.();
+      if (store?.db.isOpen) store.close();
+      await releaseIdentity?.();
+      if (publishedConnection) await removeOwnedServiceFile(connectionPath, publishedConnection, true);
+      if (pendingConnectionFile) await removeOwnedServiceFile(pendingConnectionFile.path, pendingConnectionFile.original);
+      await lock.close();
+      await removeOwnedServiceFile(lockPath, ownedLock);
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], `Moguri startup failed (${error instanceof Error ? error.message : "unknown startup error"}) and original cleanup is unconfirmed. Preserve the registry/lock and inspect the service log; no replacement was authorized.`);
+    }
     throw error;
   }
 }

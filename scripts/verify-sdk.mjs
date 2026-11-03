@@ -38,6 +38,8 @@ try {
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 90_000 });
   if (installedProtocol >= 86) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-startup.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 35_000 });
+  if (typeof installedNode.restartMoguriService === "function") execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 87) execFileSync(process.execPath, [resolve("tests/fixtures/installed-session-controls.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
@@ -135,6 +137,11 @@ try {
       ${capturedServiceStop ? `
       const stopCaptured = (stateDir:string, captured:Awaited<ReturnType<typeof createRuntime>>["connection"]) => stopMoguriService(stateDir,{expectedConnection:captured});
       void stopCaptured;
+      ` : ""}
+      ${typeof installedNode.restartMoguriService === "function" ? `
+      const {restartMoguriService}=await import("moguri/node");
+      const restartCaptured=(stateDir:string,expectedConnection:Awaited<ReturnType<typeof createRuntime>>["connection"])=>restartMoguriService({stateDir,expectedConnection});
+      void restartCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
       ${installedProtocol >= 83 ? `
