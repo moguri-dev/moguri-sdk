@@ -279,10 +279,19 @@ enables voice and downloads its sole managed model through an owned job.
 `voice.disable(true, expectedSettingsRevision?)` joins this profile's voice
 work, closes its recognizer and removes only the exact managed model/staging.
 `voice.prepare()` warms the qualified recognizer without microphone access.
-`voice.enabled` defaults false; legacy voice settings preserve their prior
-enabled behavior without downloading implicitly. `voice.standby` is separate
+`voice.enabled` defaults true for the dictation feature; explicitly saved
+disabled choices remain disabled. This neither opens a microphone nor downloads
+weights. Runtime/model preparation checks configured readiness first rather
+than creating failed jobs on unconfigured chats. `voice.standby` is separate
 user consent for the focused desktop composer's visible, scoped microphone
 standby. External model directories are never deletion authority.
+The standby-ready state is a scoped microphone icon/accessible description,
+not a repeated paragraph in every chat. An acquired capture recorder exposes
+its readiness acknowledgement separately from physical ownership: release can
+flush already captured PCM while that acknowledgement is pending. Release
+before hardware acquisition still cannot start a late microphone or invent
+spoken audio. Streaming partial/final text stays in the exact owning draft;
+buffers are wiped, and any batch WAV spool is removed after its owned use.
 
 ## Session IDs, dependencies and interactive outputs
 

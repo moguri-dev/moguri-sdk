@@ -199,7 +199,7 @@ export const defaultSettings = (): UserSettings => ({
   permissions: { defaultDecision: "ask", tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [], skillSources: [],
-  voice: { enabled: false, standby: false, language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
+  voice: { enabled: true, standby: false, language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
   shortcuts: { commands: "Primary+KeyK", terminalCopy: "Primary+Shift+KeyC" },
   lifecycle: { keepAwake: false, tailMinutes: 5 },
   integrations: { sql: { enabled: false, endpoint: "http://127.0.0.1:9147" } },

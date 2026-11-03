@@ -327,6 +327,27 @@ controller's current state rather than a stale render. Early release still
 prevents late microphone startup; profile/blur/sleep cancellation and the
 original nonce/session authority remain intact.
 
+The subsequent interaction repair separates an acquired physical recorder
+from its asynchronous readiness acknowledgement. A release may flush the
+already-owned PCM while the UI is still Starting; partial text can be read in
+that interval, and completion cannot later republish Recording or cancel a
+successfully finalized owner. Release before actual acquisition keeps the
+no-late-microphone rule. Permission-release cleanup is shared/idempotent and
+retains the exact permission ID on failure for retry.
+
+Per the actual user choice, dictation now defaults enabled but microphone
+standby defaults off; explicit off settings remain off. Missing configured
+runtime/model readiness does not create automatic failed preparation jobs.
+No permission, model download or recording is inferred from that default.
+Consented standby uses an icon/accessible description, not repetitive chat
+status paragraphs. Streaming PCM never becomes a durable WAV/message context;
+owned buffers and any batch spool keep their existing zeroing/deletion rules.
+Batch spool cleanup now rechecks the original inode/device, private mode,
+size and modification witness before unlinking. A missing/replaced/changed
+WAV is retained as explicit partial cleanup, never another writer's file
+deleted under a success-shaped result. Generated success/failure/replacement
+checks prove memory zeroing and exact owned-file removal without a microphone.
+
 The pinned native server's PCM16 and final-before-commit contract was checked
 against the existing 0.2.0 source. The transport, native runtime/model, SDK API,
 durable events/settings shape and protocol 76 are unchanged. No cloud/backend
