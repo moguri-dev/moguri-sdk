@@ -18,7 +18,7 @@ test("issue reimports do not repeatedly normalize obsolete descriptions during t
   assert.deepEqual(next.issues, first.issues);
   assert.ok(first.issues.every((issue) => !issue.title.includes("GENERATED_HIDDEN") && !issue.body.includes("GENERATED_HIDDEN")));
   console.log(JSON.stringify({ primitive: "generated-issue-reimport-projection", revisions: history.length, currentIssues: first.issues.length, twoProjectionMs: projectionMs }));
-  assert.ok(projectionMs < 1500, `Two ordinary commit projections took ${projectionMs.toFixed(1)} ms instead of staying below 1500 ms.`);
+  assert.ok(projectionMs < 450, `Two ordinary commit projections took ${projectionMs.toFixed(1)} ms instead of staying below the 450-ms cold admission component budget.`);
 });
 
 test("unchanged retained issue source validation stays fast across later commit projections", () => {
@@ -64,6 +64,37 @@ test("overwritten historical issue sources are still checked after cached valida
     if (change === "nested-undefined") Reflect.set(link.pullRequests[0]!, "generatedUnknown", undefined);
     if (change === "body") Reflect.set(issue, "body", null);
     assert.throws(() => projectEvents(history), { code: "github_sync_corrupt" });
+  });
+});
+
+test("cold issue-source revision reuse cannot bypass complete schema checks or change valid retained observations", async (t) => {
+  for (const change of ["node", "database", "repo", "number", "url", "state", "reason", "updated", "checked", "source", "title", "body",
+    "unknown-undefined", "nested-invalid", "valid-observation"] as const) await t.test(change, () => {
+    const history = retained(generatedIssueRevisions("generated-project", 2, 1));
+    const event = history[1];
+    assert.ok(event?.event_type === "issue.saved" && event.payload.issue.github);
+    const link = event.payload.issue.github;
+    if (change === "node") link.nodeId = "Generated invalid node!";
+    if (change === "database") link.databaseId = 0;
+    if (change === "repo") link.repo = "Generated invalid repository";
+    if (change === "number") link.number = 0;
+    if (change === "url") link.url = "https://github.com/generated/other/issues/1";
+    if (change === "state") Reflect.set(link, "state", "generated-invalid");
+    if (change === "reason") Reflect.set(link, "stateReason", "generated-invalid");
+    if (change === "updated") link.updatedAt = "Generated invalid time";
+    if (change === "checked") link.checkedAt = "Generated invalid time";
+    if (change === "source") link.sourceDigest = "generated-invalid-digest";
+    if (change === "title") link.titleDigest = "generated-invalid-digest";
+    if (change === "body") link.bodyDigest = "generated-invalid-digest";
+    if (change === "unknown-undefined") Reflect.set(link, "generatedUnknown", undefined);
+    if (change === "nested-invalid") link.pullRequests.push({ url: "https://github.com/generated/responsiveness/pull/1",
+      repo: "generated/responsiveness", number: 0, state: "open", checkedAt: null, diagnostic: null });
+    if (change === "valid-observation") {
+      link.state = "closed"; link.stateReason = "completed"; link.diagnostic = "Generated new valid observation.";
+      link.pullRequests.push({ url: "https://github.com/generated/responsiveness/pull/1", repo: "generated/responsiveness",
+        number: 1, state: "open", checkedAt: null, diagnostic: null });
+      assert.deepEqual(projectEvents(history).issues[0]?.github, link);
+    } else assert.throws(() => projectEvents(history), { code: "github_sync_corrupt" });
   });
 });
 

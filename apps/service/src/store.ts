@@ -1012,7 +1012,7 @@ export class EventStore {
     if (types.some((type) => !eventTypes.includes(type))) throw new MoguriError("event_filter", "Choose known retained event types. No broader history was substituted.");
     const rows = this.db.prepare(`SELECT seq,data FROM events INDEXED BY events_type_sequence
       WHERE json_extract(data,'$.event_type') IN (${types.map(() => "?").join(",")})
-      AND json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq`).all(...types, this.profileId, after);
+      AND json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq`).iterate(...types, this.profileId, after);
     return this.decodeEvents(rows, false);
   }
   globalBudgetSequence(): number {
@@ -1021,21 +1021,24 @@ export class EventStore {
     return value;
   }
   private readEvents(after: number, allProfiles: boolean, legacyArtifactScopes = false, previous?: readonly StoredEvent[]): StoredEvent[] {
-    const rows = allProfiles ? this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after) :
-      this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq").all(this.profileId, after);
+    const rows = allProfiles ? this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").iterate(after) :
+      this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq").iterate(this.profileId, after);
     return this.decodeEvents(rows, allProfiles, legacyArtifactScopes, previous);
   }
-  private decodeEvents(rows: Record<string, SQLOutputValue>[], allProfiles: boolean, legacyArtifactScopes = false, previous?: readonly StoredEvent[]): StoredEvent[] {
+  private decodeEvents(rows: Iterable<Record<string, SQLOutputValue>>, allProfiles: boolean, legacyArtifactScopes = false, previous?: readonly StoredEvent[]): StoredEvent[] {
+    // A previous read's key memo cannot outlive a peer's scope deletion or key change.
+    this.keys.clear();
     const issueLinks = new Map(previous?.flatMap((event) => event.event_type === "issue.saved" && event.profile_id === this.profileId && event.payload.issue.github ?
       [[event.id, event.payload.issue.github] as const] : []) ?? []);
-    return rows.flatMap((row) => {
+    const events: StoredEvent[] = [];
+    for (const row of rows) {
       const event: unknown = JSON.parse(String(row.data));
       const data = this.validEvent(event, Number(row.seq));
-      if (!allProfiles && data.profile_id !== this.profileId) return [];
+      if (!allProfiles && data.profile_id !== this.profileId) continue;
       const encrypted: unknown = data.payload, legacy = scopeFor(data);
       const scope = legacyArtifactScopes && isRecord(encrypted) && encrypted.scope === legacy.scope ? legacy : scopeFor(data, data.artifact_id ?? null);
       const key = this.key(scope, false);
-      if (!key) return [];
+      if (!key) continue;
       const decoded = this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, Number(row.seq));
       if (!legacyArtifactScopes && artifactIdentity(decoded) !== (data.artifact_id ?? null)) throw new Error("Artifact retention identity is corrupt. State was preserved.");
       if (decoded.event_type === "issue.saved") {
@@ -1043,8 +1046,9 @@ export class EventStore {
         const checked = issueLinks.get(decoded.id);
         if (checked && Value.Equal(checked, decoded.payload.issue.github)) decoded.payload.issue.github = checked;
       }
-      return [decoded];
-    });
+      events.push(decoded);
+    }
+    return events;
   }
   putBlob(content: string): string {
     const hash = digest(content);

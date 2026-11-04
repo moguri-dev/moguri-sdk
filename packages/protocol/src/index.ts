@@ -516,13 +516,31 @@ export const eventTypes: readonly EventType[] = [
 ];
 
 const issueLinkChecks = new WeakMap<GithubIssueLink, GithubIssueLink>();
-function validRetainedIssueLink(link: GithubIssueLink): boolean {
+function validIssueSourceIdentity(link: GithubIssueLink): boolean {
+  return link.url === `https://github.com/${link.repo}/issues/${link.number}` &&
+    Number.isFinite(Date.parse(link.checkedAt)) && Number.isFinite(Date.parse(link.updatedAt));
+}
+function validRetainedIssueLink(link: GithubIssueLink, sources: Map<string, GithubIssueLink>, revisionSchema: TSchema): boolean {
   const checked = issueLinkChecks.get(link);
   // Inputs are mutable to in-process callers; only an exact private-copy match reuses validation.
   if (checked && Value.Equal(checked, link)) return true;
-  if (!Value.Check(GithubIssueLinkSchema, link) || link.url !== `https://github.com/${link.repo}/issues/${link.number}` ||
-    !Number.isFinite(Date.parse(link.checkedAt)) || !Number.isFinite(Date.parse(link.updatedAt))) return false;
-  issueLinkChecks.set(link, structuredClone(link));
+  const key = typeof link.repo === "string" && Number.isSafeInteger(link.number) && link.number > 0 ? JSON.stringify([link.repo, link.number]) : null;
+  const previous = key === null ? undefined : sources.get(key);
+  if (previous && key !== null) {
+    // Reuse a private schema-checked shape only when every other field matches exactly.
+    const revision = { updatedAt: link.updatedAt, checkedAt: link.checkedAt, sourceDigest: link.sourceDigest,
+      titleDigest: link.titleDigest, bodyDigest: link.bodyDigest };
+    const candidate = { ...previous, ...revision };
+    if (Value.Check(revisionSchema, revision) && Value.Equal(candidate, link) && validIssueSourceIdentity(candidate)) {
+      issueLinkChecks.set(link, candidate); sources.set(key, candidate); return true;
+    }
+  }
+  if (!Value.Check(GithubIssueLinkSchema, link) || !validIssueSourceIdentity(link)) return false;
+  const copy = structuredClone(link);
+  if (Value.Check(GithubIssueLinkSchema, copy) && Value.Equal(copy, link) && validIssueSourceIdentity(copy)) {
+    issueLinkChecks.set(link, copy);
+    if (key !== null) sources.set(key, copy);
+  }
   return true;
 }
 
@@ -558,6 +576,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const notificationSounds = new Map<string, NotificationSound>();
   const boards = new Map<string, IssueBoard>();
   const issues = new Map<string, LocalIssue>();
+  const issueSources = new Map<string, GithubIssueLink>();
+  const issueRevisionSchema = Type.Pick(GithubIssueLinkSchema, ["updatedAt", "checkedAt", "sourceDigest", "titleDigest", "bodyDigest"]);
   const scriptReviews = new Map<string, ScriptReviewRecord>();
   const dependencyCaches = new Map<string, CacheReceipt>();
   const projectConfigurations = new Map<string, ProjectConfiguration>();
@@ -1119,7 +1139,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "issue.saved") {
       const issue = event.payload.issue, link = issue.github;
       if (typeof issue.title !== "string" || typeof issue.body !== "string" ||
-        issue.order !== undefined && (!Number.isSafeInteger(issue.order) || issue.order < 0) || link && !validRetainedIssueLink(link)) {
+        issue.order !== undefined && (!Number.isSafeInteger(issue.order) || issue.order < 0) || link && !validRetainedIssueLink(link, issueSources, issueRevisionSchema)) {
         throw new MoguriError("github_sync_corrupt", "The retained card lost its exact order or GitHub source identity. State was preserved.", 409);
       }
       issues.set(issue.id, issue);

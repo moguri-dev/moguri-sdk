@@ -118,6 +118,54 @@ test("a previous issue view cannot hide corrupted encrypted source bytes on a re
   } finally { await fixture.close(); }
 });
 
+test("authenticated rereads refresh scope keys after a peer forgets or corrupts a previously read scope", async (t) => {
+  for (const change of ["forgotten", "corrupted"] as const) await t.test(change, async () => {
+    const fixture = await setupFixture(), store = fixture.service.store, peer = store.view("default");
+    try {
+      const appended = store.commit(generatedIssueRevisions(fixture.session().projectId, 3, 1));
+      const previous = store.events();
+      assert.equal(previous.filter((event) => event.event_type === "issue.saved").length, 3);
+      if (change === "forgotten") {
+        peer.commit([], undefined, { projects: [fixture.session().projectId] });
+        assert.equal(store.events(0, previous).some((event) => event.event_type === "issue.saved"), false);
+        assert.equal(store.eventsOfTypes(["issue.saved"]).length, 0);
+      } else {
+        const scope = store.db.prepare("SELECT json_extract(data,'$.payload.scope') AS scope FROM events WHERE id=?").get(appended[0]!.id)?.scope;
+        const original = peer.db.prepare("SELECT payload FROM retention_keys WHERE scope=?").get(scope!)?.payload;
+        assert.equal(typeof original, "string");
+        peer.db.prepare("UPDATE retention_keys SET payload=json_set(payload,'$.data',?) WHERE scope=?")
+          .run(Buffer.from("Generated corrupted scope key").toString("base64"), scope!);
+        assert.throws(() => store.events(0, previous), /retention payload|key.*missing\/corrupt/i);
+        assert.throws(() => store.eventsOfTypes(["issue.saved"]), /retention payload|key.*missing\/corrupt/i);
+        peer.db.prepare("UPDATE retention_keys SET payload=? WHERE scope=?").run(original!, scope!);
+        assert.deepEqual(store.events(), previous);
+      }
+      assert.equal(fixture.requests.length, 0);
+    } finally { peer.close(); await fixture.close(); }
+  });
+});
+
+test("an authenticated row failure releases full and indexed read cursors without publishing a partial view", async () => {
+  const fixture = await setupFixture(), store = fixture.service.store;
+  try {
+    const appended = store.commit(generatedIssueRevisions(fixture.session().projectId, 3, 1)), before = store.events();
+    const original = store.db.prepare("SELECT data FROM events WHERE id=?").get(appended[1]!.id)?.data;
+    assert.equal(typeof original, "string");
+    store.db.exec("DROP TRIGGER events_no_update");
+    store.db.prepare("UPDATE events SET data=json_set(data,'$.payload.data',?) WHERE id=?")
+      .run(Buffer.from("Generated failure after an earlier authenticated row").toString("base64"), appended[1]!.id);
+    for (const read of [() => store.events(), () => store.eventsOfTypes(["issue.saved"])]) {
+      assert.throws(read, /retention payload|key.*missing\/corrupt/i);
+      try { store.db.exec("BEGIN IMMEDIATE; DROP TABLE events; ROLLBACK"); }
+      finally { if (store.db.isTransaction) store.db.exec("ROLLBACK"); }
+    }
+    store.db.prepare("UPDATE events SET data=? WHERE id=?").run(original!, appended[1]!.id);
+    store.db.exec("CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'events are append-only'); END;");
+    assert.deepEqual(store.events(), before);
+    assert.equal(fixture.requests.length, 0);
+  } finally { await fixture.close(); }
+});
+
 test("type-selective readers use the retained type index and preserve profile, sequence, rollback and forgetting", async () => {
   const fixture = await setupFixture(), store = fixture.service.store, peer = store.view("generated-other-profile");
   try {

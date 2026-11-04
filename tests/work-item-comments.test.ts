@@ -28,6 +28,52 @@ test("work-item comment filtering removes hidden standard, malformed and untermi
   }
 });
 
+test("work-item filtering retains exact v1 UTF-16 output when removals join earlier visible delimiters", () => {
+  const original = (text: string): string => {
+    const visible: string[] = [];
+    for (let index = 0; index < text.length; index++) {
+      visible.push(text[index]!);
+      const length = visible.length;
+      if (length < 4 || visible[length - 4] !== "<" || visible[length - 2] !== "-" || visible[length - 1] !== "-" ||
+        visible[length - 3] !== "!" && visible[length - 3] !== "-") continue;
+      visible.length -= 4;
+      const end = text.indexOf("-->", index + 1);
+      if (end < 0) break;
+      index = end + 2;
+    }
+    return visible.join("");
+  };
+  const prefix = "Generated visible prefix \ud83d\ude80.\n".repeat(200), alphabet = ["<", "!", "-", ">", "a", "\n", "\ud83d", "\ude80"];
+  for (const source of [
+    `${prefix}<!<!<!-- first -->-- second -->-- third -->Visible`,
+    `${prefix}<--<--- first -->- second -->Visible`,
+    `${prefix}\ud83d<!-- hidden -->\ude80`,
+    `${prefix}<!-- unterminated`,
+  ]) assert.equal(stripMarkdownComments(source), original(source));
+  let seed = 0x1247a38;
+  for (let sample = 0; sample < 20_000; sample++) {
+    let text = sample % 3 === 0 ? prefix : "";
+    for (let index = 0; index < 120; index++) {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      text += alphabet[(seed >>> 8) % alphabet.length];
+    }
+    if (sample % 5 === 0) text += `<!-- GENERATED_HIDDEN -->${text.slice(-30)}`;
+    assert.equal(stripMarkdownComments(text), original(text), `Generated v1 source ${sample}`);
+  }
+});
+
+for (const comments of [false, true]) test(`a generated 100-card catalogue with ${comments ? "sparse" : "no"} comments filters within its admission component budget`, () => {
+  const prefix = "Generated visible body with bounded prose and code.\n".repeat(1200);
+  const cards = Array.from({ length: 100 }, (_, index) => ({
+    source: `${prefix}${comments ? `<!-- GENERATED_HIDDEN_${index} -->` : ""}\nGenerated end ${index}.`,
+    expected: `${prefix}\nGenerated end ${index}.`,
+  }));
+  const began = performance.now(), visible = cards.map((card) => stripMarkdownComments(card.source)), elapsedMs = performance.now() - began;
+  assert.deepEqual(visible, cards.map((card) => card.expected));
+  console.log(JSON.stringify({ primitive: "generated-work-item-filter-budget", cards: cards.length, sparseComments: comments, elapsedMs }));
+  assert.ok(elapsedMs <= 50, `Filtering 100 bounded work items took ${elapsedMs.toFixed(2)} ms, above its 50 ms component budget.`);
+});
+
 test("GitHub work-item previews, imports and actual model context exclude hidden comments before use", { skip: process.platform !== "darwin" }, async () => {
   const marker = "GENERATED_HIDDEN_WORK_ITEM_INSTRUCTION", url = "https://github.com/generated/example/issues/4";
   const fixture = await setupFixture({ platform: { integrations: { fetch: async () => Response.json({

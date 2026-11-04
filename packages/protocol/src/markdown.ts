@@ -6,18 +6,28 @@ export interface WorkItemCommentFilter {
 }
 
 export function stripMarkdownComments(text: string): string {
-  const visible: string[] = [];
-  for (let index = 0; index < text.length; index++) {
+  const start = text.search(/<(?:!|-)--/);
+  if (start < 0) return text;
+  const boundary = Math.max(0, start - 3);
+  let prefix = text.slice(0, boundary);
+  const visible = text.slice(boundary, start).split("");
+  for (let index = start; index < text.length; index++) {
     visible.push(text[index]!);
     const length = visible.length;
     if (length < 4 || visible[length - 4] !== "<" || visible[length - 2] !== "-" || visible[length - 1] !== "-" ||
       visible[length - 3] !== "!" && visible[length - 3] !== "-") continue;
     visible.length -= 4;
+    // Keep enough visible suffix to recognize delimiters joined by earlier removals.
+    if (prefix && visible.length < 3) {
+      const count = Math.min(3 - visible.length, prefix.length);
+      visible.unshift(...prefix.slice(-count).split(""));
+      prefix = prefix.slice(0, -count);
+    }
     const end = text.indexOf("-->", index + 1);
     if (end < 0) break;
     index = end + 2;
   }
-  return visible.join("");
+  return prefix + visible.join("");
 }
 
 export function workItemSnapshotView(text: string): string {

@@ -762,3 +762,147 @@ That attempt is retained as a failure, not a passing budget sample. The same
 recovery fixture in isolation and a fresh complete packed-consumer run pass
 without changing production code, ownership checks or deadlines. No operation
 budget was relaxed to hide that result.
+
+## Cache-first desktop opening
+
+The user confirmed that the matching service repair made ordinary session
+and message operations fast; the remaining observed delay was opening,
+about five seconds instead of twenty-five. This follow-up targets that path,
+not another unobserved Send defect.
+
+The renderer first mounts the real desktop layout and a temporary local
+composer. SDK and full application modules load asynchronously after that
+shell, while the existing native/service readiness fences remain intact.
+The early view is explicitly connecting, never an authenticated snapshot or
+successful backend readiness placeholder. Provider discovery was already
+asynchronous and is not claimed as a new deferral.
+
+### Presentation metadata, not domain authority
+
+The versioned `moguri.startup.v1` browser preference contains only model IDs,
+opaque provider IDs for display attribution, names, declared effort names, the last selected session ID, and
+its draft revision/empty flag. It never contains transcripts, saved draft
+text, attachments, filesystem roots, provider payloads, credentials,
+permissions, budget figures, or approval decisions. Records are bounded to
+256 KiB and reject unknown versions, extra fields, invalid types and changed
+root/profile bindings with an explicit diagnostic.
+
+Native startup derives an opaque scope from the captured canonical data root
+and its device/inode identity. The live connection's retained store ID and
+actual immutable profile must match before the last session is restored.
+An explicit `MOGURI_PROFILE_ID` wins over the view preference. A remembered
+profile that is missing or unready is not silently replaced by Default.
+First-launch cache misses do not create a synthetic project/session. After
+authentication, an initially absent root is checked again before saving a
+new presentation preference.
+
+Cached model labels and effort lists remain informational. They never enter
+`Snapshot.provider.models`, provider preparation, routing, model evidence,
+native qualification or tool policy. While discovery is still connecting,
+the model control may display a marked cached label and read-only list;
+actual model/effort choices and Send still require current qualified data.
+Current disconnect/error observations clear that provider's cached labels;
+other providers still actively connecting keep only their informational names.
+
+### Local opening drafts
+
+The user explicitly selected local typing while the backend reconnects.
+That text exists only in this window's RAM, with the original presentation
+binding captured when typing starts. Enter/hold shortcuts cannot dispatch
+anything during opening. Closing with unsaved text retains the existing
+keep-saving/discard confirmation. Focus alone never starts microphone
+authorization, recording, a terminal, a model request or a queued prompt.
+
+Automatic draft adoption requires a live authenticated client, the exact
+root/store/profile/session, the same saved draft revision, and an actually
+empty live draft without attachments. The normal `DraftEditor` then saves
+through its original CAS/receipt path immediately, not after an unnecessary
+new autosave debounce. No message is sent. The opening buffer is cleared
+only by its matching ID after save acknowledgement, and caret restoration
+binds the actual owning client and session.
+
+Missing/deleted/archived sessions, changed stores/profiles, peer edits,
+oversized inline text or unconfirmed saves retain the original local text
+for review. The live saved draft is not overwritten. The user can explicitly
+copy/discard it, or use an empty current draft through the existing SDK
+path. Large text uses the existing captured-paste flow, not truncation.
+Unknown mutation outcomes retain their original receipt and are never
+replayed by this opening feature.
+
+### Cold retained-read work
+
+The strengthened fixture starts a new compiled runtime process and a new
+Electron main process over 25,535 generated issue revisions plus retained
+61-chat/tool/draft history. It measures the early editable shell separately
+from an actual rendered live editor, enabled fresh-model Send, and the
+acknowledged original saved draft. A DOM observer and active hidden frame
+delivery measure the real completion frame, not an extra Playwright polling
+interval. Warm/reused-owner reloads remain a different observation.
+
+This exposed remaining cold work, not permission to increase a deadline.
+Authenticated reads now decode SQLite iterators rather than first retaining
+hundreds of megabytes of encrypted JSON strings alongside the complete
+plaintext history. The returned event arrays, profile/type/sequence order,
+header and per-row GCM authentication remain unchanged. Every read refreshes
+its scope-key memo: a peer's recorded deletion or corrupted replacement key
+cannot borrow a prior valid key. Error paths release their read cursor and
+publish no partial view; transaction rollback, real 88 migration/reopen,
+peer appends and indexed forgetting remain covered.
+
+Cold source validation also keeps a private per-replay template for a
+previously validated issue identity. Every changed revision field still
+passes the original picked schema, exact private-template comparison,
+canonical URL and real date checks. A different static or nested field
+falls back to the complete original schema. Mutable inputs, extra undefined
+fields and malformed historical revisions cannot borrow validation.
+Templates/witnesses never authorize an operation or replace current
+ciphertext, and no evaluator/compiler is introduced into the browser.
+Generated cold two-projection work fell from about 599 to 218 ms; the new
+450-ms component gate is stricter than its previous 1,500-ms allowance.
+
+The pure work-item-comments-v1 scanner skips an unchanged prefix while
+retaining enough visible suffix to recognize delimiters joined by removal.
+Its exact legacy output is checked against 20,000 generated UTF-16 cases,
+including malformed, nested/joined and unterminated blocks. It retains no
+plaintext cache. Generated 100-card plain/sparse-comment catalogues took
+about 1 ms instead of 109/129 ms, under a separate 50-ms component ceiling.
+
+No dependency, selected stack, domain event, database schema or protocol
+marker changes. The additional desktop bridge is matched to its packaged
+preload; the shared service remains protocol 90. Node, Electron, React and
+TypeBox retain their existing licenses. All routine 700-ms, deletion
+1,000-ms and live-startup 3,000-ms limits remain unchanged.
+
+### Prerequisite evidence and failed attempts
+
+The generated Phase 0 rerun passed the six available primitives: six
+intercepted provider requests with 31.81-ms cancellation; 1,000 SQLite events
+with 0.070-ms append p95 and 0.726-ms rebuild; known-group PTY cancellation
+in 152.17 ms with zero observed survivors; 60 OpenTUI updates averaging
+16.82 ms; hidden Electron opening in 258.86 ms at 445.91 MiB with 8.15-ms
+scroll frames; and 2,000-file search/Git in 1.37/8.03 ms. That baseline's
+unavailable live/SSH/Linux/Rust/signing/quality/native-image checks remain
+unqualified; earlier exact physical receipts are separate evidence.
+
+The initial missing-cache test and original focus-selector failure remain
+failed attempts. Early full-cold attempts also exceeded the unchanged
+three-second limit at about 3,098, 3,106, 3,124 and 3,016 ms. Neither a later
+fast sample nor a cached shell relabels them as successful backend readiness.
+Current source types and the focused 57-case validation/read/cache/SDK set
+pass. The three fresh-process mixed-history samples rendered the editable
+cached shell in 449/435/422 ms from desktop launch. Complete live editor,
+enabled fresh-model Send and the acknowledged original saved draft rendered
+in 2,640/2,608/2,589 ms from the generated cold service-process start, each
+under the unchanged 3,000-ms gate, with zero inference calls. The service
+had to claim its real lock before Electron was started to prevent a test-only
+second launcher; process-start-to-shell time is separately 805/1,291/777 ms.
+This is not a claim about a completely cold OS filesystem cache.
+
+The 18-case core desktop selection initially passed 17 cases and found one
+obsolete `.startup-error` selector after the error UI moved into the retained
+opening shell. Its actual changed-owner refusal heading was visible. The test
+now checks the real alert text instead; isolated owner-refusal/proxy inspection
+passes without changing the product guard. Actual package qualification and
+the complete sweeps remain separate gates.
+No new personal installation, restart, sampling, model prompt or app control
+is authorized or performed by these generated checks.
