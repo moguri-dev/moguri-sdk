@@ -313,3 +313,151 @@ phase before releasing recovery. Its complete-startup number includes that
 controlled wait and must not be presented as a directly comparable live
 startup benchmark. The current qualification proves the feedback, diagnostics
 and preserved fences, not the unresolved user's acknowledgement latency.
+
+## Protocol-90 interaction follow-up
+
+The subsequent source cuts add the owner's retained-activity reuse, inline
+rename, ordinary live input, bounded first-topic naming and dictation fixes.
+They reuse the existing SDK, worker, encrypted store and MIT libraries with
+no new dependency. `chat_titles_schema='1'` and `live_delivery_schema='1'`
+commit together after the existing 89 indexes; genuine old ciphertext,
+receipts, held input and unknown accounting are not rewritten.
+See [session interactions](session-interactions.md),
+[first-topic naming](chat-titles.md) and
+[the voice/ownership contract](session-reliability.md).
+
+### Established causes, separate from remaining latency
+
+A generated held discovery promise proves authenticated service publication
+was waiting for provider discovery unrelated to state/ownership recovery.
+Publication and chat creation no longer wait for it; model availability remains
+Connecting until the actual result. Source cold recovery authenticates without
+waiting for the generated eleven-second provider delay, without changing the
+existing launcher deadline or saved draft. A protected rotating OAuth refresh still
+settles/persists its replacement token before shutdown; caller cancellation
+is not permission to discard that credential.
+
+One failed native Browser status poll previously stopped all future polls,
+permanently stranding its host. The generated real hidden-window regression
+fails with zero recovery reads. Exact-owner bounded status recovery now
+revokes control, never replays an action, keeps the same native view and
+requires explicit re-enable. Current actual-packaged coverage passes that
+case in 2.7 s including the injected failure and real accessibility action.
+This proves the reproduced recovery bug, not the cause of the user's original
+uncorrelated Failed to fetch.
+
+Default-on dictation also warmed an AudioContext when no speech model was
+configured. The actual four-console package hit **601.13 MiB** against the
+unchanged **600-MiB** Electron-shell budget, with an extra audio utility.
+Exact current SDK/profile/backend/model readiness now gates that silent graph.
+Three unconfigured chat switches construct no AudioContext, request no
+microphone and start no recognition/model job. Configured cold-onset PCM and
+live partial/final insertion remain covered with generated audio.
+
+The corrected actual package has only its Browser/GPU/Network Service/Tab
+processes at this checkpoint: **539.72 MiB** for one console and **546.67 MiB**
+for four consoles under one authenticated broker. The service/broker combined
+Moguri totals are separately reported as 1,030.16/1,038.19 MiB; user programs
+are not hidden inside the shell budget. No threshold or sample scope changed.
+
+The user's real 16.1-second service phase and 2.8/5.6/8.4-second before-header
+waits remain distinct observed evidence. New numeric service/proxy/loop-window
+spans can localize a naturally slow action without payloads or another model
+call. These generated causes and fast interactions do not establish that
+every live waiting path is eliminated, nor classify incomplete trace entries
+as timeouts or assign them invented request/source correlations.
+
+### Immutable current installer and actual forms
+
+Current executable code is **`2ef8968`**, retaining the clean backend
+**`55b50e4`**. The app, ZIP, DMG and manifest are under
+`release/qualification-builds/interaction-2ef8968/`.
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `Moguri-0.31.0-alpha.1-macos-arm64.dmg` | 830122878 | `e453ddc706d32992b47b1cee6308b1c621d610cfc531cfa7435b855006ccf78d` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.zip` | 814566653 | `9fe4d89616536039216aad040214fd0503d63bd2c2aa3a5c811acb98d430309f` |
+
+It is **ad-hoc signed, not notarized**, not uploaded, installed or opened in
+the user's application directory. Historical 88/89/37 and intermediate
+`interaction-55b50e4` artifacts remain separate and byte-preserved.
+The installer exceeds chat's attachment limit.
+
+The external packed SDK installation/audit passes, as do the actual app's
+unmodified bundled CLI/exec launcher, SDK/runtime/worker, cold startup,
+shutdown/restart, retained replay negotiation, Home/Git/SSH/MCP, original user
+console owner/PID reattachment and independent-artifact checks.
+The production ZIP/update consumer and a private read-only DMG mount verify
+layout and exact signed-tree identity without opening Finder or bypassing
+quarantine. Native installer ownership/layout passes without administrator
+installation. Actual bundled naming/live delivery also passes independently.
+
+Thirteen selected actual-packaged hidden Electron cases pass in 19.9 s:
+startup/cancelled quit, current cache and rename, original local Sending rows,
+live steering, model title/user precedence, no unconfigured audio startup and
+streaming PTT. Sending rows appear in **14.58-15.73 ms** while dispatch is
+deliberately held. With 61 generated retained sessions, 5,860 events and
+67,182,263 history bytes under a finite global policy, the opening window
+appears in **344.98 ms**; acknowledged visible new chats take
+**130.90, 143.49 and 140.12 ms**. Complete startup **2,039.89 ms** includes
+the deliberately held actual recovery barrier, not a directly comparable
+personal startup benchmark. There are no model calls in that admission test.
+
+Actual frozen **88-to-90** and **89-to-90** application SDK/runtime/worker
+upgrades each preserve 33 original ciphertext rows exactly, a saved draft,
+held queue, independent artifact, original unknown charge and the exact
+original authenticated generated user PTY/PID/output. There is one original
+intercepted request per fixture, no input/model replay and no personal state.
+
+The complete final `2ef8968` hidden desktop sweep passes **336 cases**, with
+four explicit skips and zero failures in **10.2 minutes**. All seventeen
+generated dictation cases pass, including the first 3,336 opening PCM samples,
+release during delayed readiness and exactly-once final draft insertion.
+The complete clean `55b50e4` backend/native-TUI sweep passes **2,242 tests**,
+with 29 explicit skips, zero failures/cancellations and **1,813.14 seconds**
+elapsed. The final UI-only cut does not change those backend bytes. Final type
+checks, root audit and independent packed-consumer audit also pass with zero
+vulnerabilities. Source tests, actual application-package checks and real native
+boundary checks remain separate evidence scopes.
+
+### Fresh native byte qualification
+
+Unlike the earlier 89 diagnostic-only cut, protocol 90 changes actual guest
+worker/bridge/MCP bytes. A new no-cache Linux arm64 producer takes 71.78 s:
+`docker.io/library/moguri-worker@sha256:a84cdd12064aa8970f5991744028d0d49cf051c45dd49ee33ada4f3fd05da70e`.
+Distribution manifest SHA-256:
+`5725eca4bd1eaee9c20d14079c7ef42d7e90d283a0f029145a47b4b8c254ebd5`.
+
+| Payload | SHA-256 |
+| --- | --- |
+| `worker.mjs` | `15a74c16c40a3b97aafa8480dd812c3e57e69954700ec408942af48b944f5332` |
+| `remote-bridge.mjs` | `2ffd0a468c0bd688301c370ba0eefc68f0b2aca1556e6d2eaf9c719237694d25` |
+| `mcp-worker.mjs` | `560910f3e4e1f0fab3381845c383d440f6cfdabded12eff04a3979bbc0e90c5c` |
+
+All eight physical native gates pass in **42.82 s** from clean `55b50e4`:
+`.native/qualification/current-sendbox-04usPz/qualification.json`,
+SHA-256 `74e598f23289b7bc1cefbf8da232a3b4d6839cedd55b644fc50cc14754036c22`.
+The generated actual Sandbox sequence has three solver calls and one
+separately metered title call: 168 reported tokens, no unknown/held tokens,
+0.000216 estimated USD and null provider/billed USD. The original source is
+unchanged, private output is verified and all owned guests are absent.
+The final UI-only cut's bundled runtime/service/SDK and all three payload
+hashes are explicitly identical to this qualified backend; no 88/89 receipt
+is inherited as proof of new bytes.
+
+Initial failed full-suite, native naming-fixture and memory attempts remain
+retained as failures. Repairs include explicit worker-start naming capability
+instead of unsolicited private-compactor RPCs, a complete dynamic all-role
+wind-down bound instead of thirteen roles, ancestor-first provenance errors,
+known-invalid naming data remaining charged/rejected instead of becoming
+unknown, and genuine recovery gates instead of unrelated discovery waits.
+No arbitrary service deadline, durability policy, queue/answer permission,
+CI trigger or memory budget was loosened to conceal them.
+
+Base-main run `41602139750` is separately completed/cancelled: both Ubuntu and
+macOS annotations explicitly report the existing 30-minute test-job maximum.
+It is not a successful CI result, billing diagnosis or a branch run. CI remains
+main-only. Runner notices retain Ubuntu 26 migration and macOS arm64 queue
+capacity; local warnings retain OpenTUI experimental FFI, large renderer chunks,
+the optional `.icon` companion, generated Sandbox failures in negative probes
+and package deprecations. No trigger, timeout or rerun is changed.
