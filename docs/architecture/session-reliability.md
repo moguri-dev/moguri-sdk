@@ -292,6 +292,14 @@ or model diagnosis. The user's earlier 16.1-second service phase and clustered
 before-header waits remain distinct observed evidence; generated SQL and
 provider/poll fixes alone do not prove the full live latency is gone.
 
+Default-enabled dictation does not warm an audio graph while its runtime/model
+is missing or its exact current readiness is unknown. The ready result binds
+the SDK/profile, backend and model-lifecycle revision before a silent graph can
+warm. Switching through unconfigured chats creates no AudioContext, requests no
+microphone and starts no recognition job. This avoids starting an unnecessary
+Chromium audio utility for an unconfigured feature, while a configured model
+keeps its existing cold-onset preparation and actual-gesture microphone fence.
+
 A generated realistic PR collection above 512 KiB produces the user's exact
 owned-CLI partial diagnostic through the actual process reader. REST reads now
 have an explicit 8 MiB complete-response bound; mutation and process bounds
