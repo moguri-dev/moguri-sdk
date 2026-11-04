@@ -906,3 +906,44 @@ passes without changing the product guard. Actual package qualification and
 the complete sweeps remain separate gates.
 No new personal installation, restart, sampling, model prompt or app control
 is authorized or performed by these generated checks.
+
+### First ad-hoc execution remains a separate limitation
+
+The first execution of the actual frozen `3ee905f` development package took
+7,350.49 ms to its opening UI and failed the unchanged 1,500-ms window gate,
+with backend recovery deliberately held. That failure is not replaced by
+the faster source-process or subsequent-launch figures.
+
+An owned full-resource diagnostic copy with no Moguri modules or service
+entered Node after about 6.87 seconds. Its initial diagnostic then deadlocked
+because that fixture incorrectly awaited `app.whenReady()` at ESM top level;
+that fixture error is not a Moguri deadlock. The corrected `.then()` fixture
+entered Node after 2.01 seconds on its new signature, versus 116 ms on an
+unchanged-path control. A read-only sample of that exact owned child observed
+1,249 main-thread samples in dyld's `mapSegments` / `CodeSignatureInFile` /
+`fcntl` path before Node startup; debugger notification added its own overhead.
+This identifies a pre-JavaScript loader/signature-path lead, not a diagnosis
+of every second of the user's original opening delay.
+
+A documented inside-out signing diagnostic without process entitlements
+on the library still took about 1.65 seconds before Node and passed strict
+signature verification. The previous and current frozen Electron frameworks
+have the same CDHash. Neither that probe, a warm launch, nor an unsupported
+claim about notarization is a first-execution fix. No trust setting, quarantine
+attribute, signature check or operating-system guard was disabled.
+
+The user explicitly authorized a read-only signing-identity availability
+check, which found zero valid signing identities and zero Developer ID
+Application identities. No identity names or private keys were exported;
+no certificate signing, Apple submission or personal app/service action
+followed. The user then explicitly chose to deliver an ad-hoc alpha with
+this first-launch caveat. Proper signing/notarization and its startup
+qualification remain separate release work, not an accepted production gate.
+
+The complete default-concurrency Node/native-TUI run at `3ee905f` exercised
+2,320 tests: 2,290 passed, 29 skipped and one failed. That failure caught the
+new opening error banner bypassing the repository's shared dismissible
+`Alert`. The correction reuses that component without changing cache
+authority, ownership or runtime bytes; all five focused alert/cache cases
+and type checks pass. The original complete run remains a failed attempt
+until an explicitly recorded complete rerun, not a relabeled green run.
