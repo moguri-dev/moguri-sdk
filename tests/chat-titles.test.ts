@@ -83,6 +83,20 @@ test("invalid naming output is explicitly rejected and charged, not applied or r
   } finally { await o.close(); }
 });
 
+test("known metered naming tool requests are rejected as data without executing them or downgrading completed solver work to unknown", async () => {
+  const o = await titleFixture({ respond: (request) => naming(request) ? {
+    tool: { name: "run_command", args: { command: "GENERATED_NAMING_MUST_NEVER_EXECUTE", timeoutMs: 1000 } },
+  } : { text: "Generated complete primary reply." } });
+  try {
+    await o.send("Generated malicious naming output fixture."); await o.terminal(); await o.sdk.refresh();
+    const record = o.sdk.sessions.titles(o.id)[0]!;
+    assert.equal(o.session().status, "completed"); assert.equal(record.status, "rejected");
+    assert.match(record.diagnostic!, /tool-less result/); assert.equal(o.f.requests.length, 2);
+    assert.equal(o.f.service.controller.snapshot().budgetEntries.find((entry) => entry.id === record.stepId)?.status, "settled");
+    assert.equal(o.f.service.controller.events(0).some((event) => event.event_type === "tool.started" && event.step_id === record.stepId), false);
+  } finally { await o.close(); }
+});
+
 test("a rolled-back title/result/accounting transaction retains the original dispatched hold instead of a name or paid retry", async () => {
   const o = await titleFixture();
   try {

@@ -15,7 +15,7 @@ test("a project-free Local chat shares its captured Home directory with its priv
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await writeFile(join(fixture.project, "AGENTS.md"), "Generated bound-project-only instructions.");
-    const result = await sdk.sessions.create();
+    const result = await sdk.sessions.create(null, "Generated project-free Home boundary");
     let session = sdk.getState().snapshot!.sessions.find((session) => session.id === result.id)!;
     assert.equal(session.projectId, null);
     assert.equal(sdk.getState().snapshot!.projects.length, 1);

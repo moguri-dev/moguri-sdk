@@ -35,6 +35,10 @@ in the user's language and at most 80 characters. Invalid, incomplete, unsafe
 Unicode or non-JSON output is retained with an explicit rejected/partial
 outcome, not applied or retried. Naming results never enter ordinary solver
 context, model-owned acceptance or permission decisions.
+Fully metered malformed/tool-calling output is rejected with its known charge;
+it cannot execute a tool or relabel completed solver work as unknown usage.
+Actually missing accounting and output-bound violations keep their separate
+partial/held outcomes.
 
 `session.title_generated` binds the original factory-title revision, source
 and settled original title-role charge. An actual user rename, cancellation or

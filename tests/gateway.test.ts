@@ -231,7 +231,7 @@ test("an external MCP approval holds the project lease against other agents and 
     await reviewNativeTools(fixture, ["mcp_gateway"]);
     await fixture.configure();
     const projectId = fixture.session().projectId;
-    const second = await sdk.command({ type: "session.create", projectId });
+    const second = await sdk.command({ type: "session.create", projectId, title: "Generated MCP lease waiter" });
     await sdk.command({ type: "session.configure", sessionId: second.id!, expectedRevision: 0, controls: fixture.session().controls });
     const third = await sdk.command({ type: "session.create", projectId });
     const tool = (await sdk.mcp.tools("builtin", "grep", 0, fixture.sessionId)).tools[0]!;

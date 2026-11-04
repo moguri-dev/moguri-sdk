@@ -16,7 +16,7 @@ test("immutable profile controllers isolate real model turns, drafts, artifacts,
   const first = new ControlPlane(alpha, providerA.provider, undefined, { stateDir: stateA }), second = new ControlPlane(beta, providerB.provider, undefined, { stateDir: stateB });
   try {
     await first.initialize(); await second.initialize();
-    const command = { type: "session.create" as const, projectId: null };
+    const command = { type: "session.create" as const, projectId: null, title: "Generated explicitly named profile owner" };
     const a = await first.dispatch({ id: "generated-same-client-command", profileId: "default", command });
     const b = await second.dispatch({ id: "generated-same-client-command", profileId: "generated-beta", command });
     assert.notEqual(a.id, b.id); assert.equal(second.snapshot().profileId, "generated-beta");

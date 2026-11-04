@@ -1,5 +1,5 @@
 import type { Message } from "@earendil-works/pi-ai";
-import { CHAT_TITLE_PROMPT, chatTitleText, successfulRoleEntry, type BudgetEntry, type BudgetRate, type ChatTitleRecord, type ModelInfo, type Session, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { CHAT_TITLE_PROMPT, chatTitleText, type BudgetEntry, type BudgetRate, type ChatTitleRecord, type ModelInfo, type Session, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 import { estimateModelContext } from "./model-controls.ts";
 import { assistantMessage, toolCalls } from "./worker-protocol.ts";
 import { digest, type EventStore } from "./store.ts";
@@ -37,7 +37,8 @@ export function titleModel(models: ModelInfo[], session: Session, input: string,
 export function completedChatTitle(record: ChatTitleRecord, event: Extract<StoredEvent, { event_type: "model.completed" }>, entry: BudgetEntry | undefined, read: (digest: string) => string): ChatTitleRecord {
   let status: ChatTitleRecord["status"] = "partial", title: string | null = null;
   let diagnostic: string | null = "Naming has incomplete or unknown accounting. Its original result/charge remains retained; no title, retry or refund was inferred.";
-  if (entry && entry.role === "title" && successfulRoleEntry(entry)) {
+  if (entry && entry.role === "title" && entry.status === "settled" && entry.reportedTokens !== null &&
+    entry.inputTokens !== null && entry.inputTokens !== undefined && entry.outputTokens !== null && entry.outputTokens !== undefined && !entry.outputLimitViolation) {
     try {
       const message = assistantMessage(JSON.parse(read(event.payload.contextDigest)));
       if (message.stopReason !== "stop" || toolCalls(message).length || message.model !== record.apiModelId) {

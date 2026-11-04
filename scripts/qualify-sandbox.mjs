@@ -253,26 +253,32 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
     assert.equal(execution.cleanup, "owned-guest-stopped"); assert.equal(execution.workerOutcome, "completed"); assert.equal(execution.cliExitCode, 0);
     const result = (await sdk.sandbox.result(execution.id)).result, calls = (await sdk.budgets.calls({ sessionId: created.id })).calls;
     const totals = (await sdk.budgets.status(created.id)).status.totals;
-    assert.equal(result.journal.status, "verified"); assert.equal(calls.length, 3);
+    assert.equal(result.journal.status, "verified"); assert.equal(calls.length, 4);
+    assert.equal(calls.filter((call) => call.role === "solver").length, 3);
+    assert.equal(calls.filter((call) => call.role === "title").length, 1);
     for (const call of calls) {
-      assert.equal(call.status, "settled"); assert.equal(call.env, "Sandbox"); assert.equal(call.role, "solver");
+      assert.equal(call.status, "settled"); assert.equal(call.env, "Sandbox"); assert.ok(["solver", "title"].includes(call.role));
       assert.equal(call.reportedTokens, 42); assert.equal(call.inputTokens, 30); assert.equal(call.outputTokens, 12);
       assert.ok(call.reservedTokens > 0); assert.equal(call.estimatedUsdMicros, 54); assert.equal(call.rate.source, "user-estimate");
     }
-    assert.equal(totals.calls, 3); assert.equal(totals.reportedTokens, 126); assert.equal(totals.unknownTokenCalls, 0);
+    assert.equal(totals.calls, 4); assert.equal(totals.reportedTokens, 168); assert.equal(totals.unknownTokenCalls, 0);
+    assert.equal(session().title, "Generated native topic summary"); assert.equal(session().titleSource, "model");
+    const naming = sdk.sessions.titles(created.id)[0];
+    assert.equal(naming.status, "completed"); assert.equal(naming.env, "Sandbox"); assert.ok(naming.actualInputDigest);
     assert.equal(totals.heldTokens, 0); assert.equal(totals.unpricedCalls, 0);
     assert.equal(totals.billedUsd, null); assert.equal(totals.providerReportedUsd, null);
     const events = service.controller.events(0), sessionEvents = events.filter((event) => event.session_id === created.id);
     const starts = sessionEvents.filter((event) => event.event_type === "model.started");
-    assert.equal(events.filter((event) => event.event_type === "model.started").length, 3, "No hidden or unaccounted model role belongs in this fixture.");
-    assert.equal(starts.length, 3); assert.equal(sessionEvents.filter((event) => event.event_type === "model.completed").length, 3);
+    assert.equal(events.filter((event) => event.event_type === "model.started").length, 4, "No hidden or unaccounted model role belongs in this fixture.");
+    assert.equal(starts.length, 4); assert.equal(sessionEvents.filter((event) => event.event_type === "model.completed").length, 4);
     assert.deepEqual(starts.map((event) => event.step_id).sort(), calls.map((call) => call.id).sort());
     const decisions = sessionEvents.filter((event) => event.event_type === "tool.decided");
     assert.equal(decisions.length, 2); assert.ok(decisions.every((event) => event.payload.actor === "user" && event.payload.allow));
     assert.equal(await readFile(join(fixture.project, "fixture.txt"), "utf8"), "generated source original\n");
     assert.equal((await sdk.workspaces.file(created.id, "fixture.txt")).text, "generated native replacement\n");
     const proof = JSON.parse(result.files.find((file) => file.path === "generated-native-proof.json").text);
-    assert.equal(proof.calls.length, 3); assert.equal(proof.runId, execution.id); assert.ok(proof.pid > 0);
+    assert.equal(proof.calls.length, 4); assert.equal(proof.calls.at(-1).tools.length, 0);
+    assert.equal(proof.runId, execution.id); assert.ok(proof.pid > 0);
     const owner = { name: execution.launchName, sessionId: execution.nativeSessionId, workspace: execution.stage.workspace,
       image: execution.image, command: { program: execution.command[0], arguments: execution.command.slice(1) },
       createdAfter: execution.createdAfter };

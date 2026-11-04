@@ -30,7 +30,7 @@ export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";
 export type { DraftDictation, DraftPendingInput } from "../../client/src/draft.ts";
 export type { ClientState, ClientRequestTiming } from "../../client/src/index.ts";
 export const sessionTitle = (session: Session, limit = 64, fallback = "New session"): string =>
-  (session.titleSource === "factory" ? fallback : session.title).slice(0, limit);
+  session.titleSource === "factory" ? fallback.slice(0, limit) : session.title;
 export const attachmentStatus = (attachment: Attachment): string => attachment.kind !== "document" ? attachment.kind :
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 

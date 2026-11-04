@@ -557,14 +557,6 @@ export class EventStore {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
     const recoveryLineage = () => {
-      for (const id of [chatTitlesSchemaMarker, liveDeliverySchemaMarker]) {
-        if (version < 90 && marker(id) !== undefined) throw new Error("Premature chat naming/live delivery schema marker. Original state was preserved.");
-        if (version >= 90) require(id, "chat naming/live delivery");
-      }
-      if (version >= 4 && version < 90) {
-        const history = this.readEvents(0, true, version < 10);
-        if (hasChatTitleHistory(history) || hasLiveDeliveryHistory(history)) throw new Error("Actual chat naming/live delivery history cannot become a pre-90 lineage. Original state was preserved.");
-      }
       if (version < 88 && marker(voiceShortcutSchemaMarker) !== undefined) throw new Error("Premature voice shortcut schema marker. Original state was preserved.");
       if (version >= 88) require(voiceShortcutSchemaMarker, "voice shortcut");
       if (version >= 4 && version < 88 && hasVoiceShortcutHistory(this.readEvents(0, true, version < 10))) {
@@ -579,6 +571,14 @@ export class EventStore {
             throw new Error(`Missing or invalid event read index ${name}. Original state was preserved; no index or history was silently rebuilt.`);
           }
         }
+      }
+      for (const id of [chatTitlesSchemaMarker, liveDeliverySchemaMarker]) {
+        if (version < 90 && marker(id) !== undefined) throw new Error("Premature chat naming/live delivery schema marker. Original state was preserved.");
+        if (version >= 90) require(id, "chat naming/live delivery");
+      }
+      if (version >= 4 && version < 90) {
+        const history = this.readEvents(0, true, version < 10);
+        if (hasChatTitleHistory(history) || hasLiveDeliveryHistory(history)) throw new Error("Actual chat naming/live delivery history cannot become a pre-90 lineage. Original state was preserved.");
       }
       for (const id of sessionControlsSchemaMarkers) {
         if (version < 87 && marker(id) !== undefined) throw new Error(`Premature session controls/tools schema marker ${id}. Original state was preserved.`);
