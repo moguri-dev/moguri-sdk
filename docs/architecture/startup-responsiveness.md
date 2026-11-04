@@ -548,7 +548,7 @@ approved, redacted read-only stack samples did not capture a sustained
 four-second stack, even though the user reported a slow action; they are not
 proof of a CPU, filesystem or lock cause. Local endpoint/owner metadata matched,
 and installed backend hashes matched the frozen protocol-90 package.
-No personal event text, key, draft, heap or database write was used.
+No personal event text, decryption key, draft, heap or database write was used.
 
 ### Generated reproduction and repair
 
@@ -628,3 +628,85 @@ work may be interrupted; drafts, held work, artifacts, original receipts,
 unknown charges and exact authenticated user terminals retain their contracts.
 No personal restart or state mutation is implied by read-only diagnostic
 approval; never delete registry, database, keys or cleanup to force replacement.
+
+### Qualified issue-history delivery
+
+The immutable executable cut is **`e772707`**, packaged under
+`release/qualification-builds/service-responsiveness-e772707/`. The matching
+app is `builds.noindex/0.31.0-alpha.1/Moguri-darwin-arm64/Moguri.app`.
+Documentation-only delivery commits do not change these qualified bytes.
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `Moguri-0.31.0-alpha.1-macos-arm64.dmg` | 830150036 | `ea378416998ec917700b0a2c5d312fbd334393b2a8438483251dbf63a453b41b` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.zip` | 814577419 | `0483151b0a91d5477a0c29205aaee6e881b341540b0481c5b0c09b2f9db717d0` |
+
+| Exact verification scope | Result |
+| --- | --- |
+| Complete local Node/native-TUI suite | **2,262 passed**, 29 explicit skips, zero failures/cancellations; 2,322.82 s |
+| Complete hidden desktop suite | **339 passed**, four explicit skips, zero failures; 12.1 min |
+| Typecheck/build, root audit and independent packed-consumer install/audit | PASS; zero vulnerabilities |
+| All packed SDK entrypoints, declarations and actual installed runtime/worker | PASS, including the new issue-heavy lifecycle |
+| Complete actual application-package verifier | PASS, including original exact PTY restart/ordinary-stop and retained artifact/accounting paths |
+| Actual packaged startup/voice suite | **23 passed** in 45.9 s |
+| Production ZIP/update consumer and private read-only DMG identity/layout | PASS; no Finder opening, installation or quarantine bypass |
+| Actual frozen 88/89 SDK/runtime/worker to current package | PASS separately for both original versions |
+| Fresh no-cache native image and exact physical qualification | All eight gates PASS on clean source, 45.99 s |
+
+The independently installed packed SDK acknowledges create/draft/held
+Send/archive/delete in **93.47 / 120.16 / 101.23 / 191.12 / 862.65 ms**,
+and reopens/authenticates the same issue-heavy store in **1,877.36 ms** without
+replaying inference. The actual app-bundled SDK/runtime gives
+**87.71 / 110.40 / 97.26 / 189.87 / 886.09 ms** and **2,383.12 ms** reopen.
+These installed-fixture Sends are explicitly held; the separate ordinary
+generated solver Send/receipt regression above remains about 171 ms.
+
+In the actual hidden app, the original controlled fixture keeps its thresholds:
+471.88-ms opening, 1,941.23-ms complete startup including its artificial pause.
+The new unpaused issue-heavy case, also with 61 chats, retained tool history
+and finite global policy, reaches visible readiness in **2,612.70 ms** and an
+acknowledged visible New chat in **187.99 ms**, with no inference. These are
+generated reproducible workloads, not a claim that the user's still-running
+old service has already loaded the repair.
+
+Actual frozen 88-to-current and 89-to-current upgrades each preserve 33 original
+ciphertext rows byte-for-byte, saved draft, held input, independent artifact,
+original unknown charge and exact authenticated original user PTY/PID/output.
+Each fixture retains its one original intercepted model request, with no
+input/model replay. No user database or keys are copied into those fixtures.
+
+The current app shell measures **547.13 MiB** with one console and
+**556.45 MiB** with four under the unchanged 600-MiB gate. Combined Moguri
+totals are separately **1,005.14/1,015.48 MiB**, with user programs disclosed
+outside that shell budget. No unnecessary default audio utility is started.
+
+The changed guest worker/bridge require a new image, not the old native receipt:
+`docker.io/library/moguri-worker@sha256:53cc29658de3acbc12736e55a969bfaf2f1961f3f441078439dd27f4fcc889da`.
+The no-cache producer takes **87.83 s**. Distribution manifest SHA-256:
+`fac173ca84fc3e1cb79c3b69a0e240f6612842b70b035a95621cbf8fd561a050`.
+
+| Exact payload | SHA-256 |
+| --- | --- |
+| Service | `42bd968a7b227239f10ebd8b16da4e86abeaf1ddd2011430f2c83ec7ebd9c1e9` |
+| Node runtime | `86b009b6d795e560f85979b1123929287a8bb8c0e673b2bdc48a2b6d220952e6` |
+| Worker | `cf427b224ee04cd4deff4d38448903339741e955f0d381117aaa17c530c79acb` |
+| Remote bridge | `fc3a10cc3326d0a1a5d1ba525d258a94e7a3369efd85f94d4542c1900cdc8594` |
+| MCP worker, unchanged | `560910f3e4e1f0fab3381845c383d440f6cfdabded12eff04a3979bbc0e90c5c` |
+
+Clean-source receipt:
+`.native/qualification/current-sendbox-sVX2BQ/qualification.json`,
+SHA-256 `567deb9f003a3f620becc86a9e05122c3bbed38a9530b089f51b8fadbcfcf2be`.
+It verifies original source/output and absence of every owned guest. Actual
+native accounting has three generated solver calls plus one separately
+metered title call, 168 reported tokens, no unknown/held tokens and null
+provider/billed USD. The package's exact worker/bridge/runtime hashes were
+compared to these qualified bytes. Data worker and private terminal
+broker/bridge remain byte-identical to their prior qualified versions.
+
+This image is **ad-hoc signed, not notarized**, not uploaded, automatically
+installed or opened in the user's application directory. Historical failed
+projection, deletion, paused-startup and old-package attempts remain failures,
+not relabeled passes. Main-only CI retains its separately reported 30-minute
+base-job limit; no trigger, timeout or rerun is changed. Existing FFI, chunk,
+optional icon, package-deprecation and disclosed generated Sandbox negative
+diagnostics remain warnings, not personal setup activity.
