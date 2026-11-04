@@ -947,3 +947,103 @@ new opening error banner bypassing the repository's shared dismissible
 authority, ownership or runtime bytes; all five focused alert/cache cases
 and type checks pass. The original complete run remains a failed attempt
 until an explicitly recorded complete rerun, not a relabeled green run.
+
+### Qualified cache-first alpha
+
+The corrected code cut is
+`becc99d9a66992ca405ec3cfde0ff71413cb33f7`, including the shared opening
+alert. Its complete default-concurrency Node/native-TUI rerun passed
+**2,291 tests, with 29 skipped and zero failures or cancellations** out of
+2,320, in 1,810.66 seconds. The subsequent complete hidden source desktop
+suite passed **349 tests, with four skipped and zero failures**, in
+10.4 minutes. These explicitly supersede the failed `3ee905f` full run,
+not its first-execution limitation.
+
+Build/types, fresh independently installed packed SDK entrypoints,
+declarations, runtime/worker and the actual application-package verifier
+pass. Both the root and independent consumer audits report **zero
+vulnerabilities**. The production ZIP/update consumer and a private
+read-only, no-browse DMG mount verify the exact signed application,
+Finder geometry and icons without opening Finder, installing, executing
+the mounted app or bypassing quarantine.
+
+The actual frozen app's separate 45-case desktop selection passes. It
+covers cached and missing presentations, peer/deleted/store-mismatched
+destinations, read-only model labels, all three new service/main-process
+cold openings, exact-owner quit/cancel, profiles, microphone preparation
+and generated user-terminal startup. Every latency sample keeps its
+original individual gate.
+
+| Measured completion, milliseconds | Source samples | Actual packaged samples |
+| --- | --- | --- |
+| Editable cached shell from desktop launch | 301.17 / 302.62 / 306.74 | 342.09 / 347.82 / 337.42 |
+| Service-process start to editable shell | 655.59 / 655.97 / 661.10 | 697.55 / 702.68 / 692.53 |
+| Full live rendered frame and original draft save acknowledgement | 1,782.71 / 1,796.34 / 1,785.46 | 1,948.88 / 1,930.30 / 1,929.66 |
+| Ordinary first Send, including unsaved draft and canonical rendered acknowledgement | 300.34 / 289.75 / 284.86 | 348.50 / 352.04 / 344.60 |
+
+The cold rows use 25,535 generated issue revisions and retained 61-chat
+history; ordinary first Send uses 25,000 revisions and 61 chats. These are
+fresh-process observations, not a completely cold OS filesystem cache or a
+new personal measurement. The early shell is measured while the real
+runtime remains unready. Full completion additionally requires the
+actual connected SDK, restored session, fresh-model-enabled Send and
+**Draft saved**, after a real rendered frame, with zero inference calls.
+The separate unpaused 25,000-revision startup measures 1,740.74 ms in
+source and 1,833.15 ms in the actual app. Its three visible New chat
+acknowledgements are 181.47 / 186.33 / 193.17 ms and
+197.02 / 216.20 / 203.09 ms respectively.
+
+The first actual execution of this corrected frozen app also passed:
+391.04 ms to the initial opening window and 1,726.83 ms to authenticated
+completion, with backend recovery initially held. This is a new bounded
+observation, not a fix or replacement for the earlier 7,350.49-ms first
+execution. Signing behavior was not changed; the user-accepted ad-hoc
+first-launch caveat and unqualified notarization/production gates remain.
+
+Both actual frozen protocol-88 and protocol-89 app SDK/runtime/worker
+upgrades to this cut pass using the new app's bundled Node. Each preserves
+33 original ciphertext rows, saved draft, held input, independent artifact,
+unknown original charge and the exact authenticated original user
+PTY/PID/output, with one original intercepted call and no input/model
+replay. Old-bundle `sandbox_protocol` warnings are retained; those
+migration fixtures do not claim legacy Sandbox compatibility.
+
+Fresh physical native qualification on the clean corrected source passes
+all eight gates with the unchanged qualified guest image. The new receipt is
+`.native/qualification/current-sendbox-xZD5bR/qualification.json`, SHA-256
+`13d578c712ee9859f820fdd804b5604b8b49e77d6741638a4fa2a338a7c9420c`.
+Worker, bridges and guest dependency payload remain byte-identical to the
+previously qualified image; no new guest image is claimed. Actual host-side
+accounting, provider scope, cold networking, grouped work, snapshot retries,
+accepted-work checkpoints and exact-owned teardown were exercised again.
+
+The first native qualification remains a separate failure: one checkpoint
+preparation's exact retained diagnostic reports a CNAME lookup `ETIMEOUT`
+for `api.githubcopilot.com`. No empty scope, extra host or Local fallback
+was used, and the undispatched finishing envelope remained unused. Four
+other cases passed and owned-guest absence was confirmed. Its original
+closed generated database was opened read-only and remained byte-identical;
+diagnostics were read from an independent backup. The passing complete qualification
+used wholly new generated roots/identities, not a replay of that original
+work. This DNS result is not a diagnosis of the user's opening delay.
+An initial anchored test selector selected no tests, and an update-verifier
+invocation omitted its TypeScript loader; neither executed its intended
+probe. Their corrected executions and original invocation errors remain
+separate evidence.
+
+The immutable local installer is
+`release/qualification-builds/deferred-opening-becc99d/Moguri-0.31.0-alpha.1-macos-arm64.dmg`,
+**830,230,511 bytes**, SHA-256
+`bcd9fa163018ff00b53050a3a5efdf8e73fb8ecb456d65dc45a1821f0215d87c`.
+Its sibling ZIP is **814,633,309 bytes**, SHA-256
+`edb906b18fd1e4ff4cbba749df24d3c7dabb0506c08e3298fd6d279356a91ea9`;
+the manifest SHA-256 is
+`037bbc6c80e1ac7b5c2b1b96f1cfa7919ef9282014c8d91355eed0a4eabb2159`.
+Every bundled compiled ESM SDK/service/runtime/worker entrypoint was
+compared with the clean built cut. No personal installation, app opening,
+restart, model call, profiling or mutation test followed this qualification.
+The earlier explicitly authorized `e772707` service restart is a completed
+separate action; its authorization is consumed. A healthy same-protocol
+owner may still be reused by the new UI. Updated backend bytes require a
+normal matching installation's owned launch/restart, never an automatic
+replacement or an inferred new permission.
