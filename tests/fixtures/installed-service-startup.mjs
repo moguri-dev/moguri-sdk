@@ -27,10 +27,11 @@ try {
   const startup = join(root, "generated-installed-startup.mjs");
   await writeFile(startup, `
     import {createRuntime} from ${JSON.stringify(nodeEntry)};
+    import {setTimeout as delay} from 'node:timers/promises';
     const stateDir=process.env.MOGURI_STATE_DIR;
     if(!stateDir)throw new Error("An exact generated state directory is required.");
     const provider={state:{status:"disconnected",models:[],login:null,diagnostic:null},onChange:()=>{},
-      refresh:async()=>{await new Promise(resolve=>setTimeout(resolve,11000));},logout:async()=>{},cancel:async()=>{},
+      refresh:async signal=>{await delay(11000,undefined,{signal});},logout:async()=>{},cancel:async()=>{},
       login:()=>{throw new Error("No personal authorization.");},prepare:async()=>{throw new Error("No inference.");}};
     const values=new Map(),vault={read:async id=>values.get(id)??null,write:async(id,value)=>{values.set(id,value);},remove:async id=>{values.delete(id);}};
     const runtime=await createRuntime({stateDir,retentionKey:Buffer.alloc(32,0x67),provider,platform:{vault,sandbox:{setup:{automatic:false}}}});
@@ -40,7 +41,7 @@ try {
   launched = true;
   connection = await ensureConnection({ stateDir, servicePath: startup, runtime: process.execPath });
   const elapsed = performance.now() - began;
-  assert.ok(elapsed >= 11000);
+  assert.ok(elapsed < 2000, "Packed startup must not wait for the generated eleven-second provider discovery.");
   sdk = await new MoguriSdk(connection).ready();
   assert.equal(sdk.getState().snapshot.sessions.find((session) => session.id === created.id)?.draft.text, "Generated installed slow-start draft.");
   assert.equal(sdk.getState().snapshot.budgetEntries.length, 0);

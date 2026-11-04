@@ -18,7 +18,7 @@ test("suggestions preview stays scoped, excludes control chats and requires exac
   try {
     const phrase = "Use generated headless checks instead of opening a browser.";
     for (let index = 0; index < 2; index++) {
-      const created = await sdk.sessions.create(null), session = sdk.getState().snapshot!.sessions.find((session) => session.id === created.id)!;
+      const created = await sdk.sessions.create(null, `Generated suggestion source ${index}`), session = sdk.getState().snapshot!.sessions.find((session) => session.id === created.id)!;
       await sdk.command({ type: "session.configure", sessionId: session.id, expectedRevision: session.revision, controls: { ...session.controls, modelId: fixture.modelId } });
       await send(sdk, sdk.getState().snapshot!.sessions.find((value) => value.id === session.id)!, phrase);
       await waitFor(() => fixture.service.controller.snapshot().sessions.find((value) => value.id === session.id)?.status === "completed");

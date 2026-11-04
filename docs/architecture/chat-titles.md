@@ -26,6 +26,9 @@ attachments, ordinary solver history or a later interjection. This is an
 explicit naming input contract, not an image/document fallback. The complete
 escaped envelope must fit 128 KiB and the actual model window; it is never
 silently truncated. Output is bounded to 128 tokens and 15 seconds of inference.
+Only the actual first-topic owner receives the explicit worker-start naming
+capability. Existing private/root-less compaction, candidate and standalone
+worker probes do not gain another RPC or model role from an omitted phase.
 
 The model returns only `{"title":"short topic summary"}`, normally 3-6 words
 in the user's language and at most 80 characters. Invalid, incomplete, unsafe
@@ -59,6 +62,9 @@ terminal naming state and any title application commit together. Known usage
 settles once; lost or unknown completion retains its original capacity through
 stop, source deletion and restart. A deleted result or missing receipt cannot
 authorize a second naming call. The existing all-role 32-call turn bound applies.
+The complete future wind-down aggregate is bounded by the actual model-role
+schema, including `title`, not a stale thirteen-role constant. Adding this role
+does not shrink, truncate or relabel an already retained budget reservation.
 
 The SDK exposes `sessions.titles(sessionId)` and optional `Snapshot.chatTitles`;
 the service supplies the actual records in every current snapshot. Title calls

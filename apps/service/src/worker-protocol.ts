@@ -63,7 +63,7 @@ export const UserMcpOperationSchema = Type.Object({
 }, { additionalProperties: false });
 export type UserMcpOperation = Static<typeof UserMcpOperationSchema>;
 export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; automaticKupo?: true; operation?: UserPlanOperation | UserMcpOperation; hooks?: HookBinding[];
-  retainModelRequests?: true; automaticCompaction?: true; ownedModelCalls?: true; retry?: { loadedTools: string[]; instructionSources: string[]; remainingSteps: number; kupoDraft?: { stepId: string; message: AssistantMessage } } }
+  retainModelRequests?: true; automaticCompaction?: true; ownedModelCalls?: true; chatTitles?: true; retry?: { loadedTools: string[]; instructionSources: string[]; remainingSteps: number; kupoDraft?: { stepId: string; message: AssistantMessage } } }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; toolCatalog?: Tool[]; directMcpTools?: DirectMcpTool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate" | "checkpoint" | "decision" | "steering" | "title" | `kupo-${import("../../../packages/protocol/src/index.ts").KupoResponsePhase}`; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean; endTurn?: true; deliveries?: ToolDelivery[] };
 export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy; root?: string | null; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution } | { accepted: boolean; titleStatus?: import("../../../packages/protocol/src/chat-titles.ts").ChatTitleRecord["status"]; source?: import("../../../packages/protocol/src/tooling.ts").RetainedToolSource; continue?: true; contextReplacement?: Message[]; validation?: CompoundValidationOperation; selectedResponse?: { stepId: string; message: AssistantMessage } } | DelegatedResult | RemoteMcpAuthorization; error?: string; halt?: true };
@@ -83,6 +83,9 @@ export function parentMessage(value: unknown): ParentMessage {
     (value.error === undefined || typeof value.error === "string") &&
     (value.value === undefined || isRecord(value.value))) return value as ParentMessage;
   if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) {
+    if (value.chatTitles !== undefined && (value.chatTitles !== true || value.operation !== undefined || value.publicCompound !== undefined)) {
+      throw new Error("Chat naming needs its explicit ordinary first-topic owner, not a private role or user operation.");
+    }
     if (value.ownedModelCalls !== undefined && (value.ownedModelCalls !== true || value.operation !== undefined ||
       value.publicCompound !== undefined || value.readOnly !== false || value.env !== "Remote" && value.env !== "Sandbox")) {
       throw new Error("Tool-less subcalls need an explicit existing Remote/native parent owner. No Local process, private compound or user operation was adopted.");

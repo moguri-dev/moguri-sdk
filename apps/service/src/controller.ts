@@ -4111,6 +4111,8 @@ export class ControlPlane extends EventEmitter {
           ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && current.controls.modelId === KUPO_MODEL_ID && current.controls.kupoMode &&
             this.projection.settings.values.kupo.workflow === "auto" && this.projection.settings.values.kupo.autoCompaction?.enabled ? { automaticCompaction: true as const } : {}),
           ...(hooks.length ? { hooks } : {}),
+          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl &&
+            this.projection.chatTitles.some((title) => title.sessionId === current.id && title.turnId === run.turnId && title.status === "pending") ? { chatTitles: true as const } : {}),
           ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl ? { retainModelRequests: true as const } : {}),
           ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl &&
             current.controls.env !== "Local" && current.controls.autonomy === "Autopilot Max" &&

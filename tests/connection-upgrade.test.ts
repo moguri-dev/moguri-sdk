@@ -9,7 +9,7 @@ import { ensureConnection, readConnection, ServiceProtocolMismatch, stopMoguriSe
 import { defaultNotificationWav, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 
-test("cold service startup waits beyond ten seconds and authenticates the real recovered owner without resetting its retained draft", { timeout: 25000 }, async () => {
+test("cold service startup authenticates its recovered owner without waiting eleven seconds for unrelated discovery or resetting its retained draft", { timeout: 25000 }, async () => {
   const fixture = await setupFixture(), directory = join(fixture.directory, "state"), previous = await new MoguriSdk(fixture.service.connection).ready();
   let connection: Awaited<ReturnType<typeof ensureConnection>> | undefined, current: MoguriSdk | undefined;
   try {
@@ -18,7 +18,7 @@ test("cold service startup waits beyond ten seconds and authenticates the real r
     await writeFile(join(directory, "generated-startup-delay.json"), "11000", { mode: 0o600 });
     const began = performance.now();
     connection = await ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts") });
-    assert.ok(performance.now() - began >= 11000);
+    assert.ok(performance.now() - began < 2000, "Original authenticated recovery must not wait for the generated eleven-second provider discovery.");
     current = await new MoguriSdk(connection).ready();
     assert.equal(connection.protocolVersion, PROTOCOL_VERSION);
     assert.equal(current.getState().snapshot!.sessions[0]!.draft.text, "Generated slow-start retained draft.");

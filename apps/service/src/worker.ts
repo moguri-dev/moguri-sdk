@@ -81,6 +81,7 @@ async function run(start: WorkerStart): Promise<void> {
   debuggerRuntime = start.readOnly ? undefined : new OwnedDebugRuntime();
   let incompleteCleanup = false, mcpDispatched = false;
   const nameChat = async (): Promise<boolean> => {
+    if (!start.chatTitles) return true;
     const stepId = randomUUID(), reply = await request({ kind: "title.boundary", requestId: randomUUID(), stepId });
     if (reply.error || reply.halt || !reply.value) throw new Error(reply.error ?? "Naming admission was not acknowledged.");
     if (!("model" in reply.value)) {

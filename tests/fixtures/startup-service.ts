@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { startService } from "../../apps/service/src/server.ts";
 
 const stateDir = process.env.MOGURI_STATE_DIR;
@@ -19,7 +20,7 @@ await writeFile(join(stateDir, "generated-startup-environment.json"), JSON.strin
 }), { mode: 0o600 });
 const provider = {
   state: { status: "disconnected" as const, models: [], login: null, diagnostic: null }, onChange: () => {},
-  refresh: async () => { if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs)); }, logout: async () => {}, cancel: async () => {},
+  refresh: async (signal?: AbortSignal) => { if (delayMs) await delay(delayMs, undefined, { signal }); }, logout: async () => {}, cancel: async () => {},
   login: () => { throw new Error("Personal authorization is forbidden in generated startup checks."); },
   prepare: async () => { throw new Error("No model call is allowed in generated startup checks."); },
 };
